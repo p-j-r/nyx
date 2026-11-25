@@ -92,7 +92,9 @@ pub struct Engine {
     /// bind the project to a workflow of `workspace` at the first solve, so what a host does shows in the dashboard (the MCP server turns it on)
     pub(crate) auto_store: bool,
     /// the material files of the program (`materials/`), before the project's own
-    pub(crate) base_library: Arc<femcore::material::Library>,
+    base_library: Arc<femcore::material::Library>,
+    /// BLAKE3 digest of `base_library` TOMLs, included in `problem_key` so library edits invalidate cached keys
+    base_library_hash: String,
     /// why the library is empty or partial, in words
     pub library_notes: Vec<String>,
     /// the worker program a solve runs in when it asks to be isolated (`set_worker`), and whether it does when it does not say (P4, ADR 86)
@@ -135,18 +137,30 @@ fn hash_of(text: &str) -> String {
     nyx_store::util::hash_bytes(text.as_bytes())
 }
 
+pub(crate) fn hash_library(lib: &femcore::material::Library) -> String {
+    let mut map = BTreeMap::new();
+    for name in lib.names() {
+        if let Some(m) = lib.get(&name) {
+            map.insert(name, nyx_store::util::hash_bytes(m.to_toml().as_bytes()));
+        }
+    }
+    hash_of(&nyx_physics::canonical_json(&json!(map)).to_string())
+}
+
 impl Engine {
     /// An engine with the physics compiled into this build and an empty 2D project.
     pub fn new() -> Engine {
         let mut e = Engine::with(crate::registry(), Arc::new(FemcoreMesher));
         e.isolable = true;
         let (lib, notes) = crate::materials::load_library(&crate::materials::default_dirs());
-        e.base_library = Arc::new(lib);
+        e.set_base_library_arc(Arc::new(lib));
         e.library_notes = notes;
         e
     }
 
     pub fn with(registry: Registry, mesher: Arc<dyn Mesher>) -> Engine {
+        let base_library = Arc::new(femcore::material::Library::default());
+        let base_library_hash = hash_library(&base_library);
         Engine {
             registry,
             mesher,
@@ -164,7 +178,8 @@ impl Engine {
             link: None,
             workspace: None,
             auto_store: false,
-            base_library: Arc::new(femcore::material::Library::default()),
+            base_library,
+            base_library_hash,
             library_notes: vec![],
             worker: None,
             isolate_default: false,
@@ -263,6 +278,15 @@ impl Engine {
             }
             Err(_) => false,
         }
+    }
+
+    pub(crate) fn base_library(&self) -> &Arc<femcore::material::Library> {
+        &self.base_library
+    }
+
+    pub(crate) fn set_base_library_arc(&mut self, library: Arc<femcore::material::Library>) {
+        self.base_library_hash = hash_library(&library);
+        self.base_library = library;
     }
 
     pub fn registry(&self) -> &Registry {
@@ -365,7 +389,14 @@ impl Engine {
         let imports: BTreeMap<String, String> =
             from.into_iter().map(|o| (o.clone(), self.key_of(&o, mesh, memo, stack))).collect();
         stack.pop();
-        let v = json!({ "physics": id, "problem": spec, "materials": self.project.materials, "mesh": mesh, "imports": imports });
+        let v = json!({
+            "physics": id,
+            "problem": spec,
+            "materials": self.project.materials,
+            "library": self.base_library_hash,
+            "mesh": mesh,
+            "imports": imports
+        });
         let key = hash_of(&nyx_physics::canonical_json(&v).to_string());
         memo.insert(id.to_string(), key.clone());
         key
@@ -384,12 +415,13 @@ impl Engine {
         self.results.get(physics).map(|s| s.at.elapsed().as_secs_f64())
     }
 
-    /// Replaces the project (a new one, or one just opened). The mesh and results are dropped and the store binding is released.
+    /// Replaces the project (a new one, or one just opened). The mesh, results, checks and store binding are cleared.
     pub fn set_project(&mut self, project: Project) {
         self.project = project;
         self.generation += 1;
         self.model = None;
         self.results.clear();
+        self.checks.clear();
         self.link = None;
         self.stages.clear();
     }
@@ -485,7 +517,7 @@ impl Engine {
             crate::estimate::resolve_memory_wait_timeout(opts.memory_wait_timeout_s, self.memory_wait_timeout)?;
         let (key, keys) = (s.mesh_key(), s.problem_keys());
         let (registry, mesher, project, sizing) = (s.registry.clone(), s.mesher.clone(), s.project.clone(), s.sizing());
-        let base_library = s.base_library.clone();
+        let base_library = s.base_library().clone();
         let library = s.library()?;
         // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds;
         // an AMR solve (`adapt_passes > 1`) also starts from the unadapted initial mesh rather than a prior adapted one
@@ -649,7 +681,7 @@ impl Engine {
                         let mut pa_out = Vec::new();
                         if f.is_none() && !post_analyses.is_empty() {
                             let mut tmp = Engine::with(registry.clone(), mesher.clone());
-                            tmp.base_library = base_library.clone();
+                            tmp.set_base_library_arc(base_library.clone());
                             tmp.project = project.clone();
                             tmp.model = Some((mesh_key.clone(), model.clone()));
                             let at_now = Instant::now();
@@ -955,7 +987,7 @@ impl Engine {
     /// until the job is applied; then the file's project replaces the project and its results become the latest results.
     pub fn start_open_results(&mut self, path: &str) -> Result<JobId, Error> {
         let (registry, mesher, library, path) =
-            (self.registry.clone(), self.mesher.clone(), self.base_library.clone(), path.to_string());
+            (self.registry.clone(), self.mesher.clone(), self.base_library().clone(), path.to_string());
         let submit = self.submission("open results", Lane::Heavy, &QueueOpts::default(), "open results");
         let id = self.jobs.submit(submit, move |progress| {
             crate::results_file::read_and_mesh(&registry, &mesher, &library, &path, &progress)

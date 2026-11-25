@@ -10,5 +10,5 @@ One page per component, C4 level 4. [Component view](../../3-components/store.md
 | [Versions](./versions.md) | 1 | 202 | 11 | 4 |
 | [Runs](./runs.md) | 1 | 454 | 17 | 6 |
 | [Search](./search.md) | 1 | 255 | 10 | 4 |
-| [Archives](./archive.md) | 1 | 705 | 14 | 3 |
+| [Archives](./archive.md) | 1 | 785 | 14 | 3 |
 | [Utilities](./util.md) | 1 | 173 | 11 | 0 |

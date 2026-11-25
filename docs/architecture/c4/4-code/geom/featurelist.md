@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Feature list** (`geom.featurelist`) in the 
 > The serialisable feature list (single source of truth for code and GUI), its operations and validation, parameter expressions, printing as Rust builder calls, and the error type.
 
 **Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 6 files, 3726 lines.
+**Size:** 6 files, 4416 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Feature list** (`geom.featurelist`) in the 
 |---|---:|---|
 | `crates/geom/src/error.rs` | 42 | The error type of the crate: plain-language messages that name the features involved. Converts into `String` because the femcore APIs use `Result<_, String>`. |
 | `crates/geom/src/expr.rs` | 337 | Parameter expressions: a number or a small safe formula over named parameters. The grammar mirrors nyx `femcore::expr` (numbers, `+ - * / ^ **`, parentheses, the functions `sin cos tan exp log ln log10 sqrt abs sinh cosh tanh atan min ma... |
-| `crates/geom/src/gds.rs` | 1959 |  |
+| `crates/geom/src/gds.rs` | 2649 |  |
 | `crates/geom/src/lib.rs` | 27 | `geom`: a lean CSG-over-B-rep geometry kernel for the nyx FEM stack. |
 | `crates/geom/src/model.rs` | 1182 | The serialisable feature list (the single source of truth for code and GUI), its operations, validation, and the `Model` builder that only pushes `Op`s and returns `FeatureId` handles. Nothing here evaluates geometry. |
 | `crates/geom/src/print.rs` | 179 | `FeatureList::to_rust`: prints the builder calls that recreate a list (the "Copy as Rust" of the GUI). One statement per feature, `let fN = m.method(...)` where `N` is the feature id; operations without a builder shorthand fall back to `... |
@@ -147,6 +147,15 @@ classDiagram
         +dbu_m f64
         +cells Vec~GdsCell~
     }
+    class GdsImportLimits {
+        <<struct>>
+        +max_file_bytes usize
+        +max_records usize
+        +max_depth usize
+        +max_instances usize
+        +max_polygons usize
+        +max_decompose_vertices usize
+    }
     class GdsImportOptions {
         <<struct>>
         +layers Vec
@@ -185,10 +194,13 @@ classDiagram
         +decode_ibm_f64(bytes) f64
         +encode_ibm_f64(val) slice
         +parse_gds(bytes) GeomResult~GdsLibrary~
+        +parse_gds_with_limits(bytes, limits) GeomResult~GdsLibrary~
         +expand_path_polygons(centerline, width, pathtype, bgnextn, endextn) Vec
         +sanitize_pin_name(raw) String
         +import_gds_bytes(bytes, opts) GeomResult~GdsImportResult~
+        +import_gds_bytes_with_limits(bytes, opts, limits, roi) GeomResult~GdsImportResult~
         +import_gds_library(lib, opts) GeomResult~GdsImportResult~
+        +import_gds_library_with_limits(lib, opts, limits, roi) GeomResult~GdsImportResult~
         +STRANS_REFLECT_X const
         +IslandRings type
     }
@@ -434,15 +446,19 @@ classDiagram
 | struct | `GdsText` | `gds.rs:162` | fields: `layer`, `texttype`, `string`, `xy`, `strans`, `mag`, `angle_deg` —  Parsed GDSII `TEXT` label element. |
 | struct | `GdsCell` | `gds.rs:174` | fields: `name`, `boundaries`, `paths`, `srefs`, `arefs`, `texts` —  Parsed GDSII structure (`BGNSTR` .. `ENDSTR`). |
 | struct | `GdsLibrary` | `gds.rs:185` | fields: `version`, `name`, `user_unit`, `dbu_m`, `cells` —  Parsed GDSII binary library (`HEADER` .. `ENDLIB`). |
-| struct | `GdsImportOptions` | `gds.rs:197` | fields: `layers`, `cell`, `split_islands`, `pin_layer`, `simplify_tol`, `arc_tol` —  Options controlling GDSII hierarchy flattening, boolean union, island splitting, and pin matching. |
-| type | `IslandRings` | `gds.rs:219` |  One connected planar island: `(outer_ccw, holes_cw)`. |
-| struct | `GdsSheet` | `gds.rs:224` | fields: `name`, `layer_key`, `outers`, `holes`, `islands`, `area`, `centroid`, `bbox` —  One extracted conductive sheet (a single connected island when `split_islands` is `true`, or |
-| struct | `GdsImportResult` | `gds.rs:245` | fields: `cell`, `dbu_m`, `sheets`, `layers`, `layer_bbox`, `cell_bbox`, `pins` —  Flattened, boolean-unioned GDSII import result in SI metres. |
-| fn | `parse_gds` | `gds.rs:365` | `pub fn parse_gds(bytes: &[u8]) -> GeomResult<GdsLibrary>` —  Parses a binary GDSII stream into a structured `GdsLibrary`. |
-| fn | `expand_path_polygons` | `gds.rs:782` | `pub fn expand_path_polygons(centerline: &[V2], width: f64, pathtype: i16, bgnextn: f64, endextn: f64) -> Vec<Vec<V2>>` —  Expands a GDSII `PATH` centerline into one or more closed counter-clockwise polygons in metres. |
-| fn | `sanitize_pin_name` | `gds.rs:1698` | `pub fn sanitize_pin_name(raw: &str) -> String` —  Sanitizes a GDSII `TEXT` pin label into a valid `geom` feature name. |
-| fn | `import_gds_bytes` | `gds.rs:1732` | `pub fn import_gds_bytes(bytes: &[u8], opts: &GdsImportOptions) -> GeomResult<GdsImportResult>` —  Parses and imports a binary GDSII stream according to `opts`. |
-| fn | `import_gds_library` | `gds.rs:1739` | `pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResult<GdsImportResult>` —  Flattens `lib`, boolean-unions requested layers, splits/orders islands, applies optional |
+| struct | `GdsImportLimits` | `gds.rs:197` | fields: `max_file_bytes`, `max_records`, `max_depth`, `max_instances`, `max_polygons`, `max_decompose_vertices` —  Security and resource budgets enforced during binary GDSII parsing, hierarchy flattening, and polygon decomposition. |
+| struct | `GdsImportOptions` | `gds.rs:227` | fields: `layers`, `cell`, `split_islands`, `pin_layer`, `simplify_tol`, `arc_tol` —  Options controlling GDSII hierarchy flattening, boolean union, island splitting, and pin matching. |
+| type | `IslandRings` | `gds.rs:249` |  One connected planar island: `(outer_ccw, holes_cw)`. |
+| struct | `GdsSheet` | `gds.rs:254` | fields: `name`, `layer_key`, `outers`, `holes`, `islands`, `area`, `centroid`, `bbox` —  One extracted conductive sheet (a single connected island when `split_islands` is `true`, or |
+| struct | `GdsImportResult` | `gds.rs:275` | fields: `cell`, `dbu_m`, `sheets`, `layers`, `layer_bbox`, `cell_bbox`, `pins` —  Flattened, boolean-unioned GDSII import result in SI metres. |
+| fn | `parse_gds` | `gds.rs:395` | `pub fn parse_gds(bytes: &[u8]) -> GeomResult<GdsLibrary>` —  Parses a binary GDSII stream into a structured `GdsLibrary` using default [`GdsImportLimits`]. |
+| fn | `parse_gds_with_limits` | `gds.rs:400` | `pub fn parse_gds_with_limits(bytes: &[u8], limits: &GdsImportLimits) -> GeomResult<GdsLibrary>` —  Parses a binary GDSII stream into a structured `GdsLibrary` enforcing `limits`. |
+| fn | `expand_path_polygons` | `gds.rs:862` | `pub fn expand_path_polygons(centerline: &[V2], width: f64, pathtype: i16, bgnextn: f64, endextn: f64) -> Vec<Vec<V2>>` —  Expands a GDSII `PATH` centerline into one or more closed counter-clockwise polygons in metres. |
+| fn | `sanitize_pin_name` | `gds.rs:2336` | `pub fn sanitize_pin_name(raw: &str) -> String` —  Sanitizes a GDSII `TEXT` pin label into a valid `geom` feature name. |
+| fn | `import_gds_bytes` | `gds.rs:2370` | `pub fn import_gds_bytes(bytes: &[u8], opts: &GdsImportOptions) -> GeomResult<GdsImportResult>` —  Parses and imports a binary GDSII stream according to `opts` using default [`GdsImportLimits`]. |
+| fn | `import_gds_bytes_with_limits` | `gds.rs:2376` | `pub fn import_gds_bytes_with_limits( bytes: &[u8], opts: &GdsImportOptions, limits: &GdsImportLimits, roi: Option<[f64; 4]>, ) -> GeomResult<GdsImportResult>` —  Parses and imports a binary GDSII stream according to `opts`, enforcing `limits` and optional |
+| fn | `import_gds_library` | `gds.rs:2388` | `pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResult<GdsImportResult>` —  Flattens `lib`, boolean-unions requested layers, splits/orders islands, applies optional |
+| fn | `import_gds_library_with_limits` | `gds.rs:2394` | `pub fn import_gds_library_with_limits( lib: &GdsLibrary, opts: &GdsImportOptions, limits: &GdsImportLimits, roi: Option<[f64; 4]>, ) -> GeomResult<GdsImportResult>` —  Flattens `lib`, boolean-unions requested layers, splits/orders islands, applies optional |
 | type | `FeatureId` | `model.rs:9` |  |
 | enum | `PmlGrowMode` | `model.rs:39` | variants: `Inward`, `Outward` —  Whether an absorbing layer slices inward from an oversized CAD domain around a `window` (legacy mode) |
 | enum | `PmlCoordKind` | `model.rs:57` | variants: `Auto`, `Cartesian`, `Cylindrical`, `Spherical` —  Coordinate system topology for an absorbing layer (`Op::Pml`). |
@@ -534,4 +550,4 @@ classDiagram
 | fn | `SteppedAirbridge::hole_region` | `model.rs:1178` | `pub fn hole_region(&self, name: &str) -> RegionDef` —  Returns a `RegionDef` marking the landing pad pillars as `RegionKind::Hole` (PEC cutout). |
 | fn | `to_rust` | `print.rs:36` | `pub fn to_rust(l: &FeatureList) -> String` |
 
-Trait implementations in this component: `GeomError: Display`, `GeomError: Error`, `String: From`, `GeomError: From`, `GeomError: From`, `Expr: From`, `Expr: From`, `Expr: From`, `Expr: From`, `Expr: From`, `GdsImportOptions: Default`, `FlatWorld: Default`
+Trait implementations in this component: `GeomError: Display`, `GeomError: Error`, `String: From`, `GeomError: From`, `GeomError: From`, `Expr: From`, `Expr: From`, `Expr: From`, `Expr: From`, `Expr: From`, `GdsImportLimits: Default`, `GdsImportOptions: Default`, `FlatWorld: Default`

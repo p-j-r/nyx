@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Driven frequency-domain and PROM** (`ems.dr
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | edge, edge_mixed, fem, fem_mixed, fields, linalg::amg_elastic, linalg::ams, linalg::csr +9 | AmsFgmresOptions, AmsFgmresSolver, AmsP2Topology, C, CCsr, CellFields, Coo, CurvedTet, DEFAULT_RUIZ_PASSES, FacetType +41 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, frame, result | Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
-| [3D cavity kernel](./cavity.md) | cavity | Ned3, assemble_maxwell_with_pml, basis3, gradient_full, safe_curved_jacobian |
+| [3D cavity kernel](./cavity.md) | cavity | Ned3, assemble_maxwell_with_pml, basis3_keyed, gradient_full, safe_curved_jacobian |
 | [Thin-film IBC and Josephson ROM](./ibc.md) | crate root, ibc, rom | AssembledJjPort, MU0, SheetCellKind, assemble_ibc_and_jj_3d, build_face_to_cell_3d, build_tls_meta, reduce_real_csr, reduce_real_vec, sorted3 |
 | [Native mixed-cell EM](./mixed.md) | mixed_ops | EmPmlTable, MixedCellMaterials, assemble_ibc_and_jj_3d_mixed, assemble_lumped_ports_3d_mixed, assemble_maxwell_mixed, assemble_waveports_3d_mixed, axes_of_3d_periodic_mixed, iso_mu_inv_c3, match_vertices_mixed, simplex_cell_materials_3d +2 |
 | [Mode kernel](./modes.md) | crate root, modes | C0, EpsCell, assemble_modes_with_bcs, solve_mode_pairs |

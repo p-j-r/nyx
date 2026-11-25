@@ -72,15 +72,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/src/tess.rs` | 3 | display only |
 | `crates/geom/src/bvh.rs` | 116, 3 | flat 2D AABB BVH (`AabbBvh2`, `ComplexBvh`) accelerating arrangement, `Complex::locate`, and stack face lookup |
 | `crates/geom/src/poly_batch.rs` | 102, 2, 116, 121 | batch polygon cleanup, spatial-hash shared-corner-pinned RDP simplification, and 1-DOF endpoint-anchored circular arc fitting |
-| `crates/geom/src/gds.rs` | 114, 121, 3 | pure-Rust binary GDSII stream parser, IBM float codec, hierarchy flattener, arc fitting, and unioned island/pin extractor |
+| `crates/geom/src/gds.rs` | 114, 121, 3, 131 | pure-Rust binary GDSII stream parser, IBM float codec, hierarchy flattener with `GdsImportLimits`/ROI clipping, arc fitting, and unioned island/pin extractor |
 | `crates/geom/src/*` | 3, 116, 121 | arrangement, complex, planar, prim, scene, synth, math, lib |
 | `crates/geom/tests/contracts.rs` | 19, 3 | |
 | `crates/geom/tests/goldens.rs` | 10, 2 | |
 | `crates/geom/tests/wafer.rs` | 1 | |
 | `crates/geom/tests/sweep_axes.rs` | 1 | |
 | `crates/geom/tests/selectors.rs` | 2 | |
-| `crates/geom/tests/gds.rs` | 114, 3 | binary GDSII parser, IBM hex float, hierarchy, `PATH`, keyhole cutline, and `TEXT` pin tests |
-| `crates/geom/tests/arc_fit_gds.rs` | 121, 102, 114 | 1-DOF circular arc fitting (`Polygons::arc_tol` & `GdsImportOptions::arc_tol`) and `Curve::Circle` preservation tests |
+| `crates/geom/tests/gds.rs` | 114, 3, 131 | binary GDSII parser, IBM hex float, hierarchy, `PATH`, keyhole cutline, `TEXT` pin, and `GdsImportLimits`/ROI DoS tests |
+| `crates/geom/tests/arc_fitting.rs` | 121, 102, 114 | 1-DOF circular arc fitting (`Polygons::arc_tol` & `GdsImportOptions::arc_tol`) and `Curve::Circle` preservation tests |
 | `crates/geom/tests/thick_sheet_stack.rs` | 121, 102 | conformal finite-thickness metal (`thickness`) and substrate trench (`etch_depth`) 3D stack tests |
 | `crates/geom/tests/*` | 3 | |
 | `crates/geom/golden/*` | 10, 2 | |
@@ -91,8 +91,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/Cargo.toml` | 3, 13 | serde only |
 | `crates/femcore/src/linalg/equilibrate.rs` | 129, 106, 33 | 8-pass symmetric Ruiz equilibration (`RCsr`, `CCsr`, affine term terms) shared by `nyx-sms` and `nyx-ems` |
 | `crates/femcore/src/linalg/prom.rs` | 129, 106, 33 | multi-port Hermite + isometric-QR reduced-order model (`PROM`) sweep builder shared by `nyx-ems` and `nyx-sms` |
-| `crates/femcore/src/linalg/*` | 33, 8, 11, 117, 125, 127, 129 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
-| `crates/femcore/src/mesh/mod.rs` | 4, 82 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
+| `crates/femcore/src/linalg/*` | 33, 8, 11, 117, 125, 127, 129, 131 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver (`RawCols::chunk_mut`, `LineSmoother` bounds, `Csr` soundness) |
+| `crates/femcore/src/mesh/mod.rs` | 4, 82, 131 | `SimplexMesh`, the solver contract (was `mesh.rs`; `SimplexMesh::check()`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
 | `crates/femcore/src/mesh/cells.rs` | 5, 82 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
 | `crates/femcore/src/mesh/exchange.rs` | 32, 41, 82, 128 | the mesh a physics is given (native cell mesh, 2D or 3D) and its numbering of unknowns |
@@ -100,23 +100,23 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/mesh/io/*` | 16 | `.fmsh` |
 | `crates/femcore/src/mesh/{quality,fixtures}.rs` | 7 | quality statistics, test meshes |
 | `crates/femcore/src/meshing/mod.rs` | 6, 7, 18, 50, 51, 52, 82 | `MeshPlan`, `mesh_model` (was `meshing.rs`) |
-| `crates/femcore/src/meshing/geomdrive.rs` | 2, 6, 82 | |
-| `crates/femcore/src/meshing/mesher.rs` | 6, 2, 66, 110, 126 | 2D triangulation core; `extrude_y` with `Layer::fill`, `extrude_y_with_remap`, `sweep_model_3d`, and cross-gap dielectric edge splitting |
-| `crates/femcore/src/meshing/mesher3d.rs` | 40, 55, 82, 83, 110 | lattice (isosurface stuffing) tetrahedral mesher on `Domain3`, with parent->child periodic axis conformance |
+| `crates/femcore/src/meshing/geomdrive.rs` | 2, 6, 82, 131 | |
+| `crates/femcore/src/meshing/mesher.rs` | 6, 2, 66, 110, 126, 131 | 2D triangulation core; `extrude_y` with `Layer::fill`, `extrude_y_with_remap`, `sweep_model_3d`, and cross-gap dielectric edge splitting |
+| `crates/femcore/src/meshing/mesher3d.rs` | 40, 55, 82, 83, 110, 131 | lattice (isosurface stuffing) tetrahedral mesher on `Domain3`, with parent->child periodic axis conformance |
 | `crates/femcore/src/meshing/refine3d.rs` | 40, 110 | Rivara longest-edge refinement of a `CellMesh<3>`, with synchronous parent->child periodic twin bisection |
-| `crates/femcore/src/meshing/curve3.rs` | 82, 110 | curved edges: mid-edge geometry nodes from the exact surface, Jacobian validity, periodic mid-edge sync |
+| `crates/femcore/src/meshing/curve3.rs` | 82, 110, 131 | curved edges: mid-edge geometry nodes from the exact surface, Jacobian validity, periodic mid-edge sync |
 | `crates/femcore/src/meshing/geomdrive3.rs` | 40, 2, 50, 52, 82, 83, 110 | adapter: a 3D geom model as `Domain3` (classify, facet_project, LabelMap, `PeriodicAxis3`), `mesh_geom_3d` |
 | `crates/femcore/src/meshing/pml3.rs` | 5, 7 | |
-| `crates/femcore/src/meshing/pml_geom3.rs` | 52, 5 | structured absorbing layers for a meshed 3D geom model: the physical window, `build_pml`, geom labels, the tetrahedral cut |
+| `crates/femcore/src/meshing/pml_geom3.rs` | 52, 5, 131 | structured absorbing layers for a meshed 3D geom model: the physical window, `build_pml`, geom labels, the tetrahedral cut |
 | `crates/femcore/src/meshing/adapt3d.rs` | 51, 40 | adaptive meshing of a 3D geom model: the exact faces as the oracle of `adapt3`, interface facets, vertex sizes |
-| `crates/femcore/src/meshing/request.rs` | 54, 82, 83, 114, 116, 120 | the serialisable mesh request and report (`curved`, `gap_cells`, `z_coarsen`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `strict_mesh`, `singular_edges`, `quarter_point_xi`, `corner_grading`), their JSON Schemas |
-| `crates/femcore/src/meshing/pml_geom.rs` | 5, 7, 52 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
+| `crates/femcore/src/meshing/request.rs` | 54, 82, 83, 114, 116, 120, 131 | the serialisable mesh request and report (`curved`, `gap_cells`, `z_coarsen`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `strict_mesh`, `singular_edges`, `quarter_point_xi`, `corner_grading`), their JSON Schemas |
+| `crates/femcore/src/meshing/pml_geom.rs` | 5, 7, 52, 131 | structured PML for a meshed geom model, an adapter over `pml_box` (was `meshing_pml.rs`, then `meshing/pml.rs`) |
 | `crates/femcore/src/meshing/pml_box.rs` | 7, 5, 128 | structured PML generator (was `meshers/adapt/pml.rs`) |
 | `crates/femcore/src/meshing/{pml_cyl,pml_sphere}.rs` | 128, 52, 82 | structured 2D/3D cylindrical (`Quad`, barrel/endcap `Prism`, rim `Hex`) and spherical (`Quad` at $r=0$, concentric `Prism`) mesh sweepers with lockstep curved shells |
 | `crates/femcore/src/meshing/physics_size.rs` | 17 | |
 | `crates/femcore/src/meshing/sizing.rs` | 17, 25 | the neutral Sizing a physics reports to the mesher (re-exported by nyx-physics) |
 | `crates/femcore/src/meshing/validate/*` | 7 | |
-| `crates/femcore/src/meshing/sheet3d.rs` | 102, 114, 116, 120, 121, 126 | conformal 3D sheet-stack mesher (`Op::Sheet`, `<sheet>:edge`, PSLG guard, `gap_cells` medial-axis seeding, `z_coarsen` `max_cells` enforcement, thin slabs, curved/QP enrichment) |
+| `crates/femcore/src/meshing/sheet3d.rs` | 102, 114, 116, 120, 121, 126, 131 | conformal 3D sheet-stack mesher (`Op::Sheet`, `<sheet>:edge`, PSLG guard, `gap_cells` medial-axis seeding, `z_coarsen` `max_cells` enforcement, thin slabs, curved/QP enrichment) |
 | `crates/femcore/src/meshing/sheet3d_amr.rs` | 120, 102, 114 | `OverlayOracle2` 2D-overlay and `full_3d` sheet-preserving adaptive mesh refinement helpers |
 | `crates/femcore/src/meshing/sheet3d_curve.rs` | 121, 82, 102 | exact 2D `Curve::Circle` / `Curve::Ellipse` mid-edge node projection and relaxation on extruded `sheet3d` meshes |
 | `crates/femcore/src/meshing/singularity.rs` | 120, 115, 82 | Barsoum quarter-point P2 rim shifting (with curved-rim clamping) and Morrison–Lewis radical corner grading |
@@ -125,14 +125,14 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/estimate*.rs` | 7, 17, 53 | |
 | `crates/femcore/src/adapt/work.rs` | 5, 4, 7 | the adaptation's private simplex working mesh and its conversion from and to the solver mesh (was `mesh/native.rs`, `mesh/interop.rs`) |
 | `crates/femcore/src/adapt/maxwell.rs` | 53 | residual error estimator for edge elements and the equidistributing metric |
-| `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
+| `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51, 131 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
 | `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 104, 108, 109 | spec, units, elastic, tensor, optics, schema, T-curves (`state_t.rs`), Zimmermann BCS (`bcs.rs`), coupled tensors (`coupled.rs`), database importers (`import.rs`) |
 | `crates/femcore/tests/material_import.rs` | 108, 109 | pure-Rust importer & catalog regression tests |
 | `crates/femcore/tests/material_bcs.rs` | 104, 109 | Mattis–Bardeen BCS surface impedance and sub-gap mK loss floor tests |
 | `materials/*` | 29, 30, 34, 35, 101, 104, 108, 109 | the shipped multi-source material library (TOML, `format = 2`) |
 | `docs/MATERIALS.md` | 29, 30, 34, 35, 101, 108, 109 | material library guide, `format = 2` sections, variant catalog, and database import commands |
-| `crates/nyx-engine/src/material_fetch.rs` | 108, 109 | engine catalog, remote search, offline database conversion, and HTTPS material fetch |
+| `crates/nyx-engine/src/material_fetch.rs` | 108, 109, 131 | engine catalog, remote search, offline database conversion, and allowlisted/SSRF-hardened HTTPS material fetch |
 | `crates/app/src/matcmd.rs` | 108, 109 | `nyx material` CLI subcommands (`list`, `show`, `eval`, `bcs`, `search`, `import`, `fetch`) |
 | `crates/femcore/src/expr.rs` | 2 | duplicate of geom::expr (R06) |
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
@@ -190,8 +190,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/mesh_*.rs` | 7, 16 | mesher studies |
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
-| `crates/nyx-storage/*` | 107, 62, 99 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF, sweep checkpoint |
-| `crates/nyx-store/*` | 14, 39, 130 | JSON specs, settings (`scale_mode`, `zoom`), and the card function (39) |
+| `crates/nyx-storage/*` | 107, 62, 99, 131 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer with `max_solutions` & byte budgets, XDMF, sweep checkpoint |
+| `crates/nyx-store/*` | 14, 39, 130, 131 | JSON specs, settings (`scale_mode`, `zoom`), `.nys`/`.xdmf` archive rules, and the card function (39) |
 | `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124, 130 | colour tokens as data, the looks built from them (`weak_text_color`), the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/src/console.rs` | 123, 122 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
@@ -201,7 +201,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/app/*` | 23, 130 | |
 | `crates/nyx-mcp/tests/{contracts,stdio}.rs` | 94, 97, 19, 15 | the `mcp_tools.v3` snapshot (four tools), the handshake, and the gate of S7: the P0 workflows in script mode against the per-command baseline |
 | `crates/nyx-mcp/tests/{reset_session,multi_session}.rs` | 113, 94 | `reset_session` REPL global reset and isolated concurrent multi-session (`session`) MCP tests |
-| `crates/nyx-mcp/*` | 94, 97, 15, 113 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels |
+| `crates/nyx-mcp/*` | 94, 97, 15, 113, 131 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels with bounded framing/sessions |
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27, 107 | shared target directory (no `HDF5_DIR` C dependency) |
@@ -210,7 +210,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/src/cqed.rs` | 103, 104, 105, 106, 118, 120, 121 | typed cQED payloads (`CapacitanceMatrixData` bounds/loss/AMR history, `InductanceMatrixData`, `TlsMeta`, `CircuitRom`, `DrivenPortData`, `ElectroAmrData`) |
 | `crates/nyx-physics/tests/inline_tensor.rs` | 113, 25, 129 | inline diagonal, 6-component, 3x3 symmetric, and `3x6` piezoelectric tensor (`PropValue` / `PropsTensor` / `Oriented`) tests |
-| `crates/nyx-physics/*` | 25, 19, 113, 118, 120, 121, 129 | the Physics trait, envelope, descriptors, registry |
+| `crates/nyx-physics/*` | 25, 19, 113, 118, 120, 121, 129, 131 | the Physics trait, envelope, descriptors, registry, `check_mesh`, and `check_result_finite` |
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/src/ac_loss.rs` | 121, 103 | quasi-electrostatic AC dielectric conductance $G_{ij}(\omega)$, $Q_{ij}$ matrix, and positive complex Schur $\Delta C^{(2)} > 0$ |
 | `crates/nyx-dfs/src/magneto.rs` | 103 | gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`) and inductance matrix extraction |
@@ -296,10 +296,10 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 125, 126, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, `bug2`–`bug5`, and thread determinism |
 | `crates/nyx-engine/tests/fr25_33_e2e.rs` | 125, 126, 127 | end-to-end post-SQuADDS (`FR-25..FR-33`) integration tests through `Engine::call` (`ibc_mode: "perturbative"`, hybrid quasi-electrostatic TLS, and `ems::driven` `blr`/`ams_fgmres` + memory calibration) |
 | `crates/nyx-engine/tests/piezo_driven_network.rs` | 129, 106, 118 | Mason 1D BAW driven piezo FEM -> `NetworkAnalysis` and `piezo_resonator` mBVD round-trip tests |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130 | `Project`, commands, jobs, store wiring (`card_of` swept 3D), pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130, 131 | `Project`, commands, jobs, store wiring (`card_of` swept 3D), pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
-| `crates/nyx-script/src/kernel.rs` | 94, 93, 113 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, and worker recovery |
+| `crates/nyx-script/src/kernel.rs` | 94, 93, 113, 131 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, timeout/output clamping, network refusal, and worker recovery |
 | `crates/nyx-script/src/bin/nyx-script-worker.rs` | 93, 86 | the script worker program: Monty's worker mode, the only place the interpreter runs |
 | `crates/nyx-script/tests/resilience.rs` | 113, 93, 94 | per-turn suspension budget rollover, fatal turn recovery, `reset`, UTF-8 BOM, and dict-traced lambda tests |
 | `crates/nyx-script/tests/accuracy_features_script.rs` | 120, 121, 93 | Monty `.nys` script static check and execution of `AF-1..AF-6` electrostatic accuracy features |
@@ -307,10 +307,10 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/src/path_guard.rs` | 93 | the path guard: file and folder arguments of commands kept inside one folder |
 | `crates/nyx-engine/tests/path_guard.rs` | 93 | the path guard: every path-like argument of the catalog is guarded, no command writes or reads outside the root |
 | `docs/scripting-samples/*` | 93 | a sample script (the strip sweep) |
-| `docs/architecture/contracts/script_api.v1.json` | 93, 19 | what a script can rely on (the binding's rules; the commands are `engine_commands`) |
+| `docs/architecture/contracts/script_api.v1.json` | 93, 19, 131 | what a script can rely on (the binding's rules; the commands are `engine_commands`) |
 | `docs/architecture/contracts/install_manifest.v1.*` | 122, 19 | versioned installer receipt (`format = 1`) and JSON Schema |
 | `docs/architecture/contracts/install_report.v1.*` | 122, 19 | machine-readable `nyx-setup --json` report and JSON Schema |
-| `crates/nyx-install/*` | 122, 28, 88, 95, 100, 107 | cross-platform pure-Rust installer (`nyx-setup`, `nyx-uninstall`), `nyx-pack` packager, OS desktop/PATH/file-assoc/ARP/Nyx.app drivers, 7-phase atomic journal, optional `glow` GUI wizard, and contract/hermetic/E2E tests |
+| `crates/nyx-install/*` | 122, 28, 88, 95, 100, 107, 131 | cross-platform pure-Rust installer (`nyx-setup`, `nyx-uninstall`), `nyx-pack` packager, OS desktop/PATH/file-assoc/ARP/Nyx.app drivers, 7-phase atomic journal, optional `glow` GUI wizard, and contract/hermetic/E2E tests |
 <!-- map:end -->
 
 ## Gaps this index shows

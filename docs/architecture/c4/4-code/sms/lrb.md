@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Low-reflecting boundary** (`sms.lrb`) in th
 > Low-reflecting boundaries for solid mechanics.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md)  
-**Size:** 1 file, 547 lines.
+**Size:** 1 file, 537 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/lrb.rs` | 547 |  |
+| `crates/nyx-sms/src/lrb.rs` | 537 |  |
 
 ## What it uses
 
@@ -84,10 +84,10 @@ classDiagram
 | fn | `damping_matrix_mixed` | `lrb.rs:138` | `pub(crate) fn damping_matrix_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, c6: &[M6], rho: &[f64], labels: &[i32], ncomp: usize, thickness_2d: f64, ) -> Csr` —  Real symmetric low-reflecting damping matrix `C` assembled natively on a [`MixedDiscretisation`] |
 | type | `QuadraticModes` | `lrb.rs:245` |  Eigenvalues, eigenvectors, whether all converged, and the Krylov dimension used. |
 | fn | `quadratic_modes` | `lrb.rs:249` | `pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize) -> Result<QuadraticModes, String>` —  Eigenpairs `omega` (complex, rad/s) near `omega_s` of `(K + i omega C - omega^2 M) u = 0` over the free |
-| fn | `solve_lrb` | `lrb.rs:302` | `pub fn solve_lrb( mesh: &Discretisation, spec: &Problem, st: &crate::solid::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant, ) -> Result<SolveResult, String>` —  Eigenfrequencies with low-reflecting boundaries for the real stiffness and mass matrices of |
-| fn | `solve_lrb_mixed` | `lrb.rs:321` | `pub(crate) fn solve_lrb_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, c6: &[M6], fixed: &[usize], k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant, ) -> Result<SolveResult, String>` |
-| struct | `LrbAssembly` | `lrb.rs:420` | fields: `order`, `d`, `n`, `kf`, `mf`, `cf`, `free`, `n_modes`, `f_search` —  Stage 1 of the solid kernel with low-reflecting boundaries: stiffness, mass and the boundary damping on the free dofs |
-| struct | `LrbSolve` | `lrb.rs:433` | fields: `omegas`, `vectors`, `converged`, `dim` —  Stage 2 output: complex angular frequencies and the free-dof vectors of the converged modes. |
-| fn | `assemble_lrb` | `lrb.rs:441` | `pub fn assemble_lrb( mesh: &Discretisation, spec: &Problem, st: &crate::solid::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, ) -> Result<LrbAssembly, String>` |
-| fn | `solve_lrb_modes` | `lrb.rs:488` | `pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String>` —  Stage 2: the quadratic eigenpairs nearest the search frequency. |
-| fn | `lrb_fields` | `lrb.rs:498` | `pub fn lrb_fields(mesh: &Discretisation, asm: &LrbAssembly, solved: &LrbSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and signed Q. |
+| fn | `solve_lrb` | `lrb.rs:292` | `pub fn solve_lrb( mesh: &Discretisation, spec: &Problem, st: &crate::solid::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant, ) -> Result<SolveResult, String>` —  Eigenfrequencies with low-reflecting boundaries for the real stiffness and mass matrices of |
+| fn | `solve_lrb_mixed` | `lrb.rs:311` | `pub(crate) fn solve_lrb_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, c6: &[M6], fixed: &[usize], k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, t0: std::time::Instant, ) -> Result<SolveResult, String>` |
+| struct | `LrbAssembly` | `lrb.rs:410` | fields: `order`, `d`, `n`, `kf`, `mf`, `cf`, `free`, `n_modes`, `f_search` —  Stage 1 of the solid kernel with low-reflecting boundaries: stiffness, mass and the boundary damping on the free dofs |
+| struct | `LrbSolve` | `lrb.rs:423` | fields: `omegas`, `vectors`, `converged`, `dim` —  Stage 2 output: complex angular frequencies and the free-dof vectors of the converged modes. |
+| fn | `assemble_lrb` | `lrb.rs:431` | `pub fn assemble_lrb( mesh: &Discretisation, spec: &Problem, st: &crate::solid::Setup, k: &Csr, m: &Csr, rho_cells: &[f64], labels: &[i32], n_modes: usize, f_search: f64, ) -> Result<LrbAssembly, String>` |
+| fn | `solve_lrb_modes` | `lrb.rs:478` | `pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String>` —  Stage 2: the quadratic eigenpairs nearest the search frequency. |
+| fn | `lrb_fields` | `lrb.rs:488` | `pub fn lrb_fields(mesh: &Discretisation, asm: &LrbAssembly, solved: &LrbSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and signed Q. |

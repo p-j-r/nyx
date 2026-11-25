@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Absorbing-layer kernel** (`sms.pml`) in the
 > Eigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md)  
-**Size:** 1 file, 1583 lines.
+**Size:** 1 file, 1575 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/pml.rs` | 1583 |  |
+| `crates/nyx-sms/src/pml.rs` | 1575 |  |
 
 ## What it uses
 
@@ -107,12 +107,12 @@ classDiagram
 | fn | `real_quad_norm` | `pml.rs:875` | `pub(crate) fn real_quad_norm(m1: &Csr, u: &[C], n1: usize, d: usize) -> f64` |
 | fn | `solve_solid_pml` | `pml.rs:890` | `pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
 | fn | `solve_solid_pml_mixed` | `pml.rs:899` | `pub fn solve_solid_pml_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, ) -> Result<SolveResult, String>` —  Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) PML eigenfrequency solve. |
-| struct | `PmlAssembly` | `pml.rs:1118` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `red`, `n_pairs`, `n_modes`, `f_search`, `has_fixed`, `diagnostics`, ... —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
-| struct | `PmlSolve` | `pml.rs:1138` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
-| fn | `assemble_solid_pml` | `pml.rs:1145` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
-| fn | `solve_pml_modes` | `pml.rs:1381` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
-| fn | `push_pml_mode_scalars_and_label` | `pml.rs:1404` | `pub(crate) fn push_pml_mode_scalars_and_label( j: usize, f: C, layer_fraction: f64, phys_mass_norm: f64, any_pml: bool, has_interior: bool, scalars: &mut Vec<(String, Scalar)>, unstable_count: &mut usize, ) -> (String, f64)` |
-| fn | `pml_fields` | `pml.rs:1478` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, frequencies, signed Q, |
+| struct | `PmlAssembly` | `pml.rs:1114` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `red`, `n_pairs`, `n_modes`, `f_search`, `has_fixed`, `diagnostics`, ... —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
+| struct | `PmlSolve` | `pml.rs:1134` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
+| fn | `assemble_solid_pml` | `pml.rs:1141` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
+| fn | `solve_pml_modes` | `pml.rs:1373` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
+| fn | `push_pml_mode_scalars_and_label` | `pml.rs:1396` | `pub(crate) fn push_pml_mode_scalars_and_label( j: usize, f: C, layer_fraction: f64, phys_mass_norm: f64, any_pml: bool, has_interior: bool, scalars: &mut Vec<(String, Scalar)>, unstable_count: &mut usize, ) -> (String, f64)` |
+| fn | `pml_fields` | `pml.rs:1470` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, frequencies, signed Q, |
 | fn | `ResolvedPmlDomains::from_simplex` | `pml.rs:383` | `pub fn from_simplex(mesh: &Discretisation, spec: &Problem, axisym: bool, f_search: f64) -> Result<Self, String>` |
 | fn | `ResolvedPmlDomains::from_mixed` | `pml.rs:401` | `pub fn from_mixed( mixed: &MixedDiscretisation, spec: &Problem, axisym: bool, f_search: f64, ) -> Result<Self, String>` |
 | fn | `ResolvedPmlDomains::contains` | `pml.rs:425` | `pub fn contains(&self, dom: i32) -> bool` |

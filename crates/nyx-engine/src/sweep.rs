@@ -109,7 +109,7 @@ impl Engine {
     /// reaches this engine.
     pub(crate) fn scratch(&self) -> Engine {
         let mut e = Engine::with(self.registry.clone(), self.mesher.clone());
-        e.base_library = self.base_library.clone();
+        e.set_base_library_arc(self.base_library().clone());
         e.project = self.project.clone();
         e.owner = self.owner.clone();
         e.memory_wait_timeout = self.memory_wait_timeout;
@@ -290,7 +290,18 @@ impl Engine {
                 .collect::<Vec<_>>()));
         };
         let id = id.as_u64().ok_or_else(|| Error::invalid("`sweep` is a whole number"))?;
-        let wait = args.get("wait_s").and_then(Value::as_f64).filter(|t| *t >= 0.0 && t.is_finite()).unwrap_or(0.0);
+        let wait = match args.get("wait_s") {
+            None | Some(Value::Null) => Duration::ZERO,
+            Some(v) => {
+                let t = v
+                    .as_f64()
+                    .filter(|t| *t >= 0.0 && t.is_finite())
+                    .ok_or_else(|| Error::invalid("`wait_s` must be a finite non-negative number of seconds"))?;
+                Duration::try_from_secs_f64(t)
+                    .map(|d| d.min(Duration::from_secs(86_400)))
+                    .map_err(|_| Error::invalid("`wait_s` overflows Duration"))?
+            }
+        };
         let jobs: Vec<JobId> = self
             .sweeps
             .get(&id)
@@ -300,12 +311,12 @@ impl Engine {
             .filter(|p| p.row.is_none())
             .map(|p| p.job)
             .collect();
-        let deadline = Instant::now() + Duration::from_secs_f64(wait);
+        let deadline = Instant::now() + wait;
         for job in jobs {
             if !self.pending.contains_key(&job) {
                 continue;
             }
-            let outcome = if wait > 0.0 {
+            let outcome = if !wait.is_zero() {
                 self.jobs.wait_timeout(job, deadline.saturating_duration_since(Instant::now()))
             } else {
                 self.jobs.try_take(job)

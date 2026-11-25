@@ -51,7 +51,7 @@ archive = component "Archives" ".nyx files: a workflow as one deterministic ZIP 
     properties {
         "adr" "14"
         "code" "crates/nyx-store/src: archive.rs"
-        "lines" "705"
+        "lines" "785"
         "codeDiagram" "4-code/store/archive.md"
     }
 }

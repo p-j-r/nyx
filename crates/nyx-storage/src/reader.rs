@@ -204,19 +204,22 @@ impl NyxV3Summary {
 pub struct NyxReader {
     file: File,
     budget: ReadBudgetConfig,
+    file_bytes: u64,
 }
 
 impl NyxReader {
     /// Opens an `.h5` file in streaming (`pread`) mode without buffering datasets into RAM.
     pub fn open(path: &Path, budget: ReadBudgetConfig) -> Result<Self> {
+        let file_bytes = std::fs::metadata(path)?.len();
         let file = File::open_streaming(path)?;
-        Ok(Self { file, budget })
+        Ok(Self { file, budget, file_bytes })
     }
 
     /// Opens an in-memory `.h5` image with [`ReadBudgetConfig`] protection (used by untrusted fuzzing).
     pub fn from_bytes(bytes: Vec<u8>, budget: ReadBudgetConfig) -> Result<Self> {
+        let file_bytes = bytes.len() as u64;
         let file = File::from_bytes(bytes)?;
-        Ok(Self { file, budget })
+        Ok(Self { file, budget, file_bytes })
     }
 
     /// Configured read budget for dataset and group traversal operations.
@@ -227,6 +230,21 @@ impl NyxReader {
     /// Underlying `hdf5-pure` [`File`] handle.
     pub fn file(&self) -> &File {
         &self.file
+    }
+
+    fn account_bytes(&self, total_bytes: &mut u64, add_bytes: u64, context: &str) -> Result<()> {
+        let next = total_bytes
+            .checked_add(add_bytes)
+            .ok_or_else(|| anyhow!("cumulative result byte count overflow at {context}"))?;
+        if next > self.budget.max_total_result_bytes {
+            bail!(
+                "cumulative result size {} B exceeds configured total read budget {} B at {context}",
+                next,
+                self.budget.max_total_result_bytes
+            );
+        }
+        *total_bytes = next;
+        Ok(())
     }
 
     /// Enforces [`ReadBudgetConfig::max_dataset_bytes`] using checked multiplication across `ds.shape()`.
@@ -243,6 +261,55 @@ impl NyxReader {
         Ok(elems)
     }
 
+    fn check_dataset_budget_tracked(
+        &self,
+        ds: &Dataset,
+        elem_bytes: u64,
+        total_bytes: &mut u64,
+        context: &str,
+    ) -> Result<u64> {
+        let elems = self.check_dataset_budget(ds, elem_bytes)?;
+        let bytes = elems
+            .checked_mul(elem_bytes)
+            .ok_or_else(|| anyhow!("dataset byte size overflow at {context}"))?;
+        self.account_bytes(total_bytes, bytes, context)?;
+        Ok(elems)
+    }
+
+    fn validate_n_solutions(&self, raw_n: i64, min_bytes_per_solution: u64, context: &str) -> Result<usize> {
+        if raw_n < 0 {
+            bail!("negative n_solutions {} at {}", raw_n, context);
+        }
+        let n_solutions = usize::try_from(raw_n)
+            .map_err(|_| anyhow!("n_solutions {} overflows usize at {}", raw_n, context))?;
+        if n_solutions > self.budget.max_solutions {
+            bail!(
+                "n_solutions {} exceeds configured max_solutions budget {} at {}",
+                n_solutions,
+                self.budget.max_solutions,
+                context
+            );
+        }
+        if min_bytes_per_solution > 0 {
+            let min_needed = (n_solutions as u64).saturating_mul(min_bytes_per_solution);
+            if min_needed > self.file_bytes {
+                bail!(
+                    "declared n_solutions {} requires at least {} B, exceeding file size {} B at {}",
+                    n_solutions,
+                    min_needed,
+                    self.file_bytes,
+                    context
+                );
+            }
+        }
+        Ok(n_solutions)
+    }
+
+    fn capped_solution_capacity(&self, n_solutions: usize) -> usize {
+        let file_cap = (self.file_bytes / 16).min(usize::MAX as u64) as usize;
+        n_solutions.min(self.budget.max_solutions).min(4096).min(file_cap)
+    }
+
     /// Reads raw dataset bytes only after checking datatype size and dataspace dimensions against [`ReadBudgetConfig`].
     pub fn read_raw_checked(&self, ds: &Dataset) -> Result<Vec<u8>> {
         let elem_bytes = u64::from(ds.datatype()?.type_size()).max(1);
@@ -254,46 +321,71 @@ impl NyxReader {
     /// Supports both packed `eigenvalues` (`[M, 2]` or streaming `[2 * M]`) and legacy per-solution
     /// attributes (`eig_re` / `eig_im` with mechanical `value` fallback and `eig_im = 0.0`).
     pub fn scan_mode_headers(&self, physics: &str) -> Result<Vec<ModeHeader>> {
-        let phys_grp = self.file.group(&format!("results/{physics}"))?;
-        let phys_attrs = phys_grp.attrs()?;
-        let n_solutions = attr_i64(&phys_attrs, "n_solutions")?.max(0) as usize;
+        let mut total_bytes = 0u64;
+        self.scan_mode_headers_with_budget(physics, &mut total_bytes)
+    }
 
-        let packed_eig_path = format!("results/{physics}/eigenvalues");
+    /// Same as [`Self::scan_mode_headers`] while charging cumulative bytes against `total_bytes`.
+    pub fn scan_mode_headers_with_budget(&self, physics: &str, total_bytes: &mut u64) -> Result<Vec<ModeHeader>> {
+        let phys_path = format!("results/{physics}");
+        let phys_grp = self.file.group(&phys_path)?;
+        let phys_attrs = phys_grp.attrs()?;
+        let raw_n = attr_i64(&phys_attrs, "n_solutions")?;
+
+        let packed_eig_path = format!("{phys_path}/eigenvalues");
         if let Ok(ds_eig) = self.file.dataset(&packed_eig_path) {
-            self.check_dataset_budget(&ds_eig, 8)?;
+            let n_solutions = self.validate_n_solutions(raw_n, 0, &phys_path)?;
+            self.check_dataset_budget_tracked(&ds_eig, 8, total_bytes, &packed_eig_path)?;
             let raw = ds_eig.read_f64()?;
+            let need = n_solutions
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("n_solutions * 2 overflow at {}", packed_eig_path))?;
+            if raw.len() < need {
+                bail!(
+                    "{} length {} < n_solutions * 2 ({})",
+                    packed_eig_path,
+                    raw.len(),
+                    need
+                );
+            }
             let labels_opt: Option<Vec<String>> =
                 attr_str(&phys_attrs, "mode_labels_json").ok().and_then(|j| serde_json::from_str(&j).ok());
-            let mut headers = Vec::with_capacity(n_solutions);
+            let mut headers = Vec::with_capacity(self.capped_solution_capacity(n_solutions));
             for k in 0..n_solutions {
                 let label = labels_opt
                     .as_ref()
                     .and_then(|v| v.get(k).cloned())
                     .or_else(|| {
                         self.file
-                            .group(&format!("results/{physics}/solution_{k}"))
+                            .group(&format!("{phys_path}/solution_{k}"))
                             .ok()
                             .and_then(|g| g.attrs().ok())
                             .and_then(|a| attr_str(&a, "label").ok())
                     })
                     .unwrap_or_else(|| format!("mode_{k}"));
+                let hdr_bytes = (std::mem::size_of::<ModeHeader>() as u64).saturating_add(label.len() as u64);
+                self.account_bytes(total_bytes, hdr_bytes, &packed_eig_path)?;
                 headers.push(ModeHeader {
                     mode_index: k,
-                    eig_re: raw.get(k * 2).copied().unwrap_or(0.0),
-                    eig_im: raw.get(k * 2 + 1).copied().unwrap_or(0.0),
+                    eig_re: raw[k * 2],
+                    eig_im: raw[k * 2 + 1],
                     label,
                 });
             }
             return Ok(headers);
         }
 
-        let mut headers = Vec::with_capacity(n_solutions);
+        let n_solutions = self.validate_n_solutions(raw_n, 8, &phys_path)?;
+        let mut headers = Vec::with_capacity(self.capped_solution_capacity(n_solutions));
         for k in 0..n_solutions {
-            let sol_grp = self.file.group(&format!("results/{physics}/solution_{k}"))?;
+            let sol_path = format!("{phys_path}/solution_{k}");
+            let sol_grp = self.file.group(&sol_path)?;
             let sattrs = sol_grp.attrs()?;
             let eig_re = attr_f64(&sattrs, "eig_re").or_else(|_| attr_f64(&sattrs, "value"))?;
             let eig_im = attr_f64(&sattrs, "eig_im").unwrap_or(0.0);
             let label = attr_str(&sattrs, "label").unwrap_or_default();
+            let hdr_bytes = (std::mem::size_of::<ModeHeader>() as u64).saturating_add(label.len() as u64);
+            self.account_bytes(total_bytes, hdr_bytes, &sol_path)?;
             headers.push(ModeHeader { mode_index: k, eig_re, eig_im, label });
         }
         Ok(headers)
@@ -302,38 +394,43 @@ impl NyxReader {
     /// Reads `/mesh` topology, connectivity, coordinates, and optional curved-edge geometry (`edge_node_pairs`, `edge_node_points`).
     /// Transparently handles both explicit `/mesh` attributes and legacy `nyx-results` v3/v4 files without `/mesh` attributes.
     pub fn read_mesh(&self) -> Result<MeshData> {
+        let mut total_bytes = 0u64;
+        self.read_mesh_with_budget(&mut total_bytes)
+    }
+
+    fn read_mesh_with_budget(&self, total_bytes: &mut u64) -> Result<MeshData> {
         let mesh_grp = self.file.group("mesh")?;
         let mattrs = mesh_grp.attrs()?;
 
         let ds_cl = self.file.dataset("mesh/cell_labels")?;
-        self.check_dataset_budget(&ds_cl, 4)?;
+        self.check_dataset_budget_tracked(&ds_cl, 4, total_bytes, "mesh/cell_labels")?;
         let cell_labels = ds_cl.read_i32()?;
 
         let ds_c = self.file.dataset("mesh/cells")?;
-        self.check_dataset_budget(&ds_c, 4)?;
+        self.check_dataset_budget_tracked(&ds_c, 4, total_bytes, "mesh/cells")?;
         let cs = ds_c.shape()?;
         let cells_shape = shape_2d(&cs, "mesh/cells")?;
         let cells = ds_c.read_u32()?;
 
         let ds_fl = self.file.dataset("mesh/facet_labels")?;
-        self.check_dataset_budget(&ds_fl, 4)?;
+        self.check_dataset_budget_tracked(&ds_fl, 4, total_bytes, "mesh/facet_labels")?;
         let facet_labels = ds_fl.read_i32()?;
 
         let ds_f = self.file.dataset("mesh/facets")?;
-        self.check_dataset_budget(&ds_f, 4)?;
+        self.check_dataset_budget_tracked(&ds_f, 4, total_bytes, "mesh/facets")?;
         let fs = ds_f.shape()?;
         let facets_shape = shape_2d(&fs, "mesh/facets")?;
         let facets = ds_f.read_u32()?;
 
         let ds_p = self.file.dataset("mesh/points")?;
-        self.check_dataset_budget(&ds_p, 8)?;
+        self.check_dataset_budget_tracked(&ds_p, 8, total_bytes, "mesh/points")?;
         let ps = ds_p.shape()?;
         let points_shape = shape_2d(&ps, "mesh/points")?;
         let points = ds_p.read_f64()?;
 
         let mut edge_node_pairs = Vec::new();
         if let Ok(ds_ep) = self.file.dataset("mesh/edge_node_pairs") {
-            self.check_dataset_budget(&ds_ep, 4)?;
+            self.check_dataset_budget_tracked(&ds_ep, 4, total_bytes, "mesh/edge_node_pairs")?;
             let raw_pairs = ds_ep.read_u32()?;
             let (chunks, rem) = raw_pairs.as_chunks::<2>();
             if !rem.is_empty() {
@@ -344,7 +441,7 @@ impl NyxReader {
 
         let mut edge_node_points = Vec::new();
         if let Ok(ds_ept) = self.file.dataset("mesh/edge_node_points") {
-            self.check_dataset_budget(&ds_ept, 8)?;
+            self.check_dataset_budget_tracked(&ds_ept, 8, total_bytes, "mesh/edge_node_points")?;
             let raw_pts = ds_ept.read_f64()?;
             let (chunks, rem) = raw_pts.as_chunks::<3>();
             if !rem.is_empty() {
@@ -448,8 +545,9 @@ impl NyxReader {
             let m = if let Some(div) = (shape[0] as usize).checked_div(mode_elems) {
                 div
             } else {
-                let pattrs = self.file.group(&format!("results/{physics}"))?.attrs()?;
-                attr_i64(&pattrs, "n_solutions")?.max(0) as usize
+                let phys_path = format!("results/{physics}");
+                let pattrs = self.file.group(&phys_path)?.attrs()?;
+                self.validate_n_solutions(attr_i64(&pattrs, "n_solutions")?, 0, &phys_path)?
             };
             return Ok(Some([m, c, n_c, n_v, ri]));
         }
@@ -460,6 +558,17 @@ impl NyxReader {
     /// Dispatches to `ds.read_f64_rows` on `L2`/`L3`/`L1-packed` datasets (decompressing only chunk `mode_idx`),
     /// or reconstructs `[C, N_c, N_v, 2]` (`[re, im]` interleaved) from legacy `/results/<phys>/solution_<k>/cell_fields`.
     pub fn read_mode_cell_fields(&self, physics: &str, mode_idx: usize) -> Result<Vec<f64>> {
+        let mut total_bytes = 0u64;
+        self.read_mode_cell_fields_with_budget(physics, mode_idx, &mut total_bytes)
+    }
+
+    /// Same as [`Self::read_mode_cell_fields`] while charging cumulative bytes against `total_bytes`.
+    pub fn read_mode_cell_fields_with_budget(
+        &self,
+        physics: &str,
+        mode_idx: usize,
+        total_bytes: &mut u64,
+    ) -> Result<Vec<f64>> {
         let packed_path = format!("results/{physics}/cell_fields_packed");
         if let Ok(ds) = self.file.dataset(&packed_path) {
             let shape = ds.shape()?;
@@ -479,6 +588,7 @@ impl NyxReader {
                         self.budget.max_dataset_bytes
                     );
                 }
+                self.account_bytes(total_bytes, row_bytes, &packed_path)?;
                 if row_elems == 0 {
                     return Ok(Vec::new());
                 }
@@ -502,9 +612,11 @@ impl NyxReader {
                         self.budget.max_dataset_bytes
                     );
                 }
+                self.account_bytes(total_bytes, mode_bytes, &packed_path)?;
                 if mode_elems == 0 {
-                    let pattrs = self.file.group(&format!("results/{physics}"))?.attrs()?;
-                    let n_sol = attr_i64(&pattrs, "n_solutions")?.max(0) as usize;
+                    let phys_path = format!("results/{physics}");
+                    let pattrs = self.file.group(&phys_path)?.attrs()?;
+                    let n_sol = self.validate_n_solutions(attr_i64(&pattrs, "n_solutions")?, 0, &phys_path)?;
                     if mode_idx >= n_sol {
                         bail!("mode_idx {} out of bounds for n_solutions={}", mode_idx, n_sol);
                     }
@@ -529,20 +641,31 @@ impl NyxReader {
         comp_names.sort();
         let mut out = Vec::new();
         for cname in comp_names {
-            let ds_re = self.file.dataset(&format!("{cf_path}/{cname}/re"))?;
-            self.check_dataset_budget(&ds_re, 8)?;
+            let re_path = format!("{cf_path}/{cname}/re");
+            let ds_re = self.file.dataset(&re_path)?;
+            self.check_dataset_budget_tracked(&ds_re, 8, total_bytes, &re_path)?;
             let re = ds_re.read_f64()?;
 
-            let im = if let Ok(ds_im) = self.file.dataset(&format!("{cf_path}/{cname}/im")) {
-                self.check_dataset_budget(&ds_im, 8)?;
+            let im_path = format!("{cf_path}/{cname}/im");
+            let im = if let Ok(ds_im) = self.file.dataset(&im_path) {
+                self.check_dataset_budget_tracked(&ds_im, 8, total_bytes, &im_path)?;
                 ds_im.read_f64()?
             } else {
+                let im_bytes = (re.len() as u64)
+                    .checked_mul(8)
+                    .ok_or_else(|| anyhow!("{}: im byte size overflow", im_path))?;
+                self.account_bytes(total_bytes, im_bytes, &im_path)?;
                 vec![0.0; re.len()]
             };
             if re.len() != im.len() {
                 bail!("{}/{}: re.len() {} != im.len() {}", cf_path, cname, re.len(), im.len());
             }
-            out.reserve(re.len() * 2);
+            let inter_elems = re
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("{}/{}: interleaved length overflow", cf_path, cname))?;
+            out.try_reserve(inter_elems)
+                .map_err(|e| anyhow!("{}/{}: allocation failed for {} elements: {}", cf_path, cname, inter_elems, e))?;
             for (&r, &i) in re.iter().zip(im.iter()) {
                 out.push(r);
                 out.push(i);
@@ -562,6 +685,17 @@ impl NyxReader {
 
     /// Reads the complete `nyx-results` v3 structure for a specific `physics` group under `/results`.
     pub fn read_nyx_v3_summary_for_physics(&self, physics: &str, read_viz_links: bool) -> Result<NyxV3Summary> {
+        let mut total_bytes = 0u64;
+        self.read_nyx_v3_summary_for_physics_with_budget(physics, read_viz_links, &mut total_bytes)
+    }
+
+    /// Same as [`Self::read_nyx_v3_summary_for_physics`] while charging cumulative bytes against `total_bytes`.
+    pub fn read_nyx_v3_summary_for_physics_with_budget(
+        &self,
+        physics: &str,
+        read_viz_links: bool,
+        total_bytes: &mut u64,
+    ) -> Result<NyxV3Summary> {
         let root_attrs = self.file.root().attrs()?;
         let format = attr_str(&root_attrs, "format")?;
         let version = attr_i64(&root_attrs, "version")?;
@@ -569,33 +703,34 @@ impl NyxReader {
         let processes = attr_i64(&root_attrs, "processes")?;
 
         let ds_proj = self.file.dataset("project")?;
-        self.check_dataset_budget(&ds_proj, 1)?;
+        self.check_dataset_budget_tracked(&ds_proj, 1, total_bytes, "project")?;
         let project_bytes = ds_proj.read_u8()?;
 
         let ds_cell_labels = self.file.dataset("mesh/cell_labels")?;
-        self.check_dataset_budget(&ds_cell_labels, 4)?;
+        self.check_dataset_budget_tracked(&ds_cell_labels, 4, total_bytes, "mesh/cell_labels")?;
         let mesh_cell_labels = ds_cell_labels.read_i32()?;
 
         let ds_cells = self.file.dataset("mesh/cells")?;
-        self.check_dataset_budget(&ds_cells, 4)?;
+        self.check_dataset_budget_tracked(&ds_cells, 4, total_bytes, "mesh/cells")?;
         let mesh_cells_shape = shape_2d(&ds_cells.shape()?, "mesh/cells")?;
         let mesh_cells = ds_cells.read_u32()?;
 
         let ds_facet_labels = self.file.dataset("mesh/facet_labels")?;
-        self.check_dataset_budget(&ds_facet_labels, 4)?;
+        self.check_dataset_budget_tracked(&ds_facet_labels, 4, total_bytes, "mesh/facet_labels")?;
         let mesh_facet_labels = ds_facet_labels.read_i32()?;
 
         let ds_facets = self.file.dataset("mesh/facets")?;
-        self.check_dataset_budget(&ds_facets, 4)?;
+        self.check_dataset_budget_tracked(&ds_facets, 4, total_bytes, "mesh/facets")?;
         let mesh_facets_shape = shape_2d(&ds_facets.shape()?, "mesh/facets")?;
         let mesh_facets = ds_facets.read_u32()?;
 
         let ds_points = self.file.dataset("mesh/points")?;
-        self.check_dataset_budget(&ds_points, 8)?;
+        self.check_dataset_budget_tracked(&ds_points, 8, total_bytes, "mesh/points")?;
         let mesh_points_shape = shape_2d(&ds_points.shape()?, "mesh/points")?;
         let mesh_points = ds_points.read_f64()?;
 
-        let phys_grp = self.file.group(&format!("results/{physics}"))?;
+        let phys_path = format!("results/{physics}");
+        let phys_grp = self.file.group(&phys_path)?;
         let phys_attrs = phys_grp.attrs()?;
         let study = attr_str(&phys_attrs, "study")?;
         let dim = attr_i64(&phys_attrs, "dim")?;
@@ -605,11 +740,11 @@ impl NyxReader {
         let seconds = attr_f64(&phys_attrs, "seconds")?;
 
         let ds_log = phys_grp.dataset("log")?;
-        self.check_dataset_budget(&ds_log, 1)?;
+        self.check_dataset_budget_tracked(&ds_log, 1, total_bytes, &format!("{phys_path}/log"))?;
         let log_bytes = ds_log.read_u8()?;
 
         let ds_scalars = phys_grp.dataset("scalars")?;
-        self.check_dataset_budget(&ds_scalars, 1)?;
+        self.check_dataset_budget_tracked(&ds_scalars, 1, total_bytes, &format!("{phys_path}/scalars"))?;
         let scalars_bytes = ds_scalars.read_u8()?;
 
         let viz_phys = self.file.group(&format!("viz/{physics}"))?;
@@ -617,17 +752,17 @@ impl NyxReader {
         let viz_topology = attr_str(&viz_attrs, "topology")?;
 
         let ds_vcells = viz_phys.dataset("cells")?;
-        self.check_dataset_budget(&ds_vcells, 4)?;
+        self.check_dataset_budget_tracked(&ds_vcells, 4, total_bytes, &format!("viz/{physics}/cells"))?;
         let viz_cells_shape = shape_2d(&ds_vcells.shape()?, "viz/cells")?;
         let viz_cells = ds_vcells.read_u32()?;
 
         let ds_vpoints = viz_phys.dataset("points")?;
-        self.check_dataset_budget(&ds_vpoints, 8)?;
+        self.check_dataset_budget_tracked(&ds_vpoints, 8, total_bytes, &format!("viz/{physics}/points"))?;
         let viz_points_shape = shape_2d(&ds_vpoints.shape()?, "viz/points")?;
         let viz_points = ds_vpoints.read_f64()?;
 
-        let n_sol = n_solutions.max(0) as usize;
-        let mut solutions = Vec::with_capacity(n_sol);
+        let n_sol = self.validate_n_solutions(n_solutions, 8, &phys_path)?;
+        let mut solutions = Vec::with_capacity(self.capped_solution_capacity(n_sol));
         for k in 0..n_sol {
             let sol_grp = phys_grp.group(&format!("solution_{k}"))?;
             let sol_attrs = sol_grp.attrs()?;
@@ -646,16 +781,25 @@ impl NyxReader {
                 let c_unit = attr_str(&comp_attrs, "unit")?;
                 let c_nloc = attr_i64(&comp_attrs, "nloc")?;
 
+                let re_ctx = format!("{phys_path}/solution_{k}/cell_fields/{cf_key}/re");
                 let ds_re = comp_grp.dataset("re")?;
-                self.check_dataset_budget(&ds_re, 8)?;
+                self.check_dataset_budget_tracked(&ds_re, 8, total_bytes, &re_ctx)?;
                 let re = ds_re.read_f64()?;
 
+                let im_ctx = format!("{phys_path}/solution_{k}/cell_fields/{cf_key}/im");
                 let im = if let Ok(ds_im) = comp_grp.dataset("im") {
-                    self.check_dataset_budget(&ds_im, 8)?;
+                    self.check_dataset_budget_tracked(&ds_im, 8, total_bytes, &im_ctx)?;
                     ds_im.read_f64()?
                 } else {
+                    let im_bytes = (re.len() as u64)
+                        .checked_mul(8)
+                        .ok_or_else(|| anyhow!("{}: im byte size overflow", im_ctx))?;
+                    self.account_bytes(total_bytes, im_bytes, &im_ctx)?;
                     vec![0.0; re.len()]
                 };
+                if re.len() != im.len() {
+                    bail!("{phys_path}/solution_{k}/cell_fields/{cf_key}: re.len() {} != im.len() {}", re.len(), im.len());
+                }
                 cell_fields.insert(cf_key, (c_name, c_unit, c_nloc, re, im));
             }
 
@@ -667,7 +811,12 @@ impl NyxReader {
             let mut fields = BTreeMap::new();
             for f_key in f_names {
                 let ds = f_grp.dataset(&f_key)?;
-                self.check_dataset_budget(&ds, 8)?;
+                self.check_dataset_budget_tracked(
+                    &ds,
+                    8,
+                    total_bytes,
+                    &format!("{phys_path}/solution_{k}/fields/{f_key}"),
+                )?;
                 let ds_attrs = ds.attrs()?;
                 let f_name = attr_str(&ds_attrs, "name")?;
                 let f_unit = attr_str(&ds_attrs, "unit")?;
@@ -683,7 +832,12 @@ impl NyxReader {
                 v_names.sort();
                 for v_key in v_names {
                     let v_ds = vsol_grp.dataset(&v_key)?;
-                    self.check_dataset_budget(&v_ds, 8)?;
+                    self.check_dataset_budget_tracked(
+                        &v_ds,
+                        8,
+                        total_bytes,
+                        &format!("viz/{physics}/sol_{k}/{v_key}"),
+                    )?;
                     let v_data = v_ds.read_f64()?;
                     viz_fields.insert(v_key, v_data);
                 }
@@ -741,37 +895,25 @@ fn shape_2d(shape: &[u64], label: &str) -> Result<[usize; 2]> {
     }
 }
 
-fn walk_group_checked(reader: &NyxReader, grp: &Group, depth: usize) -> Result<usize> {
+fn walk_group_checked(reader: &NyxReader, grp: &Group, depth: usize, total_bytes: &mut u64) -> Result<usize> {
     if depth > reader.budget.max_group_depth {
         bail!("group recursion depth {} exceeds configured limit {}", depth, reader.budget.max_group_depth);
     }
-    let mut total_bytes = 0usize;
+    let mut local_bytes = 0usize;
     let _ = grp.attrs()?;
     for ds_name in grp.datasets()? {
         let ds = grp.dataset(&ds_name)?;
         let _ = ds.attrs()?;
-        let raw = reader.read_raw_checked(&ds)?;
-        total_bytes = total_bytes.saturating_add(raw.len());
-        if (total_bytes as u64) > reader.budget.max_total_result_bytes {
-            bail!(
-                "cumulative result size {} B exceeds configured total read budget {} B",
-                total_bytes,
-                reader.budget.max_total_result_bytes
-            );
-        }
+        let elem_bytes = u64::from(ds.datatype()?.type_size()).max(1);
+        reader.check_dataset_budget_tracked(&ds, elem_bytes, total_bytes, &ds_name)?;
+        let raw = ds.read_raw()?;
+        local_bytes = local_bytes.saturating_add(raw.len());
     }
     for sub_name in grp.groups()? {
         let sub = grp.group(&sub_name)?;
-        total_bytes = total_bytes.saturating_add(walk_group_checked(reader, &sub, depth + 1)?);
-        if (total_bytes as u64) > reader.budget.max_total_result_bytes {
-            bail!(
-                "cumulative result size {} B exceeds configured total read budget {} B",
-                total_bytes,
-                reader.budget.max_total_result_bytes
-            );
-        }
+        local_bytes = local_bytes.saturating_add(walk_group_checked(reader, &sub, depth + 1, total_bytes)?);
     }
-    Ok(total_bytes)
+    Ok(local_bytes)
 }
 
 /// Walks an untrusted HDF5 byte buffer enforcing [`ReadBudgetConfig`] (`checked_mul` byte ceiling
@@ -779,5 +921,178 @@ fn walk_group_checked(reader: &NyxReader, grp: &Group, depth: usize) -> Result<u
 pub fn fuzz_walk_untrusted(bytes: &[u8], budget: ReadBudgetConfig) -> Result<usize> {
     let reader = NyxReader::from_bytes(bytes.to_vec(), budget)?;
     let root = reader.file().root();
-    walk_group_checked(&reader, &root, 0)
+    let mut total_bytes = 0u64;
+    walk_group_checked(&reader, &root, 0, &mut total_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hdf5_pure::FileBuilder;
+
+    fn build_packed_bytes(n_sol_attr: i64, eig_pairs: usize) -> Result<Vec<u8>> {
+        let mut fb = FileBuilder::new();
+        let mut res = fb.create_group("results");
+        let mut ems = res.create_group("ems");
+        ems.set_attr("n_solutions", AttrValue::I64(n_sol_attr));
+        let eigs: Vec<f64> = (0..eig_pairs * 2).map(|i| i as f64).collect();
+        ems.create_dataset("eigenvalues").with_f64_data(&eigs).with_shape(&[eig_pairs as u64, 2]);
+        res.add_group(ems.finish());
+        fb.add_group(res.finish());
+        Ok(fb.finish()?)
+    }
+
+    fn build_legacy_v3_bytes(
+        n_sol_attr: i64,
+        actual_sols: usize,
+        n_comp: usize,
+        n_vals: usize,
+        with_im: bool,
+    ) -> Result<Vec<u8>> {
+        let mut fb = FileBuilder::new();
+        fb.set_attr("format", AttrValue::VarLenString("nyx-results".into()));
+        fb.set_attr("version", AttrValue::I64(3));
+        fb.set_attr("writer", AttrValue::VarLenString("nyx".into()));
+        fb.set_attr("processes", AttrValue::I64(1));
+        fb.create_dataset("project").with_u8_data(b"{}");
+
+        let mut mg = fb.create_group("mesh");
+        mg.create_dataset("cell_labels").with_i32_data(&[1]);
+        mg.create_dataset("cells").with_u32_data(&[0, 1, 2]).with_shape(&[1, 3]);
+        mg.create_dataset("facet_labels").with_i32_data(&[1]);
+        mg.create_dataset("facets").with_u32_data(&[0, 1]).with_shape(&[1, 2]);
+        mg.create_dataset("points").with_f64_data(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0]).with_shape(&[3, 2]);
+        fb.add_group(mg.finish());
+
+        let mut res = fb.create_group("results");
+        let mut ems = res.create_group("ems");
+        ems.set_attr("physics", AttrValue::VarLenString("ems".into()));
+        ems.set_attr("study", AttrValue::VarLenString("modes".into()));
+        ems.set_attr("dim", AttrValue::I64(2));
+        ems.set_attr("dofs", AttrValue::I64(3));
+        ems.set_attr("n_solutions", AttrValue::I64(n_sol_attr));
+        ems.set_attr("order", AttrValue::I64(1));
+        ems.set_attr("seconds", AttrValue::F64(0.1));
+        ems.create_dataset("log").with_u8_data(b"ok");
+        ems.create_dataset("scalars").with_u8_data(b"{}");
+
+        let mut viz = fb.create_group("viz");
+        let mut vems = viz.create_group("ems");
+        vems.set_attr("topology", AttrValue::VarLenString("Triangle".into()));
+        vems.create_dataset("cells").with_u32_data(&[0, 1, 2]).with_shape(&[1, 3]);
+        vems.create_dataset("points").with_f64_data(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0]).with_shape(&[3, 2]);
+
+        let vals = vec![1.0f64; n_vals];
+        for k in 0..actual_sols {
+            let mut sg = ems.create_group(&format!("solution_{k}"));
+            sg.set_attr("eig_re", AttrValue::F64(2.5));
+            sg.set_attr("eig_im", AttrValue::F64(0.0));
+            sg.set_attr("label", AttrValue::VarLenString(format!("mode_{k}")));
+
+            let mut cf = sg.create_group("cell_fields");
+            for c in 0..n_comp {
+                let mut cg = cf.create_group(&format!("{c:02}_E"));
+                cg.set_attr("name", AttrValue::VarLenString(format!("E{c}")));
+                cg.set_attr("unit", AttrValue::VarLenString("V/m".into()));
+                cg.set_attr("nloc", AttrValue::I64(3));
+                cg.create_dataset("re").with_f64_data(&vals);
+                if with_im {
+                    cg.create_dataset("im").with_f64_data(&vals);
+                }
+                cf.add_group(cg.finish());
+            }
+            sg.add_group(cf.finish());
+
+            let mut fg = sg.create_group("fields");
+            fg.set_attr("order", AttrValue::VarLenString("[\"E\"]".into()));
+            fg.create_dataset("00_E")
+                .with_f64_data(&vals)
+                .set_attr("name", AttrValue::VarLenString("E".into()))
+                .set_attr("unit", AttrValue::VarLenString("V/m".into()))
+                .set_attr("components", AttrValue::VarLenString("[\"x\"]".into()));
+            sg.add_group(fg.finish());
+            ems.add_group(sg.finish());
+
+            let mut vsg = vems.create_group(&format!("sol_{k}"));
+            vsg.create_dataset("E").with_f64_data(&vals);
+            vems.add_group(vsg.finish());
+        }
+        res.add_group(ems.finish());
+        fb.add_group(res.finish());
+        viz.add_group(vems.finish());
+        fb.add_group(viz.finish());
+        Ok(fb.finish()?)
+    }
+
+    #[test]
+    fn oversized_n_solutions_fails_cleanly_without_oom() -> Result<()> {
+        let bomb_packed = build_packed_bytes(i64::MAX, 1)?;
+        let r = NyxReader::from_bytes(bomb_packed, ReadBudgetConfig::default())?;
+        let err = r.scan_mode_headers("ems").err().ok_or_else(|| anyhow!("expected error"))?.to_string();
+        assert!(err.contains("max_solutions"), "unexpected packed bomb error: {err}");
+
+        let over_custom = build_packed_bytes(50, 50)?;
+        let r_cap = NyxReader::from_bytes(
+            over_custom,
+            ReadBudgetConfig { max_solutions: 16, ..ReadBudgetConfig::default() },
+        )?;
+        let err_cap = r_cap.scan_mode_headers("ems").err().ok_or_else(|| anyhow!("expected error"))?.to_string();
+        assert!(err_cap.contains("max_solutions"), "unexpected custom max_solutions error: {err_cap}");
+
+        // Legacy layout with forged n_solutions exceeding file size / max_solutions fails before looping
+        let bomb_legacy = build_legacy_v3_bytes(50_000, 1, 1, 3, true)?;
+        let r_leg = NyxReader::from_bytes(bomb_legacy, ReadBudgetConfig::default())?;
+        let err_leg_hdr = r_leg.scan_mode_headers("ems").err().ok_or_else(|| anyhow!("expected error"))?.to_string();
+        assert!(err_leg_hdr.contains("exceeding file size"), "unexpected legacy header error: {err_leg_hdr}");
+        let err_leg_sum = r_leg
+            .read_nyx_v3_summary_for_physics("ems", true)
+            .err()
+            .ok_or_else(|| anyhow!("expected error"))?
+            .to_string();
+        assert!(err_leg_sum.contains("exceeding file size"), "unexpected legacy summary error: {err_leg_sum}");
+        Ok(())
+    }
+
+    #[test]
+    fn scan_mode_headers_enforces_cumulative_byte_budget() -> Result<()> {
+        let packed = build_packed_bytes(10, 10)?;
+        // 10 * 2 * 8 = 160 B for eigenvalues alone, plus ModeHeader accounting
+        let budget = ReadBudgetConfig {
+            max_dataset_bytes: 1024,
+            max_total_result_bytes: 120,
+            ..ReadBudgetConfig::default()
+        };
+        let r = NyxReader::from_bytes(packed, budget)?;
+        let err = r.scan_mode_headers("ems").err().ok_or_else(|| anyhow!("expected error"))?.to_string();
+        assert!(err.contains("cumulative result size"), "unexpected header budget error: {err}");
+        Ok(())
+    }
+
+    #[test]
+    fn read_mode_cell_fields_and_v3_summary_enforce_cumulative_byte_budget() -> Result<()> {
+        // 4 components * (64 re + 64 im) * 8 bytes = 4096 B total; each individual dataset is 512 B.
+        let bytes_with_im = build_legacy_v3_bytes(2, 2, 4, 64, true)?;
+        let budget = ReadBudgetConfig {
+            max_dataset_bytes: 1024,
+            max_total_result_bytes: 2048,
+            ..ReadBudgetConfig::default()
+        };
+        let r = NyxReader::from_bytes(bytes_with_im, budget)?;
+        let err_cf = r.read_mode_cell_fields("ems", 0).err().ok_or_else(|| anyhow!("expected error"))?.to_string();
+        assert!(err_cf.contains("cumulative result size"), "unexpected cell_fields budget error: {err_cf}");
+
+        let err_sum = r
+            .read_nyx_v3_summary_for_physics("ems", true)
+            .err()
+            .ok_or_else(|| anyhow!("expected error"))?
+            .to_string();
+        assert!(err_sum.contains("cumulative result size"), "unexpected summary budget error: {err_sum}");
+
+        // Without `im` dataset: synthetic zero-im still counts toward cumulative `re.len() * 2 * 8` budget.
+        let bytes_no_im = build_legacy_v3_bytes(1, 1, 4, 64, false)?;
+        let r_no_im = NyxReader::from_bytes(bytes_no_im, budget)?;
+        let err_no_im = r_no_im.read_mode_cell_fields("ems", 0).err().ok_or_else(|| anyhow!("expected error"))?.to_string();
+        assert!(err_no_im.contains("cumulative result size"), "unexpected no-im budget error: {err_no_im}");
+        Ok(())
+    }
 }

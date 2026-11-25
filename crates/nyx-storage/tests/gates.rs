@@ -16,17 +16,41 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-const PYTHON_EXE: &str = r"C:\ProgramData\anaconda3\python.exe";
-const BENCH_MODES_2D: &str =
-    r"C:\Users\robin-adm\Documents\nyx2_benches\.jj-workspaces\main-3c3d3858\sos_300nm_modes.h5";
-const BENCH_RIB_2D: &str =
-    r"C:\Users\robin-adm\Documents\nyx2_benches\.jj-workspaces\main-3c3d3858\sos_300nm_rib_modes.h5";
-const BENCH_MECH_3D: &str =
-    r"C:\Users\robin-adm\Documents\nyx2_benches\.jj-workspaces\main-789a3652\sos_300nm_mech_modes.h5";
-const BENCH_COUPLED_2D: &str =
-    r"C:\Users\robin-adm\Documents\nyx2_benches\.jj-workspaces\main-789a3652\sos_300nm_strip_coupled_q0_a1.h5";
-const BENCH_SWG_3D: &str =
-    r"C:\Users\robin-adm\Documents\nyx2_benches\.jj-workspaces\main-77744503\swg_3d_bock2010_case1a.h5";
+fn external_bench_dir() -> Option<PathBuf> {
+    std::env::var_os("NYX_EXTERNAL_BENCH_DIR").filter(|s| !s.is_empty()).map(PathBuf::from)
+}
+
+fn resolve_bench_file(dir: &Path, subpath: &str, filename: &str) -> Result<PathBuf> {
+    for cand in [dir.join(filename), dir.join(subpath), dir.join(".jj-workspaces").join(subpath)] {
+        if cand.is_file() {
+            return Ok(cand);
+        }
+    }
+    bail!(
+        "NYX_EXTERNAL_BENCH_DIR ({}) does not contain '{}' (also checked '{}' and '.jj-workspaces/{}')",
+        dir.display(),
+        filename,
+        subpath,
+        subpath
+    )
+}
+
+fn find_h5py_python() -> Option<PathBuf> {
+    let mut cands: Vec<PathBuf> = Vec::new();
+    if let Some(p) = std::env::var_os("NYX_PYTHON").filter(|s| !s.is_empty()) {
+        cands.push(PathBuf::from(p));
+    }
+    cands.push(PathBuf::from("python3"));
+    cands.push(PathBuf::from("python"));
+    for cand in cands {
+        if let Ok(out) = Command::new(&cand).args(["-c", "import h5py, numpy"]).output() {
+            if out.status.success() {
+                return Some(cand);
+            }
+        }
+    }
+    None
+}
 
 #[cfg(target_os = "windows")]
 mod win_mem {
@@ -68,7 +92,26 @@ mod win_mem {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod win_mem {
+    pub fn memory_usage_mb() -> (f64, f64) {
+        let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+            return (0.0, 0.0);
+        };
+        let parse_kib = |key: &str| -> f64 {
+            status
+                .lines()
+                .find_map(|l| l.strip_prefix(key))
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|n| n.parse::<f64>().ok())
+                .unwrap_or(0.0)
+                / 1024.0
+        };
+        (parse_kib("VmRSS:"), parse_kib("VmHWM:"))
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod win_mem {
     pub fn memory_usage_mb() -> (f64, f64) {
         (0.0, 0.0)
@@ -85,8 +128,8 @@ fn test_scratch_dir(sub: &str) -> Result<PathBuf> {
     Ok(base)
 }
 
-fn run_python_inline(code: &str, args: &[&str]) -> Result<String> {
-    let out = Command::new(PYTHON_EXE).arg("-c").arg(code).args(args).output()?;
+fn run_python_inline(py: &Path, code: &str, args: &[&str]) -> Result<String> {
+    let out = Command::new(py).arg("-c").arg(code).args(args).output()?;
     if !out.status.success() {
         let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -142,17 +185,17 @@ fn ieee754_extreme_bits() -> Vec<u64> {
 fn gate1_ec00_zero_c_offline_build_and_tree_audit() -> Result<()> {
     let t0 = Instant::now();
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let target_dir = std::env::var("CARGO_TARGET_DIR")
-        .unwrap_or_else(|_| r"c:\Users\robin-adm\Documents\opomech\nyx3-target\storage-core".to_string());
 
-    let out = Command::new("cargo")
-        .current_dir(&manifest_dir)
-        .env("CARGO_TARGET_DIR", &target_dir)
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(&manifest_dir)
         .env("CC", "nonexistent_cc")
         .env("CXX", "nonexistent_cxx")
         .env("CMAKE", "nonexistent_cmake")
-        .args(["tree", "--offline", "-e", "normal,build", "-p", "nyx-storage"])
-        .output()?;
+        .args(["tree", "--offline", "-e", "normal,build", "-p", "nyx-storage"]);
+    if let Some(td) = std::env::var_os("CARGO_TARGET_DIR") {
+        cmd.env("CARGO_TARGET_DIR", td);
+    }
+    let out = cmd.output()?;
 
     if !out.status.success() {
         bail!("cargo tree failed: {}", String::from_utf8_lossy(&out.stderr));
@@ -187,23 +230,237 @@ fn gate1_ec00_zero_c_offline_build_and_tree_audit() -> Result<()> {
     Ok(())
 }
 
+fn build_portable_v3_ems_summary() -> nyx_storage::NyxV3Summary {
+    use nyx_storage::{NyxSolutionData, NyxV3Summary};
+    use std::collections::BTreeMap;
+
+    // 2x2 unit square split into 2 Triangle_6 cells (9 global nodes in P2):
+    // Vertices: 0:(0,0), 1:(1,0), 2:(1,1), 3:(0,1)
+    // Edge midpoints: 4:(0.5,0), 5:(0.5,0.5), 6:(0,0.5), 7:(1,0.5), 8:(0.5,1)
+    let pts = vec![
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.5, 0.0, 0.5, 0.5, 0.0, 0.5, 1.0, 0.5, 0.5, 1.0,
+    ];
+    let cells = vec![0u32, 1, 2, 4, 7, 5, 0, 2, 3, 5, 8, 6];
+    let n_cells = 2usize;
+    let nloc = 6usize;
+    let n_pts = 9usize;
+
+    let mut solutions = Vec::new();
+    for k in 0..3usize {
+        let mut cell_fields = BTreeMap::new();
+        for (cname, c_idx) in [("00_Ex", 0usize), ("01_Ez", 1usize), ("02_Ey", 2usize)] {
+            let re: Vec<f64> = (0..n_cells * nloc)
+                .map(|i| (k as f64 + 1.0) * 0.5 + (c_idx as f64) * 0.25 + (i as f64) * 1e-3)
+                .collect();
+            let im: Vec<f64> = (0..n_cells * nloc)
+                .map(|i| -0.125 * (k as f64 + 1.0) + (c_idx as f64) * 0.0625 - (i as f64) * 5e-4)
+                .collect();
+            let short = cname.split('_').nth(1).unwrap().to_string();
+            cell_fields.insert(cname.to_string(), (short, "V/m".to_string(), nloc as i64, re, im));
+        }
+        let mut fields = BTreeMap::new();
+        let mut viz_fields = BTreeMap::new();
+        let e_mag: Vec<f64> = (0..n_pts).map(|i| 1.0 + (k as f64) * 0.25 + (i as f64) * 0.05).collect();
+        let re_ex: Vec<f64> = (0..n_pts).map(|i| 0.5 + (k as f64) * 0.1 + (i as f64) * 0.02).collect();
+        fields.insert(
+            "00_|E|".to_string(),
+            ("|E|".to_string(), "V/m".to_string(), "[\"|\"]".to_string(), e_mag.clone()),
+        );
+        fields.insert(
+            "01_Re Ex".to_string(),
+            ("Re Ex".to_string(), "V/m".to_string(), "[\"x\"]".to_string(), re_ex.clone()),
+        );
+        viz_fields.insert(viz_link_name("00_|E|"), e_mag);
+        viz_fields.insert(viz_link_name("01_Re Ex"), re_ex);
+
+        solutions.push(NyxSolutionData {
+            eig_re: 2.8945 - (k as f64) * 0.15,
+            eig_im: -1e-9 * (k as f64 + 1.0),
+            label: format!("mode_{k}"),
+            cell_fields,
+            fields_order_json: "[\"00_|E|\",\"01_Re Ex\"]".to_string(),
+            fields,
+            viz_fields,
+        });
+    }
+
+    NyxV3Summary {
+        format: "nyx-results".to_string(),
+        version: 3,
+        writer: "serial".to_string(),
+        processes: 1,
+        project_bytes: b"{\"format\":1,\"title\":\"portable-v3\"}".to_vec(),
+        mesh_cell_labels: vec![1, 1],
+        mesh_cells_shape: [2, 3],
+        mesh_cells: vec![0, 1, 2, 0, 2, 3],
+        mesh_facet_labels: vec![1, 1, 1, 1],
+        mesh_facets_shape: [4, 2],
+        mesh_facets: vec![0, 1, 1, 2, 2, 3, 3, 0],
+        mesh_points_shape: [4, 2],
+        mesh_points: vec![0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0],
+        physics: "ems".to_string(),
+        study: "modes".to_string(),
+        dim: 2,
+        dofs: n_pts as i64,
+        n_solutions: 3,
+        order: 2,
+        seconds: 0.125,
+        log_bytes: b"portable synthetic v3 fixture".to_vec(),
+        scalars_bytes: b"{\"neff_0\":2.8945}".to_vec(),
+        viz_topology: "Triangle_6".to_string(),
+        viz_cells_shape: [2, 6],
+        viz_cells: cells,
+        viz_points_shape: [n_pts, 2],
+        viz_points: pts,
+        solutions,
+    }
+}
+
+fn write_portable_mech_value_fallback_v3(path: &Path) -> Result<(Vec<f64>, Vec<f64>)> {
+    let mut fb = FileBuilder::new();
+    fb.set_attr("format", AttrValue::VarLenString("nyx-results".into()));
+    fb.set_attr("version", AttrValue::I64(3));
+    fb.set_attr("writer", AttrValue::VarLenString("serial".into()));
+    fb.set_attr("processes", AttrValue::I64(1));
+    fb.create_dataset("project").with_u8_data(b"{}");
+
+    let mut mg = fb.create_group("mesh");
+    mg.create_dataset("cell_labels").with_i32_data(&[1]);
+    mg.create_dataset("cells").with_u32_data(&[0, 1, 2, 3]).with_shape(&[1, 4]);
+    mg.create_dataset("facet_labels").with_i32_data(&[1]);
+    mg.create_dataset("facets").with_u32_data(&[0, 1, 2]).with_shape(&[1, 3]);
+    mg.create_dataset("points")
+        .with_f64_data(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+        .with_shape(&[4, 3]);
+    fb.add_group(mg.finish());
+
+    let mut res = fb.create_group("results");
+    let mut sms = res.create_group("sms");
+    sms.set_attr("physics", AttrValue::VarLenString("sms".into()));
+    sms.set_attr("study", AttrValue::VarLenString("eigenfrequency".into()));
+    sms.set_attr("dim", AttrValue::I64(3));
+    sms.set_attr("dofs", AttrValue::I64(10));
+    sms.set_attr("n_solutions", AttrValue::I64(2));
+    sms.set_attr("order", AttrValue::I64(2));
+    sms.set_attr("seconds", AttrValue::F64(0.05));
+    sms.create_dataset("log").with_u8_data(b"mech");
+    sms.create_dataset("scalars").with_u8_data(b"{}");
+
+    let mut viz = fb.create_group("viz");
+    let mut vsms = viz.create_group("sms");
+    vsms.set_attr("topology", AttrValue::VarLenString("Tetrahedron_10".into()));
+    vsms.create_dataset("cells").with_u32_data(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).with_shape(&[1, 10]);
+    vsms.create_dataset("points").with_f64_data(&vec![0.0; 30]).with_shape(&[10, 3]);
+
+    let mode0_ux_re: Vec<f64> = (0..10).map(|i| 0.25 + i as f64 * 0.01).collect();
+    let mode0_ux_im: Vec<f64> = (0..10).map(|i| -0.125 + i as f64 * 0.005).collect();
+    let vals_f: Vec<f64> = (0..10).map(|i| i as f64 * 0.1).collect();
+
+    for (k, freq) in [1.79e10, 2.15e10].into_iter().enumerate() {
+        let mut sg = sms.create_group(&format!("solution_{k}"));
+        // Mechanical real eigenfrequency uses scalar `value` attribute without `eig_re`/`eig_im`.
+        sg.set_attr("value", AttrValue::F64(freq));
+        sg.set_attr("label", AttrValue::VarLenString(format!("mech_{k}")));
+
+        let mut cf = sg.create_group("cell_fields");
+        let mut cg = cf.create_group("00_ux");
+        cg.set_attr("name", AttrValue::VarLenString("ux".into()));
+        cg.set_attr("unit", AttrValue::VarLenString("m".into()));
+        cg.set_attr("nloc", AttrValue::I64(10));
+        cg.create_dataset("re").with_f64_data(&mode0_ux_re);
+        cg.create_dataset("im").with_f64_data(&mode0_ux_im);
+        cf.add_group(cg.finish());
+        sg.add_group(cf.finish());
+
+        let mut fg = sg.create_group("fields");
+        fg.set_attr("order", AttrValue::VarLenString("[\"00_|u|\"]".into()));
+        fg.create_dataset("00_|u|")
+            .with_f64_data(&vals_f)
+            .set_attr("name", AttrValue::VarLenString("|u|".into()))
+            .set_attr("unit", AttrValue::VarLenString("m".into()))
+            .set_attr("components", AttrValue::VarLenString("[\"|\"]".into()));
+        sg.add_group(fg.finish());
+        sms.add_group(sg.finish());
+
+        let mut vsg = vsms.create_group(&format!("sol_{k}"));
+        vsg.create_dataset("_u_").with_f64_data(&vals_f);
+        vsms.add_group(vsg.finish());
+    }
+    res.add_group(sms.finish());
+    fb.add_group(res.finish());
+    viz.add_group(vsms.finish());
+    fb.add_group(viz.finish());
+    fb.write(path)?;
+    Ok((mode0_ux_re, mode0_ux_im))
+}
+
 // =============================================================================
-// GATE 2 (EC-01): Real `nyx2_benches` .h5 Read Parity (0 ULP vs h5py 3.13.0)
+// GATE 2 (EC-01): Portable v3 Parity (+ Optional External `nyx2_benches` vs h5py)
 // =============================================================================
 #[test]
 fn gate2_ec01_real_nyx2_benches_read_parity_0_ulp() -> Result<()> {
     let t0 = Instant::now();
     let scratch = test_scratch_dir("gate2")?;
 
-    let bench_files = [
-        ("sos_300nm_modes.h5", BENCH_MODES_2D, vec!["ems"]),
-        ("sos_300nm_rib_modes.h5", BENCH_RIB_2D, vec!["ems"]),
-        ("sos_300nm_mech_modes.h5", BENCH_MECH_3D, vec!["sms"]),
-        ("sos_300nm_strip_coupled_q0_a1.h5", BENCH_COUPLED_2D, vec!["ems", "sms"]),
-        ("swg_3d_bock2010_case1a.h5", BENCH_SWG_3D, vec!["ems"]),
-    ];
+    // 1. Portable synthetic v3 checks (always executed on clean CI / any OS):
+    //    2D ems with /viz hard-link verification + 3D sms mechanical `value` fallback.
+    let synth_ems = build_portable_v3_ems_summary();
+    let synth_ems_path = scratch.join("portable_v3_ems.h5");
+    write_nyx_v3(&synth_ems, &synth_ems_path)?;
+    let r_ems = NyxReader::open(&synth_ems_path, ReadBudgetConfig::default())?;
+    let r_mesh = r_ems.read_mesh()?;
+    if r_mesh.points != synth_ems.mesh_points || r_mesh.cells != synth_ems.mesh_cells {
+        bail!("portable v3 ems mesh mismatch");
+    }
+    let ems_headers = r_ems.scan_mode_headers("ems")?;
+    let ems_sum = r_ems.read_nyx_v3_summary_for_physics("ems", true)?;
+    ems_sum.verify_0_ulp(&synth_ems, true)?;
+    for (k, sol) in ems_sum.solutions.iter().enumerate() {
+        for (fk, (_, _, _, fdata)) in &sol.fields {
+            let vk = viz_link_name(fk);
+            let vdata = sol.viz_fields.get(&vk).ok_or_else(|| anyhow!("missing viz link {}", vk))?;
+            assert_f64_bits_eq(&format!("portable_ems/viz/sol_{k}/{vk}"), vdata, fdata)?;
+        }
+    }
+    let ems_mode0 = r_ems.read_mode_cell_fields("ems", 0)?;
+    let mut expected_mode0 = Vec::new();
+    for (_n, _u, _nloc, re, im) in synth_ems.solutions[0].cell_fields.values() {
+        for (&r, &i) in re.iter().zip(im.iter()) {
+            expected_mode0.push(r);
+            expected_mode0.push(i);
+        }
+    }
+    assert_f64_bits_eq("portable_ems/mode0_cell_fields", &ems_mode0, &expected_mode0)?;
 
-    let py_dump_code = r#"
+    let synth_sms_path = scratch.join("portable_v3_sms_value_fallback.h5");
+    let (sms_re, sms_im) = write_portable_mech_value_fallback_v3(&synth_sms_path)?;
+    let r_sms = NyxReader::open(&synth_sms_path, ReadBudgetConfig::default())?;
+    let sms_headers = r_sms.scan_mode_headers("sms")?;
+    assert_eq!(sms_headers.len(), 2);
+    assert_f64_bits_eq(
+        "portable_sms/value_fallback_eigs",
+        &[sms_headers[0].eig_re, sms_headers[0].eig_im, sms_headers[1].eig_re, sms_headers[1].eig_im],
+        &[1.79e10, 0.0, 2.15e10, 0.0],
+    )?;
+    let sms_sum = r_sms.read_nyx_v3_summary_for_physics("sms", true)?;
+    sms_sum.verify_0_ulp(&sms_sum, true)?;
+    let sms_cf0 = r_sms.read_mode_cell_fields("sms", 0)?;
+    let expected_sms0: Vec<f64> = sms_re.iter().zip(sms_im.iter()).flat_map(|(&r, &i)| [r, i]).collect();
+    assert_f64_bits_eq("portable_sms/mode0_cell_fields", &sms_cf0, &expected_sms0)?;
+
+    let mut total_modes_checked = ems_headers.len() + sms_headers.len();
+
+    // 2. Optional external developer benchmarks (`NYX_EXTERNAL_BENCH_DIR`), cross-checked vs `h5py` if present.
+    if let Some(bench_dir) = external_bench_dir() {
+        let bench_files = [
+            ("sos_300nm_modes.h5", "main-3c3d3858/sos_300nm_modes.h5", vec!["ems"]),
+            ("sos_300nm_rib_modes.h5", "main-3c3d3858/sos_300nm_rib_modes.h5", vec!["ems"]),
+            ("sos_300nm_mech_modes.h5", "main-789a3652/sos_300nm_mech_modes.h5", vec!["sms"]),
+            ("sos_300nm_strip_coupled_q0_a1.h5", "main-789a3652/sos_300nm_strip_coupled_q0_a1.h5", vec!["ems", "sms"]),
+            ("swg_3d_bock2010_case1a.h5", "main-77744503/swg_3d_bock2010_case1a.h5", vec!["ems"]),
+        ];
+
+        let py_dump_code = r#"
 import json, sys, h5py, numpy as np
 
 def u64_list(arr):
@@ -244,72 +501,78 @@ with open(out_path, "w", encoding="utf-8") as fp:
     json.dump(payload, fp)
 "#;
 
-    let mut total_modes_checked = 0usize;
-    for (label, fpath, phys_list) in &bench_files {
-        let p = Path::new(fpath);
-        let reader = NyxReader::open(p, ReadBudgetConfig::default())?;
-        let mesh = reader.read_mesh()?;
+        let py_exe = find_h5py_python();
+        for (label, subpath, phys_list) in &bench_files {
+            let p = resolve_bench_file(&bench_dir, subpath, label)?;
+            let reader = NyxReader::open(&p, ReadBudgetConfig::default())?;
+            let mesh = reader.read_mesh()?;
 
-        for phys in phys_list {
-            let headers = reader.scan_mode_headers(phys)?;
-            let summary = reader.read_nyx_v3_summary_for_physics(phys, true)?;
-            summary.verify_0_ulp(&summary, true)?;
+            for phys in phys_list {
+                let headers = reader.scan_mode_headers(phys)?;
+                let summary = reader.read_nyx_v3_summary_for_physics(phys, true)?;
+                summary.verify_0_ulp(&summary, true)?;
 
-            // Check every /viz/<phys>/sol_k/<vname> v1 hard-link dataset equals /results/<phys>/solution_k/fields/<fname>
-            for (k, sol) in summary.solutions.iter().enumerate() {
-                if sol.viz_fields.len() != sol.fields.len() {
-                    bail!("{}/{}: sol_{} viz_fields != fields count", label, phys, k);
+                for (k, sol) in summary.solutions.iter().enumerate() {
+                    if sol.viz_fields.len() != sol.fields.len() {
+                        bail!("{}/{}: sol_{} viz_fields != fields count", label, phys, k);
+                    }
+                    for (fk, (_, _, _, fdata)) in &sol.fields {
+                        let vk = viz_link_name(fk);
+                        let vdata = sol.viz_fields.get(&vk).ok_or_else(|| anyhow!("missing viz link {}", vk))?;
+                        assert_f64_bits_eq(&format!("{}/{}/viz/sol_{}/{}", label, phys, k, vk), vdata, fdata)?;
+                    }
                 }
-                for (fk, (_, _, _, fdata)) in &sol.fields {
-                    let vk = viz_link_name(fk);
-                    let vdata = sol.viz_fields.get(&vk).ok_or_else(|| anyhow!("missing viz link {}", vk))?;
-                    assert_f64_bits_eq(&format!("{}/{}/viz/sol_{}/{}", label, phys, k, vk), vdata, fdata)?;
+
+                let mode0_cf = reader.read_mode_cell_fields(phys, 0)?;
+
+                if let Some(py) = py_exe.as_deref() {
+                    let json_out = scratch.join(format!("oracle_{}_{}.json", label, phys));
+                    run_python_inline(py, py_dump_code, &[p.to_str().unwrap(), phys, json_out.to_str().unwrap()])?;
+                    let oracle: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_out)?)?;
+
+                    let py_pts: Vec<f64> = oracle["mesh_points_bits"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| f64::from_bits(v.as_u64().unwrap()))
+                        .collect();
+                    assert_f64_bits_eq(&format!("{}/mesh/points", label), &mesh.points, &py_pts)?;
+
+                    let py_cells: Vec<u32> =
+                        oracle["mesh_cells"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+                    if mesh.cells != py_cells {
+                        bail!("{}/mesh/cells mismatch vs h5py", label);
+                    }
+
+                    let py_eigs: Vec<f64> = oracle["eigs_bits"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| f64::from_bits(v.as_u64().unwrap()))
+                        .collect();
+                    let mut rust_eigs = Vec::with_capacity(headers.len() * 2);
+                    for h in &headers {
+                        rust_eigs.push(h.eig_re);
+                        rust_eigs.push(h.eig_im);
+                    }
+                    assert_f64_bits_eq(&format!("{}/{}/eigenvalues", label, phys), &rust_eigs, &py_eigs)?;
+
+                    let py_mode0_cf: Vec<f64> = oracle["mode0_cf_bits"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| f64::from_bits(v.as_u64().unwrap()))
+                        .collect();
+                    assert_f64_bits_eq(&format!("{}/{}/mode0_cell_fields", label, phys), &mode0_cf, &py_mode0_cf)?;
                 }
+
+                total_modes_checked += headers.len();
             }
-
-            // Cross-check against Python h5py 3.13.0 at 0 ULP
-            let json_out = scratch.join(format!("oracle_{}_{}.json", label, phys));
-            run_python_inline(py_dump_code, &[fpath, phys, json_out.to_str().unwrap()])?;
-            let oracle: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_out)?)?;
-
-            let py_pts: Vec<f64> = oracle["mesh_points_bits"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| f64::from_bits(v.as_u64().unwrap()))
-                .collect();
-            assert_f64_bits_eq(&format!("{}/mesh/points", label), &mesh.points, &py_pts)?;
-
-            let py_cells: Vec<u32> =
-                oracle["mesh_cells"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
-            if mesh.cells != py_cells {
-                bail!("{}/mesh/cells mismatch vs h5py", label);
-            }
-
-            let py_eigs: Vec<f64> =
-                oracle["eigs_bits"].as_array().unwrap().iter().map(|v| f64::from_bits(v.as_u64().unwrap())).collect();
-            let mut rust_eigs = Vec::with_capacity(headers.len() * 2);
-            for h in &headers {
-                rust_eigs.push(h.eig_re);
-                rust_eigs.push(h.eig_im);
-            }
-            assert_f64_bits_eq(&format!("{}/{}/eigenvalues", label, phys), &rust_eigs, &py_eigs)?;
-
-            let mode0_cf = reader.read_mode_cell_fields(phys, 0)?;
-            let py_mode0_cf: Vec<f64> = oracle["mode0_cf_bits"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| f64::from_bits(v.as_u64().unwrap()))
-                .collect();
-            assert_f64_bits_eq(&format!("{}/{}/mode0_cell_fields", label, phys), &mode0_cf, &py_mode0_cf)?;
-
-            total_modes_checked += headers.len();
         }
     }
 
     println!(
-        "[Gate 2 / EC-01 PASS] ({:.1} ms) Read all 5 real nyx2_benches 2D/3D .h5 files ({} solutions, mech `value` fallback, v1 symbol-table hard links) with 0 ULP vs h5py 3.13.0",
+        "[Gate 2 / EC-01 PASS] ({:.1} ms) Verified portable v3 fixtures ({} total solutions across portable + optional external benches, mech `value` fallback, v1 symbol-table hard links) at 0 ULP",
         t0.elapsed().as_secs_f64() * 1000.0,
         total_modes_checked
     );
@@ -498,11 +761,14 @@ with h5py.File(p3d, "r") as f:
     exp2 = gen_mode(2, 3, 2000, 10)
     assert np.array_equal(m2, exp2), "3D mode 2 0-ULP mismatch in h5py"
 "#;
+    let py_exe = find_h5py_python();
     let p_2d_l2 = scratch.join("tri6_2d_L2ShuffleLzfPacked.h5");
-    run_python_inline(py_verify_packed, &[p_2d_l2.to_str().unwrap(), p_3d_l2.to_str().unwrap()])?;
+    if let Some(py) = py_exe.as_deref() {
+        run_python_inline(py, py_verify_packed, &[p_2d_l2.to_str().unwrap(), p_3d_l2.to_str().unwrap()])?;
+    }
 
-    // Also test legacy v3 write_nyx_v3 + direct-path XDMF generation & XML DataItem resolution
-    let orig_v3 = NyxReader::open(Path::new(BENCH_MODES_2D), ReadBudgetConfig::default())?.read_nyx_v3_summary(true)?;
+    // Also test legacy v3 write_nyx_v3 + direct-path XDMF generation & XML DataItem resolution on a portable synthetic v3 summary
+    let orig_v3 = build_portable_v3_ems_summary();
     let v3_out = scratch.join("reexport_v3_2d.h5");
     let xdmf_out = scratch.join("reexport_v3_2d.xdmf");
     write_nyx_v3(&orig_v3, &v3_out)?;
@@ -534,7 +800,6 @@ with h5py.File(path, "w") as f:
     f.create_dataset("shuffle_deflate_fletcher32", data=base * 0.75 - 12.0, chunks=(ch,), shuffle=True, compression="gzip", compression_opts=3, fletcher32=True)
     f.create_dataset("shuffle_lzf", data=base * 2.25 + 1.0, chunks=(ch,), shuffle=True, compression="lzf")
 "#;
-    run_python_inline(py_gen_ec06, &[ec06_h5py.to_str().unwrap()])?;
 
     let n_ec06 = 11_844usize;
     let ch_ec06 = 4_096u64;
@@ -543,7 +808,8 @@ with h5py.File(path, "w") as f:
     let sdf_ec06: Vec<f64> = base_ec06.iter().map(|&x| x * 0.75 - 12.0).collect();
     let lzf_ec06: Vec<f64> = base_ec06.iter().map(|&x| x * 2.25 + 1.0).collect();
 
-    {
+    if let Some(py) = py_exe.as_deref() {
+        run_python_inline(py, py_gen_ec06, &[ec06_h5py.to_str().unwrap()])?;
         let r_h5py = NyxReader::open(&ec06_h5py, ReadBudgetConfig::default())?;
         assert_f64_bits_eq("ec06_h5py/deflate_only", &r_h5py.file().dataset("deflate_only")?.read_f64()?, &base_ec06)?;
         assert_f64_bits_eq(
@@ -579,6 +845,21 @@ with h5py.File(path, "w") as f:
         fb.create_dataset("shuffle_lzf").with_f64_data(&lzf_ec06).with_chunks(&[ch_ec06]).with_shuffle().with_lzf();
         fb.write(&ec06_rust)?;
     }
+    {
+        let r_rust = NyxReader::open(&ec06_rust, ReadBudgetConfig::default())?;
+        assert_f64_bits_eq("ec06_rust/deflate_only", &r_rust.file().dataset("deflate_only")?.read_f64()?, &base_ec06)?;
+        assert_f64_bits_eq(
+            "ec06_rust/shuffle_deflate",
+            &r_rust.file().dataset("shuffle_deflate")?.read_f64()?,
+            &sd_ec06,
+        )?;
+        assert_f64_bits_eq(
+            "ec06_rust/shuffle_deflate_fletcher32",
+            &r_rust.file().dataset("shuffle_deflate_fletcher32")?.read_f64()?,
+            &sdf_ec06,
+        )?;
+        assert_f64_bits_eq("ec06_rust/shuffle_lzf", &r_rust.file().dataset("shuffle_lzf")?.read_f64()?, &lzf_ec06)?;
+    }
     let py_verify_ec06 = r#"
 import math, sys, h5py, numpy as np
 path = sys.argv[1]
@@ -590,7 +871,9 @@ with h5py.File(path, "r") as f:
     assert np.array_equal(f["shuffle_deflate_fletcher32"][:].view(np.uint64), (base * 0.75 - 12.0).view(np.uint64))
     assert np.array_equal(f["shuffle_lzf"][:].view(np.uint64), (base * 2.25 + 1.0).view(np.uint64))
 "#;
-    run_python_inline(py_verify_ec06, &[ec06_rust.to_str().unwrap()])?;
+    if let Some(py) = py_exe.as_deref() {
+        run_python_inline(py, py_verify_ec06, &[ec06_rust.to_str().unwrap()])?;
+    }
 
     // -------------------------------------------------------------------------
     // 3. EC-07: Extreme IEEE-754 Bit-Exact Preservation (+0.0, -0.0, subnormals, Inf, NaN payloads)
@@ -622,7 +905,9 @@ with h5py.File(path, "r") as f:
     db = f["ieee754"][:].view(np.uint64)
     assert np.array_equal(db, exp), "dataset IEEE-754 bits mismatch"
 "#;
-    run_python_inline(py_verify_ec07, &[ec07_path.to_str().unwrap(), &ieee_hex])?;
+    if let Some(py) = py_exe.as_deref() {
+        run_python_inline(py, py_verify_ec07, &[ec07_path.to_str().unwrap(), &ieee_hex])?;
+    }
 
     // -------------------------------------------------------------------------
     // 4. EC-08: Degenerate Shapes (n_solutions=0, empty (0, 3) dataset, single-cell (1, 6))
@@ -672,7 +957,9 @@ with h5py.File(sys.argv[2], "r") as f:
     assert f["/results/ems/eigenvalues"].shape == (0, 2)
     assert f["/results/ems/cell_fields_packed"].shape == (0, 3, 5488, 6, 2)
 "#;
-    run_python_inline(py_verify_ec08, &[ec08_raw.to_str().unwrap(), ec08_packed_zero.to_str().unwrap()])?;
+    if let Some(py) = py_exe.as_deref() {
+        run_python_inline(py, py_verify_ec08, &[ec08_raw.to_str().unwrap(), ec08_packed_zero.to_str().unwrap()])?;
+    }
 
     // -------------------------------------------------------------------------
     // 5. Incremental Streaming Mode Append (`init_nyx_packed_streaming` + `append_solved_mode_in_place`)
@@ -745,12 +1032,15 @@ with h5py.File(path, "r") as f:
     assert np.array_equal(er0, exp_er0), "BM-5 eig_re_0 0-ULP mismatch"
     assert np.array_equal(ei1, exp_ei1), "BM-5 eig_im_1 0-ULP mismatch"
 "#;
-    run_python_inline(py_verify_bm5, &[sweep_path.to_str().unwrap()])?;
+    if let Some(py) = py_exe.as_deref() {
+        run_python_inline(py, py_verify_bm5, &[sweep_path.to_str().unwrap()])?;
+    }
 
     println!(
-        "[Gate 3 / EC-02..EC-08 & BM-5 PASS] ({:.1} ms) 2D/3D L2/L3/L1 0-ULP round-trip (L2 ratio={:.2}x > 15x), partial edge chunks, 15 IEEE-754 bit patterns, degenerate shapes, streaming mode append, and 50-pt SweepCheckpoint verified in h5py 3.13.0",
+        "[Gate 3 / EC-02..EC-08 & BM-5 PASS] ({:.1} ms) 2D/3D L2/L3/L1 0-ULP round-trip (L2 ratio={:.2}x > 15x), partial edge chunks, 15 IEEE-754 bit patterns, degenerate shapes, streaming mode append, and 50-pt SweepCheckpoint{}",
         t0.elapsed().as_secs_f64() * 1000.0,
-        l2_ratio_2d
+        l2_ratio_2d,
+        if py_exe.is_some() { " (cross-checked with h5py)" } else { " (pure-Rust portable mode)" }
     );
     Ok(())
 }
@@ -2060,33 +2350,210 @@ fn gate5_ec11_untrusted_fuzz_and_ec12_sos_brillouin_physics_invariant() -> Resul
     }
 
     // -------------------------------------------------------------------------
-    // 2. EC-12: Pure-Rust P2 Triangle_6 + Tetrahedron_10 SOS Brillouin PE + MB Overlap
+    // 2. EC-12: Pure-Rust P2 Triangle_6 & Tetrahedron_10 SOS Brillouin PE + MB Overlap
     // -------------------------------------------------------------------------
     use brillouin::{
         compute_brillouin_overlap, load_ems_mode_2d, load_sms_mode, PreparedEmsMode2D, PreparedSmsSlice2D, WL0,
     };
 
-    let ems_strip =
-        PreparedEmsMode2D::from_raw(&load_ems_mode_2d(Path::new(BENCH_MODES_2D), 0)?, "strip", 2.0e-6, 2.0e-6, 1.6e-6);
-    let ems_rib =
-        PreparedEmsMode2D::from_raw(&load_ems_mode_2d(Path::new(BENCH_RIB_2D), 0)?, "rib", 2.0e-6, 2.0e-6, 1.6e-6);
-    let ems_te0 = PreparedEmsMode2D::from_raw(
-        &load_ems_mode_2d(Path::new(BENCH_COUPLED_2D), 0)?,
-        "strip",
-        2.0e-6,
-        2.0e-6,
-        1.2e-6,
-    );
-    let sms_m1 =
-        PreparedSmsSlice2D::from_raw(&load_sms_mode(Path::new(BENCH_MECH_3D), 0)?, "strip", 1.6e-6, 1.6e-6, 0.5e-6);
-    let sms_a1 =
-        PreparedSmsSlice2D::from_raw(&load_sms_mode(Path::new(BENCH_COUPLED_2D), 4)?, "strip", 2.0e-6, 2.0e-6, 1.2e-6);
+    // Portable synthetic P2 Triangle_6 (EMS) + Tetrahedron_10 (SMS) strip waveguide fixture:
+    // Strip core [-0.40..0.40] um x [0..0.30] um, sapphire substrate z in [-0.20..0.0] um.
+    let write_portable_brillouin_pair = |ems_path: &Path, sms_path: &Path| -> Result<()> {
+        // 6 points on strip core + 2 sapphire points = 6 vertices + midpoints for 4 Tri6 cells
+        let base_pts = [
+            [-0.40e-6, 0.0],
+            [0.40e-6, 0.0],
+            [0.40e-6, 0.30e-6],
+            [-0.40e-6, 0.30e-6],
+            [-0.40e-6, -0.20e-6],
+            [0.40e-6, -0.20e-6],
+        ];
+        // 4 CCW triangles: (0,1,2), (0,2,3) in core; (4,5,1), (4,1,0) in sapphire
+        let tris = [[0usize, 1, 2], [0, 2, 3], [4, 5, 1], [4, 1, 0]];
+        let mut pts_2d = base_pts.to_vec();
+        let mut tri6_cells = Vec::with_capacity(4 * 6);
+        let mut edge_map = std::collections::BTreeMap::<(usize, usize), u32>::new();
+        for t in &tris {
+            tri6_cells.extend_from_slice(&[t[0] as u32, t[1] as u32, t[2] as u32]);
+            for &(a, b) in &[(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let key = (a.min(b), a.max(b));
+                let mid = *edge_map.entry(key).or_insert_with(|| {
+                    let id = pts_2d.len() as u32;
+                    pts_2d.push([0.5 * (base_pts[a][0] + base_pts[b][0]), 0.5 * (base_pts[a][1] + base_pts[b][1])]);
+                    id
+                });
+                tri6_cells.push(mid);
+            }
+        }
+        let n_tri = 4usize;
+        let ems_ex_re: Vec<f64> = (0..n_tri * 6).map(|i| 1.0 + 0.05 * (i as f64)).collect();
+        let ems_ez_re: Vec<f64> = (0..n_tri * 6).map(|i| 0.3 + 0.02 * (i as f64)).collect();
+        let ems_ey_im: Vec<f64> = (0..n_tri * 6).map(|i| 0.1 + 0.01 * (i as f64)).collect();
+        let ems_zero = vec![0.0; n_tri * 6];
+        let mut ems_cf = std::collections::BTreeMap::new();
+        ems_cf.insert("00_Ex".to_string(), ("Ex".to_string(), "V/m".to_string(), 6, ems_ex_re, ems_zero.clone()));
+        ems_cf.insert("01_Ez".to_string(), ("Ez".to_string(), "V/m".to_string(), 6, ems_ez_re, ems_zero.clone()));
+        ems_cf.insert("02_Ey".to_string(), ("Ey".to_string(), "V/m".to_string(), 6, ems_zero.clone(), ems_ey_im));
+        let mut ems_fields = std::collections::BTreeMap::new();
+        ems_fields.insert(
+            "00_|E|".to_string(),
+            ("|E|".to_string(), "V/m".to_string(), "[\"|\"]".to_string(), vec![1.0; pts_2d.len()]),
+        );
+        let mut ems_viz = std::collections::BTreeMap::new();
+        ems_viz.insert(viz_link_name("00_|E|"), vec![1.0; pts_2d.len()]);
+        let ems_sum = nyx_storage::NyxV3Summary {
+            format: "nyx-results".into(),
+            version: 3,
+            writer: "serial".into(),
+            processes: 1,
+            project_bytes: b"{}".to_vec(),
+            mesh_cell_labels: vec![1; n_tri],
+            mesh_cells_shape: [n_tri, 3],
+            mesh_cells: tris.iter().flatten().map(|&v| v as u32).collect(),
+            mesh_facet_labels: vec![1; 4],
+            mesh_facets_shape: [4, 2],
+            mesh_facets: vec![0, 1, 1, 2, 2, 3, 3, 0],
+            mesh_points_shape: [base_pts.len(), 2],
+            mesh_points: base_pts.iter().flatten().copied().collect(),
+            physics: "ems".into(),
+            study: "modes".into(),
+            dim: 2,
+            dofs: pts_2d.len() as i64,
+            n_solutions: 1,
+            order: 2,
+            seconds: 0.01,
+            log_bytes: b"ok".to_vec(),
+            scalars_bytes: b"{}".to_vec(),
+            viz_topology: "Triangle_6".into(),
+            viz_cells_shape: [n_tri, 6],
+            viz_cells: tri6_cells.clone(),
+            viz_points_shape: [pts_2d.len(), 2],
+            viz_points: pts_2d.iter().flatten().copied().collect(),
+            solutions: vec![nyx_storage::NyxSolutionData {
+                eig_re: 2.8946,
+                eig_im: 0.0,
+                label: "TE0".into(),
+                cell_fields: ems_cf,
+                fields_order_json: "[\"00_|E|\"]".into(),
+                fields: ems_fields,
+                viz_fields: ems_viz,
+            }],
+        };
+        write_nyx_v3(&ems_sum, ems_path)?;
 
+        // Build matching Tetrahedron_10 mesh whose y=0 face (nodes 0,1,2,4,5,6) matches those 4 triangles.
+        let mut pts_3d: Vec<[f64; 3]> = pts_2d.iter().map(|p| [p[0], 0.0, p[1]]).collect();
+        let apex_idx = pts_3d.len() as u32;
+        pts_3d.push([0.0, 0.25e-6, 0.05e-6]);
+        let mut tet10_cells = Vec::with_capacity(n_tri * 10);
+        for t in 0..n_tri {
+            let v0 = tri6_cells[t * 6];
+            let v1 = tri6_cells[t * 6 + 1];
+            let v2 = tri6_cells[t * 6 + 2];
+            let e01 = tri6_cells[t * 6 + 3];
+            let e12 = tri6_cells[t * 6 + 4];
+            let e20 = tri6_cells[t * 6 + 5];
+            let e03 = pts_3d.len() as u32;
+            pts_3d.push([
+                0.5 * (pts_3d[v0 as usize][0] + pts_3d[apex_idx as usize][0]),
+                0.5 * (pts_3d[v0 as usize][1] + pts_3d[apex_idx as usize][1]),
+                0.5 * (pts_3d[v0 as usize][2] + pts_3d[apex_idx as usize][2]),
+            ]);
+            let e13 = pts_3d.len() as u32;
+            pts_3d.push([
+                0.5 * (pts_3d[v1 as usize][0] + pts_3d[apex_idx as usize][0]),
+                0.5 * (pts_3d[v1 as usize][1] + pts_3d[apex_idx as usize][1]),
+                0.5 * (pts_3d[v1 as usize][2] + pts_3d[apex_idx as usize][2]),
+            ]);
+            let e23 = pts_3d.len() as u32;
+            pts_3d.push([
+                0.5 * (pts_3d[v2 as usize][0] + pts_3d[apex_idx as usize][0]),
+                0.5 * (pts_3d[v2 as usize][1] + pts_3d[apex_idx as usize][1]),
+                0.5 * (pts_3d[v2 as usize][2] + pts_3d[apex_idx as usize][2]),
+            ]);
+            // VTK Tet10 order (0,1,2,3,4=e01,5=e12,6=e20,7=e03,8=e13,9=e23)
+            tet10_cells.extend_from_slice(&[v0, v1, v2, apex_idx, e01, e12, e20, e03, e13, e23]);
+        }
+        // Smooth acoustic displacement u(x, z) = (x, i*0.2, z - 0.15e-6) scaled per cell node
+        let mut ux_re = Vec::with_capacity(n_tri * 10);
+        let mut ux_im = Vec::with_capacity(n_tri * 10);
+        let mut uy_re = Vec::with_capacity(n_tri * 10);
+        let mut uy_im = Vec::with_capacity(n_tri * 10);
+        let mut uz_re = Vec::with_capacity(n_tri * 10);
+        let mut uz_im = Vec::with_capacity(n_tri * 10);
+        for &vid in &tet10_cells {
+            let p = pts_3d[vid as usize];
+            ux_re.push(p[0] * 1e6);
+            ux_im.push(0.0);
+            uy_re.push(0.0);
+            uy_im.push(0.2);
+            uz_re.push((p[2] - 0.15e-6) * 1e6);
+            uz_im.push(0.0);
+        }
+        let mut sms_cf = std::collections::BTreeMap::new();
+        sms_cf.insert("00_ux".to_string(), ("ux".to_string(), "m".to_string(), 10, ux_re, ux_im));
+        sms_cf.insert("01_uy".to_string(), ("uy".to_string(), "m".to_string(), 10, uy_re, uy_im));
+        sms_cf.insert("02_uz".to_string(), ("uz".to_string(), "m".to_string(), 10, uz_re, uz_im));
+        let mut sms_fields = std::collections::BTreeMap::new();
+        sms_fields.insert(
+            "00_|u|".to_string(),
+            ("|u|".to_string(), "m".to_string(), "[\"|\"]".to_string(), vec![1.0; pts_3d.len()]),
+        );
+        let mut sms_viz = std::collections::BTreeMap::new();
+        sms_viz.insert(viz_link_name("00_|u|"), vec![1.0; pts_3d.len()]);
+        let sms_sum = nyx_storage::NyxV3Summary {
+            format: "nyx-results".into(),
+            version: 3,
+            writer: "serial".into(),
+            processes: 1,
+            project_bytes: b"{}".to_vec(),
+            mesh_cell_labels: vec![1; n_tri],
+            mesh_cells_shape: [n_tri, 4],
+            mesh_cells: (0..n_tri).flat_map(|t| [tet10_cells[t * 10], tet10_cells[t * 10 + 1], tet10_cells[t * 10 + 2], tet10_cells[t * 10 + 3]]).collect(),
+            mesh_facet_labels: vec![1; n_tri],
+            mesh_facets_shape: [n_tri, 3],
+            mesh_facets: tris.iter().flatten().map(|&v| v as u32).collect(),
+            mesh_points_shape: [pts_3d.len(), 3],
+            mesh_points: pts_3d.iter().flatten().copied().collect(),
+            physics: "sms".into(),
+            study: "eigenfrequency".into(),
+            dim: 3,
+            dofs: pts_3d.len() as i64,
+            n_solutions: 1,
+            order: 2,
+            seconds: 0.01,
+            log_bytes: b"ok".to_vec(),
+            scalars_bytes: b"{}".to_vec(),
+            viz_topology: "Tetrahedron_10".into(),
+            viz_cells_shape: [n_tri, 10],
+            viz_cells: tet10_cells,
+            viz_points_shape: [pts_3d.len(), 3],
+            viz_points: pts_3d.iter().flatten().copied().collect(),
+            solutions: vec![nyx_storage::NyxSolutionData {
+                eig_re: 17.94e9,
+                eig_im: 0.0,
+                label: "M1".into(),
+                cell_fields: sms_cf,
+                fields_order_json: "[\"00_|u|\"]".into(),
+                fields: sms_fields,
+                viz_fields: sms_viz,
+            }],
+        };
+        write_nyx_v3(&sms_sum, sms_path)
+    };
+
+    let synth_ems_path = scratch.join("ec12_synth_ems.h5");
+    let synth_sms_path = scratch.join("ec12_synth_sms.h5");
+    write_portable_brillouin_pair(&synth_ems_path, &synth_sms_path)?;
+    let synth_ems =
+        PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&synth_ems_path, 0)?, "strip", 2.0e-6, 2.0e-6, 1.6e-6);
+    let synth_sms =
+        PreparedSmsSlice2D::from_raw(&load_sms_mode(&synth_sms_path, 0)?, "strip", 2.0e-6, 2.0e-6, 1.6e-6);
     let q_strip = 2.0 * (2.0 * PI / WL0) * 2.894656;
-    let bsbs = compute_brillouin_overlap(
-        &ems_strip,
-        &ems_strip,
-        &sms_m1,
+    let synth_bsbs = compute_brillouin_overlap(
+        &synth_ems,
+        &synth_ems,
+        &synth_sms,
         17.944410e9,
         q_strip,
         2.894656,
@@ -2095,65 +2562,141 @@ fn gate5_ec11_untrusted_fuzz_and_ec12_sos_brillouin_physics_invariant() -> Resul
         "100",
         false,
     );
-    let fsbs =
-        compute_brillouin_overlap(&ems_te0, &ems_te0, &sms_a1, 5.001021e9, 0.0, 2.894656, 3.936293, false, "100", true);
-    let rib_bsbs = compute_brillouin_overlap(
-        &ems_rib,
-        &ems_rib,
-        &sms_m1,
+    if !synth_bsbs.gb_qm1000_vg.is_finite() || synth_bsbs.gb_qm1000_vg <= 0.0 {
+        bail!("Expected positive finite synthetic B-SBS G_B(vg), got {}", synth_bsbs.gb_qm1000_vg);
+    }
+
+    let synth_sum = NyxReader::open(&synth_ems_path, ReadBudgetConfig::default())?.read_nyx_v3_summary(false)?;
+    let synth_reexport = scratch.join("ec12_synth_reexport.h5");
+    write_nyx_v3(&synth_sum, &synth_reexport)?;
+    let synth_ems_reloaded =
+        PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&synth_reexport, 0)?, "strip", 2.0e-6, 2.0e-6, 1.6e-6);
+    let synth_bsbs_reloaded = compute_brillouin_overlap(
+        &synth_ems_reloaded,
+        &synth_ems_reloaded,
+        &synth_sms,
         17.944410e9,
         q_strip,
-        2.625066,
-        3.850000,
+        2.894656,
+        3.936293,
         true,
         "100",
         false,
     );
-
-    if (bsbs.gb_qm1000_vg - 37.30).abs() > 0.01 {
-        bail!("Expected B-SBS M1 G_B(vg) = 37.30 W^-1 m^-1, got {:.6}", bsbs.gb_qm1000_vg);
-    }
-    if (fsbs.gb_qm1000_vg - 6053.66).abs() > 0.01 {
-        bail!("Expected F-SBS A1 G_B(vg) = 6053.66 W^-1 m^-1, got {:.6}", fsbs.gb_qm1000_vg);
-    }
-    if (fsbs.q_pe_signed_um2_inv - 6.1783).abs() > 1e-4 {
-        bail!("Expected F-SBS A1 Q_PE = 6.1783 um^-2, got {:.6}", fsbs.q_pe_signed_um2_inv);
-    }
-    if (fsbs.q_mb_signed_um2_inv - 0.0884).abs() > 1e-4 {
-        bail!("Expected F-SBS A1 Q_MB = 0.0884 um^-2, got {:.6}", fsbs.q_mb_signed_um2_inv);
-    }
-
-    // Re-export sos_300nm_rib_modes.h5 through write_nyx_v3, reload, and assert 0-ULP (<= 1e-15 rel error) Brillouin invariance
-    let rib_sum = NyxReader::open(Path::new(BENCH_RIB_2D), ReadBudgetConfig::default())?.read_nyx_v3_summary(false)?;
-    let rib_reexport = scratch.join("ec12_rib_reexport.h5");
-    write_nyx_v3(&rib_sum, &rib_reexport)?;
-    let ems_rib_reloaded =
-        PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&rib_reexport, 0)?, "rib", 2.0e-6, 2.0e-6, 1.6e-6);
-    let rib_bsbs_reloaded = compute_brillouin_overlap(
-        &ems_rib_reloaded,
-        &ems_rib_reloaded,
-        &sms_m1,
-        17.944410e9,
-        q_strip,
-        2.625066,
-        3.850000,
-        true,
-        "100",
-        false,
-    );
-    let rel_err = (rib_bsbs_reloaded.gb_qm1000_vg - rib_bsbs.gb_qm1000_vg).abs() / rib_bsbs.gb_qm1000_vg.abs();
+    let mut rel_err = (synth_bsbs_reloaded.gb_qm1000_vg - synth_bsbs.gb_qm1000_vg).abs()
+        / synth_bsbs.gb_qm1000_vg.abs();
     if rel_err > 1e-15 {
-        bail!("Rib Brillouin overlap relative error after write->read {:.3e} > 1e-15", rel_err);
+        bail!("Synthetic Brillouin overlap relative error after write->read {:.3e} > 1e-15", rel_err);
+    }
+
+    // Optional external benchmark EC-12 checks when `NYX_EXTERNAL_BENCH_DIR` is provided
+    let mut bench_summary = format!(
+        "synthetic G_B(vg)={:.4} W^-1m^-1 (Q_PE={:.4}, Q_MB={:.4}, rel_err={:.2e} <= 1e-15)",
+        synth_bsbs.gb_qm1000_vg, synth_bsbs.q_pe_signed_um2_inv, synth_bsbs.q_mb_signed_um2_inv, rel_err
+    );
+    if let Some(bench_dir) = external_bench_dir() {
+        let p_modes_2d = resolve_bench_file(&bench_dir, "main-3c3d3858/sos_300nm_modes.h5", "sos_300nm_modes.h5")?;
+        let p_rib_2d =
+            resolve_bench_file(&bench_dir, "main-3c3d3858/sos_300nm_rib_modes.h5", "sos_300nm_rib_modes.h5")?;
+        let p_mech_3d =
+            resolve_bench_file(&bench_dir, "main-789a3652/sos_300nm_mech_modes.h5", "sos_300nm_mech_modes.h5")?;
+        let p_coupled_2d = resolve_bench_file(
+            &bench_dir,
+            "main-789a3652/sos_300nm_strip_coupled_q0_a1.h5",
+            "sos_300nm_strip_coupled_q0_a1.h5",
+        )?;
+
+        let ems_strip =
+            PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&p_modes_2d, 0)?, "strip", 2.0e-6, 2.0e-6, 1.6e-6);
+        let ems_rib = PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&p_rib_2d, 0)?, "rib", 2.0e-6, 2.0e-6, 1.6e-6);
+        let ems_te0 =
+            PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&p_coupled_2d, 0)?, "strip", 2.0e-6, 2.0e-6, 1.2e-6);
+        let sms_m1 =
+            PreparedSmsSlice2D::from_raw(&load_sms_mode(&p_mech_3d, 0)?, "strip", 1.6e-6, 1.6e-6, 0.5e-6);
+        let sms_a1 =
+            PreparedSmsSlice2D::from_raw(&load_sms_mode(&p_coupled_2d, 4)?, "strip", 2.0e-6, 2.0e-6, 1.2e-6);
+
+        let bsbs = compute_brillouin_overlap(
+            &ems_strip,
+            &ems_strip,
+            &sms_m1,
+            17.944410e9,
+            q_strip,
+            2.894656,
+            3.936293,
+            true,
+            "100",
+            false,
+        );
+        let fsbs = compute_brillouin_overlap(
+            &ems_te0,
+            &ems_te0,
+            &sms_a1,
+            5.001021e9,
+            0.0,
+            2.894656,
+            3.936293,
+            false,
+            "100",
+            true,
+        );
+        let rib_bsbs = compute_brillouin_overlap(
+            &ems_rib,
+            &ems_rib,
+            &sms_m1,
+            17.944410e9,
+            q_strip,
+            2.625066,
+            3.850000,
+            true,
+            "100",
+            false,
+        );
+
+        if (bsbs.gb_qm1000_vg - 37.30).abs() > 0.01 {
+            bail!("Expected B-SBS M1 G_B(vg) = 37.30 W^-1 m^-1, got {:.6}", bsbs.gb_qm1000_vg);
+        }
+        if (fsbs.gb_qm1000_vg - 6053.66).abs() > 0.01 {
+            bail!("Expected F-SBS A1 G_B(vg) = 6053.66 W^-1 m^-1, got {:.6}", fsbs.gb_qm1000_vg);
+        }
+        if (fsbs.q_pe_signed_um2_inv - 6.1783).abs() > 1e-4 {
+            bail!("Expected F-SBS A1 Q_PE = 6.1783 um^-2, got {:.6}", fsbs.q_pe_signed_um2_inv);
+        }
+        if (fsbs.q_mb_signed_um2_inv - 0.0884).abs() > 1e-4 {
+            bail!("Expected F-SBS A1 Q_MB = 0.0884 um^-2, got {:.6}", fsbs.q_mb_signed_um2_inv);
+        }
+
+        let rib_sum = NyxReader::open(&p_rib_2d, ReadBudgetConfig::default())?.read_nyx_v3_summary(false)?;
+        let rib_reexport = scratch.join("ec12_rib_reexport.h5");
+        write_nyx_v3(&rib_sum, &rib_reexport)?;
+        let ems_rib_reloaded =
+            PreparedEmsMode2D::from_raw(&load_ems_mode_2d(&rib_reexport, 0)?, "rib", 2.0e-6, 2.0e-6, 1.6e-6);
+        let rib_bsbs_reloaded = compute_brillouin_overlap(
+            &ems_rib_reloaded,
+            &ems_rib_reloaded,
+            &sms_m1,
+            17.944410e9,
+            q_strip,
+            2.625066,
+            3.850000,
+            true,
+            "100",
+            false,
+        );
+        rel_err = (rib_bsbs_reloaded.gb_qm1000_vg - rib_bsbs.gb_qm1000_vg).abs() / rib_bsbs.gb_qm1000_vg.abs();
+        if rel_err > 1e-15 {
+            bail!("Rib Brillouin overlap relative error after write->read {:.3e} > 1e-15", rel_err);
+        }
+        bench_summary = format!(
+            "SOS Brillouin B-SBS M1 G_B(vg)={:.2} W^-1m^-1, F-SBS A1 G_B(vg)={:.2} W^-1m^-1 (Q_PE={:.4} um^-2, Q_MB={:.4} um^-2, rel_err={:.2e} <= 1e-15)",
+            bsbs.gb_qm1000_vg, fsbs.gb_qm1000_vg, fsbs.q_pe_signed_um2_inv, fsbs.q_mb_signed_um2_inv, rel_err
+        );
     }
 
     println!(
-        "[Gate 5 / EC-11 & EC-12 PASS] ({:.1} ms) Survived 10,000/10,000 adversarial fuzz mutations (0 panics/OOMs); SOS Brillouin B-SBS M1 G_B(vg)={:.2} W^-1m^-1, F-SBS A1 G_B(vg)={:.2} W^-1m^-1 (Q_PE={:.4} um^-2, Q_MB={:.4} um^-2, rel_err={:.2e} <= 1e-15)",
+        "[Gate 5 / EC-11 & EC-12 PASS] ({:.1} ms) Survived 10,000/10,000 adversarial fuzz mutations (0 panics/OOMs); {}",
         t0.elapsed().as_secs_f64() * 1000.0,
-        bsbs.gb_qm1000_vg,
-        fsbs.gb_qm1000_vg,
-        fsbs.q_pe_signed_um2_inv,
-        fsbs.q_mb_signed_um2_inv,
-        rel_err
+        bench_summary
     );
     Ok(())
 }

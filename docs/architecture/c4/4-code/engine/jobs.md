@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 11 files, 6055 lines.
+**Size:** 11 files, 6070 lines.
 
 ## Files
 
@@ -16,11 +16,11 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | `crates/nyx-engine/src/estimate.rs` | 476 |  |
 | `crates/nyx-engine/src/jobs.rs` | 599 |  |
 | `crates/nyx-engine/src/process.rs` | 318 |  |
-| `crates/nyx-engine/src/queue.rs` | 677 |  |
+| `crates/nyx-engine/src/queue.rs` | 681 |  |
 | `crates/nyx-engine/src/reuse.rs` | 204 |  |
 | `crates/nyx-engine/src/shared_queue.rs` | 970 |  |
 | `crates/nyx-engine/src/solve.rs` | 174 |  |
-| `crates/nyx-engine/src/sweep.rs` | 489 |  |
+| `crates/nyx-engine/src/sweep.rs` | 500 |  |
 | `crates/nyx-engine/src/worker.rs` | 507 |  |
 
 ## What it uses
@@ -617,10 +617,10 @@ classDiagram
 | fn | `Engine::queue_list` | `queue.rs:373` | `pub fn queue_list(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value>` —  The queue, oldest first, optionally of one owner or one state (`queued`, `running`, `done`, `cancelled`, `failed`). |
 | fn | `Engine::wait_timeout` | `queue.rs:414` | `pub fn wait_timeout(&mut self, id: JobId, timeout: Duration) -> Result<Value, Error>` —  Waits for a job up to `timeout` and applies its outcome; at the timeout the job's entry comes back with `waiting: true` and the job goes on. |
 | fn | `Engine::queue_command` | `queue.rs:431` | `pub(crate) fn queue_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` —  The `queue_*` commands (see the catalog). |
-| fn | `Engine::note_shared` | `queue.rs:572` | `pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>)` —  Remembers that the job `id` was handed to the workspace queue, and under which item. |
-| fn | `Engine::note_job` | `queue.rs:578` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
-| fn | `Engine::note_job_estimate` | `queue.rs:583` | `pub(crate) fn note_job_estimate( &mut self, id: JobId, kind: &'static str, targets: Vec<String>, estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>, )` —  `note_job` for a job that fills in its own estimate (a solve, once its mesh is known). |
-| fn | `Engine::run_post_analyses` | `queue.rs:620` | `pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error>` —  Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results). |
+| fn | `Engine::note_shared` | `queue.rs:576` | `pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>)` —  Remembers that the job `id` was handed to the workspace queue, and under which item. |
+| fn | `Engine::note_job` | `queue.rs:582` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
+| fn | `Engine::note_job_estimate` | `queue.rs:587` | `pub(crate) fn note_job_estimate( &mut self, id: JobId, kind: &'static str, targets: Vec<String>, estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>, )` —  `note_job` for a job that fills in its own estimate (a solve, once its mesh is known). |
+| fn | `Engine::run_post_analyses` | `queue.rs:624` | `pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error>` —  Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results). |
 | struct | `WarmDone` | `reuse.rs:25` | fields: `bytes`, `calls` —  What a finished point leaves for the next: the modes as bytes (none when it failed, or its eigensolves left none) and what its eigensolves did. |
 | struct | `WarmCell` | `reuse.rs:32` |  Where a point leaves its modes. Empty until the point's job has ended. |
 | enum | `WarmSource` | `reuse.rs:54` | variants: `Cold`, `Bytes`, `Cell` —  Where a point's start block comes from. |
@@ -682,7 +682,7 @@ classDiagram
 | fn | `Engine::scratch` | `sweep.rs:110` | `pub(crate) fn scratch(&self) -> Engine` —  A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does |
 | fn | `Engine::sweep_command` | `sweep.rs:153` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
 | fn | `Engine::sweep_prepare` | `sweep.rs:169` | `pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error>` —  Reads and checks a sweep request without submitting anything: the points, what they solve, how they queue, and the engine of every point |
-| fn | `Engine::apply_point` | `sweep.rs:337` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
+| fn | `Engine::apply_point` | `sweep.rs:348` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
 | const | `PREFIX` | `worker.rs:28` | `&str` —  Every line of the worker's standard output that is a message starts with this. |
 | struct | `RemoteSpec` | `worker.rs:32` | fields: `worker`, `project_json`, `materials`, `targets`, `warm`, `save_fields`, `post_analyses` —  What a worker is asked to solve. |
 | struct | `WarmIo` | `worker.rs:48` | fields: `input` —  The modes handed to a worker for a warm start (none for the first point, which only records). |

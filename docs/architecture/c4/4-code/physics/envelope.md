@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 > The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 3 files, 1452 lines.
+**Size:** 3 files, 1566 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 |---|---:|---|
 | `crates/nyx-physics/src/decode.rs` | 1017 |  |
 | `crates/nyx-physics/src/spec.rs` | 114 |  |
-| `crates/nyx-physics/src/validate.rs` | 321 |  |
+| `crates/nyx-physics/src/validate.rs` | 435 |  |
 
 ## What it uses
 
@@ -22,7 +22,7 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 | [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::coupled, material::elastic, material::spec, material::tensor, props | Class, InterfaceLayer, Library, M3, Materials, Requirement, Tensor, TensorProp, iso_tensor, tensor_global |
 | [cQED result payloads](./cqed.md) | cqed | TlsInterfaceSpec, TlsInterfaces |
 | [Descriptors and schemas](./descriptors.md) | desc | Applies, BcDesc, ParamDesc, ParamKind, PropDesc, PropKind |
-| [Result and frame](./result.md) | result | SolveResult |
+| [Result and frame](./result.md) | result | Scalar, SolveResult |
 | [Physics trait and registry](./trait.md) | error, physics | Ctx, Error, LabelResolver, Physics |
 
 ## Used by
@@ -172,4 +172,4 @@ classDiagram
 | fn | `ProblemSpec::new` | `spec.rs:84` | `pub fn new(physics: &str, order: u8, study_kind: &str) -> ProblemSpec` |
 | fn | `validate_spec` | `validate.rs:13` | `pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error>` |
 | fn | `check_params` | `validate.rs:216` | `pub fn check_params(value: &Value, descs: &[ParamDesc], what: &str) -> Result<(), Error>` —  Checks `value` (null or an object) against `descs`. |
-| fn | `check_result_finite` | `validate.rs:304` | `pub fn check_result_finite(result: &crate::result::SolveResult) -> Result<(), Error>` —  Every field of the result must be finite: NaN or infinity does not stop a factorisation or a Krylov iteration, it flows into every |
+| fn | `check_result_finite` | `validate.rs:305` | `pub fn check_result_finite(result: &crate::result::SolveResult) -> Result<(), Error>` —  Every field and scalar solution metric of the result must be finite, with one physical |

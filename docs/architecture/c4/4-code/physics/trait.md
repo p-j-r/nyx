@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 > The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 4 files, 339 lines.
+**Size:** 4 files, 342 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-physics/src/error.rs` | 66 |  |
-| `crates/nyx-physics/src/lib.rs` | 77 |  |
+| `crates/nyx-physics/src/lib.rs` | 80 |  |
 | `crates/nyx-physics/src/physics.rs` | 103 |  |
 | `crates/nyx-physics/src/registry.rs` | 93 |  |
 
@@ -170,7 +170,7 @@ classDiagram
 | type | `Discretisation` | `lib.rs:49` |  The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type |
 | fn | `discretise` | `lib.rs:52` | `pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error>` —  The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices). |
 | fn | `discretise_mixed` | `lib.rs:57` | `pub fn discretise_mixed(mesh: &Mesh) -> Result<MixedDiscretisation, Error>` —  Native mixed-cell discretisation made directly from `mesh` without splitting `Quad`, `Prism`, or `Hex` cells. |
-| fn | `check_mesh` | `lib.rs:62` | `pub fn check_mesh(mesh: &Mesh) -> Result<(), Error>` —  Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis. |
+| fn | `check_mesh` | `lib.rs:63` | `pub fn check_mesh(mesh: &Mesh) -> Result<(), Error>` —  Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis, or an invalid |
 | trait | `LabelResolver` | `physics.rs:21` | methods: `domains`, `boundaries`, `sheet_thickness_m`, `sheet_etch_depth_m` —  Turns the names of a problem (`geom` region names and boundary selectors) into the integer labels of the mesh being solved. |
 | struct | `Ctx` | `physics.rs:38` | fields: `resolver`, `progress`, `library`, `wavelength`, `frequency`, `temperature`, `inputs` —  What a solve may use besides the mesh and the problem: the label resolver, progress and cancellation, and the fields that other |
 | trait | `Physics` | `physics.rs:76` | methods: `id`, `name`, `studies`, `bc_kinds`, `properties`, `params`, `fields`, `exports`, `imports`, `validate`, `sizing`, `solve` |

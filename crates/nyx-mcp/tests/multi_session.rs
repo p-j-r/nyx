@@ -206,3 +206,26 @@ fn invalid_session_names_are_rejected() {
         }
     }
 }
+
+#[test]
+fn session_limit_returns_jsonrpc_32002_when_exceeded() {
+    worker_present();
+    let mut h = Host::start();
+
+    // "default" already counts as session #1; fill up to MAX_SESSIONS (= 32).
+    assert_eq!(ok(&h.tool("script_check", json!({ "session": "s1", "source": "1 + 1" })))["status"], json!("ok"));
+    for i in 2..32 {
+        let r = ok(&h.tool("script_run", json!({ "session": format!("s{i}"), "reset_session": true })));
+        assert_eq!(r["ok"], json!(true));
+    }
+
+    for tool in ["script_check", "script_run"] {
+        let resp = h.request("tools/call", json!({ "name": tool, "arguments": { "session": "s32", "source": "1 + 1" } }));
+        assert_eq!(resp["error"]["code"], json!(-32002), "{resp}");
+        let msg = resp["error"]["message"].as_str().unwrap_or("");
+        assert!(msg.contains("SESSION_LIMIT_EXCEEDED"), "{resp}");
+    }
+
+    // Existing session remains usable.
+    assert_eq!(ok(&h.tool("script_check", json!({ "session": "s1", "source": "2 + 2" })))["status"], json!("ok"));
+}

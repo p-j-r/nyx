@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Structured absorbing layers** (`femcore.str
 > Structured PML around a box-shaped, cylindrical, spherical, or geom-model mesh: prisms, hexahedra, quads, labels.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 52](../../../adr/0052-structured-absorbing-layers-in-3d.md), [ADR 5](../../../adr/0005-native-mixed-cell-mesh.md), [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md)  
-**Size:** 6 files, 4918 lines.
+**Size:** 6 files, 4923 lines.
 
 ## Files
 
@@ -14,8 +14,8 @@ C4 level 4 (code) of the component **Structured absorbing layers** (`femcore.str
 | `crates/femcore/src/meshing/pml3.rs` | 69 | Structured absorbing layers around a tetrahedral mesh in a box: prisms on the faces, hexahedra on the edges and corners, the labels and `Pml` entries the solvers read, and the simplex mesh they run on today. |
 | `crates/femcore/src/meshing/pml_box.rs` | 1130 | Structured PML generator around a box-shaped physical mesh. |
 | `crates/femcore/src/meshing/pml_cyl.rs` | 1318 |  |
-| `crates/femcore/src/meshing/pml_geom.rs` | 776 |  |
-| `crates/femcore/src/meshing/pml_geom3.rs` | 955 |  |
+| `crates/femcore/src/meshing/pml_geom.rs` | 780 |  |
+| `crates/femcore/src/meshing/pml_geom3.rs` | 956 |  |
 | `crates/femcore/src/meshing/pml_sphere.rs` | 670 |  |
 
 ## What it uses
@@ -338,16 +338,16 @@ classDiagram
 | fn | `compute_min_pml_scaled_jacobian` | `meshing/pml_geom.rs:169` | `pub fn compute_min_pml_scaled_jacobian<const D: usize>( cm: &CellMesh<D>, pml_start_cell: usize, ) -> Option<f64>` —  Computes the minimum normalized scaled Jacobian across all PML cells `pml_start_cell..cm.n_cells()`. |
 | fn | `structured_pml` | `meshing/pml_geom.rs:185` | `pub fn structured_pml(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String>` —  Replaces or extrudes the absorbing layers of a meshed model (`2D` or `3D`), keeping the uncut |
 | fn | `structured_pml_with_curved` | `meshing/pml_geom.rs:190` | `pub fn structured_pml_with_curved(g: MeshedGeom, curved: bool) -> Result<(MeshedGeom, PmlReport), String>` —  Like [`structured_pml`], with explicit `curved` control for concentric curvilinear shells. |
-| enum | `Native` | `meshing/pml_geom.rs:218` | variants: `Unchanged`, `Cells` —  What [`structured_pml_native`] returns. |
-| fn | `structured_pml_native` | `meshing/pml_geom.rs:226` | `pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String>` —  Builds uncut 2D mixed `Tri` + `Quad` structured absorbing layers (`curved = false`). |
-| fn | `structured_pml_native_with_curved` | `meshing/pml_geom.rs:232` | `pub fn structured_pml_native_with_curved(g: MeshedGeom, curved: bool) -> Result<Native, String>` —  Builds uncut 2D mixed `Tri` + `Quad` structured absorbing layers across Cartesian, Cylindrical |
+| enum | `Native` | `meshing/pml_geom.rs:219` | variants: `Unchanged`, `Cells` —  What [`structured_pml_native`] returns. |
+| fn | `structured_pml_native` | `meshing/pml_geom.rs:227` | `pub fn structured_pml_native(g: MeshedGeom) -> Result<Native, String>` —  Builds uncut 2D mixed `Tri` + `Quad` structured absorbing layers (`curved = false`). |
+| fn | `structured_pml_native_with_curved` | `meshing/pml_geom.rs:233` | `pub fn structured_pml_native_with_curved(g: MeshedGeom, curved: bool) -> Result<Native, String>` —  Builds uncut 2D mixed `Tri` + `Quad` structured absorbing layers across Cartesian, Cylindrical |
 | fn | `PmlMode::is_structured` | `meshing/pml_geom.rs:35` | `pub fn is_structured(self, has_pml_regions: bool) -> bool` —  True when structured absorbing-layer generation is active for a model with `has_pml_regions`. |
 | fn | `PmlReport::empty` | `meshing/pml_geom.rs:62` | `pub fn empty(physical_cells: usize) -> Self` |
 | enum | `Native3` | `meshing/pml_geom3.rs:28` | variants: `Unchanged`, `Cells` —  What [`structured_pml_3d_native`] returns. |
 | fn | `structured_pml_3d` | `meshing/pml_geom3.rs:37` | `pub fn structured_pml_3d(g: MeshedGeom) -> Result<(MeshedGeom, PmlReport), String>` —  Replaces or extrudes the absorbing layers of a meshed 3D model, storing the uncut `CellMesh<3>` in |
 | fn | `structured_pml_3d_with_curved` | `meshing/pml_geom3.rs:43` | `pub fn structured_pml_3d_with_curved( g: MeshedGeom, curved: bool, ) -> Result<(MeshedGeom, PmlReport), String>` —  Like [`structured_pml_3d`], with explicit `curved` control for concentric curvilinear shells. |
-| fn | `structured_pml_3d_native` | `meshing/pml_geom3.rs:68` | `pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String>` —  Builds uncut 3D mixed `Tet` + `Prism` + `Hex` structured absorbing layers, inferring `curved` from `g.mesh`. |
-| fn | `structured_pml_3d_native_with_curved` | `meshing/pml_geom3.rs:75` | `pub fn structured_pml_3d_native_with_curved(g: MeshedGeom, curved: bool) -> Result<Native3, String>` —  Builds uncut 3D mixed `Tet` + `Prism` + `Hex` structured absorbing layers across Cartesian, Cylindrical, |
+| fn | `structured_pml_3d_native` | `meshing/pml_geom3.rs:69` | `pub fn structured_pml_3d_native(g: MeshedGeom) -> Result<Native3, String>` —  Builds uncut 3D mixed `Tet` + `Prism` + `Hex` structured absorbing layers, inferring `curved` from `g.mesh`. |
+| fn | `structured_pml_3d_native_with_curved` | `meshing/pml_geom3.rs:76` | `pub fn structured_pml_3d_native_with_curved(g: MeshedGeom, curved: bool) -> Result<Native3, String>` —  Builds uncut 3D mixed `Tet` + `Prism` + `Hex` structured absorbing layers across Cartesian, Cylindrical, |
 | struct | `SpherePmlSpec2d` | `meshing/pml_sphere.rs:40` | fields: `center_z`, `r_in`, `thickness`, `layers`, `grading`, `curved`, `label_base`, `label_stride`, `axis_label_north`, `axis_label_south`, `outer_label`, `tol` —  Specification for a 2D axisymmetric spherical semicircle PML (`R_in <= R <= R_in + thickness`, `r >= 0`). |
 | struct | `SpherePmlMesh2d` | `meshing/pml_sphere.rs:102` | fields: `mesh`, `n_physical_cells`, `n_physical_points`, `spec` —  Output of [`build_pml_semicircle_2d`]. |
 | fn | `build_pml_semicircle_2d` | `meshing/pml_sphere.rs:112` | `pub fn build_pml_semicircle_2d(phys: &SimplexMesh<2>, spec: &SpherePmlSpec2d) -> Result<SpherePmlMesh2d, String>` —  Extrudes the outer semicircle `R = R_in` (`r >= 0`) of `phys` radially into `N_R` rings of [`CellType::Quad`], |

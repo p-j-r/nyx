@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Adaptation operators** (`femcore.adaptops`)
 > Edge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification.
 
 **Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md)  
-**Size:** 4 files, 2512 lines.
+**Size:** 4 files, 2526 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/adapt/ops.rs` | 422 | Local mesh operators for 2D metric adaptation: edge split, edge collapse, edge flip, and length-equalising smoothing. |
-| `crates/femcore/src/adapt/ops3.rs` | 1091 | Local mesh operators for 3D metric adaptation: edge split, collapse of interior vertices, 3-2 and 2-3 flips, and length-equalising smoothing (the 3D counterparts of `ops`). |
+| `crates/femcore/src/adapt/ops3.rs` | 1105 | Local mesh operators for 3D metric adaptation: edge split, collapse of interior vertices, 3-2 and 2-3 flips, and length-equalising smoothing (the 3D counterparts of `ops`). |
 | `crates/femcore/src/adapt/topo.rs` | 439 | Working mesh for 2D adaptation: triangles, per-vertex metrics, and the classification of vertices and edges that tells the operators what must be preserved. |
 | `crates/femcore/src/adapt/topo3.rs` | 560 | Working mesh for 3D adaptation: tetrahedra, per-vertex metrics, and the classification of vertices that tells the operators what must be preserved (the 3D counterpart of `topo`). |
 
@@ -225,11 +225,11 @@ classDiagram
 | fn | `all_edges_of` | `adapt/ops3.rs:109` | `pub fn all_edges_of(w: &Work3) -> Vec<Edge>` —  All edges of the alive tetrahedra, sorted. |
 | fn | `unresolved_frozen` | `adapt/ops3.rs:142` | `pub fn unresolved_frozen(w: &Work3, lmax: f64) -> usize` —  Number of edges on a frozen curve or patch that are longer than `lmax`. |
 | fn | `split_pass` | `adapt/ops3.rs:155` | `pub fn split_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3, sample_mid: bool) -> usize` —  Split every edge longer than `opt.lmax`. Returns the number of splits. |
-| fn | `collapse_pass` | `adapt/ops3.rs:569` | `pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize` —  Collapse every edge shorter than `opt.lmin` that can be collapsed (one end moves onto the other, along its patch or curve when it is on one). Returns the number. |
-| fn | `flip_pass` | `adapt/ops3.rs:641` | `pub fn flip_pass(w: &mut Work3) -> usize` —  Quality-improving 3-2 and 2-3 flips of interior edges and faces. Returns the number of flips. |
-| fn | `smooth_pass` | `adapt/ops3.rs:772` | `pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3) -> usize` —  One sweep of length-equalising smoothing: every free vertex moves towards the position where its edges would have unit metric length |
-| fn | `edge_removal_pass` | `adapt/ops3.rs:905` | `pub fn edge_removal_pass(w: &mut Work3) -> usize` —  Edge removal: an interior edge with `n` (4 to 7) tetrahedra around it is replaced by the `2(n - 2)` tetrahedra of the best |
-| fn | `surface_flip_pass` | `adapt/ops3.rs:1002` | `pub fn surface_flip_pass(w: &mut Work3) -> usize` —  Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the |
+| fn | `collapse_pass` | `adapt/ops3.rs:508` | `pub fn collapse_pass(w: &mut Work3, opt: &AdaptOptions3) -> usize` —  Collapse every edge shorter than `opt.lmin` that can be collapsed (one end moves onto the other, along its patch or curve when it is on one). Returns the number. |
+| fn | `flip_pass` | `adapt/ops3.rs:580` | `pub fn flip_pass(w: &mut Work3) -> usize` —  Quality-improving 3-2 and 2-3 flips of interior edges and faces. Returns the number of flips. |
+| fn | `smooth_pass` | `adapt/ops3.rs:711` | `pub fn smooth_pass(w: &mut Work3, field: &dyn MetricField<3>, geom: &dyn Geometry3, opt: &AdaptOptions3) -> usize` —  One sweep of length-equalising smoothing: every free vertex moves towards the position where its edges would have unit metric length |
+| fn | `edge_removal_pass` | `adapt/ops3.rs:844` | `pub fn edge_removal_pass(w: &mut Work3) -> usize` —  Edge removal: an interior edge with `n` (4 to 7) tetrahedra around it is replaced by the `2(n - 2)` tetrahedra of the best |
+| fn | `surface_flip_pass` | `adapt/ops3.rs:941` | `pub fn surface_flip_pass(w: &mut Work3) -> usize` —  Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the |
 | struct | `FxHasher` | `adapt/topo.rs:25` |  Small multiplicative hasher (the well-known Fx scheme) for the integer-keyed maps in the hot |
 | type | `FxMap` | `adapt/topo.rs:47` | `<K, V>` |
 | type | `Edge` | `adapt/topo.rs:50` |  Sorted vertex pair. |

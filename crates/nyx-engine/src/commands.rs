@@ -219,7 +219,7 @@ impl Engine {
                     ("max_z_slabs", json!({ "type": ["integer", "null"], "minimum": 1, "description": "3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap" })),
                     ("z_growth_ratio", json!({ "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "3D sheet stack: geometric growth ratio (> 1.0) for vertical z-slab thickness away from sheet planes; null uses default 1.35" })),
                     ("max_steiner_multiplier", json!({ "type": ["integer", "null"], "minimum": 0, "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial PSLG vertices; null uses default max(20 * n_init, 100000)" })),
-                    ("strict_mesh", boolean("fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false")),
+                    ("strict_mesh", boolean("fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default true")),
                     ("singular_edges", json!({ "type": ["string", "null"], "enum": ["none", "quarter_point", null], "description": "3D sheet stack: edge singularity enrichment on zero-thickness conductor rims (\"none\" or \"quarter_point\"); null uses study defaults" })),
                     ("quarter_point_xi", json!({ "type": ["number", "null"], "minimum": 0.25, "maximum": 0.5, "description": "3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25" })),
                     ("corner_grading", boolean("3D sheet stack: radical Morrison-Lewis corner grading toward sharp 2D sheet corners, default false")),
@@ -320,23 +320,23 @@ impl Engine {
                     ("add_to_project", boolean("add the converted material to the active project (default true)")),
                     ("folder", text("optional destination folder to write <name>.toml into")),
                 ], &["name", "format", "content"])),
-            cmd("fetch_material", "Download a material from an open database", "Downloads a preset or database entry over HTTPS from `refractiveindex.info`, `AFLOW`, `Materials Project` or `NumBAT`, converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`.", Expensive,
+            cmd("fetch_material", "Download a material from an open database", "Downloads a preset or database entry over HTTPS (no redirects) from an allowlisted host (`api.materialsproject.org`, `aflowlib.org`, `aflow.org`, `aflowlib.duke.edu`, `refractiveindex.info`, or curated `raw.githubusercontent.com` repo paths), converts it into validated TOML, and optionally adds it to the project or writes `<name>.toml` into `folder`. Refused in sandboxed script mode (`path_root`).", Expensive,
                 schema(vec![
                     ("source", text("curated preset id (from `list_remote_materials`), `catalog`, `rii`, `aflow`, `mp` or `numbat`")),
-                    ("target", text("preset id, database entry key, Materials Project id (e.g. mp-149), AFLOW query, NumBAT stem or https URL; omit when `source` is a preset id")),
-                    ("name", text("material name in TOML; defaults to the preset id or derived entry stem")),
+                    ("target", text("preset id, database entry key, Materials Project id (e.g. mp-149), AFLOW query, NumBAT stem or allowlisted https URL (refused for `mp` or when an API key is present); omit when `source` is a preset id")),
+                    ("name", text("material name in TOML (`[A-Za-z0-9_-]+`, 1..=64, no Windows reserved device names); defaults to the preset id or derived entry stem")),
                     ("description", text("optional one-line comparative summary written into the material description field")),
                     ("extends", text("optional base material name in the library to inherit unprovided properties from")),
                     ("add_to_project", boolean("add the downloaded material to the active project (default true)")),
                     ("folder", text("optional destination folder to write <name>.toml into")),
-                    ("api_key", text("optional Materials Project API key (falls back to MP_API_KEY environment variable; passed via curl stdin, never stored)")),
+                    ("api_key", text("optional Materials Project API key (falls back to MP_API_KEY environment variable; sent only to api.materialsproject.org via curl stdin, never stored)")),
                 ], &["source"])),
-            cmd("search_remote_materials", "Search curated and live open material databases", "Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints.", Read,
+            cmd("search_remote_materials", "Search curated and live open material databases", "Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints (live queries are refused in sandboxed script mode).", Read,
                 schema(vec![
                     ("query", text("search keyword, chemical formula or material identifier (e.g. Si, AlN, LiNbO3, mp-149)")),
                     ("domain", json!({ "type": "string", "enum": ["all", "photonics", "phononics", "superconducting"], "description": "physics domain filter, default all" })),
                     ("source", json!({ "type": "string", "enum": ["all", "rii", "aflow", "mp", "numbat"], "description": "database filter, default all" })),
-                    ("live", boolean("also query live AFLOW and Materials Project HTTPS endpoints, default false")),
+                    ("live", boolean("also query live AFLOW and Materials Project HTTPS endpoints (refused in sandboxed script mode), default false")),
                     ("api_key", text("optional Materials Project API key for live mp queries (falls back to MP_API_KEY environment variable)")),
                 ], &["query"])),
             cmd("evaluate_material", "Evaluate a material at temperature, frequency and wavelength", "Evaluates a material's temperature-, frequency-, wavelength- and electric-field-dependent properties: thermal curves at T, optical (n, k) and complex permittivity at (wavelength, T), microwave complex permittivity and TLS loss tangent at (frequency, T, e_field), piezoelectric Legendre duals (eps_clamped, eps_free, C^E, C^D), photoelastic, electro-optic, viscoelastic, and BCS superconducting surface impedance.", Read,
@@ -673,10 +673,18 @@ impl Engine {
             }
             "job_list" => Ok(json!(self.jobs.list())),
             "job_cancel" => Ok(json!({ "cancelled": self.jobs.cancel(get_u64(args, "id")?) })),
-            "job_wait" => match args.get("timeout_s").and_then(Value::as_f64) {
-                Some(t) if t >= 0.0 && t.is_finite() => self.wait_timeout(get_u64(args, "id")?, std::time::Duration::from_secs_f64(t)),
-                Some(_) => Err(Error::invalid("`timeout_s` is a number of seconds, zero or more")),
-                None => self.wait(get_u64(args, "id")?),
+            "job_wait" => match args.get("timeout_s") {
+                None | Some(Value::Null) => self.wait(get_u64(args, "id")?),
+                Some(v) => {
+                    let t = v
+                        .as_f64()
+                        .filter(|&x| x >= 0.0 && x.is_finite())
+                        .ok_or_else(|| Error::invalid("`timeout_s` is a finite number of seconds, zero or more"))?;
+                    let dur = std::time::Duration::try_from_secs_f64(t)
+                        .map(|d| d.min(std::time::Duration::from_secs(86_400)))
+                        .map_err(|_| Error::invalid("`timeout_s` overflows Duration"))?;
+                    self.wait_timeout(get_u64(args, "id")?, dur)
+                }
             },
             "queue_submit" | "queue_list" | "queue_get" | "queue_cancel" | "queue_hold" | "queue_release" | "queue_set_priority" | "queue_pause"
             | "queue_resume" | "queue_wait" => self.queue_command(name, args),

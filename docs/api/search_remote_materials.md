@@ -2,7 +2,7 @@
 
 **Search curated and live open material databases** · access `read`: reads the project or the results
 
-Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints.
+Searches the curated remote material presets by keyword, formula, domain or source database, and optionally queries live AFLOW and Materials Project HTTPS endpoints (live queries are refused in sandboxed script mode).
 
 ## Arguments
 
@@ -10,7 +10,7 @@ Searches the curated remote material presets by keyword, formula, domain or sour
 |---|---|---|---|---|
 | `api_key` | text | no |  | optional Materials Project API key for live mp queries (falls back to MP_API_KEY environment variable) |
 | `domain` | text: `all`, `photonics`, `phononics`, `superconducting` | no |  | physics domain filter, default all |
-| `live` | true or false | no |  | also query live AFLOW and Materials Project HTTPS endpoints, default false |
+| `live` | true or false | no |  | also query live AFLOW and Materials Project HTTPS endpoints (refused in sandboxed script mode), default false |
 | `query` | text | yes |  | search keyword, chemical formula or material identifier (e.g. Si, AlN, LiNbO3, mp-149) |
 | `source` | text: `all`, `rii`, `aflow`, `mp`, `numbat` | no |  | database filter, default all |
 

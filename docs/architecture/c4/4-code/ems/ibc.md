@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Thin-film IBC and Josephson ROM** (`ems.ibc
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | edge, edge_mixed, fem, fem_mixed, linalg::amg_elastic, linalg::csr, linalg::csr::assembly, linalg::dense +6 | C, CCoo, CCsr, CellType, Coo, CurvedTet, Dense, DirectSolver, FacetType, Geometry +36 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root | CircuitRom, Discretisation, ModeEnergyRow, RomPort, TlsMeta |
-| [3D cavity kernel](./cavity.md) | cavity | CURVED_QUAD_DEGREE, EmwAssembly, Ned3, basis3, gradient_full, safe_curved_jacobian |
+| [3D cavity kernel](./cavity.md) | cavity | CURVED_QUAD_DEGREE, EmwAssembly, Ned3, basis3_keyed, gradient_full, safe_curved_jacobian |
 | [Native mixed-cell EM](./mixed.md) | mixed_ops | gradient_mixed_full, scalar_nullspace_count_mixed |
 | [Mode kernel](./modes.md) | crate root | C0 |
 | [Typed problem](./problem.md) | problem | LumpedJjBc, Problem, SurfaceImpedanceBc, Symmetry, symmetry_facet_flags_mixed |

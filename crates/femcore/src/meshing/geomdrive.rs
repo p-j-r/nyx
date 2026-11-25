@@ -48,7 +48,7 @@ pub struct GeomMeshOpts {
     pub z_growth_ratio: Option<f64>,
     /// 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices; off by default (`None`).
     pub max_steiner_multiplier: Option<usize>,
-    /// Fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles; off by default (`false`).
+    /// Fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles; on by default (`true`).
     pub strict_mesh: bool,
     /// 3D sheet mesher: edge singularity enrichment (`"none"` or `"quarter_point"`); off by default (`None`).
     pub singular_edges: Option<String>,
@@ -72,7 +72,7 @@ impl GeomMeshOpts {
             max_z_slabs: None,
             z_growth_ratio: None,
             max_steiner_multiplier: None,
-            strict_mesh: false,
+            strict_mesh: true,
             singular_edges: None,
             quarter_point_xi: None,
             corner_grading: false,

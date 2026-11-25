@@ -3,7 +3,7 @@ mesh = component "Mesh" "The native mixed-cell mesh, MixedDiscretisation, the ex
     properties {
         "adr" "4, 5, 32, 128"
         "code" "crates/femcore/src: mesh/cells.rs, mesh/exchange.rs, mesh/mixed.rs, mesh/mod.rs, mesh/quality.rs, mesh/view.rs"
-        "lines" "2957"
+        "lines" "3364"
         "codeDiagram" "4-code/femcore/mesh.md"
     }
 }
@@ -27,7 +27,7 @@ meshing = component "Meshing facade" "MeshPlan and mesh_model (the one way to me
     properties {
         "adr" "6, 17, 54"
         "code" "crates/femcore/src: meshing/geomdrive.rs, meshing/mesher.rs, meshing/mod.rs, meshing/physics_size.rs, meshing/request.rs, meshing/sheet3d_amr.rs, ... (9 files)"
-        "lines" "5966"
+        "lines" "5994"
         "codeDiagram" "4-code/femcore/meshing.md"
     }
 }
@@ -35,7 +35,7 @@ meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, R
     properties {
         "adr" "40, 50, 51, 55, 82, 83, 102"
         "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs, meshing/sheet3d.rs"
-        "lines" "6739"
+        "lines" "6858"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -43,7 +43,7 @@ structpml = component "Structured absorbing layers" "Structured PML around a box
     properties {
         "adr" "7, 52, 5, 128"
         "code" "crates/femcore/src: meshing/pml3.rs, meshing/pml_box.rs, meshing/pml_cyl.rs, meshing/pml_geom.rs, meshing/pml_geom3.rs, meshing/pml_sphere.rs"
-        "lines" "4918"
+        "lines" "4923"
         "codeDiagram" "4-code/femcore/structpml.md"
     }
 }
@@ -67,7 +67,7 @@ adaptops = component "Adaptation operators" "Edge split, collapse, flip and smoo
     properties {
         "adr" "7, 51"
         "code" "crates/femcore/src: adapt/ops.rs, adapt/ops3.rs, adapt/topo.rs, adapt/topo3.rs"
-        "lines" "2512"
+        "lines" "2526"
         "codeDiagram" "4-code/femcore/adaptops.md"
     }
 }
@@ -91,7 +91,7 @@ lacore = component "Matrices and vectors" "The one matrix type Csr over a generi
     properties {
         "adr" "33, 8, 11, 129"
         "code" "crates/femcore/src: linalg/basis.rs, linalg/bsr.rs, linalg/bundle.rs, linalg/csr.rs, linalg/csr/assembly.rs, linalg/dense/mod.rs, ... (18 files)"
-        "lines" "4695"
+        "lines" "4862"
         "codeDiagram" "4-code/femcore/lacore.md"
     }
 }
@@ -131,7 +131,7 @@ laprecond = component "Preconditioners" "Smoothed-aggregation multigrid (scalar 
     properties {
         "adr" "33, 8"
         "code" "crates/femcore/src: linalg/ads.rs, linalg/amg.rs, linalg/amg_elastic/mod.rs, linalg/amg_elastic/single.rs, linalg/ams.rs, linalg/fieldsplit.rs, linalg/ilu.rs, linalg/schwarz.rs"
-        "lines" "3946"
+        "lines" "4019"
         "codeDiagram" "4-code/femcore/laprecond.md"
     }
 }

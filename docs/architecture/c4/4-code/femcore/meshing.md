@@ -5,17 +5,17 @@ C4 level 4 (code) of the component **Meshing facade** (`femcore.meshing`) in the
 > MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core.
 
 **Decisions:** [ADR 6](../../../adr/0006-one-meshing-interface.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md)  
-**Size:** 9 files, 5966 lines.
+**Size:** 9 files, 5994 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/meshing/geomdrive.rs` | 524 | From a `geom` model to a mesh and to the integers the solvers take, in the wafer frame throughout: x lateral, y the direction of propagation, z the surface normal. A 2D model is the x-z cross-section and its mesh has the columns `(x, z)`... |
-| `crates/femcore/src/meshing/mesher.rs` | 1568 | The triangulation core shared by the geom path (`geomdrive`): chains of boundary points become a constrained Delaunay triangulation with Ruppert refinement (via the `spade` crate), cells labelled by a domain function; and the sweep of a ... |
+| `crates/femcore/src/meshing/mesher.rs` | 1590 | The triangulation core shared by the geom path (`geomdrive`): chains of boundary points become a constrained Delaunay triangulation with Ruppert refinement (via the `spade` crate), cells labelled by a domain function; and the sweep of a ... |
 | `crates/femcore/src/meshing/mod.rs` | 924 | The one way to mesh a `geom` model: a `MeshPlan` says how fine and with which mesher, `mesh_model` returns a `MeshedGeom` with the names, labels and exact geometry of the model, whichever mesher made the cells. |
 | `crates/femcore/src/meshing/physics_size.rs` | 585 | Element sizes from the physics: how fine a mesh must be for the waves the study looks for, before any solution exists. The core takes the neutral `meshing::Sizing` a physics reports (`cell_sizes_for`, `vertex_sizes_for`, `metrics_for`, `... |
-| `crates/femcore/src/meshing/request.rs` | 757 |  |
+| `crates/femcore/src/meshing/request.rs` | 763 |  |
 | `crates/femcore/src/meshing/sheet3d_amr.rs` | 361 |  |
 | `crates/femcore/src/meshing/sheet3d_curve.rs` | 512 |  |
 | `crates/femcore/src/meshing/singularity.rs` | 642 |  |
@@ -487,10 +487,10 @@ classDiagram
 | struct | `SheetChainExtras` | `meshing/mesher.rs:81` | fields: `gap_seeds`, `chain_owner`, `dielectric_domains`, `ref_frame` —  Optional 3D sheet-stack extras passed by `sheet3d`: deterministic gap-centerline seeds, |
 | fn | `mesh_chains` | `meshing/mesher.rs:377` | `pub(crate) fn mesh_chains( chains: &[Chain], fills: &[Fill], mp: &MeshParams, domain_at: &dyn Fn([f64; 2]) -> Option<i32>, ) -> Result<(SimplexMesh, MeshChainsReport), String>` —  The shared tail of the meshers: constrained Delaunay triangulation of the chains (conforming, labelled), lattice points, Ruppert refinement, |
 | fn | `mesh_chains_with_seeds` | `meshing/mesher.rs:388` | `pub(crate) fn mesh_chains_with_seeds( chains: &[Chain], fills: &[Fill], mp: &MeshParams, domain_at: &dyn Fn([f64; 2]) -> Option<i32>, extras: Option<&SheetChainExtras<'_>>, ) -> Result<(SimplexMesh, MeshChainsReport), String>` —  Extended entry point for `sheet3d` supporting deterministic gap-centerline seeds, cross-terminal |
-| type | `RemappedLayer` | `meshing/mesher.rs:906` |  A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer. |
-| fn | `extrude_y` | `meshing/mesher.rs:912` | `pub fn extrude_y(m2: &SimplexMesh, layers: &[Layer], y0: f64) -> Result<SimplexMesh, String>` —  Sweeps the x-z cross-section of the wafer frame (a 2D mesh with the columns `(x, z)`) along the propagation axis y through the given |
-| fn | `extrude_y_with_remap` | `meshing/mesher.rs:919` | `pub fn extrude_y_with_remap( m2: &SimplexMesh, layers: &[RemappedLayer], y0: f64, ) -> Result<SimplexMesh, String>` —  Like [`extrude_y`], with an optional per-layer domain map `(source_domain -> target_domain)` applied when `l.fill` is `None`. |
-| fn | `sweep_model_3d` | `meshing/mesher.rs:998` | `pub fn sweep_model_3d( ev: &geom::eval::Evaluated, labels: &geom::labels::LabelMap, h_global: f64, max_dev: Option<f64>, min_angle_deg: f64, sizes: &crate::meshing::geomdrive3::Sizes3, layers: &[RemappedLayer], ) -> Result<SimplexMesh, String>` —  Sweeps a 3D `geom` model along the propagation axis `y` through `layers`: extracts the combined 2D `(x, z)` cross-section |
+| type | `RemappedLayer` | `meshing/mesher.rs:910` |  A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer. |
+| fn | `extrude_y` | `meshing/mesher.rs:916` | `pub fn extrude_y(m2: &SimplexMesh, layers: &[Layer], y0: f64) -> Result<SimplexMesh, String>` —  Sweeps the x-z cross-section of the wafer frame (a 2D mesh with the columns `(x, z)`) along the propagation axis y through the given |
+| fn | `extrude_y_with_remap` | `meshing/mesher.rs:923` | `pub fn extrude_y_with_remap( m2: &SimplexMesh, layers: &[RemappedLayer], y0: f64, ) -> Result<SimplexMesh, String>` —  Like [`extrude_y`], with an optional per-layer domain map `(source_domain -> target_domain)` applied when `l.fill` is `None`. |
+| fn | `sweep_model_3d` | `meshing/mesher.rs:1018` | `pub fn sweep_model_3d( ev: &geom::eval::Evaluated, labels: &geom::labels::LabelMap, h_global: f64, max_dev: Option<f64>, min_angle_deg: f64, sizes: &crate::meshing::geomdrive3::Sizes3, layers: &[RemappedLayer], ) -> Result<SimplexMesh, String>` —  Sweeps a 3D `geom` model along the propagation axis `y` through `layers`: extracts the combined 2D `(x, z)` cross-section |
 | struct | `Adaptive` | `meshing/mod.rs:61` | fields: `scale`, `grade`, `max_cells` —  Settings of the adaptive mesher. |
 | enum | `Mesher` | `meshing/mod.rs:79` | variants: `Simple`, `Adaptive` —  Which mesher makes the cells. |
 | struct | `MeshPlan` | `meshing/mod.rs:86` | fields: `opts`, `mesher`, `pml` —  How a model is meshed: the sizes (as for `mesh_geom_2d`) and the mesher. |
@@ -538,20 +538,20 @@ classDiagram
 | fn | `PhysicsSizing::ppw` | `meshing/physics_size.rs:48` | `pub fn ppw(&self, order: usize) -> f64` —  Points per wavelength for an element order. |
 | enum | `MesherRequest` | `meshing/request.rs:25` | variants: `Simple`, `Adaptive` —  Which mesher makes the cells. |
 | enum | `PmlModeRequest` | `meshing/request.rs:44` | variants: `Auto`, `Structured`, `Inline` —  How absorbing layers are meshed in a [`MeshRequest`]. |
-| struct | `WavesRequest` | `meshing/request.rs:70` | fields: `sizing`, `points_per_wavelength`, `pml_relax`, `eigen_headroom` —  The waves of a study, as the physics reports them (`Sizing`) and how finely they are resolved. |
-| struct | `MeshRequest` | `meshing/request.rs:85` | fields: `h`, `max_dev`, `mesher`, `pml_mode`, `structured_pml`, `waves`, `curved`, `gap_cells`, `z_coarsen`, `max_cells`, `dz_min`, `max_z_slabs`, ... —  A mesh asked for. |
-| struct | `DomainReport` | `meshing/request.rs:210` | fields: `id`, `name`, `cells`, `wave_size` —  One domain of the meshed model. |
-| struct | `AdaptSummary` | `meshing/request.rs:221` | fields: `iterations`, `converged`, `capped`, `q_min`, `cells_start`, `cells_end` —  What the adaptation did. |
-| struct | `MeshReport` | `meshing/request.rs:233` | fields: `dim`, `vertices`, `cells`, `facets`, `element_counts`, `domains`, `adaptation`, `structured_layers`, `min_pml_scaled_jacobian`, `pml_warnings`, `curved`, `warnings` —  A mesh reported. |
-| struct | `CurvedSummary` | `meshing/request.rs:264` | fields: `edges`, `cells`, `min_scaled_jacobian` —  The curved geometry of a 3D mesh (ADR 82). |
-| fn | `summarise_native_mesh` | `meshing/request.rs:327` | `pub(crate) fn summarise_native_mesh( mesh: &Mesh, labels: &LabelMap, eval: &Evaluated, plan: &MeshPlan, adapt: Option<&AdaptReport>, pml_rep: Option<&PmlReport>, sizes: &[Option<f64>], base_warnings: &[String], ) -> MeshReport` |
-| fn | `mesh_request` | `meshing/request.rs:560` | `pub fn mesh_request(list: &FeatureList, req: &MeshRequest) -> Result<(MeshedGeom, MeshReport), String>` —  Meshes `list` as `req` asks (any dimension) and reports what came out. |
-| fn | `mesh_request_native` | `meshing/request.rs:612` | `pub fn mesh_request_native(list: &FeatureList, req: &MeshRequest) -> Result<NativeMeshTuple, String>` —  Meshes `list` as `req` asks directly into an uncut mixed-cell [`Mesh`] (`Quad`, `Prism`, and `Hex` |
-| fn | `request_schema` | `meshing/request.rs:636` | `pub fn request_schema() -> Value` —  JSON Schema of [`MeshRequest`]. |
-| fn | `report_schema` | `meshing/request.rs:713` | `pub fn report_schema() -> Value` —  JSON Schema of [`MeshReport`]. |
-| fn | `MeshRequest::resolved_pml_mode` | `meshing/request.rs:167` | `pub fn resolved_pml_mode(&self) -> PmlModeRequest` —  Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true \| false)` when |
-| fn | `MeshRequest::plan` | `meshing/request.rs:176` | `pub fn plan(&self) -> MeshPlan` —  The plan this request names. |
-| fn | `CurvedSummary::from_mesh` | `meshing/request.rs:277` | `pub fn from_mesh(m: &crate::mesh::SimplexMesh) -> Option<Self>` —  Summarizes the curved and/or quarter-point geometry of a 3D mesh, evaluating quarter-point cells |
+| struct | `WavesRequest` | `meshing/request.rs:76` | fields: `sizing`, `points_per_wavelength`, `pml_relax`, `eigen_headroom` —  The waves of a study, as the physics reports them (`Sizing`) and how finely they are resolved. |
+| struct | `MeshRequest` | `meshing/request.rs:91` | fields: `h`, `max_dev`, `mesher`, `pml_mode`, `structured_pml`, `waves`, `curved`, `gap_cells`, `z_coarsen`, `max_cells`, `dz_min`, `max_z_slabs`, ... —  A mesh asked for. |
+| struct | `DomainReport` | `meshing/request.rs:216` | fields: `id`, `name`, `cells`, `wave_size` —  One domain of the meshed model. |
+| struct | `AdaptSummary` | `meshing/request.rs:227` | fields: `iterations`, `converged`, `capped`, `q_min`, `cells_start`, `cells_end` —  What the adaptation did. |
+| struct | `MeshReport` | `meshing/request.rs:239` | fields: `dim`, `vertices`, `cells`, `facets`, `element_counts`, `domains`, `adaptation`, `structured_layers`, `min_pml_scaled_jacobian`, `pml_warnings`, `curved`, `warnings` —  A mesh reported. |
+| struct | `CurvedSummary` | `meshing/request.rs:270` | fields: `edges`, `cells`, `min_scaled_jacobian` —  The curved geometry of a 3D mesh (ADR 82). |
+| fn | `summarise_native_mesh` | `meshing/request.rs:333` | `pub(crate) fn summarise_native_mesh( mesh: &Mesh, labels: &LabelMap, eval: &Evaluated, plan: &MeshPlan, adapt: Option<&AdaptReport>, pml_rep: Option<&PmlReport>, sizes: &[Option<f64>], base_warnings: &[String], ) -> MeshReport` |
+| fn | `mesh_request` | `meshing/request.rs:566` | `pub fn mesh_request(list: &FeatureList, req: &MeshRequest) -> Result<(MeshedGeom, MeshReport), String>` —  Meshes `list` as `req` asks (any dimension) and reports what came out. |
+| fn | `mesh_request_native` | `meshing/request.rs:618` | `pub fn mesh_request_native(list: &FeatureList, req: &MeshRequest) -> Result<NativeMeshTuple, String>` —  Meshes `list` as `req` asks directly into an uncut mixed-cell [`Mesh`] (`Quad`, `Prism`, and `Hex` |
+| fn | `request_schema` | `meshing/request.rs:642` | `pub fn request_schema() -> Value` —  JSON Schema of [`MeshRequest`]. |
+| fn | `report_schema` | `meshing/request.rs:719` | `pub fn report_schema() -> Value` —  JSON Schema of [`MeshReport`]. |
+| fn | `MeshRequest::resolved_pml_mode` | `meshing/request.rs:173` | `pub fn resolved_pml_mode(&self) -> PmlModeRequest` —  Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true \| false)` when |
+| fn | `MeshRequest::plan` | `meshing/request.rs:182` | `pub fn plan(&self) -> MeshPlan` —  The plan this request names. |
+| fn | `CurvedSummary::from_mesh` | `meshing/request.rs:283` | `pub fn from_mesh(m: &crate::mesh::SimplexMesh) -> Option<Self>` —  Summarizes the curved and/or quarter-point geometry of a 3D mesh, evaluating quarter-point cells |
 | struct | `OverlayOracle2` | `meshing/sheet3d_amr.rs:40` | fields: `ov` —  Exact 2D geometry oracle over `LayerStack::overlay` in the `(x, y)` sweep plane. |
 | struct | `OverlaySheetFeatures` | `meshing/sheet3d_amr.rs:180` | fields: `rim_segments`, `corners`, `plane_axes` —  Extracted 2D sheet perimeter segments, sharp corners, and sweep-plane world axes from a 3D stack `Complex`. |
 | fn | `extract_overlay_sheet_features` | `meshing/sheet3d_amr.rs:190` | `pub fn extract_overlay_sheet_features(cx: &Complex) -> Option<OverlaySheetFeatures>` —  Extracts 2D sheet rim segments and sharp corners from a 3D prismatic stack `Complex`. |

@@ -3,7 +3,7 @@ protocol = component "Protocol loop" "Newline-delimited JSON-RPC 2.0 over stdio,
     properties {
         "adr" "15, 57, 94"
         "code" "crates/nyx-mcp/src: main.rs"
-        "lines" "813"
+        "lines" "1070"
         "codeDiagram" "4-code/mcp/protocol.md"
     }
 }
@@ -11,7 +11,7 @@ tools = component "Script tools" "Four tools instead of one per command: `script
     properties {
         "adr" "94, 57"
         "code" "crates/nyx-mcp/src: main.rs"
-        "lines" "813"
+        "lines" "1070"
         "codeDiagram" "4-code/mcp/tools.md"
     }
 }

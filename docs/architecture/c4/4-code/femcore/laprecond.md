@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 > Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md)  
-**Size:** 8 files, 3946 lines.
+**Size:** 8 files, 4019 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 |---|---:|---|
 | `crates/femcore/src/linalg/ads.rs` | 196 | **Auxiliary-space divergence solver** (ADS, Hiptmair–Xu 2007; Kolev–Vassilevski 2012 for the practical variant) for lowest-order `H(div)` (Raviart–Thomas, face element) matrices `A = Dᵀ W D + β M_f` (port item P1, the `H(div)` c... |
 | `crates/femcore/src/linalg/amg.rs` | 327 | Smoothed-aggregation algebraic multigrid for real and **complex symmetric** matrices (port items "AMG for complex symmetric matrices" and the multigrid half of the shifted-Laplacian preconditioner, P2). |
-| `crates/femcore/src/linalg/amg_elastic/mod.rs` | 1304 | Smoothed-aggregation algebraic multigrid and a preconditioned conjugate gradient solver for large symmetric positive definite systems (3D elasticity and diffusion with millions of unknowns, where a sparse direct factorisation needs too m... |
+| `crates/femcore/src/linalg/amg_elastic/mod.rs` | 1377 | Smoothed-aggregation algebraic multigrid and a preconditioned conjugate gradient solver for large symmetric positive definite systems (3D elasticity and diffusion with millions of unknowns, where a sparse direct factorisation needs too m... |
 | `crates/femcore/src/linalg/amg_elastic/single.rs` | 68 | The single-precision matrix copy used by the multigrid cycles, and a dot product. |
 | `crates/femcore/src/linalg/ams.rs` | 972 | **Auxiliary-space Maxwell solver** (AMS, Hiptmair–Xu) for lowest-order `H(curl)` matrices (port item P1), for the curl-curl-plus-mass operator `A = K + βM` (also complex symmetric). |
 | `crates/femcore/src/linalg/fieldsplit.rs` | 280 | Field-split and Schur-complement preconditioners (port item P5; the role of PETSc `PCFIELDSPLIT`) for coupled problems: saddle points, piezoelectric `(u, φ)`, thermo-mechanical or opto-mechanical couplings. |
@@ -315,22 +315,22 @@ classDiagram
 | fn | `Amg::new` | `linalg/amg.rs:81` | `pub fn new(a: &Csr<T>, opts: AmgOptions) -> Result<Self, crate::linalg::direct::SolverError>` |
 | fn | `Amg::stats` | `linalg/amg.rs:125` | `pub fn stats(&self) -> AmgStats` |
 | struct | `AmgOptions` | `linalg/amg_elastic/mod.rs:19` | fields: `theta`, `sweeps`, `chebyshev`, `max_coarse`, `max_levels`, `gamma`, `smooth_p`, `block`, `no_p1_coarse`, `smooth_lin`, `line_smooth`, `p2_columns`, ... |
-| struct | `Amg` | `linalg/amg_elastic/mod.rs:312` |  |
-| fn | `spmm` | `linalg/amg_elastic/mod.rs:324` | `pub fn spmm(a: &Csr, b: &Csr) -> Csr` —  Sparse matrix product, on all cores by blocks of rows of `a` for large matrices. |
-| struct | `PcgResult` | `linalg/amg_elastic/mod.rs:1138` | fields: `x`, `iterations`, `relative_residual` |
-| struct | `BlockPcgResult` | `linalg/amg_elastic/mod.rs:1144` | fields: `x`, `iterations`, `relative_residual`, `residuals` |
-| fn | `block_pcg` | `linalg/amg_elastic/mod.rs:1183` | `pub fn block_pcg(a: &Csr, b: &[f64], k: usize, amg: &Amg, tol: f64, max_iter: usize) -> BlockPcgResult` —  Simultaneous multi-RHS Block-CG preconditioned by one AMG V-cycle per iteration across all `k` |
-| fn | `pcg` | `linalg/amg_elastic/mod.rs:1299` | `pub fn pcg(a: &Csr, b: &[f64], amg: &Amg, tol: f64, max_iter: usize) -> PcgResult` —  Conjugate gradients preconditioned by one AMG V-cycle. |
+| struct | `Amg` | `linalg/amg_elastic/mod.rs:340` |  |
+| fn | `spmm` | `linalg/amg_elastic/mod.rs:352` | `pub fn spmm(a: &Csr, b: &Csr) -> Csr` —  Sparse matrix product, on all cores by blocks of rows of `a` for large matrices. |
+| struct | `PcgResult` | `linalg/amg_elastic/mod.rs:1166` | fields: `x`, `iterations`, `relative_residual` |
+| struct | `BlockPcgResult` | `linalg/amg_elastic/mod.rs:1172` | fields: `x`, `iterations`, `relative_residual`, `residuals` |
+| fn | `block_pcg` | `linalg/amg_elastic/mod.rs:1211` | `pub fn block_pcg(a: &Csr, b: &[f64], k: usize, amg: &Amg, tol: f64, max_iter: usize) -> BlockPcgResult` —  Simultaneous multi-RHS Block-CG preconditioned by one AMG V-cycle per iteration across all `k` |
+| fn | `pcg` | `linalg/amg_elastic/mod.rs:1327` | `pub fn pcg(a: &Csr, b: &[f64], amg: &Amg, tol: f64, max_iter: usize) -> PcgResult` —  Conjugate gradients preconditioned by one AMG V-cycle. |
 | fn | `AmgOptions::with_env` | `linalg/amg_elastic/mod.rs:70` | `pub fn with_env(mut self) -> Self` —  Overrides from the environment (NYX_AMG_THETA, NYX_AMG_SWEEPS), for experiments. |
-| fn | `Amg::new` | `linalg/amg_elastic/mod.rs:760` | `pub fn new(a: &Csr, nullspace: Vec<Vec<f64>>, bs: usize, opts: &AmgOptions) -> Result<Amg, String>` —  `nullspace`: the near-nullspace vectors in dof order (node-major, block size `bs`). |
-| fn | `Amg::new_p2` | `linalg/amg_elastic/mod.rs:768` | `pub fn new_p2(a: &Csr, nullspace: Vec<Vec<f64>>, bs: usize, opts: &AmgOptions, lin: &Csr) -> Result<Amg, String>` —  Like `new` for a quadratic (P2) discretisation: the first coarse space is the linear (P1) |
-| fn | `Amg::n_levels` | `linalg/amg_elastic/mod.rs:893` | `pub fn n_levels(&self) -> usize` |
-| fn | `Amg::sizes` | `linalg/amg_elastic/mod.rs:898` | `pub fn sizes(&self) -> Vec<usize>` —  Sizes of the matrices on each level, finest first. |
-| fn | `Amg::line_smooth_active` | `linalg/amg_elastic/mod.rs:905` | `pub fn line_smooth_active(&self) -> bool` —  Whether vertical-line Thomas smoothing is active on at least one level of the hierarchy. |
-| fn | `Amg::n_line_columns` | `linalg/amg_elastic/mod.rs:910` | `pub fn n_line_columns(&self) -> usize` —  Number of vertical columns smoothed on the primary P1/P2 levels. |
-| fn | `Amg::apply` | `linalg/amg_elastic/mod.rs:1119` | `pub fn apply(&self, b: &[f64]) -> Vec<f64>` —  One V-cycle applied to `b` from a zero guess. |
-| fn | `Amg::apply_block_into` | `linalg/amg_elastic/mod.rs:1126` | `pub fn apply_block_into(&self, b: &[f64], x: &mut [f64], k: usize)` —  One V-cycle applied simultaneously to `k` right-hand sides stored row-major (`[n x k]`). |
-| fn | `Amg::apply_block` | `linalg/amg_elastic/mod.rs:1131` | `pub fn apply_block(&self, b: &[f64], k: usize) -> Vec<f64>` —  One V-cycle applied simultaneously to `k` right-hand sides stored row-major (`[n x k]`). |
+| fn | `Amg::new` | `linalg/amg_elastic/mod.rs:788` | `pub fn new(a: &Csr, nullspace: Vec<Vec<f64>>, bs: usize, opts: &AmgOptions) -> Result<Amg, String>` —  `nullspace`: the near-nullspace vectors in dof order (node-major, block size `bs`). |
+| fn | `Amg::new_p2` | `linalg/amg_elastic/mod.rs:796` | `pub fn new_p2(a: &Csr, nullspace: Vec<Vec<f64>>, bs: usize, opts: &AmgOptions, lin: &Csr) -> Result<Amg, String>` —  Like `new` for a quadratic (P2) discretisation: the first coarse space is the linear (P1) |
+| fn | `Amg::n_levels` | `linalg/amg_elastic/mod.rs:921` | `pub fn n_levels(&self) -> usize` |
+| fn | `Amg::sizes` | `linalg/amg_elastic/mod.rs:926` | `pub fn sizes(&self) -> Vec<usize>` —  Sizes of the matrices on each level, finest first. |
+| fn | `Amg::line_smooth_active` | `linalg/amg_elastic/mod.rs:933` | `pub fn line_smooth_active(&self) -> bool` —  Whether vertical-line Thomas smoothing is active on at least one level of the hierarchy. |
+| fn | `Amg::n_line_columns` | `linalg/amg_elastic/mod.rs:938` | `pub fn n_line_columns(&self) -> usize` —  Number of vertical columns smoothed on the primary P1/P2 levels. |
+| fn | `Amg::apply` | `linalg/amg_elastic/mod.rs:1147` | `pub fn apply(&self, b: &[f64]) -> Vec<f64>` —  One V-cycle applied to `b` from a zero guess. |
+| fn | `Amg::apply_block_into` | `linalg/amg_elastic/mod.rs:1154` | `pub fn apply_block_into(&self, b: &[f64], x: &mut [f64], k: usize)` —  One V-cycle applied simultaneously to `k` right-hand sides stored row-major (`[n x k]`). |
+| fn | `Amg::apply_block` | `linalg/amg_elastic/mod.rs:1159` | `pub fn apply_block(&self, b: &[f64], k: usize) -> Vec<f64>` —  One V-cycle applied simultaneously to `k` right-hand sides stored row-major (`[n x k]`). |
 | struct | `Csr32` | `linalg/amg_elastic/single.rs:18` | fields: `nrows`, `indptr`, `indices`, `data` —  Compressed rows with 32-bit column indices and single-precision values, for matrix-vector |
 | fn | `dot` | `linalg/amg_elastic/single.rs:65` | `pub fn dot(a: &[f64], b: &[f64]) -> f64` —  Dot product. |
 | fn | `Csr32::from_csr` | `linalg/amg_elastic/single.rs:27` | `pub fn from_csr(a: &RCsr) -> Csr32` |

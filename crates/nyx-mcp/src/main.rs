@@ -43,6 +43,14 @@ const SLICE: Duration = Duration::from_millis(200);
 const PROGRESS_EVERY: Duration = Duration::from_secs(5);
 /// A script's value is cut past this many bytes of JSON: the point of a script is that fields stay in the engine.
 const MAX_VALUE_BYTES: usize = 48 << 10;
+/// Maximum accepted JSON-RPC line length on stdin (16 MiB).
+const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+/// Bounded reader-to-server channel and backlog capacity.
+const CHANNEL_CAP: usize = 256;
+/// Maximum number of concurrent isolated MCP sessions (`"default"` plus named sessions).
+const MAX_SESSIONS: usize = 32;
+/// Idle timeout before inactive non-`"default"` sessions are reaped.
+const SESSION_IDLE_TTL: Duration = Duration::from_secs(3600);
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from)
@@ -136,27 +144,134 @@ fn cap_value(v: Value) -> Value {
 /// What the reader thread took from stdin.
 enum Incoming {
     Msg(Value),
-    /// a line that is not JSON: answered with a parse error
+    /// a line that is not JSON or invalid UTF-8: answered with a parse error
     Bad(String),
+    /// a line that exceeded `MAX_LINE_BYTES`: answered with an invalid-request error
+    TooLarge(usize),
+}
+
+enum BoundedLine {
+    Eof,
+    Line(String),
+    Bad(String),
+    TooLarge(usize),
+}
+
+fn read_bounded_line<R: BufRead>(reader: &mut R, max_bytes: usize) -> std::io::Result<BoundedLine> {
+    let mut buf_out = Vec::new();
+    let mut oversized_len: Option<usize> = None;
+    loop {
+        let avail = match reader.fill_buf() {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if avail.is_empty() {
+            return Ok(if let Some(n) = oversized_len {
+                BoundedLine::TooLarge(n)
+            } else if buf_out.is_empty() {
+                BoundedLine::Eof
+            } else {
+                if buf_out.last() == Some(&b'\r') {
+                    buf_out.pop();
+                }
+                match String::from_utf8(buf_out) {
+                    Ok(s) => BoundedLine::Line(s),
+                    Err(e) => BoundedLine::Bad(format!("invalid UTF-8: {e}")),
+                }
+            });
+        }
+        if let Some(nl) = avail.iter().position(|&b| b == b'\n') {
+            let consume = nl + 1;
+            let res = if let Some(n) = oversized_len {
+                BoundedLine::TooLarge(n.saturating_add(nl))
+            } else if buf_out.len().saturating_add(nl) > max_bytes {
+                BoundedLine::TooLarge(buf_out.len().saturating_add(nl))
+            } else {
+                buf_out.extend_from_slice(&avail[..nl]);
+                if buf_out.last() == Some(&b'\r') {
+                    buf_out.pop();
+                }
+                match String::from_utf8(buf_out) {
+                    Ok(s) => BoundedLine::Line(s),
+                    Err(e) => BoundedLine::Bad(format!("invalid UTF-8: {e}")),
+                }
+            };
+            reader.consume(consume);
+            return Ok(res);
+        }
+        let n = avail.len();
+        if let Some(ref mut total) = oversized_len {
+            *total = total.saturating_add(n);
+        } else if buf_out.len().saturating_add(n) > max_bytes {
+            let total = buf_out.len().saturating_add(n);
+            buf_out = Vec::new();
+            oversized_len = Some(total);
+        } else {
+            buf_out.extend_from_slice(avail);
+        }
+        reader.consume(n);
+    }
+}
+
+fn overload_reply(rejected: &Incoming) -> Option<Value> {
+    let id = match rejected {
+        Incoming::Msg(v) if v.is_array() => Value::Null,
+        Incoming::Msg(v) => match v.get("id") {
+            Some(id) if !id.is_null() => id.clone(),
+            _ => return None,
+        },
+        Incoming::Bad(_) | Incoming::TooLarge(_) => Value::Null,
+    };
+    Some(json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": -32001, "message": format!("server overloaded: request queue full (limit {CHANNEL_CAP})") }
+    }))
+}
+
+fn pump_reader<R: BufRead, F: FnMut(&Value) -> bool>(
+    reader: &mut R,
+    tx: &mpsc::SyncSender<Incoming>,
+    max_line_bytes: usize,
+    mut on_overload: F,
+) {
+    loop {
+        let m = match read_bounded_line(reader, max_line_bytes) {
+            Ok(BoundedLine::Eof) | Err(_) => break,
+            Ok(BoundedLine::Line(line)) => {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<Value>(&line) {
+                    Ok(v) => Incoming::Msg(v),
+                    Err(e) => Incoming::Bad(e.to_string()),
+                }
+            }
+            Ok(BoundedLine::Bad(e)) => Incoming::Bad(e),
+            Ok(BoundedLine::TooLarge(n)) => Incoming::TooLarge(n),
+        };
+        match tx.try_send(m) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(rejected)) => {
+                if let Some(err) = overload_reply(&rejected) {
+                    if !on_overload(&err) {
+                        break;
+                    }
+                }
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => break,
+        }
+    }
 }
 
 /// Takes the lines of stdin on a thread of its own, so the main loop can look at them while a script waits.
 fn spawn_reader() -> mpsc::Receiver<Incoming> {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(CHANNEL_CAP);
     std::thread::spawn(move || {
-        for line in std::io::stdin().lock().lines() {
-            let Ok(line) = line else { break };
-            if line.trim().is_empty() {
-                continue;
-            }
-            let m = match serde_json::from_str::<Value>(&line) {
-                Ok(v) => Incoming::Msg(v),
-                Err(e) => Incoming::Bad(e.to_string()),
-            };
-            if tx.send(m).is_err() {
-                break;
-            }
-        }
+        let stdin = std::io::stdin();
+        let mut locked = stdin.lock();
+        pump_reader(&mut locked, &tx, MAX_LINE_BYTES, send);
     });
     rx
 }
@@ -220,10 +335,11 @@ struct McpSession {
     id: String,
     /// counts the scripts that ran a command in this session, so a host can tell that something moved
     revision: u64,
+    last_used: Instant,
 }
 
 impl McpSession {
-    fn new(name: &str, dir: PathBuf, root: PathBuf, queue: PathBuf, base_id: &str) -> McpSession {
+    fn new(name: &str, dir: PathBuf, root: PathBuf, queue: PathBuf, base_id: &str, now: Instant) -> McpSession {
         let mut engine = Engine::new();
         engine.set_workspace(dir.clone(), true);
         engine.set_owner("ai"); // its requests queue behind a person's at the same priority (ADR 87)
@@ -232,7 +348,11 @@ impl McpSession {
         // one queue with the window: solves are run by the queue worker of that folder, in order, whoever asked (Q3, ADR 95)
         engine.set_shared_queue(&queue, true);
         let id = if name == "default" { base_id.to_string() } else { format!("{base_id}:{name}") };
-        McpSession { name: name.to_string(), engine, kernel: None, dir, root, id, revision: 0 }
+        McpSession { name: name.to_string(), engine, kernel: None, dir, root, id, revision: 0, last_used: now }
+    }
+
+    fn is_busy(&self) -> bool {
+        self.kernel.as_ref().is_some_and(|k| k.waiting().is_some()) || !self.engine.jobs().running().is_empty()
     }
 
     fn header(&self) -> Value {
@@ -265,6 +385,7 @@ impl McpSession {
 
 struct Server {
     sessions: BTreeMap<String, McpSession>,
+    session_idle_ttl: Duration,
     dir: PathBuf,
     root: PathBuf,
     proto: &'static str,
@@ -286,11 +407,24 @@ struct Server {
 
 impl Server {
     fn new(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64, rx: mpsc::Receiver<Incoming>) -> Server {
+        Self::with_idle_ttl(dir, root, queue, max_wait, rx, SESSION_IDLE_TTL)
+    }
+
+    fn with_idle_ttl(
+        dir: PathBuf,
+        root: PathBuf,
+        queue: PathBuf,
+        max_wait: f64,
+        rx: mpsc::Receiver<Incoming>,
+        session_idle_ttl: Duration,
+    ) -> Server {
         let base_session_id = session_id();
+        let now = Instant::now();
         let mut sessions = BTreeMap::new();
-        sessions.insert("default".to_string(), McpSession::new("default", dir.clone(), root.clone(), queue, &base_session_id));
+        sessions.insert("default".to_string(), McpSession::new("default", dir.clone(), root.clone(), queue, &base_session_id, now));
         Server {
             sessions,
+            session_idle_ttl,
             dir,
             root,
             proto: PROTOCOLS[0],
@@ -307,15 +441,49 @@ impl Server {
         }
     }
 
-    fn session_mut(&mut self, name: &str) -> &mut McpSession {
+    fn reap_idle_sessions(&mut self, now: Instant) {
+        let ttl = self.session_idle_ttl;
+        self.sessions.retain(|name, sess| {
+            name == "default" || sess.is_busy() || now.saturating_duration_since(sess.last_used) < ttl
+        });
+    }
+
+    fn ensure_session(&mut self, name: &str) -> Result<&mut McpSession, (i64, String)> {
+        let now = Instant::now();
+        self.reap_idle_sessions(now);
         if !self.sessions.contains_key(name) {
+            if self.sessions.len() >= MAX_SESSIONS {
+                return Err((
+                    -32002,
+                    format!("SESSION_LIMIT_EXCEEDED: maximum of {MAX_SESSIONS} active sessions reached"),
+                ));
+            }
             let s_dir = self.dir.join("sessions").join(name);
             let s_root = if self.root == self.dir { s_dir.clone() } else { self.root.clone() };
             let s_queue = s_dir.clone();
-            let sess = McpSession::new(name, s_dir, s_root, s_queue, &self.base_session_id);
+            let sess = McpSession::new(name, s_dir, s_root, s_queue, &self.base_session_id, now);
             self.sessions.insert(name.to_string(), sess);
         }
-        self.sessions.get_mut(name).expect("session inserted")
+        let sess = self.sessions.get_mut(name).expect("session inserted");
+        sess.last_used = now;
+        Ok(sess)
+    }
+
+    fn session_mut(&mut self, name: &str) -> &mut McpSession {
+        let now = Instant::now();
+        let sess = self.sessions.get_mut(name).expect("session must already exist");
+        sess.last_used = now;
+        sess
+    }
+
+    fn push_backlog(&mut self, m: Incoming) {
+        if self.backlog.len() >= CHANNEL_CAP {
+            if let Some(err) = overload_reply(&m) {
+                let _ = send(&err);
+            }
+        } else {
+            self.backlog.push_back(m);
+        }
     }
 
     /// Takes in what the reader thread has for the server and answers what needs no kernel at once (`ping`, `tools/list`); the rest waits its turn
@@ -332,7 +500,7 @@ impl Server {
                 }
             };
             let Incoming::Msg(v) = &m else {
-                self.backlog.push_back(m);
+                self.push_backlog(m);
                 continue;
             };
             let method = v.get("method").and_then(Value::as_str).unwrap_or("");
@@ -355,9 +523,9 @@ impl Server {
                 "tools/call" => {
                     let tool = v.get("params").and_then(|p| p.get("name")).and_then(Value::as_str).unwrap_or("");
                     out.newer |= matches!(tool, "script_run" | "script_wait");
-                    self.backlog.push_back(m);
+                    self.push_backlog(m);
                 }
-                _ => self.backlog.push_back(m),
+                _ => self.push_backlog(m),
             }
         }
     }
@@ -429,11 +597,17 @@ impl Server {
     /// The wait a call asked for, cut to the longest wait of the server; the second is the value that was asked when it was cut.
     fn wait_of(&self, args: &Value) -> Result<(Duration, Option<f64>), String> {
         match args.get("wait_s") {
-            None | Some(Value::Null) => Ok((Duration::from_secs_f64(DEFAULT_WAIT_S.min(self.max_wait)), None)),
+            None | Some(Value::Null) => {
+                let dur = Duration::try_from_secs_f64(DEFAULT_WAIT_S.min(self.max_wait))
+                    .map_err(|_| "invalid default wait duration".to_string())?;
+                Ok((dur, None))
+            }
             Some(v) => match v.as_f64() {
                 Some(w) if w >= 0.0 && w.is_finite() => {
                     let used = w.min(self.max_wait);
-                    Ok((Duration::from_secs_f64(used), (w > self.max_wait).then_some(w)))
+                    let dur = Duration::try_from_secs_f64(used)
+                        .map_err(|_| format!("`wait_s` ({w}) overflows Duration"))?;
+                    Ok((dur, (w > self.max_wait).then_some(w)))
                 }
                 _ => Err(format!("`wait_s` is a number of seconds from 0 to {} (a longer wait is cut to it)", self.max_wait)),
             },
@@ -671,6 +845,11 @@ impl Server {
         if !args.is_object() {
             return Err((-32602, "arguments is an object".to_string()));
         }
+        if matches!(name.as_str(), "script_run" | "script_wait" | "script_check") {
+            if let Ok(sname) = session_name(&args) {
+                self.ensure_session(&sname)?;
+            }
+        }
         let out = catch_unwind(AssertUnwindSafe(|| match name.as_str() {
             "script_run" => Some(self.script_run(&args)),
             "script_wait" => Some(self.script_wait(&args)),
@@ -744,6 +923,7 @@ fn serve(dir: PathBuf, root: PathBuf, queue: PathBuf, max_wait: f64) {
             }
             Incoming::Msg(m) => s.handle(&m),
             Incoming::Bad(e) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": format!("parse error: {e}") } })),
+            Incoming::TooLarge(n) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32600, "message": format!("request line exceeds maximum size of {MAX_LINE_BYTES} bytes (saw {n} bytes)") } })),
         };
         if let Some(r) = reply {
             if !send(&r) {
@@ -808,5 +988,82 @@ fn main() {
             usage();
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fmt::Write as _;
+    use std::io::Cursor;
+
+    #[test]
+    fn bounded_line_rejects_oversized_and_keeps_stream_aligned() {
+        let mut data = vec![b'x'; MAX_LINE_BYTES + 64];
+        data.push(b'\n');
+        data.extend_from_slice(b"{\"id\":2}\r\n");
+        let mut reader = std::io::BufReader::new(Cursor::new(data));
+
+        match read_bounded_line(&mut reader, MAX_LINE_BYTES).unwrap() {
+            BoundedLine::TooLarge(n) => assert_eq!(n, MAX_LINE_BYTES + 64),
+            _ => panic!("expected BoundedLine::TooLarge"),
+        }
+        match read_bounded_line(&mut reader, MAX_LINE_BYTES).unwrap() {
+            BoundedLine::Line(line) => assert_eq!(line, "{\"id\":2}"),
+            _ => panic!("expected next line to stay aligned"),
+        }
+        assert!(matches!(read_bounded_line(&mut reader, MAX_LINE_BYTES).unwrap(), BoundedLine::Eof));
+    }
+
+    #[test]
+    fn pump_reader_returns_overload_error_when_channel_full() {
+        let mut input = String::new();
+        for i in 0..(CHANNEL_CAP + 3) {
+            let _ = writeln!(input, r#"{{"jsonrpc":"2.0","id":{i},"method":"ping"}}"#);
+        }
+        let (tx, rx) = mpsc::sync_channel(CHANNEL_CAP);
+        let mut replies = Vec::new();
+        pump_reader(&mut Cursor::new(input.as_bytes()), &tx, MAX_LINE_BYTES, |reply| {
+            replies.push(reply.clone());
+            true
+        });
+
+        assert_eq!(replies.len(), 3);
+        for (idx, reply) in replies.iter().enumerate() {
+            assert_eq!(reply["error"]["code"], json!(-32001));
+            assert_eq!(reply["id"], json!(CHANNEL_CAP + idx));
+        }
+        assert_eq!(rx.try_iter().count(), CHANNEL_CAP);
+    }
+
+    #[test]
+    fn session_limit_and_idle_ttl_reaping() {
+        let dir = std::env::temp_dir().join(format!("nyx_mcp_unit_sess_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (_tx, rx) = mpsc::channel();
+        let mut server = Server::with_idle_ttl(
+            dir.clone(),
+            dir.clone(),
+            dir.clone(),
+            MAX_WAIT_S,
+            rx,
+            Duration::from_secs(30),
+        );
+
+        for i in 1..MAX_SESSIONS {
+            server.ensure_session(&format!("s{i}")).unwrap();
+        }
+        assert_eq!(server.sessions.len(), MAX_SESSIONS);
+
+        let (code, msg) = server.ensure_session("overflow").err().expect("33rd session must fail");
+        assert_eq!(code, -32002);
+        assert!(msg.contains("SESSION_LIMIT_EXCEEDED"), "{msg}");
+
+        server.reap_idle_sessions(Instant::now() + Duration::from_secs(60));
+        assert_eq!(server.sessions.len(), 1);
+        assert!(server.sessions.contains_key("default"));
+        server.ensure_session("overflow").unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

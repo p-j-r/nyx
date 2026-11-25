@@ -27,7 +27,7 @@ piezo = component "Piezoelectric kernel" "Coupled piezoelectric `(u, phi)` 2D/3D
     properties {
         "adr" "129, 106, 128"
         "code" "crates/nyx-sms/src: piezo.rs, piezo_asm.rs, piezo_driven.rs, piezo_mat.rs"
-        "lines" "6055"
+        "lines" "6043"
         "codeDiagram" "4-code/sms/piezo.md"
     }
 }
@@ -67,7 +67,7 @@ pml = component "Absorbing-layer kernel" "Eigenfrequencies of elastic bodies wit
     properties {
         "adr" "42, 101"
         "code" "crates/nyx-sms/src: pml.rs"
-        "lines" "1583"
+        "lines" "1575"
         "codeDiagram" "4-code/sms/pml.md"
     }
 }
@@ -75,7 +75,7 @@ lrb = component "Low-reflecting boundary" "Low-reflecting boundaries for solid m
     properties {
         "adr" "42"
         "code" "crates/nyx-sms/src: lrb.rs"
-        "lines" "547"
+        "lines" "537"
         "codeDiagram" "4-code/sms/lrb.md"
     }
 }

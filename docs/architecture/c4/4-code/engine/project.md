@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Project** (`engine.project`) in the contain
 > The saved state: feature list, mesh settings, one ProblemSpec per physics, project materials. The format key is checked at the file boundary.
 
 **Decisions:** [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 1 file, 312 lines.
+**Size:** 1 file, 318 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/project.rs` | 312 |  |
+| `crates/nyx-engine/src/project.rs` | 318 |  |
 
 ## What it uses
 
@@ -94,19 +94,19 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `SweepLayer` | `project.rs:19` | fields: `thickness`, `n`, `domain_offset`, `fill`, `regions` —  One layer of a model swept along y into a 3D mesh (the 2D cross-section is extruded with `n` cells across `thickness`). |
-| struct | `MeshSettings` | `project.rs:36` | fields: `h`, `sweep`, `adapt_scale`, `physics_sizing`, `points_per_wavelength`, `pml_mode`, `structured_pml`, `max_dev`, `curved`, `gap_cells`, `z_coarsen`, `adapt_grade`, ... —  How the geometry is meshed. |
-| const | `PROJECT_FORMAT` | `project.rs:150` | `u32` —  The file format of a project (ADR 63). |
-| struct | `Project` | `project.rs:157` | fields: `format`, `title`, `geometry`, `mesh`, `physics`, `active`, `materials` |
-| fn | `MeshSettings::resolved_pml_mode` | `project.rs:140` | `pub fn resolved_pml_mode(&self) -> PmlModeRequest` —  Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true \| false)` |
-| fn | `Project::new` | `project.rs:177` | `pub fn new(title: &str, dim: u8) -> Project` —  An empty project: no features, no physics. |
-| fn | `Project::spec` | `project.rs:189` | `pub fn spec(&self, physics: &str) -> Option<&ProblemSpec>` |
-| fn | `Project::spec_mut` | `project.rs:193` | `pub fn spec_mut(&mut self, physics: &str) -> Option<&mut ProblemSpec>` |
-| fn | `Project::need_spec` | `project.rs:198` | `pub fn need_spec(&mut self, physics: &str) -> Result<&mut ProblemSpec, Error>` —  The spec of a physics the project must have, with the list of those it has in the message when it has not. |
-| fn | `Project::default_targets` | `project.rs:209` | `pub fn default_targets(&self) -> Vec<String>` —  The codes to solve when none is named: the active physics, else all of them. |
-| fn | `Project::to_json` | `project.rs:217` | `pub fn to_json(&self) -> String` —  The project as JSON text with sorted keys. |
-| fn | `Project::from_json` | `project.rs:224` | `pub fn from_json(text: &str) -> Result<Project, Error>` —  Reads a project file. The `format` key must be present (in the project, the feature list and every problem) and supported: a file of |
-| fn | `Project::check_formats` | `project.rs:247` | `pub fn check_formats(&self) -> Result<(), Error>` —  Refuses a format this program does not read, in the project, its feature list and its problems. |
-| fn | `Project::check` | `project.rs:267` | `pub fn check(&self, registry: &Registry) -> Result<(), Error>` —  Everything that can be checked without a mesh: the feature list, the element size, the physics against the registry and each problem |
+| struct | `SweepLayer` | `project.rs:25` | fields: `thickness`, `n`, `domain_offset`, `fill`, `regions` —  One layer of a model swept along y into a 3D mesh (the 2D cross-section is extruded with `n` cells across `thickness`). |
+| struct | `MeshSettings` | `project.rs:42` | fields: `h`, `sweep`, `adapt_scale`, `physics_sizing`, `points_per_wavelength`, `pml_mode`, `structured_pml`, `max_dev`, `curved`, `gap_cells`, `z_coarsen`, `adapt_grade`, ... —  How the geometry is meshed. |
+| const | `PROJECT_FORMAT` | `project.rs:156` | `u32` —  The file format of a project (ADR 63). |
+| struct | `Project` | `project.rs:163` | fields: `format`, `title`, `geometry`, `mesh`, `physics`, `active`, `materials` |
+| fn | `MeshSettings::resolved_pml_mode` | `project.rs:146` | `pub fn resolved_pml_mode(&self) -> PmlModeRequest` —  Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true \| false)` |
+| fn | `Project::new` | `project.rs:183` | `pub fn new(title: &str, dim: u8) -> Project` —  An empty project: no features, no physics. |
+| fn | `Project::spec` | `project.rs:195` | `pub fn spec(&self, physics: &str) -> Option<&ProblemSpec>` |
+| fn | `Project::spec_mut` | `project.rs:199` | `pub fn spec_mut(&mut self, physics: &str) -> Option<&mut ProblemSpec>` |
+| fn | `Project::need_spec` | `project.rs:204` | `pub fn need_spec(&mut self, physics: &str) -> Result<&mut ProblemSpec, Error>` —  The spec of a physics the project must have, with the list of those it has in the message when it has not. |
+| fn | `Project::default_targets` | `project.rs:215` | `pub fn default_targets(&self) -> Vec<String>` —  The codes to solve when none is named: the active physics, else all of them. |
+| fn | `Project::to_json` | `project.rs:223` | `pub fn to_json(&self) -> String` —  The project as JSON text with sorted keys. |
+| fn | `Project::from_json` | `project.rs:230` | `pub fn from_json(text: &str) -> Result<Project, Error>` —  Reads a project file. The `format` key must be present (in the project, the feature list and every problem) and supported: a file of |
+| fn | `Project::check_formats` | `project.rs:253` | `pub fn check_formats(&self) -> Result<(), Error>` —  Refuses a format this program does not read, in the project, its feature list and its problems. |
+| fn | `Project::check` | `project.rs:273` | `pub fn check(&self, registry: &Registry) -> Result<(), Error>` —  Everything that can be checked without a mesh: the feature list, the element size, the physics against the registry and each problem |
 
 Trait implementations in this component: `MeshSettings: Default`

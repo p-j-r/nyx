@@ -9,7 +9,7 @@ One page per component, C4 level 4. [Component view](../../3-components/ems.md) 
 | [Mode kernel](./modes.md) | 1 | 850 | 15 | 3 |
 | [Complex-mode kernel](./modescx.md) | 1 | 1422 | 16 | 3 |
 | [Axisymmetric kernel](./axisym.md) | 1 | 979 | 21 | 5 |
-| [3D cavity kernel](./cavity.md) | 2 | 3691 | 41 | 7 |
+| [3D cavity kernel](./cavity.md) | 2 | 3716 | 43 | 7 |
 | [Thin-film IBC and Josephson ROM](./ibc.md) | 2 | 3134 | 39 | 5 |
 | [Driven frequency-domain and PROM](./driven.md) | 2 | 2963 | 20 | 7 |
 | [Native mixed-cell EM](./mixed.md) | 1 | 2112 | 39 | 5 |

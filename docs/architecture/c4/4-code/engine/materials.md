@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Materials** (`engine.materials`) in the con
 > The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point.
 
 **Decisions:** [ADR 58](../../../adr/0058-the-engine-resolves-materials-from-the-library-and-the-project.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
-**Size:** 2 files, 1159 lines.
+**Size:** 2 files, 1347 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/material_fetch.rs` | 538 |  |
+| `crates/nyx-engine/src/material_fetch.rs` | 726 |  |
 | `crates/nyx-engine/src/materials.rs` | 621 |  |
 
 ## What it uses
@@ -96,14 +96,14 @@ classDiagram
 | fn | `default_materials_folder` | `material_fetch.rs:73` | `pub fn default_materials_folder() -> Option<PathBuf>` —  First writable `materials/` directory for CLI `--save` or GUI save-to-library toggles. |
 | fn | `convert_to_toml` | `material_fetch.rs:90` | `pub fn convert_to_toml( format: &str, content: &str, name: &str, description: Option<&str>, extends: Option<&str>, source_url: Option<&str>, ) -> Result<String, Error>` —  Converts raw external database text into validated `format = 1` material TOML text (`rii`, `aflow`, `mp`, `numbat`). |
 | fn | `resolve_remote_url` | `material_fetch.rs:104` | `pub fn resolve_remote_url(format: &str, target: &str) -> Result<String, Error>` —  Resolves a format + database coordinate into its HTTPS URL (for GUI hints or diagnostics). |
-| fn | `fetch_url_text` | `material_fetch.rs:110` | `pub fn fetch_url_text(url: &str) -> Result<String, Error>` —  Downloads a UTF-8 text payload over HTTPS using system `curl` (`--max-time 20`, 5 MiB cap). |
-| fn | `fetch_url_text_with_api_key` | `material_fetch.rs:116` | `pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<String, Error>` —  Downloads a UTF-8 text payload over HTTPS using system `curl` (`--max-time 20`, 5 MiB cap), |
-| fn | `default_name_from_target` | `material_fetch.rs:195` | `pub fn default_name_from_target(target: &str) -> String` —  Derives a safe material filename/identifier stem from a database entry path or query. |
-| fn | `Engine::list_remote_materials` | `material_fetch.rs:263` | `pub fn list_remote_materials(&self, domain: Option<&str>) -> Result<Value, Error>` —  Lists curated remote materials in `REMOTE_CATALOG`, optionally filtered by `domain` (`photonics`, `phononics`, `superconducting`, `all`). |
-| fn | `Engine::import_material` | `material_fetch.rs:293` | `pub fn import_material( &mut self, name: &str, format: &str, content: &str, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Converts raw database text (`rii`, `aflow`, `mp`, `numbat`), validates it against the library and adds/saves as requested. |
-| fn | `Engine::fetch_material` | `material_fetch.rs:312` | `pub fn fetch_material( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS, converts it into validated TOML, and adds/saves as requested. |
-| fn | `Engine::fetch_material_with_key` | `material_fetch.rs:328` | `pub fn fetch_material_with_key( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, api_key: Option<&str>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS (using `api_key` or `MP_API_KEY` via `curl --config -` stdin for Materials Project), |
-| fn | `Engine::search_remote_materials` | `material_fetch.rs:412` | `pub fn search_remote_materials( &self, query: &str, domain: Option<&str>, source: Option<&str>, live: bool, api_key: Option<&str>, ) -> Result<Value, Error>` —  Searches the curated `REMOTE_CATALOG` and (when `live` is true) live AFLOW and Materials Project HTTPS endpoints. |
+| fn | `fetch_url_text` | `material_fetch.rs:200` | `pub fn fetch_url_text(url: &str) -> Result<String, Error>` —  Downloads a UTF-8 text payload over HTTPS using system `curl` (`--proto =https --max-redirs 0 --max-time 20`, 5 MiB cap). |
+| fn | `fetch_url_text_with_api_key` | `material_fetch.rs:206` | `pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<String, Error>` —  Downloads a UTF-8 text payload over HTTPS using system `curl` (`--proto =https --max-redirs 0 --max-time 20`, 5 MiB cap), |
+| fn | `default_name_from_target` | `material_fetch.rs:277` | `pub fn default_name_from_target(target: &str) -> String` —  Derives a safe material filename/identifier stem from a database entry path or query. |
+| fn | `Engine::list_remote_materials` | `material_fetch.rs:345` | `pub fn list_remote_materials(&self, domain: Option<&str>) -> Result<Value, Error>` —  Lists curated remote materials in `REMOTE_CATALOG`, optionally filtered by `domain` (`photonics`, `phononics`, `superconducting`, `all`). |
+| fn | `Engine::import_material` | `material_fetch.rs:375` | `pub fn import_material( &mut self, name: &str, format: &str, content: &str, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Converts raw database text (`rii`, `aflow`, `mp`, `numbat`), validates it against the library and adds/saves as requested. |
+| fn | `Engine::fetch_material` | `material_fetch.rs:394` | `pub fn fetch_material( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS, converts it into validated TOML, and adds/saves as requested. |
+| fn | `Engine::fetch_material_with_key` | `material_fetch.rs:410` | `pub fn fetch_material_with_key( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, api_key: Option<&str>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS (using `api_key` or `MP_API_KEY` via `curl --config -` stdin for Materials Project), |
+| fn | `Engine::search_remote_materials` | `material_fetch.rs:513` | `pub fn search_remote_materials( &self, query: &str, domain: Option<&str>, source: Option<&str>, live: bool, api_key: Option<&str>, ) -> Result<Value, Error>` —  Searches the curated `REMOTE_CATALOG` and (when `live` is true) live AFLOW and Materials Project HTTPS endpoints. |
 | fn | `default_dirs` | `materials.rs:17` | `pub fn default_dirs() -> Vec<PathBuf>` —  The folders searched for bundled/configured material files, first valid match wins when loading the base library: |
 | fn | `user_materials_dir` | `materials.rs:77` | `pub fn user_materials_dir() -> Option<PathBuf>` —  The user's writable material overlay folder (`<workspace>/materials`, i.e. `$NYX_WORKSPACE/materials` or `Documents/nyx/materials`). |
 | fn | `load_library` | `materials.rs:106` | `pub fn load_library(dirs: &[PathBuf]) -> (Library, Vec<String>)` —  Loads the first folder that has material files as the base library, then overlays any user `*.toml` files |

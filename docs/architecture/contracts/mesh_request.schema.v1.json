@@ -143,7 +143,7 @@
       ]
     },
     "strict_mesh": {
-      "default": false,
+      "default": true,
       "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles",
       "type": "boolean"
     },

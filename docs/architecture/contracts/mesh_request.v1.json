@@ -8,6 +8,7 @@
     "scale": 0.7
   },
   "pml_mode": "structured",
+  "strict_mesh": false,
   "waves": {
     "eigen_headroom": 1.5,
     "pml_relax": 1.5,

@@ -5,7 +5,11 @@
 //! keyhole & overlapping boolean polygon union, hull/hole orientation, island ordering, and
 //! `TEXT` pin matching.
 
-use geom::gds::{decode_ibm_f64, encode_ibm_f64, import_gds_bytes, parse_gds, GdsImportOptions, STRANS_REFLECT_X};
+use geom::gds::{
+    decode_ibm_f64, encode_ibm_f64, import_gds_bytes, import_gds_bytes_with_limits, import_gds_library,
+    import_gds_library_with_limits, parse_gds, parse_gds_with_limits, GdsCell, GdsImportLimits, GdsImportOptions,
+    GdsLibrary, GdsSref, STRANS_REFLECT_X,
+};
 use geom::prim::polygon_area;
 
 /// Helper builder for synthesizing spec-compliant binary GDSII streams in tests.
@@ -55,12 +59,18 @@ impl GdsWriter {
     }
 
     fn rec_xy(&mut self, pts: &[[i32; 2]]) {
-        let mut p = Vec::with_capacity(pts.len() * 8);
-        for &[x, y] in pts {
-            p.extend_from_slice(&x.to_be_bytes());
-            p.extend_from_slice(&y.to_be_bytes());
+        if pts.is_empty() {
+            self.rec(0x10, 0x03, &[]);
+            return;
         }
-        self.rec(0x10, 0x03, &p);
+        for chunk_pts in pts.chunks(8000) {
+            let mut p = Vec::with_capacity(chunk_pts.len() * 8);
+            for &[x, y] in chunk_pts {
+                p.extend_from_slice(&x.to_be_bytes());
+                p.extend_from_slice(&y.to_be_bytes());
+            }
+            self.rec(0x10, 0x03, &p);
+        }
     }
 
     fn begin_lib(&mut self, name: &str, user_unit: f64, dbu_m: f64) {
@@ -498,4 +508,240 @@ fn diagnostics_reject_malformed_or_cyclic_streams_and_split_islands_false_merges
     assert_eq!(merged.sheets[0].name, "sig");
     assert_eq!(merged.sheets[0].outers.len(), 2);
     assert!((merged.sheets[0].area - 300e-12).abs() < 1e-22);
+}
+
+#[test]
+fn aref_bomb_and_binary_dag_sref_bomb_are_rejected_without_oom() {
+    // 1. Massive 30,000 x 30,000 AREF (900M instances) on requested layer must fail in O(1) before looping
+    let mut w = GdsWriter::new();
+    w.begin_lib("aref_bomb", 1.0e-3, 1.0e-9);
+    w.begin_cell("DOT");
+    w.boundary(1, 0, &[[0, 0], [100, 0], [100, 100], [0, 100]]);
+    w.end_cell();
+    w.begin_cell("TOP");
+    w.aref("DOT", 30_000, 30_000, [[0, 0], [30_000_000, 0], [0, 30_000_000]], false, None, None);
+    w.end_cell();
+    w.end_lib();
+
+    let opts = GdsImportOptions { layers: vec![("m1".into(), (1, 0))], ..Default::default() };
+    let err = import_gds_bytes(&w.buf, &opts).unwrap_err().0;
+    assert!(err.contains("max_instances"), "unexpected AREF bomb error: {err}");
+
+    // 2. Binary DAG SREF bomb (depth = 20 < 64, 2^20 = 1,048,576 instances > 250,000)
+    let mut dag = GdsWriter::new();
+    dag.begin_lib("dag_bomb", 1.0e-3, 1.0e-9);
+    dag.begin_cell("L0");
+    dag.boundary(1, 0, &[[0, 0], [100, 0], [100, 100], [0, 100]]);
+    dag.end_cell();
+    for lvl in 1..=20 {
+        dag.begin_cell(&format!("L{lvl}"));
+        let prev = format!("L{}", lvl - 1);
+        dag.sref(&prev, [0, 0], false, None, None);
+        dag.sref(&prev, [200, 0], false, None, None);
+        dag.end_cell();
+    }
+    dag.end_lib();
+
+    let err_dag = import_gds_bytes(&dag.buf, &opts).unwrap_err().0;
+    assert!(err_dag.contains("max_instances"), "unexpected binary DAG SREF error: {err_dag}");
+
+    // 3. Explicit max_file_bytes, max_records, and max_polygons limits
+    let small_file_lim = GdsImportLimits { max_file_bytes: 32, ..Default::default() };
+    assert!(parse_gds_with_limits(&w.buf, &small_file_lim).unwrap_err().0.contains("max_file_bytes"));
+    let small_rec_lim = GdsImportLimits { max_records: 5, ..Default::default() };
+    assert!(parse_gds_with_limits(&w.buf, &small_rec_lim).unwrap_err().0.contains("max_records"));
+    let small_poly_lim = GdsImportLimits { max_polygons: 3, ..Default::default() };
+    let mut polys = GdsWriter::new();
+    polys.begin_lib("many_polys", 1.0e-3, 1.0e-9);
+    polys.begin_cell("TOP");
+    for k in 0..5 {
+        polys.boundary(1, 0, &[[k * 200, 0], [k * 200 + 100, 0], [k * 200 + 100, 100], [k * 200, 100]]);
+    }
+    polys.end_cell();
+    polys.end_lib();
+    assert!(import_gds_bytes_with_limits(&polys.buf, &opts, &small_poly_lim, None)
+        .unwrap_err()
+        .0
+        .contains("max_polygons"));
+}
+
+#[test]
+fn deep_sref_chain_above_max_depth_is_rejected() {
+    let mut w = GdsWriter::new();
+    w.begin_lib("deep_sref", 1.0e-3, 1.0e-9);
+    w.begin_cell("LEAF");
+    w.boundary(1, 0, &[[0, 0], [100, 0], [100, 100], [0, 100]]);
+    w.end_cell();
+    for lvl in 1..=66 {
+        w.begin_cell(&format!("N{lvl}"));
+        let child = if lvl == 1 { "LEAF".to_string() } else { format!("N{}", lvl - 1) };
+        w.sref(&child, [0, 0], false, None, None);
+        w.end_cell();
+    }
+    w.end_lib();
+
+    let opts = GdsImportOptions { layers: vec![("m1".into(), (1, 0))], ..Default::default() };
+    let err = import_gds_bytes(&w.buf, &opts).unwrap_err().0;
+    assert!(err.contains("64 levels"), "unexpected deep SREF error: {err}");
+}
+
+#[test]
+fn oversized_decompose_raw_polygon_is_rejected_before_quadratic_work() {
+    let n = 17_000usize;
+    let mut pts: Vec<[i32; 2]> = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let ang = std::f64::consts::TAU * (i as f64 / n as f64);
+        let r = 50_000.0;
+        pts.push([(r * ang.cos()).round() as i32, (r * ang.sin()).round() as i32]);
+    }
+    let mut w = GdsWriter::new();
+    w.begin_lib("big_poly", 1.0e-3, 1.0e-9);
+    w.begin_cell("TOP");
+    w.boundary(1, 0, &pts);
+    w.end_cell();
+    w.end_lib();
+
+    let opts = GdsImportOptions { layers: vec![("m1".into(), (1, 0))], ..Default::default() };
+    let err = import_gds_bytes(&w.buf, &opts).unwrap_err().0;
+    assert!(err.contains("max_decompose_vertices"), "unexpected decompose limit error: {err}");
+}
+
+#[test]
+fn non_finite_or_non_positive_rec_units_and_xf_overflow_are_rejected() {
+    // 1. Non-positive user_unit (0.0 and -1e-3) in binary REC_UNITS
+    for bad_uu in [0.0, -1.0e-3] {
+        let mut w = GdsWriter::new();
+        w.begin_lib("bad_uu", bad_uu, 1.0e-9);
+        w.begin_cell("TOP");
+        w.boundary(1, 0, &[[0, 0], [100, 0], [100, 100], [0, 100]]);
+        w.end_cell();
+        w.end_lib();
+        let err = parse_gds(&w.buf).unwrap_err().0;
+        assert!(err.contains("user unit"), "expected user_unit error for {bad_uu}, got: {err}");
+    }
+
+    // 2. Non-finite user_unit / dbu_m via programmatic GdsLibrary
+    let opts = GdsImportOptions { layers: vec![("m1".into(), (1, 0))], ..Default::default() };
+    for bad_uu in [f64::NAN, f64::INFINITY, -0.0] {
+        let lib = GdsLibrary {
+            version: 600,
+            name: "nan_lib".into(),
+            user_unit: bad_uu,
+            dbu_m: 1e-9,
+            cells: vec![GdsCell { name: "TOP".into(), ..Default::default() }],
+        };
+        let err = import_gds_library(&lib, &opts).unwrap_err().0;
+        assert!(err.contains("user_unit"), "expected library user_unit error for {bad_uu}, got: {err}");
+    }
+
+    // 3. Finite GdsXf overflow during composition (6 nested SREFs each with mag = 1e60 => 1e360 = inf)
+    let mut mag_bomb = GdsWriter::new();
+    mag_bomb.begin_lib("xf_overflow", 1.0e-3, 1.0e-9);
+    mag_bomb.begin_cell("LEAF");
+    mag_bomb.boundary(1, 0, &[[0, 0], [100, 0], [100, 100], [0, 100]]);
+    mag_bomb.end_cell();
+    for lvl in 1..=6 {
+        mag_bomb.begin_cell(&format!("S{lvl}"));
+        let child = if lvl == 1 { "LEAF".to_string() } else { format!("S{}", lvl - 1) };
+        mag_bomb.sref(&child, [0, 0], false, Some(1.0e60), None);
+        mag_bomb.end_cell();
+    }
+    mag_bomb.end_lib();
+    let err_xf = import_gds_bytes(&mag_bomb.buf, &opts).unwrap_err().0;
+    assert!(err_xf.contains("non-finite"), "expected GdsXf non-finite error, got: {err_xf}");
+
+    // Also direct GdsLibrary with NaN mag
+    let nan_sref_lib = GdsLibrary {
+        version: 600,
+        name: "nan_xf".into(),
+        user_unit: 1e-3,
+        dbu_m: 1e-9,
+        cells: vec![
+            GdsCell {
+                name: "TOP".into(),
+                srefs: vec![GdsSref { sname: "C".into(), strans: 0, mag: f64::NAN, angle_deg: 0.0, xy: [0, 0] }],
+                ..Default::default()
+            },
+            GdsCell { name: "C".into(), ..Default::default() },
+        ],
+    };
+    let lim = GdsImportLimits::default();
+    let err_nan_sref = import_gds_library_with_limits(&nan_sref_lib, &opts, &lim, None).unwrap_err().0;
+    assert!(err_nan_sref.contains("magnification") || err_nan_sref.contains("non-finite"), "{err_nan_sref}");
+}
+
+#[test]
+fn roi_and_layer_lazy_aref_clipping_skips_unwanted_million_hole_arrays() {
+    // 1. 1,000 x 1,000 = 1,000,000 AREF holes on unrequested layer (99, 0) + 1,000 x 1,000 AREF pads on (1, 0)
+    //    spanning [0..10 mm] x [0..10 mm] (pitch 10 um, 4x4 um pads).
+    let mut w = GdsWriter::new();
+    w.begin_lib("flux_trap_lib", 1.0e-3, 1.0e-9);
+    w.begin_cell("TRAP");
+    w.boundary(99, 0, &[[0, 0], [2_000, 0], [2_000, 2_000], [0, 2_000]]);
+    w.end_cell();
+    w.begin_cell("PAD");
+    w.boundary(1, 0, &[[0, 0], [4_000, 0], [4_000, 4_000], [0, 4_000]]);
+    w.end_cell();
+    w.begin_cell("TOP");
+    w.boundary(1, 0, &[[-20_000, -20_000], [-10_000, -20_000], [-10_000, -10_000], [-20_000, -10_000]]);
+    w.aref("TRAP", 1_000, 1_000, [[0, 0], [10_000_000, 0], [0, 10_000_000]], false, None, None);
+    w.end_cell();
+    w.end_lib();
+
+    // Importing layer (1, 0) skips the 1,000,000-element TRAP AREF on unrequested layer (99, 0) before allocation!
+    let opts = GdsImportOptions { layers: vec![("m1".into(), (1, 0))], ..Default::default() };
+    let res_layer = import_gds_bytes(&w.buf, &opts).unwrap();
+    assert_eq!(res_layer.sheets.len(), 1);
+    assert!((res_layer.sheets[0].area - 100e-12).abs() < 1e-22);
+
+    // 2. Now put the 1,000 x 1,000 AREF on requested layer (1, 0), rotated 45 deg around origin (wait: 0 deg first, then 45 deg):
+    let mut w_roi = GdsWriter::new();
+    w_roi.begin_lib("roi_aref_lib", 1.0e-3, 1.0e-9);
+    w_roi.begin_cell("PAD");
+    w_roi.boundary(1, 0, &[[0, 0], [4_000, 0], [4_000, 4_000], [0, 4_000]]);
+    w_roi.end_cell();
+    w_roi.begin_cell("TOP");
+    // 1000 x 1000 array, pitch 10 um -> covers [0..9994 um] x [0..9994 um]
+    w_roi.aref("PAD", 1_000, 1_000, [[0, 0], [10_000_000, 0], [0, 10_000_000]], false, None, None);
+    w_roi.end_cell();
+    w_roi.end_lib();
+
+    // Without ROI, 1,000,000 instances exceeds max_instances (250,000)
+    assert!(import_gds_bytes(&w_roi.buf, &opts).unwrap_err().0.contains("max_instances"));
+
+    // With ROI [99e-6, 99e-6, 115e-6, 115e-6]: hits ic in {10, 11} and ir in {10, 11} => 4 pads (each 16 um^2)!
+    let res_roi = import_gds_bytes_with_limits(
+        &w_roi.buf,
+        &opts,
+        &GdsImportLimits::default(),
+        Some([99.0e-6, 99.0e-6, 115.0e-6, 115.0e-6]),
+    )
+    .unwrap();
+    assert_eq!(res_roi.sheets.len(), 4, "ROI must select exactly the 2x2 overlapping AREF pads");
+    for sh in &res_roi.sheets {
+        assert!((sh.area - 16e-12).abs() < 1e-22);
+        assert!(sh.bbox[0] >= 99.0e-6 && sh.bbox[2] <= 115.0e-6);
+        assert!(sh.bbox[1] >= 99.0e-6 && sh.bbox[3] <= 115.0e-6);
+    }
+
+    // 3. Rotated 45-degree 1000 x 1000 AREF clipped to a tight ROI near the first element (0, 0):
+    let mut w_rot = GdsWriter::new();
+    w_rot.begin_lib("roi_rot_aref", 1.0e-3, 1.0e-9);
+    w_rot.begin_cell("PAD");
+    w_rot.boundary(1, 0, &[[0, 0], [2_000, 0], [2_000, 2_000], [0, 2_000]]);
+    w_rot.end_cell();
+    w_rot.begin_cell("TOP");
+    // Stepped at 10 um along (1, 1)/sqrt(2) and (-1, 1)/sqrt(2) (~7071 nm per step)
+    w_rot.aref("PAD", 1_000, 1_000, [[0, 0], [7_071_000, 7_071_000], [-7_071_000, 7_071_000]], false, None, Some(45.0));
+    w_rot.end_cell();
+    w_rot.end_lib();
+    let res_rot = import_gds_bytes_with_limits(
+        &w_rot.buf,
+        &opts,
+        &GdsImportLimits::default(),
+        Some([-3.0e-6, -1.0e-6, 3.0e-6, 4.0e-6]),
+    )
+    .unwrap();
+    assert_eq!(res_rot.sheets.len(), 1, "rotated 45-deg AREF ROI should keep only the origin pad");
+    assert!((res_rot.sheets[0].area - 4e-12).abs() < 1e-22);
 }

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Storage types and read budget** (`storage.t
 > FieldStorageLayout (L1 Deflate-3, L2 Shuffle+LZF packed 5D, L3 Contiguous packed 5D), ReadBudgetConfig (512 MiB default ceiling), MeshData, ModeHeader, PackedComponentMeta and bitwise f64 verification helpers.
 
 **Decisions:** [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md), [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md)  
-**Size:** 1 file, 202 lines.
+**Size:** 1 file, 206 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-storage/src/lib.rs` | 202 |  |
+| `crates/nyx-storage/src/lib.rs` | 206 |  |
 
 ## What it uses
 
@@ -51,6 +51,7 @@ classDiagram
       +max_dataset_bytes u64
       +max_total_result_bytes u64
       +max_group_depth usize
+      +max_solutions usize
       +from_env() Self
   }
   class MeshData {
@@ -90,13 +91,13 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | enum | `FieldStorageLayout` | `lib.rs:20` | variants: `L1LegacyGzip3`, `L2ShuffleLzfPacked`, `L3ContiguousPacked` —  Dataset storage layout for FEM cell and nodal fields. |
-| struct | `ReadBudgetConfig` | `lib.rs:57` | fields: `max_dataset_bytes`, `max_total_result_bytes`, `max_group_depth` —  Security & memory bounds enforced when opening untrusted or external `.h5` files (Gate EC-11). |
-| struct | `MeshData` | `lib.rs:100` | fields: `cell_topology`, `element_family`, `element_degree`, `space_dimension`, `cell_labels`, `cells_shape`, `cells`, `facet_labels`, `facets_shape`, `facets`, `points_shape`, `points`, ... —  Complete mesh topology, connectivity, coordinates, and optional curved-edge geometry. |
-| struct | `ModeHeader` | `lib.rs:121` | fields: `mode_index`, `eig_re`, `eig_im`, `label` —  Eigenvalue and label summary for a single mode or solution. |
-| struct | `PackedComponentMeta` | `lib.rs:130` | fields: `name`, `unit`, `nloc`, `has_im` —  Metadata for a single packed cell-field component stored in `/results/<physics>/cell_fields_meta`. |
-| fn | `assert_f64_bits_eq` | `lib.rs:138` | `pub fn assert_f64_bits_eq(context: &str, actual: &[f64], expected: &[f64]) -> Result<()>` —  Exact 0-ULP (`to_bits()`) comparison of two `f64` slices. |
+| struct | `ReadBudgetConfig` | `lib.rs:57` | fields: `max_dataset_bytes`, `max_total_result_bytes`, `max_group_depth`, `max_solutions` —  Security & memory bounds enforced when opening untrusted or external `.h5` files (Gate EC-11). |
+| struct | `MeshData` | `lib.rs:103` | fields: `cell_topology`, `element_family`, `element_degree`, `space_dimension`, `cell_labels`, `cells_shape`, `cells`, `facet_labels`, `facets_shape`, `facets`, `points_shape`, `points`, ... —  Complete mesh topology, connectivity, coordinates, and optional curved-edge geometry. |
+| struct | `ModeHeader` | `lib.rs:124` | fields: `mode_index`, `eig_re`, `eig_im`, `label` —  Eigenvalue and label summary for a single mode or solution. |
+| struct | `PackedComponentMeta` | `lib.rs:133` | fields: `name`, `unit`, `nloc`, `has_im` —  Metadata for a single packed cell-field component stored in `/results/<physics>/cell_fields_meta`. |
+| fn | `assert_f64_bits_eq` | `lib.rs:141` | `pub fn assert_f64_bits_eq(context: &str, actual: &[f64], expected: &[f64]) -> Result<()>` —  Exact 0-ULP (`to_bits()`) comparison of two `f64` slices. |
 | fn | `FieldStorageLayout::as_str` | `lib.rs:36` | `pub fn as_str(self) -> &'static str` —  Stable string identifier stored in HDF5 `/results/<physics>` `@field_layout` attributes. |
 | fn | `FieldStorageLayout::parse` | `lib.rs:45` | `pub fn parse(s: &str) -> Option<Self>` —  Parses a `@field_layout` attribute string back into [`FieldStorageLayout`]. |
-| fn | `ReadBudgetConfig::from_env` | `lib.rs:82` | `pub fn from_env() -> Self` —  Returns [`ReadBudgetConfig::default()`], overriding `max_total_result_bytes` when the |
+| fn | `ReadBudgetConfig::from_env` | `lib.rs:85` | `pub fn from_env() -> Self` —  Returns [`ReadBudgetConfig::default()`], overriding `max_total_result_bytes` when the |
 
 Trait implementations in this component: `ReadBudgetConfig: Default`

@@ -5,18 +5,18 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 > The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing.
 
 **Decisions:** [ADR 40](../../../adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md), [ADR 55](../../../adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md), [ADR 82](../../../adr/0082-curved-order-2-geometry.md), [ADR 83](../../../adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
-**Size:** 6 files, 6739 lines.
+**Size:** 6 files, 6858 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/meshing/adapt3d.rs` | 528 | Adaptive meshing of a 3D `geom` model (ADR 51): the metric adaptation of `adapt::drive3` driven by the exact faces of the model. |
-| `crates/femcore/src/meshing/curve3.rs` | 512 | Curved edges for 3D meshes (ADR 82): the mid-edge geometry nodes that make the tetrahedra around a curved surface quadratic (isoparametric) instead of straight. |
+| `crates/femcore/src/meshing/curve3.rs` | 577 | Curved edges for 3D meshes (ADR 82): the mid-edge geometry nodes that make the tetrahedra around a curved surface quadratic (isoparametric) instead of straight. |
 | `crates/femcore/src/meshing/geomdrive3.rs` | 396 | From a 3D `geom` model to a tetrahedral mesh: the adapter between `geom::Evaluated` and the lattice mesher (`mesher3d`), which only knows the trait `Domain3`. |
-| `crates/femcore/src/meshing/mesher3d.rs` | 1373 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
+| `crates/femcore/src/meshing/mesher3d.rs` | 1425 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
 | `crates/femcore/src/meshing/refine3d.rs` | 491 | Local refinement of a tetrahedral mesh by longest-edge (Rivara) bisection. |
-| `crates/femcore/src/meshing/sheet3d.rs` | 3439 |  |
+| `crates/femcore/src/meshing/sheet3d.rs` | 3441 |  |
 
 ## What it uses
 
@@ -254,10 +254,10 @@ classDiagram
 | fn | `subdivide_z_interval` | `meshing/sheet3d.rs:410` | `pub fn subdivide_z_interval(z0: f64, z1: f64, dz0: f64, dz1: f64, h_max: f64, ratio: f64) -> Vec<f64>` —  Subdivides `[z0, z1]` into graded z-levels starting at step `dz0` near `z0` and `dz1` near `z1`, |
 | fn | `build_sized_overlay_mesh_2d` | `meshing/sheet3d.rs:1742` | `pub fn build_sized_overlay_mesh_2d( ev: &Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<SimplexMesh, String>` —  Builds the sized 2D conformal overlay triangulation `m2` (`cell_labels = ov_cell + 1`, boundary |
 | fn | `apply_sheet_post_enrichment` | `meshing/sheet3d.rs:1812` | `pub fn apply_sheet_post_enrichment( g: &mut MeshedGeom, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, )` —  Applies post-adaptation `AF-5` (`curved`) and `AF-2` (`singular_edges = "quarter_point"`) `EdgeNodes` |
-| fn | `extrude_overlay_2d_with_plan` | `meshing/sheet3d.rs:2966` | `pub fn extrude_overlay_2d_with_plan( ev: Evaluated, m2: &SimplexMesh, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, sheet_dz_override: Option<f64>, ) -> Result<MeshedGeom, String>` —  Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` using the full |
-| fn | `extrude_overlay_2d` | `meshing/sheet3d.rs:2984` | `pub fn extrude_overlay_2d( ev: Evaluated, m2: &SimplexMesh, h_global: f64, sheet_dz_override: Option<f64>, ) -> Result<MeshedGeom, String>` —  Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` at global |
-| fn | `mesh_sheet_stack_3d_with_pml` | `meshing/sheet3d.rs:2995` | `pub fn mesh_sheet_stack_3d_with_pml( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<(MeshedGeom, Option<AdaptReport>, Option<crate::meshing::PmlReport>), String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a [`MeshedGeom`], with |
-| fn | `mesh_sheet_stack_3d_native` | `meshing/sheet3d.rs:3016` | `pub fn mesh_sheet_stack_3d_native( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<crate::meshing::NativeRawTuple, String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) directly into an uncut |
-| fn | `mesh_sheet_stack_3d` | `meshing/sheet3d.rs:3043` | `pub fn mesh_sheet_stack_3d( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<(MeshedGeom, Option<AdaptReport>), String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`. |
+| fn | `extrude_overlay_2d_with_plan` | `meshing/sheet3d.rs:2968` | `pub fn extrude_overlay_2d_with_plan( ev: Evaluated, m2: &SimplexMesh, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, sheet_dz_override: Option<f64>, ) -> Result<MeshedGeom, String>` —  Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` using the full |
+| fn | `extrude_overlay_2d` | `meshing/sheet3d.rs:2986` | `pub fn extrude_overlay_2d( ev: Evaluated, m2: &SimplexMesh, h_global: f64, sheet_dz_override: Option<f64>, ) -> Result<MeshedGeom, String>` —  Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` at global |
+| fn | `mesh_sheet_stack_3d_with_pml` | `meshing/sheet3d.rs:2997` | `pub fn mesh_sheet_stack_3d_with_pml( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<(MeshedGeom, Option<AdaptReport>, Option<crate::meshing::PmlReport>), String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a [`MeshedGeom`], with |
+| fn | `mesh_sheet_stack_3d_native` | `meshing/sheet3d.rs:3018` | `pub fn mesh_sheet_stack_3d_native( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<crate::meshing::NativeRawTuple, String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) directly into an uncut |
+| fn | `mesh_sheet_stack_3d` | `meshing/sheet3d.rs:3045` | `pub fn mesh_sheet_stack_3d( ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>, ) -> Result<(MeshedGeom, Option<AdaptReport>), String>` —  Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`. |
 
 Trait implementations in this component: `GeomOracle3: Geometry3`, `CurveReport: Default`, `GeomDomain3: Domain3`

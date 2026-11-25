@@ -48,7 +48,7 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, Scalar, Solution, SolveResult |
 | [engine: Store link](../engine/storeLink.md) | result | Scalar, SolveResult |
 | [cQED result payloads](./cqed.md) | result | Scalar, SolveResult |
-| [Problem envelope](./envelope.md) | result | SolveResult |
+| [Problem envelope](./envelope.md) | result | Scalar, SolveResult |
 | [Test support](./testsupport.md) | result | Scalar, SolveResult |
 | [Physics trait and registry](./trait.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult +2 |
 | [sms: Cross-section study kernel](../sms/crosssection.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |

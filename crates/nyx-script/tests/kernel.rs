@@ -206,3 +206,72 @@ fn a_script_error_names_the_line_and_the_session_goes_on() {
     assert!(err.contains("line 2") && err.contains("set_param"), "{err}");
     assert_eq!(go(&mut k, &mut e, "a = 2\na + 1").unwrap(), json!(3));
 }
+
+#[test]
+fn timeout_validation_rejects_bad_floats_and_clamps_large_durations() {
+    let e = Engine::new();
+    for bad in [-1.0, f64::NAN, f64::INFINITY, 1e308] {
+        let opts = Options { root: root("bad_limit"), worker: Some(PathBuf::from(env!("CARGO_BIN_EXE_nyx-script-worker"))) };
+        let err = match Kernel::new(&e, Limits { seconds: bad, ..Limits::default() }, opts) {
+            Ok(_) => panic!("expected Limits::seconds={bad} to fail"),
+            Err(err) => err,
+        };
+        assert!(err.contains("limits.seconds"), "{err}");
+    }
+
+    let mut e = Engine::new();
+    let mut k = kernel(&e, Limits { seconds: 1e10, ..Limits::default() });
+    assert_eq!(go(&mut k, &mut e, "1 + 1").unwrap(), json!(2));
+
+    for bad_py in ["-1.0", "float('nan')", "float('inf')", "1e308"] {
+        let src = format!("nyx.job_wait(id=1, timeout_s={bad_py})");
+        let err = go(&mut k, &mut e, &src).unwrap_err();
+        assert!(err.contains("timeout_s"), "{src}: {err}");
+    }
+    let err = go(&mut k, &mut e, "nyx.job_wait(id=999999, timeout_s=1e10)").unwrap_err();
+    assert!(err.contains("999999") && !err.contains("overflow"), "{err}");
+}
+
+#[test]
+fn printer_caps_multibyte_utf8_output_on_char_boundary() {
+    let mut e = Engine::new();
+    let mut k = kernel(&e, Limits { output_bytes: 5, ..Limits::default() });
+    let Step::Done(o) = k.run(&mut e, "utf8.nys", "print('ééé')\nprint('abc')\n42", None, None, true).unwrap() else {
+        panic!("expected Step::Done");
+    };
+    assert_eq!(o.value, json!(42));
+    let total: usize = o.printed.iter().map(String::len).sum();
+    assert!(total <= 5, "printed bytes exceeded cap: {:?}", o.printed);
+
+    let mut k2 = kernel(&e, Limits { output_bytes: 2, ..Limits::default() });
+    let Step::Done(o2) = k2.run(&mut e, "emoji.nys", "print('🎉')\n7", None, None, true).unwrap() else {
+        panic!("expected Step::Done");
+    };
+    assert_eq!(o2.value, json!(7));
+    let total2: usize = o2.printed.iter().map(String::len).sum();
+    assert!(total2 <= 2, "printed bytes exceeded cap: {:?}", o2.printed);
+}
+
+#[test]
+fn network_commands_are_refused_in_script_mode() {
+    let mut e = Engine::new();
+    let mut k = kernel(&e, Limits::default());
+
+    for src in [
+        "nyx.fetch_material(source='mp', target='mp-149', name='si_test')",
+        "nyx.call('fetch_material', source='aflow', target='Si')",
+        "nyx.search_remote_materials(query='silicon', live=True)",
+    ] {
+        let err = go(&mut k, &mut e, src).unwrap_err();
+        assert!(err.contains("refused") || err.contains("script"), "{src}: {err}");
+    }
+
+    // Catching in Python keeps the session usable, and offline search (live=False) still works.
+    let res = go(
+        &mut k,
+        &mut e,
+        "try:\n    nyx.fetch_material(source='mp', target='mp-149', name='si_test')\n    caught = False\nexcept RuntimeError:\n    caught = True\noffline = nyx.search_remote_materials(query='silicon', live=False)\n[caught, bool(offline)]",
+    )
+    .unwrap();
+    assert_eq!(res, json!([true, true]));
+}

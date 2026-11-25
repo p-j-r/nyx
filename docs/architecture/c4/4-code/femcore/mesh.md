@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Mesh** (`femcore.mesh`) in the container **
 > The native mixed-cell mesh, MixedDiscretisation, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics.
 
 **Decisions:** [ADR 4](../../../adr/0004-simplexmesh-is-the-solver-contract.md), [ADR 5](../../../adr/0005-native-mixed-cell-mesh.md), [ADR 32](../../../adr/0032-one-native-mesh-simplexmesh-as-a-view.md), [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md)  
-**Size:** 6 files, 2957 lines.
+**Size:** 6 files, 3364 lines.
 
 ## Files
 
@@ -14,7 +14,7 @@ C4 level 4 (code) of the component **Mesh** (`femcore.mesh`) in the container **
 | `crates/femcore/src/mesh/cells.rs` | 637 | Mixed-cell meshes: triangles and quads in 2D; tetrahedra, prisms and hexahedra in 3D. |
 | `crates/femcore/src/mesh/exchange.rs` | 134 | The mesh a physics is given (`Physics::solve`): the one native cell mesh (`cells::CellMesh`) in 2D or in 3D, as plain data. It replaces `SimplexMesh` as the exchange type of the physics interface (ADR 32 phase 4 deliverable, ADR 41). Eac... |
 | `crates/femcore/src/mesh/mixed.rs` | 1069 |  |
-| `crates/femcore/src/mesh/mod.rs` | 736 | Simplex meshes (triangles in 2D, tetrahedra in 3D) with their boundary facets, the numbering of P1/P2 unknowns, and structured generators with numbered boundaries. |
+| `crates/femcore/src/mesh/mod.rs` | 1143 | Simplex meshes (triangles in 2D, tetrahedra in 3D) with their boundary facets, the numbering of P1/P2 unknowns, and structured generators with numbered boundaries. |
 | `crates/femcore/src/mesh/quality.rs` | 297 | Element-quality and edge-length statistics, Euclidean or measured in a metric field. |
 | `crates/femcore/src/mesh/view.rs` | 84 | Draw-only mesh for display: works for simplex meshes and for meshes the solvers cannot use (quadrilaterals, hexahedra, prisms...), of which only the surface is kept. |
 
@@ -198,6 +198,20 @@ classDiagram
         +is_empty() bool
         +describe() String
     }
+    class MeshIntegrityError {
+        <<enumeration>>
+        InvalidDimension
+        LengthMismatch
+        NonFiniteCoordinate
+        VertexOutOfBounds
+        DuplicateVertexInSimplex
+        NonPositiveMeasure
+        NonManifoldFacet
+        InconsistentFacetTag
+        FacetNotInAnyCell
+        InvalidCurvedEdge
+        InvalidQpEdge
+    }
     class SimplexMesh {
         <<struct>>
         +dim usize
@@ -207,14 +221,17 @@ classDiagram
         +facets Vec~u32~
         +facet_labels Vec~i32~
         +new(dim, points, cells, cell_labels, facets, facet_labels) Self
+        +check() Result
         +set_edge_nodes(nodes)
         +set_qp_edges(edges)
         +edge_is_qp(e) bool
         +has_qp() bool
         +cell_is_qp(c) bool
         +qp_edge_list() Vecu32
-        +edge_node_list() Vecu32
-        +more_29_methods()
+        +more_30_methods()
+    }
+    class String {
+        <<impl block>>
     }
   }
   namespace mesh_quality_rs {
@@ -262,6 +279,7 @@ classDiagram
   Mesh --> CellMesh
   MixedDiscretisation --> CellType
   MixedDiscretisation --> FacetType
+  MeshIntegrityError --> String
 ```
 
 ## Public items
@@ -373,46 +391,48 @@ classDiagram
 | fn | `MixedDiscretisation::validate_conforming` | `mesh/mixed.rs:798` | `pub fn validate_conforming(&self) -> Result<(), String>` —  Verifies that the mixed mesh is 100% conforming with zero transition pyramids and zero |
 | enum | `SplitMode` | `mesh/mod.rs:28` | variants: `Minimal`, `Star` —  How hexahedra, prisms and boundary quadrilaterals are cut into simplices in 3D. |
 | struct | `SplitReport` | `mesh/mod.rs:51` | fields: `quads`, `hexes`, `prisms`, `boundary_quads`, `cells_after` —  What `from_cells` had to do to make a mesh usable by the simplex solvers. |
-| struct | `SimplexMesh` | `mesh/mod.rs:82` | fields: `dim`, `points`, `cells`, `cell_labels`, `facets`, `facet_labels` |
+| enum | `MeshIntegrityError` | `mesh/mod.rs:80` | variants: `InvalidDimension`, `LengthMismatch`, `NonFiniteCoordinate`, `VertexOutOfBounds`, `DuplicateVertexInSimplex`, `NonPositiveMeasure`, `NonManifoldFacet`, `InconsistentFacetTag`, `FacetNotInAnyCell`, `InvalidCurvedEdge`, `InvalidQpEdge` —  Structural, geometric, or edge-endpoint defect detected by [`SimplexMesh::check`]. |
+| struct | `SimplexMesh` | `mesh/mod.rs:142` | fields: `dim`, `points`, `cells`, `cell_labels`, `facets`, `facet_labels` |
 | fn | `SplitReport::is_empty` | `mesh/mod.rs:60` | `pub fn is_empty(&self) -> bool` |
 | fn | `SplitReport::describe` | `mesh/mod.rs:63` | `pub fn describe(&self) -> String` |
-| fn | `SimplexMesh::new` | `mesh/mod.rs:220` | `pub fn new(dim: usize, points: Vec<f64>, cells: Vec<u32>, cell_labels: Vec<i32>, facets: Vec<u32>, facet_labels: Vec<i32>) -> Self` |
-| fn | `SimplexMesh::set_edge_nodes` | `mesh/mod.rs:229` | `pub fn set_edge_nodes(&mut self, nodes: &[([u32; 2], [f64; 3])])` —  Sets the curved edges of a mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the |
-| fn | `SimplexMesh::set_qp_edges` | `mesh/mod.rs:246` | `pub fn set_qp_edges(&mut self, edges: &[[u32; 2]])` —  Marks which curved edges carry Barsoum quarter-point singularity shifts (`AF-2`), sorted by edge index. |
-| fn | `SimplexMesh::edge_is_qp` | `mesh/mod.rs:264` | `pub fn edge_is_qp(&self, e: usize) -> bool` —  Whether edge `e` (index into `edges()`) carries a quarter-point singularity node. |
-| fn | `SimplexMesh::has_qp` | `mesh/mod.rs:269` | `pub fn has_qp(&self) -> bool` —  Whether the mesh carries any quarter-point shifted edge. |
-| fn | `SimplexMesh::cell_is_qp` | `mesh/mod.rs:274` | `pub fn cell_is_qp(&self, c: usize) -> bool` —  Whether at least one edge of cell `c` is a quarter-point shifted edge (`AF-2`). |
-| fn | `SimplexMesh::qp_edge_list` | `mesh/mod.rs:279` | `pub fn qp_edge_list(&self) -> Vec<[u32` —  The quarter-point edges as sorted vertex pairs `[a, b]`, sorted by pair (`CellMesh::qp_edges`). |
-| fn | `SimplexMesh::edge_node_list` | `mesh/mod.rs:285` | `pub fn edge_node_list(&self) -> Vec<([u32` —  The curved edges as `(sorted vertex pair, node position)`, sorted by pair (the exchange form of `CellMesh::edge_nodes`). |
-| fn | `SimplexMesh::edge_node` | `mesh/mod.rs:291` | `pub fn edge_node(&self, e: usize) -> Option<[f64` —  Position of the mid-edge geometry node of edge `e` (index into `edges()`); `None` when the edge is straight. |
-| fn | `SimplexMesh::has_curved` | `mesh/mod.rs:295` | `pub fn has_curved(&self) -> bool` —  Whether the mesh has any curved edge. |
-| fn | `SimplexMesh::cell_is_curved` | `mesh/mod.rs:299` | `pub fn cell_is_curved(&self, c: usize) -> bool` —  Whether one of the edges of cell `c` is curved (3D only). |
-| fn | `SimplexMesh::cell_geometry_nodes` | `mesh/mod.rs:304` | `pub fn cell_geometry_nodes(&self, c: usize) -> [[f64` —  The ten geometry nodes of tetrahedron `c`: its four vertices, then the nodes of its six edges in the order of the local vertex |
-| fn | `SimplexMesh::n_points` | `mesh/mod.rs:324` | `pub fn n_points(&self) -> usize` |
-| fn | `SimplexMesh::n_cells` | `mesh/mod.rs:327` | `pub fn n_cells(&self) -> usize` |
-| fn | `SimplexMesh::n_facets` | `mesh/mod.rs:330` | `pub fn n_facets(&self) -> usize` |
-| fn | `SimplexMesh::exterior_facets` | `mesh/mod.rs:336` | `pub fn exterior_facets(&self) -> Vec<bool>` —  Which boundary facets lie on the outside of the mesh (used by exactly one cell). Meshes |
-| fn | `SimplexMesh::n_edges` | `mesh/mod.rs:358` | `pub fn n_edges(&self) -> usize` |
-| fn | `SimplexMesh::edges` | `mesh/mod.rs:361` | `pub fn edges(&self) -> &[(u32, u32)]` |
-| fn | `SimplexMesh::point` | `mesh/mod.rs:364` | `pub fn point(&self, i: usize) -> &[f64]` |
-| fn | `SimplexMesh::cell` | `mesh/mod.rs:367` | `pub fn cell(&self, c: usize) -> &[u32]` |
-| fn | `SimplexMesh::facet` | `mesh/mod.rs:370` | `pub fn facet(&self, f: usize) -> &[u32]` |
-| fn | `SimplexMesh::sheet_facets` | `mesh/mod.rs:378` | `pub fn sheet_facets(&self, label: i32) -> Vec<&[u32]>` —  Facets carrying the given 1-based boundary label from `LabelMap`. |
-| fn | `SimplexMesh::cell_edge_ids` | `mesh/mod.rs:382` | `pub fn cell_edge_ids(&self, c: usize) -> &[u32]` —  Local pair edges of cell `c` (index into `edges()`), pairs (0,1),(0,2),... |
-| fn | `SimplexMesh::edge_index` | `mesh/mod.rs:386` | `pub fn edge_index(&self, a: u32, b: u32) -> usize` |
-| fn | `SimplexMesh::n_dofs` | `mesh/mod.rs:389` | `pub fn n_dofs(&self, order: usize) -> usize` |
-| fn | `SimplexMesh::nloc` | `mesh/mod.rs:392` | `pub fn nloc(&self, order: usize) -> usize` |
-| fn | `SimplexMesh::cell_dofs` | `mesh/mod.rs:398` | `pub fn cell_dofs(&self, c: usize, order: usize, out: &mut Vec<usize>)` —  Dof indices of cell `c` (P1: vertices; P2: vertices then edge midpoints in the order of |
-| fn | `SimplexMesh::all_cell_dofs` | `mesh/mod.rs:407` | `pub fn all_cell_dofs(&self, order: usize) -> Vec<usize>` —  All cell dofs, flat with stride `nloc(order)`. |
-| fn | `SimplexMesh::facet_dofs` | `mesh/mod.rs:418` | `pub fn facet_dofs(&self, f: usize, order: usize, out: &mut Vec<usize>)` —  Dofs of boundary facet `f` (same local order as for cells). |
-| fn | `SimplexMesh::dof_coordinates` | `mesh/mod.rs:432` | `pub fn dof_coordinates(&self, order: usize) -> Vec<f64>` —  Coordinates of every dof (vertices, then edge midpoints). |
-| fn | `SimplexMesh::domain_labels` | `mesh/mod.rs:444` | `pub fn domain_labels(&self) -> Vec<i32>` |
-| fn | `SimplexMesh::boundary_labels` | `mesh/mod.rs:447` | `pub fn boundary_labels(&self) -> Vec<i32>` |
-| fn | `SimplexMesh::bbox` | `mesh/mod.rs:450` | `pub fn bbox(&self) -> ([f64` |
-| fn | `SimplexMesh::relabel` | `mesh/mod.rs:468` | `pub fn relabel(&mut self, domains: &[(Vec<f64>, i32)], boundaries: &[(Vec<f64>, i32)]) -> Result<(), String>` —  Relabels cells whose centroid lies in a box and boundary facets whose midpoint lies in a |
-| fn | `SimplexMesh::from_cells` | `mesh/mod.rs:514` | `pub fn from_cells<const D: usize>(nm: &NativeCells<D>) -> Result<Self, String>` —  Mesh from a mixed-cell mesh (`mesh::cells::CellMesh`). Domain and boundary numbers are 1-based in both and stay as they are. |
-| fn | `SimplexMesh::from_cells_split` | `mesh/mod.rs:518` | `pub fn from_cells_split<const D: usize>(nm: &NativeCells<D>) -> Result<(Self, SplitReport), String>` |
-| fn | `SimplexMesh::from_cells_split_with` | `mesh/mod.rs:522` | `pub fn from_cells_split_with<const D: usize>(nm: &NativeCells<D>, mode: SplitMode) -> Result<(Self, SplitReport), String>` |
+| fn | `SimplexMesh::new` | `mesh/mod.rs:283` | `pub fn new(dim: usize, points: Vec<f64>, cells: Vec<u32>, cell_labels: Vec<i32>, facets: Vec<u32>, facet_labels: Vec<i32>) -> Self` |
+| fn | `SimplexMesh::check` | `mesh/mod.rs:293` | `pub fn check(&self) -> Result<(), MeshIntegrityError>` —  Verifies mesh coordinate finiteness, vertex index bounds, distinct simplex vertices, strictly |
+| fn | `SimplexMesh::set_edge_nodes` | `mesh/mod.rs:536` | `pub fn set_edge_nodes(&mut self, nodes: &[([u32; 2], [f64; 3])])` —  Sets the curved edges of a mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the |
+| fn | `SimplexMesh::set_qp_edges` | `mesh/mod.rs:553` | `pub fn set_qp_edges(&mut self, edges: &[[u32; 2]])` —  Marks which curved edges carry Barsoum quarter-point singularity shifts (`AF-2`), sorted by edge index. |
+| fn | `SimplexMesh::edge_is_qp` | `mesh/mod.rs:571` | `pub fn edge_is_qp(&self, e: usize) -> bool` —  Whether edge `e` (index into `edges()`) carries a quarter-point singularity node. |
+| fn | `SimplexMesh::has_qp` | `mesh/mod.rs:576` | `pub fn has_qp(&self) -> bool` —  Whether the mesh carries any quarter-point shifted edge. |
+| fn | `SimplexMesh::cell_is_qp` | `mesh/mod.rs:581` | `pub fn cell_is_qp(&self, c: usize) -> bool` —  Whether at least one edge of cell `c` is a quarter-point shifted edge (`AF-2`). |
+| fn | `SimplexMesh::qp_edge_list` | `mesh/mod.rs:586` | `pub fn qp_edge_list(&self) -> Vec<[u32` —  The quarter-point edges as sorted vertex pairs `[a, b]`, sorted by pair (`CellMesh::qp_edges`). |
+| fn | `SimplexMesh::edge_node_list` | `mesh/mod.rs:592` | `pub fn edge_node_list(&self) -> Vec<([u32` —  The curved edges as `(sorted vertex pair, node position)`, sorted by pair (the exchange form of `CellMesh::edge_nodes`). |
+| fn | `SimplexMesh::edge_node` | `mesh/mod.rs:598` | `pub fn edge_node(&self, e: usize) -> Option<[f64` —  Position of the mid-edge geometry node of edge `e` (index into `edges()`); `None` when the edge is straight. |
+| fn | `SimplexMesh::has_curved` | `mesh/mod.rs:602` | `pub fn has_curved(&self) -> bool` —  Whether the mesh has any curved edge. |
+| fn | `SimplexMesh::cell_is_curved` | `mesh/mod.rs:606` | `pub fn cell_is_curved(&self, c: usize) -> bool` —  Whether one of the edges of cell `c` is curved (3D only). |
+| fn | `SimplexMesh::cell_geometry_nodes` | `mesh/mod.rs:611` | `pub fn cell_geometry_nodes(&self, c: usize) -> [[f64` —  The ten geometry nodes of tetrahedron `c`: its four vertices, then the nodes of its six edges in the order of the local vertex |
+| fn | `SimplexMesh::n_points` | `mesh/mod.rs:631` | `pub fn n_points(&self) -> usize` |
+| fn | `SimplexMesh::n_cells` | `mesh/mod.rs:634` | `pub fn n_cells(&self) -> usize` |
+| fn | `SimplexMesh::n_facets` | `mesh/mod.rs:637` | `pub fn n_facets(&self) -> usize` |
+| fn | `SimplexMesh::exterior_facets` | `mesh/mod.rs:643` | `pub fn exterior_facets(&self) -> Vec<bool>` —  Which boundary facets lie on the outside of the mesh (used by exactly one cell). Meshes |
+| fn | `SimplexMesh::n_edges` | `mesh/mod.rs:665` | `pub fn n_edges(&self) -> usize` |
+| fn | `SimplexMesh::edges` | `mesh/mod.rs:668` | `pub fn edges(&self) -> &[(u32, u32)]` |
+| fn | `SimplexMesh::point` | `mesh/mod.rs:671` | `pub fn point(&self, i: usize) -> &[f64]` |
+| fn | `SimplexMesh::cell` | `mesh/mod.rs:674` | `pub fn cell(&self, c: usize) -> &[u32]` |
+| fn | `SimplexMesh::facet` | `mesh/mod.rs:677` | `pub fn facet(&self, f: usize) -> &[u32]` |
+| fn | `SimplexMesh::sheet_facets` | `mesh/mod.rs:685` | `pub fn sheet_facets(&self, label: i32) -> Vec<&[u32]>` —  Facets carrying the given 1-based boundary label from `LabelMap`. |
+| fn | `SimplexMesh::cell_edge_ids` | `mesh/mod.rs:689` | `pub fn cell_edge_ids(&self, c: usize) -> &[u32]` —  Local pair edges of cell `c` (index into `edges()`), pairs (0,1),(0,2),... |
+| fn | `SimplexMesh::edge_index` | `mesh/mod.rs:693` | `pub fn edge_index(&self, a: u32, b: u32) -> usize` |
+| fn | `SimplexMesh::n_dofs` | `mesh/mod.rs:696` | `pub fn n_dofs(&self, order: usize) -> usize` |
+| fn | `SimplexMesh::nloc` | `mesh/mod.rs:699` | `pub fn nloc(&self, order: usize) -> usize` |
+| fn | `SimplexMesh::cell_dofs` | `mesh/mod.rs:705` | `pub fn cell_dofs(&self, c: usize, order: usize, out: &mut Vec<usize>)` —  Dof indices of cell `c` (P1: vertices; P2: vertices then edge midpoints in the order of |
+| fn | `SimplexMesh::all_cell_dofs` | `mesh/mod.rs:714` | `pub fn all_cell_dofs(&self, order: usize) -> Vec<usize>` —  All cell dofs, flat with stride `nloc(order)`. |
+| fn | `SimplexMesh::facet_dofs` | `mesh/mod.rs:725` | `pub fn facet_dofs(&self, f: usize, order: usize, out: &mut Vec<usize>)` —  Dofs of boundary facet `f` (same local order as for cells). |
+| fn | `SimplexMesh::dof_coordinates` | `mesh/mod.rs:739` | `pub fn dof_coordinates(&self, order: usize) -> Vec<f64>` —  Coordinates of every dof (vertices, then edge midpoints). |
+| fn | `SimplexMesh::domain_labels` | `mesh/mod.rs:751` | `pub fn domain_labels(&self) -> Vec<i32>` |
+| fn | `SimplexMesh::boundary_labels` | `mesh/mod.rs:754` | `pub fn boundary_labels(&self) -> Vec<i32>` |
+| fn | `SimplexMesh::bbox` | `mesh/mod.rs:757` | `pub fn bbox(&self) -> ([f64` |
+| fn | `SimplexMesh::relabel` | `mesh/mod.rs:775` | `pub fn relabel(&mut self, domains: &[(Vec<f64>, i32)], boundaries: &[(Vec<f64>, i32)]) -> Result<(), String>` —  Relabels cells whose centroid lies in a box and boundary facets whose midpoint lies in a |
+| fn | `SimplexMesh::from_cells` | `mesh/mod.rs:821` | `pub fn from_cells<const D: usize>(nm: &NativeCells<D>) -> Result<Self, String>` —  Mesh from a mixed-cell mesh (`mesh::cells::CellMesh`). Domain and boundary numbers are 1-based in both and stay as they are. |
+| fn | `SimplexMesh::from_cells_split` | `mesh/mod.rs:825` | `pub fn from_cells_split<const D: usize>(nm: &NativeCells<D>) -> Result<(Self, SplitReport), String>` |
+| fn | `SimplexMesh::from_cells_split_with` | `mesh/mod.rs:829` | `pub fn from_cells_split_with<const D: usize>(nm: &NativeCells<D>, mode: SplitMode) -> Result<(Self, SplitReport), String>` |
 | fn | `simplex_quality` | `mesh/quality.rs:15` | `pub fn simplex_quality<const D: usize>(p: &[[f64; D]], metrics: Option<&[Sym<D>]>) -> f64` —  Mean-ratio quality of a simplex with vertices `p` (`D + 1` points), optionally in the metric |
 | struct | `QualityStats` | `mesh/quality.rs:54` | fields: `n`, `min`, `mean`, `histogram` —  Summary of a set of scalar samples in `[0, 1]` (quality) with a 10-bin histogram. |
 | fn | `mesh_quality` | `mesh/quality.rs:79` | `pub fn mesh_quality<const D: usize>(mesh: &SimplexMesh<D>, metrics: Option<&[Sym<D>]>) -> QualityStats` —  Mean-ratio statistics of a simplex mesh, with an optional vertex metric field. |
@@ -422,3 +442,5 @@ classDiagram
 | fn | `cellmesh_quality` | `mesh/quality.rs:229` | `pub fn cellmesh_quality<const D: usize>(m: &CellMesh<D>) -> QualityStats` —  Quality statistics over all cells of a mixed mesh (scaled Jacobian / mean ratio). |
 | struct | `ViewMesh` | `mesh/view.rs:7` | fields: `dim`, `points`, `tris`, `tri_label`, `segs`, `seg_label`, `domain_labels`, `boundary_labels`, `n_cells`, `bbox`, `types`, `view_only` |
 | fn | `ViewMesh::from_simplex` | `mesh/view.rs:45` | `pub fn from_simplex(m: &SimplexMesh) -> ViewMesh` |
+
+Trait implementations in this component: `MeshIntegrityError: Display`, `MeshIntegrityError: Error`, `String: From`

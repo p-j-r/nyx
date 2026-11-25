@@ -192,6 +192,36 @@ pub struct GdsLibrary {
     pub cells: Vec<GdsCell>,
 }
 
+/// Security and resource budgets enforced during binary GDSII parsing, hierarchy flattening, and polygon decomposition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GdsImportLimits {
+    /// Maximum binary GDSII stream size in bytes (default: 256 MiB).
+    pub max_file_bytes: usize,
+    /// Maximum binary records parsed or cumulative elements visited during flattening (default: 2_000_000).
+    pub max_records: usize,
+    /// Maximum `SREF`/`AREF` hierarchy depth (default: 64).
+    pub max_depth: usize,
+    /// Maximum cumulative `SREF`/`AREF` cell instances expanded during flattening (default: 250_000).
+    pub max_instances: usize,
+    /// Maximum cumulative polygons emitted on requested layers during flattening (default: 500_000).
+    pub max_polygons: usize,
+    /// Maximum raw vertex count accepted in `decompose_raw_polygon` (default: 16_384).
+    pub max_decompose_vertices: usize,
+}
+
+impl Default for GdsImportLimits {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: 256 * 1024 * 1024,
+            max_records: 2_000_000,
+            max_depth: 64,
+            max_instances: 250_000,
+            max_polygons: 500_000,
+            max_decompose_vertices: 16_384,
+        }
+    }
+}
+
 /// Options controlling GDSII hierarchy flattening, boolean union, island splitting, and pin matching.
 #[derive(Clone, Debug)]
 pub struct GdsImportOptions {
@@ -361,12 +391,25 @@ fn read_ascii(payload: &[u8]) -> GeomResult<String> {
         .map_err(|e| GeomError(format!("GDSII string is not valid ASCII/UTF-8: {e}")))
 }
 
-/// Parses a binary GDSII stream into a structured `GdsLibrary`.
+/// Parses a binary GDSII stream into a structured `GdsLibrary` using default [`GdsImportLimits`].
 pub fn parse_gds(bytes: &[u8]) -> GeomResult<GdsLibrary> {
+    parse_gds_with_limits(bytes, &GdsImportLimits::default())
+}
+
+/// Parses a binary GDSII stream into a structured `GdsLibrary` enforcing `limits`.
+pub fn parse_gds_with_limits(bytes: &[u8], limits: &GdsImportLimits) -> GeomResult<GdsLibrary> {
+    if bytes.len() > limits.max_file_bytes {
+        return Err(GeomError(format!(
+            "GDSII stream size {} bytes exceeds max_file_bytes limit ({})",
+            bytes.len(),
+            limits.max_file_bytes
+        )));
+    }
     if bytes.len() < 4 {
         return Err(GeomError("GDSII stream is empty or shorter than a 4-byte record header".into()));
     }
     let mut pos = 0usize;
+    let mut n_records = 0usize;
     let mut version: Option<i16> = None;
     let mut lib_name = String::new();
     let mut units: Option<(f64, f64)> = None;
@@ -376,6 +419,10 @@ pub fn parse_gds(bytes: &[u8]) -> GeomResult<GdsLibrary> {
     let mut saw_endlib = false;
 
     while pos < bytes.len() {
+        n_records += 1;
+        if n_records > limits.max_records {
+            return Err(GeomError(format!("GDSII stream exceeds max_records limit ({})", limits.max_records)));
+        }
         if pos + 4 > bytes.len() {
             return Err(GeomError(format!("GDSII stream has trailing truncated header at byte offset {pos}")));
         }
@@ -431,8 +478,13 @@ pub fn parse_gds(bytes: &[u8]) -> GeomResult<GdsLibrary> {
                         )));
                     }
                 };
+                if !uu.is_finite() || uu <= 0.0 {
+                    return Err(GeomError(format!("GDSII UNITS user unit ({uu}) must be finite and positive")));
+                }
                 if !dbu.is_finite() || dbu <= 0.0 {
-                    return Err(GeomError(format!("GDSII UNITS database unit in metres ({dbu}) must be positive")));
+                    return Err(GeomError(format!(
+                        "GDSII UNITS database unit in metres ({dbu}) must be finite and positive"
+                    )));
                 }
                 units = Some((uu, dbu));
             }
@@ -730,17 +782,44 @@ fn sin_cos_deg(deg: f64) -> (f64, f64) {
 impl GdsXf {
     const ID: Self = Self { m: [[1.0, 0.0], [0.0, 1.0]], t: [0.0, 0.0] };
 
-    fn from_instance(strans: u16, mag: f64, angle_deg: f64, origin: V2) -> Self {
+    fn check_finite(self, context: &str) -> GeomResult<Self> {
+        if self.m[0][0].is_finite()
+            && self.m[0][1].is_finite()
+            && self.m[1][0].is_finite()
+            && self.m[1][1].is_finite()
+            && self.t[0].is_finite()
+            && self.t[1].is_finite()
+        {
+            Ok(self)
+        } else {
+            Err(GeomError(format!("GDSII transform matrix has non-finite entries ({context})")))
+        }
+    }
+
+    fn from_instance(strans: u16, mag: f64, angle_deg: f64, origin: V2) -> GeomResult<Self> {
+        if !mag.is_finite() || mag <= 0.0 {
+            return Err(GeomError(format!("GDSII instance magnification ({mag}) must be finite and positive")));
+        }
+        if !angle_deg.is_finite() {
+            return Err(GeomError(format!("GDSII instance angle ({angle_deg}) must be finite")));
+        }
+        if !origin[0].is_finite() || !origin[1].is_finite() {
+            return Err(GeomError("GDSII instance origin is non-finite".into()));
+        }
         let sy = if (strans & STRANS_REFLECT_X) != 0 { -1.0 } else { 1.0 };
         let (sin, cos) = sin_cos_deg(angle_deg);
-        Self { m: [[mag * cos, -mag * sin * sy], [mag * sin, mag * cos * sy]], t: origin }
+        Self { m: [[mag * cos, -mag * sin * sy], [mag * sin, mag * cos * sy]], t: origin }.check_finite("instance")
     }
 
     fn apply(&self, p: V2) -> V2 {
         [self.m[0][0] * p[0] + self.m[0][1] * p[1] + self.t[0], self.m[1][0] * p[0] + self.m[1][1] * p[1] + self.t[1]]
     }
 
-    fn compose(&self, child: &Self) -> Self {
+    fn apply_dir(&self, d: V2) -> V2 {
+        [self.m[0][0] * d[0] + self.m[0][1] * d[1], self.m[1][0] * d[0] + self.m[1][1] * d[1]]
+    }
+
+    fn compose(&self, child: &Self) -> GeomResult<Self> {
         let a = &self.m;
         let b = &child.m;
         Self {
@@ -750,6 +829,7 @@ impl GdsXf {
             ],
             t: self.apply(child.t),
         }
+        .check_finite("composition")
     }
 
     fn scale(&self) -> f64 {
@@ -1067,61 +1147,540 @@ fn resolve_top_cell(lib: &GdsLibrary, explicit: Option<&str>, req_layers: &HashS
         .unwrap())
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CellMeta {
+    has_req: bool,
+    /// Conservative local AABB (in metres) of requested layers + pins in this cell's subtree, or
+    /// `None` if unknown/cyclic/unbounded (falls back to full traversal under budget limits).
+    req_bbox: Option<Aabb>,
+}
+
+fn transform_aabb_2d(bb: &Aabb, xf: &GdsXf) -> Option<Aabb> {
+    if bb.is_empty() {
+        return Some(Aabb::EMPTY);
+    }
+    let corners = [[bb.lo[0], bb.lo[1]], [bb.hi[0], bb.lo[1]], [bb.hi[0], bb.hi[1]], [bb.lo[0], bb.hi[1]]];
+    let mut out = Aabb::EMPTY;
+    for c in corners {
+        let p = xf.apply(c);
+        if !p[0].is_finite() || !p[1].is_finite() {
+            return None;
+        }
+        out.grow([p[0], p[1], 0.0]);
+    }
+    Some(out)
+}
+
+fn compute_cell_meta(
+    lib: &GdsLibrary,
+    cell_map: &HashMap<&str, usize>,
+    req_layers: &HashSet<(i16, i16)>,
+    pin_layer: Option<(i16, i16)>,
+) -> Vec<CellMeta> {
+    fn dfs(
+        lib: &GdsLibrary,
+        cell_map: &HashMap<&str, usize>,
+        req_layers: &HashSet<(i16, i16)>,
+        pin_layer: Option<(i16, i16)>,
+        idx: usize,
+        state: &mut [u8],
+        out: &mut [CellMeta],
+    ) -> CellMeta {
+        if state[idx] == 2 {
+            return out[idx];
+        }
+        if state[idx] == 1 {
+            // Cycle: keep `has_req = true, req_bbox = None` so `flatten_rec` catches the cycle cleanly.
+            return CellMeta { has_req: true, req_bbox: None };
+        }
+        state[idx] = 1;
+        let dbu_m = lib.dbu_m;
+        let to_m = |p: [i32; 2]| -> V2 { [p[0] as f64 * dbu_m, p[1] as f64 * dbu_m] };
+        let c = &lib.cells[idx];
+        let mut has_req = false;
+        let mut bb = Some(Aabb::EMPTY);
+
+        for b in &c.boundaries {
+            if req_layers.contains(&(b.layer, b.datatype)) && b.xy.len() >= 3 {
+                has_req = true;
+                if let Some(ref mut box_acc) = bb {
+                    for &p in &b.xy {
+                        let q = to_m(p);
+                        box_acc.grow([q[0], q[1], 0.0]);
+                    }
+                }
+            }
+        }
+        for p in &c.paths {
+            if p.width != 0 && req_layers.contains(&(p.layer, p.datatype)) && p.xy.len() >= 2 {
+                has_req = true;
+                if p.width < 0 {
+                    bb = None;
+                } else if let Some(ref mut box_acc) = bb {
+                    let w_m = (p.width.unsigned_abs() as f64) * dbu_m;
+                    let pad = 0.5 * w_m + ((p.bgnextn as f64).abs().max((p.endextn as f64).abs())) * dbu_m;
+                    let mut pbb = Aabb::EMPTY;
+                    for &q in &p.xy {
+                        let qm = to_m(q);
+                        pbb.grow([qm[0], qm[1], 0.0]);
+                    }
+                    let padded = pbb.pad(pad);
+                    *box_acc = box_acc.union(&padded);
+                }
+            }
+        }
+        if let Some((pl, ptt)) = pin_layer {
+            for t in &c.texts {
+                if t.layer == pl && t.texttype == ptt && !t.string.trim().is_empty() {
+                    has_req = true;
+                    if let Some(ref mut box_acc) = bb {
+                        let q = to_m(t.xy);
+                        box_acc.grow([q[0], q[1], 0.0]);
+                    }
+                }
+            }
+        }
+        for s in &c.srefs {
+            let Some(&ci) = cell_map.get(s.sname.as_str()) else {
+                has_req = true;
+                bb = None;
+                continue;
+            };
+            let cm = dfs(lib, cell_map, req_layers, pin_layer, ci, state, out);
+            if cm.has_req {
+                has_req = true;
+                match (bb.as_mut(), cm.req_bbox) {
+                    (Some(box_acc), Some(cbb)) => {
+                        if let Ok(xf) = GdsXf::from_instance(s.strans, s.mag, s.angle_deg, to_m(s.xy)) {
+                            if let Some(tbb) = transform_aabb_2d(&cbb, &xf) {
+                                *box_acc = box_acc.union(&tbb);
+                            } else {
+                                bb = None;
+                            }
+                        } else {
+                            bb = None;
+                        }
+                    }
+                    _ => bb = None,
+                }
+            }
+        }
+        for a in &c.arefs {
+            let Some(&ci) = cell_map.get(a.sname.as_str()) else {
+                has_req = true;
+                bb = None;
+                continue;
+            };
+            let cm = dfs(lib, cell_map, req_layers, pin_layer, ci, state, out);
+            if cm.has_req {
+                has_req = true;
+                match (bb.as_mut(), cm.req_bbox) {
+                    (Some(box_acc), Some(cbb)) if a.cols > 0 && a.rows > 0 && !cbb.is_empty() => {
+                        let p0 = to_m(a.xy[0]);
+                        let p1 = to_m(a.xy[1]);
+                        let p2 = to_m(a.xy[2]);
+                        let cols = a.cols as usize;
+                        let rows = a.rows as usize;
+                        let col_step = mul2(sub2(p1, p0), 1.0 / (cols as f64));
+                        let row_step = mul2(sub2(p2, p0), 1.0 / (rows as f64));
+                        if let Ok(lin) = GdsXf::from_instance(a.strans, a.mag, a.angle_deg, [0.0, 0.0]) {
+                            if let Some(rbb) = transform_aabb_2d(&cbb, &lin) {
+                                let corners = [(0usize, 0usize), (cols - 1, 0), (0, rows - 1), (cols - 1, rows - 1)];
+                                for (ic, ir) in corners {
+                                    let org = add2(p0, add2(mul2(col_step, ic as f64), mul2(row_step, ir as f64)));
+                                    box_acc.grow([org[0] + rbb.lo[0], org[1] + rbb.lo[1], 0.0]);
+                                    box_acc.grow([org[0] + rbb.hi[0], org[1] + rbb.hi[1], 0.0]);
+                                }
+                            } else {
+                                bb = None;
+                            }
+                        } else {
+                            bb = None;
+                        }
+                    }
+                    _ => bb = None,
+                }
+            }
+        }
+
+        let res = CellMeta { has_req, req_bbox: bb };
+        out[idx] = res;
+        state[idx] = 2;
+        res
+    }
+
+    let n = lib.cells.len();
+    let mut state = vec![0u8; n];
+    let mut out = vec![CellMeta { has_req: true, req_bbox: None }; n];
+    for i in 0..n {
+        if state[i] == 0 {
+            dfs(lib, cell_map, req_layers, pin_layer, i, &mut state, &mut out);
+        }
+    }
+    out
+}
+
+struct FlattenBudget<'a> {
+    limits: &'a GdsImportLimits,
+    req_layers: &'a HashSet<(i16, i16)>,
+    pin_layer: Option<(i16, i16)>,
+    roi: Option<[f64; 4]>,
+    cell_meta: &'a [CellMeta],
+    instances: usize,
+    polygons: usize,
+    records: usize,
+}
+
+impl<'a> FlattenBudget<'a> {
+    fn bump_records(&mut self, count: usize, cell_name: &str) -> GeomResult<()> {
+        self.records = self
+            .records
+            .checked_add(count)
+            .ok_or_else(|| GeomError(format!("GDSII record count overflow in cell '{cell_name}'")))?;
+        if self.records > self.limits.max_records {
+            return Err(GeomError(format!(
+                "GDSII flattened element count exceeds max_records limit ({}) at cell '{cell_name}'",
+                self.limits.max_records
+            )));
+        }
+        Ok(())
+    }
+
+    fn bump_instance(&mut self, count: usize, cell_name: &str) -> GeomResult<()> {
+        self.instances = self
+            .instances
+            .checked_add(count)
+            .ok_or_else(|| GeomError(format!("GDSII instance count overflow in cell '{cell_name}'")))?;
+        if self.instances > self.limits.max_instances {
+            return Err(GeomError(format!(
+                "GDSII hierarchy exceeds max_instances limit ({}) at cell '{cell_name}'",
+                self.limits.max_instances
+            )));
+        }
+        Ok(())
+    }
+
+    fn bump_polygon(&mut self, cell_name: &str) -> GeomResult<()> {
+        self.polygons = self
+            .polygons
+            .checked_add(1)
+            .ok_or_else(|| GeomError(format!("GDSII polygon count overflow in cell '{cell_name}'")))?;
+        if self.polygons > self.limits.max_polygons {
+            return Err(GeomError(format!(
+                "GDSII flattened geometry exceeds max_polygons limit ({}) at cell '{cell_name}'",
+                self.limits.max_polygons
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[inline]
+fn roi_overlaps_aabb(roi: [f64; 4], bb: &Aabb) -> bool {
+    !bb.is_empty() && bb.lo[0] <= roi[2] && roi[0] <= bb.hi[0] && bb.lo[1] <= roi[3] && roi[1] <= bb.hi[1]
+}
+
+#[inline]
+fn roi_contains_point(roi: [f64; 4], p: V2) -> bool {
+    p[0] >= roi[0] && p[0] <= roi[2] && p[1] >= roi[1] && p[1] <= roi[3]
+}
+
+fn constrain_linear_interval(step: f64, lo: f64, hi: f64, idx_lo: &mut usize, idx_hi: &mut usize) -> bool {
+    if *idx_lo > *idx_hi {
+        return false;
+    }
+    if step.abs() <= 1e-30 {
+        return lo <= 1e-12 && hi >= -1e-12;
+    }
+    let a = lo / step;
+    let b = hi / step;
+    let t_min = a.min(b) - 1e-6;
+    let t_max = a.max(b) + 1e-6;
+    let cur_lo = *idx_lo as f64;
+    let cur_hi = *idx_hi as f64;
+    if t_max < cur_lo || t_min > cur_hi {
+        return false;
+    }
+    *idx_lo = t_min.floor().clamp(cur_lo, cur_hi) as usize;
+    *idx_hi = t_max.ceil().clamp(cur_lo, cur_hi) as usize;
+    *idx_lo <= *idx_hi
+}
+
+struct ArefRoiWindow {
+    ir_lo: usize,
+    ir_hi: usize,
+    ic_lo: usize,
+    ic_hi: usize,
+    o_w: V2,
+    u_w: V2,
+    v_w: V2,
+    tx_lo: f64,
+    tx_hi: f64,
+    ty_lo: f64,
+    ty_hi: f64,
+    cols: usize,
+}
+
+impl ArefRoiWindow {
+    fn row_ic_range(&self, ir: usize) -> Option<(usize, usize)> {
+        let mut lo = self.ic_lo;
+        let mut hi = self.ic_hi;
+        let vx = (ir as f64) * self.v_w[0];
+        let vy = (ir as f64) * self.v_w[1];
+        if !constrain_linear_interval(self.u_w[0], self.tx_lo - vx, self.tx_hi - vx, &mut lo, &mut hi) {
+            return None;
+        }
+        if !constrain_linear_interval(self.u_w[1], self.ty_lo - vy, self.ty_hi - vy, &mut lo, &mut hi) {
+            return None;
+        }
+        let _ = self.o_w;
+        let _ = self.cols;
+        Some((lo, hi))
+    }
+}
+
+fn compute_aref_roi_window(
+    xf: &GdsXf,
+    a: &GdsAref,
+    dbu_m: f64,
+    child_bb: Aabb,
+    roi: [f64; 4],
+) -> GeomResult<Option<ArefRoiWindow>> {
+    if child_bb.is_empty() {
+        return Ok(None);
+    }
+    let cols = usize::try_from(a.cols).map_err(|_| GeomError("GDSII AREF cols must be positive".into()))?;
+    let rows = usize::try_from(a.rows).map_err(|_| GeomError("GDSII AREF rows must be positive".into()))?;
+    let to_m = |p: [i32; 2]| -> V2 { [p[0] as f64 * dbu_m, p[1] as f64 * dbu_m] };
+    let p0 = to_m(a.xy[0]);
+    let p1 = to_m(a.xy[1]);
+    let p2 = to_m(a.xy[2]);
+    let col_step = mul2(sub2(p1, p0), 1.0 / (cols as f64));
+    let row_step = mul2(sub2(p2, p0), 1.0 / (rows as f64));
+
+    let inst_lin = GdsXf::from_instance(a.strans, a.mag, a.angle_deg, [0.0, 0.0])?;
+    let world_lin = xf.compose(&inst_lin)?;
+    let rbb = transform_aabb_2d(&child_bb, &world_lin)
+        .ok_or_else(|| GeomError("GDSII AREF child bounding box overflowed to non-finite".into()))?;
+
+    let o_w = xf.apply(p0);
+    let u_w = xf.apply_dir(col_step);
+    let v_w = xf.apply_dir(row_step);
+    if !o_w[0].is_finite()
+        || !o_w[1].is_finite()
+        || !u_w[0].is_finite()
+        || !u_w[1].is_finite()
+        || !v_w[0].is_finite()
+        || !v_w[1].is_finite()
+    {
+        return Err(GeomError("GDSII AREF step transform produced non-finite coordinates".into()));
+    }
+
+    let tx_lo = roi[0] - rbb.hi[0] - o_w[0];
+    let tx_hi = roi[2] - rbb.lo[0] - o_w[0];
+    let ty_lo = roi[1] - rbb.hi[1] - o_w[1];
+    let ty_hi = roi[3] - rbb.lo[1] - o_w[1];
+    if tx_lo > tx_hi || ty_lo > ty_hi {
+        return Ok(None);
+    }
+
+    let det = u_w[0] * v_w[1] - u_w[1] * v_w[0];
+    let scale_uv = norm2(u_w) * norm2(v_w);
+    let (mut ic_lo, mut ic_hi, mut ir_lo, mut ir_hi) = (0usize, cols - 1, 0usize, rows - 1);
+
+    if scale_uv > 0.0 && det.abs() > 1e-12 * scale_uv {
+        let mut ic_min = f64::INFINITY;
+        let mut ic_max = f64::NEG_INFINITY;
+        let mut ir_min = f64::INFINITY;
+        let mut ir_max = f64::NEG_INFINITY;
+        for (tx, ty) in [(tx_lo, ty_lo), (tx_hi, ty_lo), (tx_hi, ty_hi), (tx_lo, ty_hi)] {
+            let ic = (tx * v_w[1] - ty * v_w[0]) / det;
+            let ir = (u_w[0] * ty - u_w[1] * tx) / det;
+            if !ic.is_finite() || !ir.is_finite() {
+                return Err(GeomError("GDSII AREF ROI projection became non-finite".into()));
+            }
+            ic_min = ic_min.min(ic);
+            ic_max = ic_max.max(ic);
+            ir_min = ir_min.min(ir);
+            ir_max = ir_max.max(ir);
+        }
+        if ic_max < -1e-6 || ic_min > (cols - 1) as f64 + 1e-6 || ir_max < -1e-6 || ir_min > (rows - 1) as f64 + 1e-6 {
+            return Ok(None);
+        }
+        ic_lo = (ic_min - 1e-6).floor().clamp(0.0, (cols - 1) as f64) as usize;
+        ic_hi = (ic_max + 1e-6).ceil().clamp(0.0, (cols - 1) as f64) as usize;
+        ir_lo = (ir_min - 1e-6).floor().clamp(0.0, (rows - 1) as f64) as usize;
+        ir_hi = (ir_max + 1e-6).ceil().clamp(0.0, (rows - 1) as f64) as usize;
+    } else {
+        let (ux_lo, ux_hi) = (0.0_f64.min((cols - 1) as f64 * u_w[0]), 0.0_f64.max((cols - 1) as f64 * u_w[0]));
+        let (uy_lo, uy_hi) = (0.0_f64.min((cols - 1) as f64 * u_w[1]), 0.0_f64.max((cols - 1) as f64 * u_w[1]));
+        if !constrain_linear_interval(v_w[0], tx_lo - ux_hi, tx_hi - ux_lo, &mut ir_lo, &mut ir_hi) {
+            return Ok(None);
+        }
+        if !constrain_linear_interval(v_w[1], ty_lo - uy_hi, ty_hi - uy_lo, &mut ir_lo, &mut ir_hi) {
+            return Ok(None);
+        }
+        let (vx_lo, vx_hi) = (0.0_f64.min((rows - 1) as f64 * v_w[0]), 0.0_f64.max((rows - 1) as f64 * v_w[0]));
+        let (vy_lo, vy_hi) = (0.0_f64.min((rows - 1) as f64 * v_w[1]), 0.0_f64.max((rows - 1) as f64 * v_w[1]));
+        if !constrain_linear_interval(u_w[0], tx_lo - vx_hi, tx_hi - vx_lo, &mut ic_lo, &mut ic_hi) {
+            return Ok(None);
+        }
+        if !constrain_linear_interval(u_w[1], ty_lo - vy_hi, ty_hi - vy_lo, &mut ic_lo, &mut ic_hi) {
+            return Ok(None);
+        }
+    }
+
+    if ir_lo > ir_hi || ic_lo > ic_hi {
+        return Ok(None);
+    }
+
+    Ok(Some(ArefRoiWindow { ir_lo, ir_hi, ic_lo, ic_hi, o_w, u_w, v_w, tx_lo, tx_hi, ty_lo, ty_hi, cols }))
+}
+
 fn flatten_rec(
     lib: &GdsLibrary,
     cell_map: &HashMap<&str, usize>,
     cell_idx: usize,
     xf: GdsXf,
     depth: usize,
-    pin_layer: Option<(i16, i16)>,
+    budget: &mut FlattenBudget<'_>,
     out: &mut FlatWorld,
 ) -> GeomResult<()> {
-    if depth > 64 {
+    let cell = &lib.cells[cell_idx];
+    if depth > budget.limits.max_depth {
         return Err(GeomError(format!(
-            "GDSII hierarchy exceeds 64 levels at cell '{}' (cyclic SREF/AREF?)",
-            lib.cells[cell_idx].name
+            "GDSII hierarchy exceeds {} levels at cell '{}' (cyclic SREF/AREF?)",
+            budget.limits.max_depth, cell.name
         )));
     }
+    let elem_count = cell.boundaries.len() + cell.paths.len() + cell.texts.len() + cell.srefs.len() + cell.arefs.len();
+    budget.bump_records(elem_count, &cell.name)?;
+
     let dbu_m = lib.dbu_m;
     let to_m = |p: [i32; 2]| -> V2 { [p[0] as f64 * dbu_m, p[1] as f64 * dbu_m] };
-    let cell = &lib.cells[cell_idx];
 
     for b in &cell.boundaries {
-        let mut pts: Vec<V2> = b.xy.iter().map(|&p| xf.apply(to_m(p))).collect();
-        for &q in &pts {
-            out.all_bbox.grow([q[0], q[1], 0.0]);
-        }
-        if pts.len() >= 3 {
-            if polygon_area(&pts) < 0.0 {
-                pts.reverse();
+        let is_req = budget.req_layers.contains(&(b.layer, b.datatype));
+        if !is_req {
+            if budget.roi.is_none() {
+                for &p in &b.xy {
+                    let q = xf.apply(to_m(p));
+                    if !q[0].is_finite() || !q[1].is_finite() {
+                        return Err(GeomError(format!(
+                            "GDSII boundary in '{}' produced non-finite coordinates",
+                            cell.name
+                        )));
+                    }
+                    out.all_bbox.grow([q[0], q[1], 0.0]);
+                }
             }
-            out.polys.entry((b.layer, b.datatype)).or_default().push(pts);
+            continue;
         }
+        if b.xy.len() < 3 {
+            continue;
+        }
+        let mut elem_bb = Aabb::EMPTY;
+        let mut pts: Vec<V2> = Vec::with_capacity(b.xy.len());
+        for &p in &b.xy {
+            let q = xf.apply(to_m(p));
+            if !q[0].is_finite() || !q[1].is_finite() {
+                return Err(GeomError(format!("GDSII boundary in '{}' produced non-finite coordinates", cell.name)));
+            }
+            elem_bb.grow([q[0], q[1], 0.0]);
+            pts.push(q);
+        }
+        if let Some(roi) = budget.roi {
+            if !roi_overlaps_aabb(roi, &elem_bb) {
+                continue;
+            }
+        }
+        out.all_bbox = out.all_bbox.union(&elem_bb);
+        budget.bump_polygon(&cell.name)?;
+        if polygon_area(&pts) < 0.0 {
+            pts.reverse();
+        }
+        out.polys.entry((b.layer, b.datatype)).or_default().push(pts);
     }
 
     for p in &cell.paths {
         if p.width == 0 {
             continue;
         }
+        let is_req = budget.req_layers.contains(&(p.layer, p.datatype));
         let scale = if p.width < 0 { 1.0 } else { xf.scale() };
         let w_m = (p.width.unsigned_abs() as f64) * dbu_m * scale;
         let bgn_m = (p.bgnextn as f64) * dbu_m * scale;
         let end_m = (p.endextn as f64) * dbu_m * scale;
-        let center: Vec<V2> = p.xy.iter().map(|&q| xf.apply(to_m(q))).collect();
-        for poly in expand_path_polygons(&center, w_m, p.pathtype, bgn_m, end_m) {
-            for &q in &poly {
-                out.all_bbox.grow([q[0], q[1], 0.0]);
+        if !w_m.is_finite() || !bgn_m.is_finite() || !end_m.is_finite() {
+            return Err(GeomError(format!("GDSII path width/extension in '{}' is non-finite", cell.name)));
+        }
+        if !is_req {
+            if budget.roi.is_none() {
+                let pad = 0.5 * w_m + bgn_m.abs().max(end_m.abs());
+                let mut pbb = Aabb::EMPTY;
+                for &q in &p.xy {
+                    let pt = xf.apply(to_m(q));
+                    if !pt[0].is_finite() || !pt[1].is_finite() {
+                        return Err(GeomError(format!(
+                            "GDSII path in '{}' produced non-finite coordinates",
+                            cell.name
+                        )));
+                    }
+                    pbb.grow([pt[0], pt[1], 0.0]);
+                }
+                if !pbb.is_empty() {
+                    out.all_bbox = out.all_bbox.union(&pbb.pad(pad));
+                }
             }
+            continue;
+        }
+        let mut center: Vec<V2> = Vec::with_capacity(p.xy.len());
+        let mut cbb = Aabb::EMPTY;
+        for &q in &p.xy {
+            let pt = xf.apply(to_m(q));
+            if !pt[0].is_finite() || !pt[1].is_finite() {
+                return Err(GeomError(format!("GDSII path in '{}' produced non-finite coordinates", cell.name)));
+            }
+            cbb.grow([pt[0], pt[1], 0.0]);
+            center.push(pt);
+        }
+        if let Some(roi) = budget.roi {
+            let pad = 0.5 * w_m + bgn_m.abs().max(end_m.abs());
+            if !roi_overlaps_aabb(roi, &cbb.pad(pad)) {
+                continue;
+            }
+        }
+        for poly in expand_path_polygons(&center, w_m, p.pathtype, bgn_m, end_m) {
+            let mut pbb = Aabb::EMPTY;
+            for &q in &poly {
+                pbb.grow([q[0], q[1], 0.0]);
+            }
+            if let Some(roi) = budget.roi {
+                if !roi_overlaps_aabb(roi, &pbb) {
+                    continue;
+                }
+            }
+            out.all_bbox = out.all_bbox.union(&pbb);
+            budget.bump_polygon(&cell.name)?;
             out.polys.entry((p.layer, p.datatype)).or_default().push(poly);
         }
     }
 
-    if let Some((pl, ptt)) = pin_layer {
+    if let Some((pl, ptt)) = budget.pin_layer {
         for t in &cell.texts {
             if t.layer == pl && t.texttype == ptt {
                 let label = t.string.trim().to_string();
                 if !label.is_empty() {
-                    out.pins.push(FlatPin { label, pos: xf.apply(to_m(t.xy)) });
+                    let pos = xf.apply(to_m(t.xy));
+                    if !pos[0].is_finite() || !pos[1].is_finite() {
+                        return Err(GeomError(format!(
+                            "GDSII TEXT pin in '{}' produced non-finite coordinates",
+                            cell.name
+                        )));
+                    }
+                    if budget.roi.is_none_or(|roi| roi_contains_point(roi, pos)) {
+                        out.pins.push(FlatPin { label, pos });
+                    }
                 }
             }
         }
@@ -1131,24 +1690,93 @@ fn flatten_rec(
         let &target = cell_map
             .get(s.sname.as_str())
             .ok_or_else(|| GeomError(format!("GDSII SREF in '{}' references unknown cell '{}'", cell.name, s.sname)))?;
-        let child_xf = GdsXf::from_instance(s.strans, s.mag, s.angle_deg, to_m(s.xy));
-        flatten_rec(lib, cell_map, target, xf.compose(&child_xf), depth + 1, pin_layer, out)?;
+        let child_xf = GdsXf::from_instance(s.strans, s.mag, s.angle_deg, to_m(s.xy))?;
+        let next_xf = xf.compose(&child_xf)?;
+        let cmeta = budget.cell_meta[target];
+        if !cmeta.has_req {
+            continue;
+        }
+        if let (Some(roi), Some(cbb)) = (budget.roi, cmeta.req_bbox) {
+            if let Some(wbb) = transform_aabb_2d(&cbb, &next_xf) {
+                if !roi_overlaps_aabb(roi, &wbb) {
+                    continue;
+                }
+            }
+        }
+        budget.bump_instance(1, &cell.name)?;
+        flatten_rec(lib, cell_map, target, next_xf, depth + 1, budget, out)?;
     }
 
     for a in &cell.arefs {
         let &target = cell_map
             .get(a.sname.as_str())
             .ok_or_else(|| GeomError(format!("GDSII AREF in '{}' references unknown cell '{}'", cell.name, a.sname)))?;
+        let cols = usize::try_from(a.cols)
+            .ok()
+            .filter(|&c| c > 0)
+            .ok_or_else(|| GeomError(format!("GDSII AREF cols ({}) in '{}' must be positive", a.cols, cell.name)))?;
+        let rows = usize::try_from(a.rows)
+            .ok()
+            .filter(|&r| r > 0)
+            .ok_or_else(|| GeomError(format!("GDSII AREF rows ({}) in '{}' must be positive", a.rows, cell.name)))?;
+        let total_cells = rows.checked_mul(cols).ok_or_else(|| {
+            GeomError(format!("GDSII AREF dimensions {}x{} overflow usize in '{}'", rows, cols, cell.name))
+        })?;
+
+        let cmeta = budget.cell_meta[target];
+        if !cmeta.has_req {
+            // Lazy layer clipping: skip million-element arrays with no requested layer or pin geometry.
+            continue;
+        }
+
         let p0 = to_m(a.xy[0]);
         let p1 = to_m(a.xy[1]);
         let p2 = to_m(a.xy[2]);
-        let col_step = mul2(sub2(p1, p0), 1.0 / (a.cols as f64));
-        let row_step = mul2(sub2(p2, p0), 1.0 / (a.rows as f64));
-        for ir in 0..a.rows {
-            for ic in 0..a.cols {
-                let origin = add2(p0, add2(mul2(col_step, ic as f64), mul2(row_step, ir as f64)));
-                let child_xf = GdsXf::from_instance(a.strans, a.mag, a.angle_deg, origin);
-                flatten_rec(lib, cell_map, target, xf.compose(&child_xf), depth + 1, pin_layer, out)?;
+        let col_step = mul2(sub2(p1, p0), 1.0 / (cols as f64));
+        let row_step = mul2(sub2(p2, p0), 1.0 / (rows as f64));
+
+        if let (Some(roi), Some(cbb)) = (budget.roi, cmeta.req_bbox) {
+            let Some(win) = compute_aref_roi_window(&xf, a, dbu_m, cbb, roi)? else {
+                // Lazy ROI clipping: array lies completely outside ROI, skip before allocation.
+                continue;
+            };
+            let span_ir = win.ir_hi - win.ir_lo + 1;
+            let span_ic = win.ic_hi - win.ic_lo + 1;
+            if span_ir > budget.limits.max_instances.saturating_mul(4).max(4096)
+                && span_ic > budget.limits.max_instances.saturating_mul(4).max(4096)
+            {
+                return Err(GeomError(format!(
+                    "GDSII AREF ROI window ({span_ir}x{span_ic}) exceeds max_instances limit ({}) in '{}'",
+                    budget.limits.max_instances, cell.name
+                )));
+            }
+            for ir in win.ir_lo..=win.ir_hi {
+                let Some((ic_lo, ic_hi)) = win.row_ic_range(ir) else {
+                    continue;
+                };
+                for ic in ic_lo..=ic_hi {
+                    budget.bump_instance(1, &cell.name)?;
+                    let origin = add2(p0, add2(mul2(col_step, ic as f64), mul2(row_step, ir as f64)));
+                    let child_xf = GdsXf::from_instance(a.strans, a.mag, a.angle_deg, origin)?;
+                    let next_xf = xf.compose(&child_xf)?;
+                    flatten_rec(lib, cell_map, target, next_xf, depth + 1, budget, out)?;
+                }
+            }
+        } else {
+            if budget.instances.checked_add(total_cells).is_none_or(|n| n > budget.limits.max_instances) {
+                return Err(GeomError(format!(
+                    "GDSII AREF ({rows}x{cols} = {total_cells} instances) exceeds max_instances limit ({}) in '{}'",
+                    budget.limits.max_instances, cell.name
+                )));
+            }
+            for ir in 0..rows {
+                for ic in 0..cols {
+                    budget.bump_instance(1, &cell.name)?;
+                    let origin = add2(p0, add2(mul2(col_step, ic as f64), mul2(row_step, ir as f64)));
+                    let child_xf = GdsXf::from_instance(a.strans, a.mag, a.angle_deg, origin)?;
+                    let next_xf = xf.compose(&child_xf)?;
+                    flatten_rec(lib, cell_map, target, next_xf, depth + 1, budget, out)?;
+                }
             }
         }
     }
@@ -1233,19 +1861,29 @@ fn point_strictly_in_ring(ring: &[V2], p: V2, tol: f64) -> bool {
 
 /// Decomposes one raw GDSII `BOUNDARY` polygon (which may contain keyhole cutlines `u -> v` and
 /// `v -> u` connecting an exterior hull to one or more interior CW holes) into simple `(outer_ccw, holes_cw)` pairs.
-fn decompose_raw_polygon(raw: &[V2]) -> Vec<IslandRings> {
+fn decompose_raw_polygon(raw: &[V2], max_vertices: usize) -> GeomResult<Vec<IslandRings>> {
+    if raw.len() > max_vertices {
+        return Err(GeomError(format!(
+            "GDSII polygon has {} vertices, exceeding max_decompose_vertices limit ({})",
+            raw.len(),
+            max_vertices
+        )));
+    }
     let mut bb = Aabb::EMPTY;
     for &p in raw {
+        if !p[0].is_finite() || !p[1].is_finite() {
+            return Err(GeomError("GDSII polygon contains non-finite vertex coordinates".into()));
+        }
         bb.grow([p[0], p[1], 0.0]);
     }
     let diag = bb.diagonal();
     if !diag.is_finite() || diag <= 1e-30 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let snap_tol = 1e-12 * diag;
     let mut pts = clean_ring(raw, snap_tol);
     if pts.len() < 3 || shoelace_area(&pts) <= 1e-24 * diag * diag {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if polygon_area(&pts) < 0.0 {
         pts.reverse();
@@ -1253,9 +1891,9 @@ fn decompose_raw_polygon(raw: &[V2]) -> Vec<IslandRings> {
     if is_simple_ring(&pts, snap_tol) {
         let c = strip_collinear(&pts, snap_tol);
         if c.len() >= 3 && shoelace_area(&c) > 1e-24 * diag * diag {
-            return vec![(canonicalize_ring(c, true), Vec::new())];
+            return Ok(vec![(canonicalize_ring(c, true), Vec::new())]);
         }
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     // Intern vertices within snap_tol.
@@ -1426,7 +2064,7 @@ fn decompose_raw_polygon(raw: &[V2]) -> Vec<IslandRings> {
     }
 
     if outers.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let outer_areas: Vec<f64> = outers.iter().map(|o| shoelace_area(o)).collect();
     let mut grouped: Vec<IslandRings> = outers.into_iter().map(|o| (o, Vec::new())).collect();
@@ -1439,7 +2077,7 @@ fn decompose_raw_polygon(raw: &[V2]) -> Vec<IslandRings> {
             grouped[best].1.push(h);
         }
     }
-    grouped
+    Ok(grouped)
 }
 
 /// Pre-snaps vertices and T-junctions within `snap_r` across all rings of a layer so near-coincident
@@ -1551,11 +2189,11 @@ fn loop_to_ring(cx: &Complex, li: usize, col_tol: f64, want_ccw: bool) -> Vec<V2
 
 /// Boolean-unions all decomposed polygons of a layer via `geom::arrange` and returns disconnected
 /// `(outer_ccw, holes_cw)` islands.
-fn union_layer_polygons(raw_polys: &[Vec<V2>]) -> GeomResult<Vec<IslandRings>> {
+fn union_layer_polygons(raw_polys: &[Vec<V2>], max_decompose_vertices: usize) -> GeomResult<Vec<IslandRings>> {
     let mut pieces: Vec<IslandRings> = Vec::new();
     let mut bb = Aabb::EMPTY;
     for raw in raw_polys {
-        for (o, hs) in decompose_raw_polygon(raw) {
+        for (o, hs) in decompose_raw_polygon(raw, max_decompose_vertices)? {
             for &p in &o {
                 bb.grow([p[0], p[1], 0.0]);
             }
@@ -1728,15 +2366,56 @@ fn unique_sheet_name(base: &str, used: &mut HashSet<String>) -> String {
     unreachable!()
 }
 
-/// Parses and imports a binary GDSII stream according to `opts`.
+/// Parses and imports a binary GDSII stream according to `opts` using default [`GdsImportLimits`].
 pub fn import_gds_bytes(bytes: &[u8], opts: &GdsImportOptions) -> GeomResult<GdsImportResult> {
-    let lib = parse_gds(bytes)?;
-    import_gds_library(&lib, opts)
+    import_gds_bytes_with_limits(bytes, opts, &GdsImportLimits::default(), None)
+}
+
+/// Parses and imports a binary GDSII stream according to `opts`, enforcing `limits` and optional
+/// 2D ROI clipping box `[xmin, ymin, xmax, ymax]` in metres.
+pub fn import_gds_bytes_with_limits(
+    bytes: &[u8],
+    opts: &GdsImportOptions,
+    limits: &GdsImportLimits,
+    roi: Option<[f64; 4]>,
+) -> GeomResult<GdsImportResult> {
+    let lib = parse_gds_with_limits(bytes, limits)?;
+    import_gds_library_with_limits(&lib, opts, limits, roi)
 }
 
 /// Flattens `lib`, boolean-unions requested layers, splits/orders islands, applies optional
-/// `simplify_tol`, and matches `TEXT` pins.
+/// `simplify_tol`, and matches `TEXT` pins using default [`GdsImportLimits`].
 pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResult<GdsImportResult> {
+    import_gds_library_with_limits(lib, opts, &GdsImportLimits::default(), None)
+}
+
+/// Flattens `lib`, boolean-unions requested layers, splits/orders islands, applies optional
+/// `simplify_tol`, and matches `TEXT` pins while enforcing `limits` and optional 2D ROI `[xmin, ymin, xmax, ymax]` in metres.
+pub fn import_gds_library_with_limits(
+    lib: &GdsLibrary,
+    opts: &GdsImportOptions,
+    limits: &GdsImportLimits,
+    roi: Option<[f64; 4]>,
+) -> GeomResult<GdsImportResult> {
+    if !lib.user_unit.is_finite() || lib.user_unit <= 0.0 {
+        return Err(GeomError(format!("GDSII library user_unit ({}) must be finite and positive", lib.user_unit)));
+    }
+    if !lib.dbu_m.is_finite() || lib.dbu_m <= 0.0 {
+        return Err(GeomError(format!("GDSII library dbu_m ({}) must be finite and positive", lib.dbu_m)));
+    }
+    if let Some([xmin, ymin, xmax, ymax]) = roi {
+        if !xmin.is_finite()
+            || !ymin.is_finite()
+            || !xmax.is_finite()
+            || !ymax.is_finite()
+            || xmin > xmax
+            || ymin > ymax
+        {
+            return Err(GeomError(format!(
+                "import_gds ROI [{xmin}, {ymin}, {xmax}, {ymax}] must be finite with xmin <= xmax and ymin <= ymax"
+            )));
+        }
+    }
     if opts.layers.is_empty() {
         return Err(GeomError("import_gds requires at least one entry in `layers`".into()));
     }
@@ -1754,9 +2433,20 @@ pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResu
     let top_idx = resolve_top_cell(lib, opts.cell.as_deref(), &req_set)?;
     let top_name = lib.cells[top_idx].name.clone();
     let cell_map: HashMap<&str, usize> = lib.cells.iter().enumerate().map(|(i, c)| (c.name.as_str(), i)).collect();
+    let cell_meta = compute_cell_meta(lib, &cell_map, &req_set, opts.pin_layer);
 
     let mut world = FlatWorld::default();
-    flatten_rec(lib, &cell_map, top_idx, GdsXf::ID, 0, opts.pin_layer, &mut world)?;
+    let mut budget = FlattenBudget {
+        limits,
+        req_layers: &req_set,
+        pin_layer: opts.pin_layer,
+        roi,
+        cell_meta: &cell_meta,
+        instances: 0,
+        polygons: 0,
+        records: 0,
+    };
+    flatten_rec(lib, &cell_map, top_idx, GdsXf::ID, 0, &mut budget, &mut world)?;
 
     // Deterministically sort flattened pins.
     world
@@ -1774,7 +2464,7 @@ pub fn import_gds_library(lib: &GdsLibrary, opts: &GdsImportOptions) -> GeomResu
 
     for (key, ld) in &opts.layers {
         let mut islands = match world.polys.get(ld) {
-            Some(polys) => union_layer_polygons(polys)?,
+            Some(polys) => union_layer_polygons(polys, limits.max_decompose_vertices)?,
             None => Vec::new(),
         };
         let mut ext_bb = Aabb::EMPTY;

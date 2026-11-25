@@ -4,7 +4,7 @@ One page per component, C4 level 4. [Component view](../../3-components/geom.md)
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Feature list](./featurelist.md) | 6 | 3726 | 117 | 34 |
+| [Feature list](./featurelist.md) | 6 | 4416 | 121 | 35 |
 | [Evaluation](./evaluation.md) | 3 | 2133 | 47 | 14 |
 | [2D kernel](./kernel2d.md) | 5 | 4357 | 138 | 25 |
 | [3D kernel](./kernel3d.md) | 3 | 2762 | 17 | 6 |

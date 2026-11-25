@@ -3,7 +3,7 @@ featurelist = component "Feature list" "The serialisable feature list (single so
     properties {
         "adr" "2, 3, 63"
         "code" "crates/geom/src: error.rs, expr.rs, gds.rs, lib.rs, model.rs, print.rs"
-        "lines" "3726"
+        "lines" "4416"
         "codeDiagram" "4-code/geom/featurelist.md"
     }
 }

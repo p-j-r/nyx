@@ -617,10 +617,38 @@ fn check_packed_budget(
     Ok(shape)
 }
 
-fn read_text(g: &Group, name: &str, budget: &ReadBudgetConfig) -> Result<String, String> {
+fn attr_nonneg_usize(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<usize, String> {
+    let Some(v) = attrs.get(name) else {
+        return Ok(0);
+    };
+    if let Some(i) = v.as_i64() {
+        if i < 0 {
+            return Err(format!("HDF5 {name}: negative integer {i}"));
+        }
+        return usize::try_from(i).map_err(|_| format!("HDF5 {name}: value {i} overflows usize"));
+    }
+    if let Some(u) = v.as_u64() {
+        return usize::try_from(u).map_err(|_| format!("HDF5 {name}: value {u} overflows usize"));
+    }
+    Ok(0)
+}
+
+fn add_total_bytes(total: &mut u64, bytes: u64, budget: &ReadBudgetConfig, name: &str) -> Result<(), String> {
+    *total = total.checked_add(bytes).ok_or_else(|| format!("HDF5 {name}: cumulative read byte count overflow"))?;
+    if *total > budget.max_total_result_bytes {
+        return Err(format!(
+            "HDF5 {name}: cumulative result size {} B exceeds read budget {} B",
+            *total, budget.max_total_result_bytes
+        ));
+    }
+    Ok(())
+}
+
+fn read_text(g: &Group, name: &str, budget: &ReadBudgetConfig, total: &mut u64) -> Result<String, String> {
     let ds = g.dataset(name).map_err(e(name))?;
     check_budget(&ds, 1, budget, name)?;
     let bytes = ds.read_u8().map_err(e(name))?;
+    add_total_bytes(total, bytes.len() as u64, budget, name)?;
     String::from_utf8(bytes).map_err(|x| format!("HDF5 {name}: {x}"))
 }
 
@@ -705,12 +733,13 @@ pub struct ResultsFileInfo {
 /// Reads the header summary of a results file via `File::open_streaming` without loading mesh or field arrays.
 pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
     let budget = ReadBudgetConfig::from_env();
+    let mut total_bytes = 0u64;
     let file = File::open_streaming(path).map_err(e("open file"))?;
     check_nyx_header(&file)?;
     let root_grp = file.root();
     let root_attrs = root_grp.attrs().map_err(e("root attributes"))?;
     let fields_saved = attr_bool(&root_attrs, "fields_saved").unwrap_or(true);
-    let project = read_text(&root_grp, "project", &budget)?;
+    let project = read_text(&root_grp, "project", &budget, &mut total_bytes)?;
 
     let (dim, points, cells) = if fields_saved {
         let m = file.group("mesh").map_err(e("mesh group"))?;
@@ -735,7 +764,11 @@ pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
     for name in codes {
         let g = res_root.group(&name).map_err(e("physics group"))?;
         let g_attrs = g.attrs().map_err(e("physics attributes"))?;
-        let scalars = parse_scalars(&read_text(&g, "scalars", &budget)?);
+        let scalars = parse_scalars(&read_text(&g, "scalars", &budget, &mut total_bytes)?);
+        let n_solutions = attr_nonneg_usize(&g_attrs, "n_solutions")?;
+        if n_solutions > budget.max_solutions {
+            return Err(format!("HDF5 {name}: n_solutions {n_solutions} exceeds read budget {}", budget.max_solutions));
+        }
         let summary = PhysicsSummary {
             physics: attr_str(&g_attrs, "physics").unwrap_or_else(|| name.clone()),
             study: attr_str(&g_attrs, "study").unwrap_or_default(),
@@ -743,7 +776,7 @@ pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
             dim: attr_i64(&g_attrs, "dim") as u8,
             dofs: attr_i64(&g_attrs, "dofs"),
             seconds: attr_f64(&g_attrs, "seconds").unwrap_or(0.0),
-            solutions: attr_i64(&g_attrs, "n_solutions"),
+            solutions: n_solutions,
             scalars,
         };
         results.push((name, summary));
@@ -769,27 +802,14 @@ pub fn read_results(path: &Path) -> Result<Stored, String> {
 
 /// Reads a results file back using `File::open_streaming` and an explicit [`ReadBudgetConfig`].
 pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result<Stored, String> {
+    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let file = File::open_streaming(path).map_err(e("open file"))?;
     check_nyx_header(&file)?;
     let root_grp = file.root();
     let root_attrs = root_grp.attrs().map_err(e("root attributes"))?;
     let fields_saved = attr_bool(&root_attrs, "fields_saved").unwrap_or(true);
-    let project = read_text(&root_grp, "project", &budget)?;
-
-    let mut total_read_bytes = project.len() as u64;
-    let mut add_total = |bytes: u64, name: &str| -> Result<(), String> {
-        total_read_bytes = total_read_bytes
-            .checked_add(bytes)
-            .ok_or_else(|| format!("HDF5 {name}: cumulative read byte count overflow"))?;
-        if total_read_bytes > budget.max_total_result_bytes {
-            return Err(format!(
-                "HDF5 {name}: cumulative result size {total_read_bytes} B exceeds read budget {} B",
-                budget.max_total_result_bytes
-            ));
-        }
-        Ok(())
-    };
-    add_total(0, "project")?;
+    let mut total_read_bytes = 0u64;
+    let project = read_text(&root_grp, "project", &budget, &mut total_read_bytes)?;
 
     let mesh = if fields_saved {
         let m = file.group("mesh").map_err(e("mesh group"))?;
@@ -807,15 +827,15 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
         check_budget(&ds_fl, 4, &budget, "facet labels")?;
 
         let pts_v = pts.read_f64().map_err(e("points"))?;
-        add_total((pts_v.len() as u64) * 8, "points")?;
+        add_total_bytes(&mut total_read_bytes, (pts_v.len() as u64) * 8, &budget, "points")?;
         let cells_v = ds_cells.read_u32().map_err(e("cells"))?;
-        add_total((cells_v.len() as u64) * 4, "cells")?;
+        add_total_bytes(&mut total_read_bytes, (cells_v.len() as u64) * 4, &budget, "cells")?;
         let cl_v = ds_cl.read_i32().map_err(e("cell labels"))?;
-        add_total((cl_v.len() as u64) * 4, "cell labels")?;
+        add_total_bytes(&mut total_read_bytes, (cl_v.len() as u64) * 4, &budget, "cell labels")?;
         let facets_v = ds_facets.read_u32().map_err(e("facets"))?;
-        add_total((facets_v.len() as u64) * 4, "facets")?;
+        add_total_bytes(&mut total_read_bytes, (facets_v.len() as u64) * 4, &budget, "facets")?;
         let fl_v = ds_fl.read_i32().map_err(e("facet labels"))?;
-        add_total((fl_v.len() as u64) * 4, "facet labels")?;
+        add_total_bytes(&mut total_read_bytes, (fl_v.len() as u64) * 4, &budget, "facet labels")?;
 
         let mut mesh = SimplexMesh::new(dim, pts_v, cells_v, cl_v, facets_v, fl_v);
         // optional curved edges: a file without them is a straight mesh
@@ -823,9 +843,9 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             check_budget(&p, 4, &budget, "edge node pairs")?;
             check_budget(&q, 8, &budget, "edge node points")?;
             let pairs = p.read_u32().map_err(e("edge node pairs"))?;
-            add_total((pairs.len() as u64) * 4, "edge node pairs")?;
+            add_total_bytes(&mut total_read_bytes, (pairs.len() as u64) * 4, &budget, "edge node pairs")?;
             let pos = q.read_f64().map_err(e("edge node points"))?;
-            add_total((pos.len() as u64) * 8, "edge node points")?;
+            add_total_bytes(&mut total_read_bytes, (pos.len() as u64) * 8, &budget, "edge node points")?;
             let nodes: Vec<([u32; 2], [f64; 3])> =
                 pairs.as_chunks::<2>().0.iter().copied().zip(pos.as_chunks::<3>().0.iter().copied()).collect();
             mesh.set_edge_nodes(&nodes);
@@ -833,7 +853,7 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
         if let Ok(qp_ds) = m.dataset("qp_edge_pairs") {
             check_budget(&qp_ds, 4, &budget, "qp edge pairs")?;
             let qp_raw = qp_ds.read_u32().map_err(e("qp edge pairs"))?;
-            add_total((qp_raw.len() as u64) * 4, "qp edge pairs")?;
+            add_total_bytes(&mut total_read_bytes, (qp_raw.len() as u64) * 4, &budget, "qp edge pairs")?;
             let qp_edges: Vec<[u32; 2]> = qp_raw.as_chunks::<2>().0.to_vec();
             mesh.set_qp_edges(&qp_edges);
         }
@@ -854,7 +874,14 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
         let g = root.group(&name).map_err(e("physics group"))?;
         let g_attrs = g.attrs().map_err(e("physics attributes"))?;
         let g_fields_saved = attr_bool(&g_attrs, "fields_saved").unwrap_or(fields_saved);
-        let n_solutions = attr_i64(&g_attrs, "n_solutions");
+        let n_solutions = attr_nonneg_usize(&g_attrs, "n_solutions")?;
+        if n_solutions > budget.max_solutions {
+            return Err(format!("HDF5 {name}: n_solutions {n_solutions} exceeds read budget {}", budget.max_solutions));
+        }
+        let sol_cap = n_solutions.min((file_size / 64) as usize).min(4096);
+        let scalars = parse_scalars(&read_text(&g, "scalars", &budget, &mut total_read_bytes)?);
+        let log: Vec<String> =
+            serde_json::from_str(&read_text(&g, "log", &budget, &mut total_read_bytes)?).unwrap_or_default();
         let mut r = SolveResult {
             physics: attr_str(&g_attrs, "physics").unwrap_or_else(|| name.clone()),
             study: attr_str(&g_attrs, "study").unwrap_or_default(),
@@ -862,9 +889,9 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             dim: attr_i64(&g_attrs, "dim") as u8,
             dofs: attr_i64(&g_attrs, "dofs"),
             seconds: attr_f64(&g_attrs, "seconds").unwrap_or(0.0),
-            scalars: parse_scalars(&read_text(&g, "scalars", &budget)?),
-            log: serde_json::from_str(&read_text(&g, "log", &budget)?).unwrap_or_default(),
-            solutions: Vec::with_capacity(n_solutions),
+            scalars,
+            log,
+            solutions: Vec::with_capacity(sol_cap),
         };
 
         let packed_cf = if g_fields_saved {
@@ -877,9 +904,9 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
                     .iter()
                     .try_fold(8u64, |acc, &d| acc.checked_mul(d))
                     .ok_or("HDF5 cell_fields_packed: byte size overflow")?;
-                add_total(packed_total, "cell_fields_packed")?;
+                add_total_bytes(&mut total_read_bytes, packed_total, &budget, "cell_fields_packed")?;
                 let ri = p_shape[4] as usize;
-                let meta_json = read_text(&g, "cell_fields_meta", &budget)?;
+                let meta_json = read_text(&g, "cell_fields_meta", &budget, &mut total_read_bytes)?;
                 let meta: Vec<PackedComponentMeta> =
                     serde_json::from_str(&meta_json).map_err(|x| format!("HDF5 cell_fields_meta: {x}"))?;
                 if meta.len() != p_shape[1] as usize {
@@ -916,6 +943,12 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             if let (Some(re), Some(im)) = (attr_f64(&sg_attrs, "eig_re"), attr_f64(&sg_attrs, "eig_im")) {
                 s.eigenvalue = Some([re, im]);
             }
+            add_total_bytes(
+                &mut total_read_bytes,
+                (std::mem::size_of::<Solution>() + s.label.len()) as u64,
+                &budget,
+                "solution metadata",
+            )?;
 
             if g_fields_saved {
                 let fg = sg.group("fields").map_err(e("fields"))?;
@@ -926,7 +959,7 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
                     check_budget(&ds, 8, &budget, &n)?;
                     let ds_attrs = ds.attrs().map_err(e(&n))?;
                     let values = ds.read_f64().map_err(e(&n))?;
-                    add_total((values.len() as u64) * 8, &n)?;
+                    add_total_bytes(&mut total_read_bytes, (values.len() as u64) * 8, &budget, &n)?;
                     s.fields.push(Field {
                         name: attr_str(&ds_attrs, "name").unwrap_or_else(|| n.clone()),
                         unit: attr_str(&ds_attrs, "unit").unwrap_or_default(),
@@ -976,12 +1009,12 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
                         let ds_re = fgp.dataset("re").map_err(e("re"))?;
                         check_budget(&ds_re, 8, &budget, "re")?;
                         let re = ds_re.read_f64().map_err(e("re"))?;
-                        add_total((re.len() as u64) * 8, "re")?;
+                        add_total_bytes(&mut total_read_bytes, (re.len() as u64) * 8, &budget, "re")?;
                         let im = match fgp.dataset("im") {
                             Ok(ds_im) => {
                                 check_budget(&ds_im, 8, &budget, "im")?;
                                 let im_v = ds_im.read_f64().map_err(e("im"))?;
-                                add_total((im_v.len() as u64) * 8, "im")?;
+                                add_total_bytes(&mut total_read_bytes, (im_v.len() as u64) * 8, &budget, "im")?;
                                 im_v
                             }
                             Err(_) => vec![],
