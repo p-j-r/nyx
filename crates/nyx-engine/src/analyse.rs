@@ -6,7 +6,8 @@
 use crate::engine::Engine;
 use nyx_analysis::{
     tls_participation_quasi_electrostatic, Analysis, CapacitanceMatrixAnalysis, EprAnalysis, HamiltonianAnalysis,
-    InductanceMatrixAnalysis, ModeAnalysis, NetworkAnalysis, PolarizationAnalysis, TlsParticipationAnalysis,
+    InductanceMatrixAnalysis, ModeAnalysis, NetworkAnalysis, PiezoResonatorAnalysis, PolarizationAnalysis,
+    TlsParticipationAnalysis,
 };
 use nyx_physics::{CapacitanceMatrixData, CircuitRom, Error};
 use serde_json::{json, Value};
@@ -21,6 +22,7 @@ pub fn analyses() -> Vec<Box<dyn Analysis>> {
         Box::new(HamiltonianAnalysis),
         Box::new(TlsParticipationAnalysis),
         Box::new(NetworkAnalysis),
+        Box::new(PiezoResonatorAnalysis),
     ]
 }
 

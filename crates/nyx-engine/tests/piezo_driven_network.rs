@@ -3,10 +3,11 @@
 //! End-to-end M2 round-trip checks connecting `nyx-sms` `Study::Driven` -> `nyx-analysis::NetworkAnalysis`
 //! plus `nyx-engine` `study_frequency` and `chain_key_for_project` calibration keys.
 
-use femcore::material::{Anisotropy, Stiffness, Tensor};
+use femcore::material::{coupled::EPSILON_0, Anisotropy, Stiffness, Tensor};
 use femcore::props::Materials;
 use femcore::testkit::block;
-use nyx_analysis::{network_applies, network_with_params};
+use nyx_analysis::{network_applies, network_with_params, piezo_resonator_applies, piezo_resonator_with_params};
+use nyx_engine::analyse::analyses;
 use nyx_engine::estimate::chain_key_for_project;
 use nyx_engine::materials::study_frequency;
 use nyx_engine::project::Project;
@@ -14,6 +15,7 @@ use nyx_physics::{Mesh, ProblemSpec};
 use nyx_sms::problem::{Bc, BcKind, Problem, Study};
 use nyx_sms::Sms;
 use serde_json::json;
+use std::f64::consts::PI;
 
 #[test]
 fn sms_driven_piezo_round_trips_through_network_analysis_and_engine_keys() {
@@ -82,4 +84,79 @@ fn sms_driven_piezo_round_trips_through_network_analysis_and_engine_keys() {
 
     project.physics[0] = ProblemSpec::new("sms", 1, "static");
     assert_eq!(chain_key_for_project(&project, &["sms".into()]), "sms");
+}
+
+#[test]
+fn sms_driven_baw_recovers_mbvd_and_analytical_kt2_via_piezo_resonator() {
+    let (lx, ly, d) = (0.4e-6, 0.4e-6, 2.0e-6);
+    let area = lx * ly;
+    let simplex = block(lx, ly, d, 1, 1, 16);
+    let mesh = Mesh::from_solver_mesh(&simplex).unwrap();
+
+    let (c33_e, e33, eps33_s, rho) = (389e9_f64, 1.55_f64, 10.12_f64, 3260.0_f64);
+    let mut visc = [[0.0; 6]; 6];
+    for row in &mut visc {
+        for v in row.iter_mut() {
+            *v = 0.0;
+        }
+    }
+    for (i, row) in visc.iter_mut().enumerate() {
+        row[i] = 2.0e-4;
+    }
+    let mut mats = Materials::default();
+    mats.default.insert("rho".into(), rho);
+    mats.aniso.insert(
+        1,
+        Anisotropy {
+            stiffness: Some(Stiffness::Hexagonal { c11: 410e9, c12: 149e9, c13: 99e9, c33: c33_e, c44: 125e9 }),
+            permittivity: Some(Tensor::Diagonal { x: 9.21, y: 9.21, z: eps33_s }),
+            permittivity_im: Some(Tensor::Diagonal { x: 9.21 * 1e-3, y: 9.21 * 1e-3, z: eps33_s * 1e-3 }),
+            piezo_e: Some([
+                [0.0, 0.0, 0.0, 0.0, -0.48, 0.0],
+                [0.0, 0.0, 0.0, -0.48, 0.0, 0.0],
+                [-0.58, -0.58, e33, 0.0, 0.0, 0.0],
+            ]),
+            viscosity: Some(visc),
+            ..Default::default()
+        },
+    );
+
+    let mut prob = Problem::new(
+        Study::Driven {
+            f_min: 2.65e9,
+            f_max: 2.90e9,
+            n_points: 121,
+            freqs_hz: None,
+            prom_tol: Some(1e-7),
+            max_hdm_solves: 14,
+            strict_prom_tol: true,
+            seed_freqs_hz: vec![],
+            solver: "auto".into(),
+            blr_tol: 1e-8,
+        },
+        2,
+    );
+    prob.materials = mats;
+    prob.bcs = vec![
+        Bc { labels: vec![1, 6], kind: BcKind::Fixed { fixed: [true, false, false], values: [0.0; 3] } },
+        Bc { labels: vec![2, 5], kind: BcKind::Fixed { fixed: [false, true, false], values: [0.0; 3] } },
+        Bc { labels: vec![3], kind: BcKind::Ground },
+        Bc { labels: vec![4], kind: BcKind::Terminal { name: "top".into(), z0_ohm: 50.0 } },
+    ];
+
+    let res = nyx_sms::run(&mesh, &prob, &femcore::progress::Progress::new()).unwrap();
+    assert!(piezo_resonator_applies(&res));
+    assert!(analyses().iter().any(|a| a.id() == "piezo_resonator"));
+
+    let rep = piezo_resonator_with_params(&res, &json!({ "fix_r_s_ohm": 0.0 })).unwrap();
+    let c33_d = c33_e + e33 * e33 / (eps33_s * EPSILON_0);
+    let fp_exact = (c33_d / rho).sqrt() / (2.0 * d);
+    let kt2_exact = (e33 * e33) / (c33_d * eps33_s * EPSILON_0);
+    let c0_exact = eps33_s * EPSILON_0 * area / d;
+
+    assert!((rep.f_p_hz / fp_exact - 1.0).abs() < 2e-3, "f_p mismatch: {} vs {fp_exact}", rep.f_p_hz);
+    assert!((rep.k_t2_ieee / kt2_exact - 1.0).abs() < 2e-2, "k_t^2 mismatch: {} vs {kt2_exact}", rep.k_t2_ieee);
+    assert!((rep.c0_f / c0_exact - 1.0).abs() < 2e-2, "C0 mismatch: {} vs {c0_exact}", rep.c0_f);
+    assert!(rep.fit_residual < 5e-3, "fit_residual {}", rep.fit_residual);
+    let _ = PI;
 }
