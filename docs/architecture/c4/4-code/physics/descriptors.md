@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Descriptors and schemas** (`physics.descrip
 > What a physics tells nyx about itself (studies, conditions, parameters) and the JSON Schemas generated from it for the window, the MCP server and the documentation.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 2 files, 380 lines.
+**Size:** 2 files, 414 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-physics/src/desc.rs` | 253 |  |
-| `crates/nyx-physics/src/schema.rs` | 127 |  |
+| `crates/nyx-physics/src/desc.rs` | 255 |  |
+| `crates/nyx-physics/src/schema.rs` | 159 |  |
 
 ## What it uses
 
@@ -97,6 +97,7 @@ classDiagram
         <<enumeration>>
         Scalar
         Tensor
+        Matrix3x6
         Dispersive
     }
     class PropDesc {
@@ -149,10 +150,10 @@ classDiagram
 | struct | `StudyDesc` | `desc.rs:144` | fields: `kind`, `name`, `doc`, `dims`, `params` —  A kind of study (stationary, eigenfrequency, modes, ...). |
 | enum | `Applies` | `desc.rs:156` | variants: `Boundary`, `Domain` —  Whether a boundary condition sits on a boundary (facet) selection or fills a domain. |
 | struct | `BcDesc` | `desc.rs:162` | fields: `kind`, `name`, `doc`, `applies`, `params` |
-| enum | `PropKind` | `desc.rs:173` | variants: `Scalar`, `Tensor`, `Dispersive` —  How a material property is given. |
-| struct | `PropDesc` | `desc.rs:182` | fields: `name`, `label`, `unit`, `kind`, `needed_by`, `default` |
-| struct | `FieldDesc` | `desc.rs:216` | fields: `name`, `unit`, `components`, `doc` —  A field a study produces. Components are named in wafer axes (`x` lateral, `y` propagation, `z` normal); empty is a scalar. |
-| struct | `FieldLink` | `desc.rs:237` | fields: `field`, `role` —  One end of a one-way coupling between two physics (restructure plan section 2). A physics *exports* fields under a `role` and |
+| enum | `PropKind` | `desc.rs:173` | variants: `Scalar`, `Tensor`, `Matrix3x6`, `Dispersive` —  How a material property is given. |
+| struct | `PropDesc` | `desc.rs:184` | fields: `name`, `label`, `unit`, `kind`, `needed_by`, `default` |
+| struct | `FieldDesc` | `desc.rs:218` | fields: `name`, `unit`, `components`, `doc` —  A field a study produces. Components are named in wafer axes (`x` lateral, `y` propagation, `z` normal); empty is a scalar. |
+| struct | `FieldLink` | `desc.rs:239` | fields: `field`, `role` —  One end of a one-way coupling between two physics (restructure plan section 2). A physics *exports* fields under a `role` and |
 | fn | `ParamDesc::number` | `desc.rs:76` | `pub fn number(name: &str, label: &str, unit: &str, default: f64, doc: &str) -> ParamDesc` |
 | fn | `ParamDesc::integer` | `desc.rs:79` | `pub fn integer(name: &str, label: &str, default: i64, min: i64, doc: &str) -> ParamDesc` |
 | fn | `ParamDesc::boolean` | `desc.rs:82` | `pub fn boolean(name: &str, label: &str, default: bool, doc: &str) -> ParamDesc` |
@@ -164,8 +165,8 @@ classDiagram
 | fn | `ParamDesc::numbers` | `desc.rs:117` | `pub fn numbers(name: &str, label: &str, unit: &str, doc: &str) -> ParamDesc` |
 | fn | `ParamDesc::required` | `desc.rs:121` | `pub fn required(mut self) -> ParamDesc` —  Marks the parameter as one that must be given. |
 | fn | `ParamDesc::range` | `desc.rs:126` | `pub fn range(mut self, lo: Option<f64>, hi: Option<f64>) -> ParamDesc` —  Sets the allowed range of a number or an integer. |
-| fn | `PropDesc::new` | `desc.rs:195` | `pub fn new( name: &str, label: &str, unit: &str, kind: PropKind, needed_by: &[&str], default: Option<f64>, ) -> PropDesc` |
-| fn | `FieldDesc::new` | `desc.rs:224` | `pub fn new(name: &str, unit: &str, components: &[&str], doc: &str) -> FieldDesc` |
-| fn | `FieldLink::new` | `desc.rs:245` | `pub fn new(field: &str, role: &str) -> FieldLink` |
+| fn | `PropDesc::new` | `desc.rs:197` | `pub fn new( name: &str, label: &str, unit: &str, kind: PropKind, needed_by: &[&str], default: Option<f64>, ) -> PropDesc` |
+| fn | `FieldDesc::new` | `desc.rs:226` | `pub fn new(name: &str, unit: &str, components: &[&str], doc: &str) -> FieldDesc` |
+| fn | `FieldLink::new` | `desc.rs:247` | `pub fn new(field: &str, role: &str) -> FieldLink` |
 | fn | `params_schema` | `schema.rs:76` | `pub fn params_schema(descs: &[ParamDesc]) -> Value` —  The schema of an object made of `descs`: unknown keys are refused, required ones listed. |
 | fn | `physics_schema` | `schema.rs:86` | `pub fn physics_schema(p: &dyn Physics) -> Value` —  The schema of a `ProblemSpec` for `p`: its study kinds, condition kinds, property names and physics options. |

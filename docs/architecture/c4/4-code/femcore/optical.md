@@ -30,7 +30,7 @@ C4 level 4 (code) of the component **Optical mode sets** (`femcore.optical`) in 
 | [ems: Axisymmetric kernel](../ems/axisym.md) | optical | EPS0, MU0, fine_rule |
 | [ems: Mode kernel](../ems/modes.md) | optical | C0 |
 | [ems: Complex-mode kernel](../ems/modescx.md) | optical | EpsC, MuC, cell_materials |
-| [ems: Optical mode sets](../ems/optical.md) | optical | OptMode, OpticalSet, absorbing_domains, cell_materials_signed |
+| [ems: Optical mode sets](../ems/optical.md) | optical | OptMode, OpticalSet, cell_materials_signed |
 
 ## Class diagram
 

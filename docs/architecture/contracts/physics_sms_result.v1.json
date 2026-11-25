@@ -466,6 +466,164 @@
     ],
     "study": "modes"
   },
+  "piezo_driven": {
+    "physics": "sms",
+    "scalars": [
+      "driven port matrix",
+      "C_0 (F)",
+      "hdm_solves",
+      "symbolic_count",
+      "rom_dim",
+      "max_prom_residual",
+      "rom_sweep_seconds",
+      "f_res_Hz",
+      "field frame"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz",
+          "phi"
+        ],
+        "fields": [
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "u",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "phi",
+            "unit": "a.u."
+          }
+        ],
+        "flat": [
+          "|u|",
+          "ux",
+          "uz",
+          "phi"
+        ],
+        "has_value": true,
+        "label": "driven (P1): 0.002000 MHz"
+      }
+    ],
+    "study": "driven"
+  },
+  "piezo_static": {
+    "physics": "",
+    "scalars": [
+      "max |u| (m)",
+      "max von Mises (Pa)",
+      "min phi (V)",
+      "max phi (V)",
+      "max |E| (V/m)",
+      "elastic energy (J)",
+      "dielectric energy (J)",
+      "mechanical energy share",
+      "electrical energy share",
+      "charge 1 (C)",
+      "charge 2 (C)",
+      "capacitance (F)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "ux",
+          "uz",
+          "phi",
+          "Ex",
+          "Ez",
+          "Dx",
+          "Dz",
+          "von Mises",
+          "sxx",
+          "szz",
+          "sxz",
+          "syy"
+        ],
+        "fields": [
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "u",
+            "unit": "m"
+          },
+          {
+            "components": [],
+            "name": "phi",
+            "unit": "V"
+          },
+          {
+            "components": [],
+            "name": "von Mises",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "sxx",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "szz",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "sxz",
+            "unit": "Pa"
+          },
+          {
+            "components": [],
+            "name": "syy",
+            "unit": "Pa"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "E",
+            "unit": "V/m"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "D",
+            "unit": "C/m^2"
+          }
+        ],
+        "flat": [
+          "|u|",
+          "ux",
+          "uz",
+          "phi",
+          "von Mises",
+          "sxx",
+          "szz",
+          "sxz",
+          "syy",
+          "|E|",
+          "Ex",
+          "Ez",
+          "|D|",
+          "Dx",
+          "Dz"
+        ],
+        "has_value": false,
+        "label": "static"
+      }
+    ],
+    "study": ""
+  },
   "static": {
     "physics": "sms",
     "scalars": [

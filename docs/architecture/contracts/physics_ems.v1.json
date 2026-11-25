@@ -1720,6 +1720,30 @@
                 }
               },
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "an oriented material by name and Bunge Euler angles",
+              "properties": {
+                "euler_deg": {
+                  "description": "Bunge Z-X-Z Euler angles in degrees",
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                },
+                "material": {
+                  "description": "a material by name",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "material",
+                "euler_deg"
+              ],
+              "type": "object"
             }
           ]
         },

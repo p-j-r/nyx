@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 > Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md)  
-**Size:** 8 files, 3533 lines.
+**Size:** 8 files, 3946 lines.
 
 ## Files
 
@@ -15,7 +15,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 | `crates/femcore/src/linalg/amg.rs` | 327 | Smoothed-aggregation algebraic multigrid for real and **complex symmetric** matrices (port items "AMG for complex symmetric matrices" and the multigrid half of the shifted-Laplacian preconditioner, P2). |
 | `crates/femcore/src/linalg/amg_elastic/mod.rs` | 1304 | Smoothed-aggregation algebraic multigrid and a preconditioned conjugate gradient solver for large symmetric positive definite systems (3D elasticity and diffusion with millions of unknowns, where a sparse direct factorisation needs too m... |
 | `crates/femcore/src/linalg/amg_elastic/single.rs` | 68 | The single-precision matrix copy used by the multigrid cycles, and a dot product. |
-| `crates/femcore/src/linalg/ams.rs` | 559 | **Auxiliary-space Maxwell solver** (AMS, Hiptmair–Xu) for lowest-order `H(curl)` matrices (port item P1), for the curl-curl-plus-mass operator `A = K + βM` (also complex symmetric). |
+| `crates/femcore/src/linalg/ams.rs` | 972 | **Auxiliary-space Maxwell solver** (AMS, Hiptmair–Xu) for lowest-order `H(curl)` matrices (port item P1), for the curl-curl-plus-mass operator `A = K + βM` (also complex symmetric). |
 | `crates/femcore/src/linalg/fieldsplit.rs` | 280 | Field-split and Schur-complement preconditioners (port item P5; the role of PETSc `PCFIELDSPLIT`) for coupled problems: saddle points, piezoelectric `(u, φ)`, thermo-mechanical or opto-mechanical couplings. |
 | `crates/femcore/src/linalg/ilu.rs` | 445 | Incomplete factorisations as preconditioners (port item P3): **ILU(k)**, **ILUT** and **incomplete Cholesky** (IC(k); Hermitian `LLᴴ` or complex-symmetric `LLᵀ`), for real and complex matrices. Sequential and deterministic; natural o... |
 | `crates/femcore/src/linalg/schwarz.rs` | 354 | Overlapping **additive and restricted additive Schwarz** preconditioners (port item P4; the role of PETSc `PCASM`) with exact local solves by sparse factorisation and an optional Nicolaides coarse space (one constant per subdomain), for ... |
@@ -24,9 +24,10 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 
 | Target | Modules | Items |
 |---|---|---|
-| [Matrices and vectors](./lacore.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map, for_chunks_mut |
+| [Matrices and vectors](./lacore.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar, linalg::vecops | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map, for_chunks_mut |
 | [Direct solvers](./ladirect.md) | linalg::direct | Definiteness, DirectSolve, ShiftedFactorization, ShiftedSolver, SolverError |
 | [Linear algebra driver](./ladriver.md) | linalg::driver | DirectSolver |
+| [Krylov solvers](./laksp.md) | linalg::ksp, linalg::ksp::gmres | Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances |
 | [Runtime services](./runtime.md) | par, progress | check, lap_since, note, stage, threads |
 
 ## Used by
@@ -35,9 +36,14 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 |---|---|---|
 | [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::amg_elastic | AmgOptions |
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::amg_elastic | spmm |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::amg_elastic, linalg::ams | AmsFgmresOptions, AmsFgmresSolver, AmsP2Topology, assemble_shifted_curl_curl, spmm |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::amg_elastic | spmm |
-| [Finite-element basics](./fem.md) | linalg::amg_elastic | Amg, AmgOptions, block_pcg, pcg |
+| [ems: Native mixed-cell EM](../ems/mixed.md) | linalg::ams | Ams, AmsOptions |
+| [Finite-element basics](./fem.md) | linalg::amg_elastic, linalg::ams | Amg, AmgOptions, AmsP2Topology, block_pcg, pcg |
+| [Matrices and vectors](./lacore.md) | linalg::ams | Ams, AmsFgmresOptions, AmsFgmresSolver, AmsFgmresStats, AmsOptions, AmsP2, AmsP2Options, AmsP2Topology +3 |
 | [Linear algebra driver](./ladriver.md) | linalg::ams | AmsP2, AmsP2Options, AmsP2Topology |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::amg_elastic | AmgOptions |
+| [sms: Solid kernel](../sms/solid.md) | linalg::amg_elastic | Amg, AmgOptions, pcg |
 
 ## Class diagram
 
@@ -166,6 +172,44 @@ classDiagram
         +dim() usize
         +nnz_storage() usize
     }
+    class AmsFgmresOptions {
+        <<struct>>
+        +rtol f64
+        +atol f64
+        +max_it usize
+        +restart usize
+        +flexible bool
+        +ams AmsOptions
+        +ams_p2 AmsP2Options
+    }
+    class AmsFgmresStats {
+        <<struct>>
+        +total_iterations usize
+        +max_relative_residual f64
+        +all_converged bool
+        +preconditioner_nnz usize
+    }
+    class AmsFgmresSolver {
+        <<struct>>
+        +new_p1(a, pc_matrix, g, edge_vectors, opts) Result
+        +new_p2(a, pc_matrix, topo, opts) Result
+        +update_matrix(a, pc_matrix) Result
+        +dim() usize
+        +preconditioner_nnz() usize
+        +options() AmsFgmresOptions
+        +solve_one(rhs) tuple
+        +solve_many(rhs_cols) tuple
+        +more_2_methods()
+    }
+    class AmsPrecondKind {
+        <<impl block>>
+    }
+    class fns_linalg_ams_rs {
+        <<module linalg/ams.rs>>
+        +assemble_shifted_curl_curl(k, c_damp, m, k0) tuple
+        +solve_ams_fgmres_many(a, pc_matrix, g, edge_vectors, rhs_cols, opts) Result
+        +solve_ams_p2_fgmres_many(a, pc_matrix, topo, rhs_cols, opts) Result
+    }
   }
   namespace linalg_fieldsplit_rs {
     class SplitKind {
@@ -251,6 +295,8 @@ classDiagram
   AmsOptions --> AmgOptions
   AmsP2Options --> AmsOptions
   AmsP2Options --> AmgOptions
+  AmsFgmresOptions --> AmsOptions
+  AmsFgmresOptions --> AmsP2Options
   SchwarzOptions --> SchwarzKind
 ```
 
@@ -291,16 +337,32 @@ classDiagram
 | fn | `Csr32::nnz` | `linalg/amg_elastic/single.rs:30` | `pub fn nnz(&self) -> usize` |
 | fn | `Csr32::matvec_into` | `linalg/amg_elastic/single.rs:41` | `pub fn matvec_into(&self, x: &[f64], y: &mut [f64])` |
 | fn | `Csr32::matvec` | `linalg/amg_elastic/single.rs:55` | `pub fn matvec(&self, x: &[f64]) -> Vec<f64>` |
-| struct | `AmsOptions` | `linalg/ams.rs:35` | fields: `amg`, `smoother_sweeps` |
-| struct | `Ams` | `linalg/ams.rs:56` |  |
-| struct | `AmsP2Topology` | `linalg/ams.rs:187` | fields: `p1_to_p2`, `gradient_p1`, `gradient_p2`, `edge_vectors`, `blocks` —  Topological operators connecting a second-order ($P_2$) Nédélec `H(curl)` space to its |
-| struct | `AmsP2Options` | `linalg/ams.rs:208` | fields: `coarse_ams`, `amg_g2`, `smoother_sweeps`, `coarse_sweeps` |
-| struct | `AmsP2` | `linalg/ams.rs:413` |  **Auxiliary-space Maxwell solver for second-order ($P_2$) Nédélec `H(curl)` spaces** (p-multigrid |
-| fn | `Ams::new` | `linalg/ams.rs:76` | `pub fn new(a: &Csr<T>, g: &Csr<f64>, edge_vectors: &[[f64; 3]], opts: &AmsOptions) -> Result<Self, SolverError>` —  `a`: the edge matrix (SPD, or complex symmetric); `g`: discrete gradient (edges × interior |
-| fn | `Ams::nnz_storage` | `linalg/ams.rs:135` | `pub fn nnz_storage(&self) -> usize` —  Approximate total sparse matrix non-zeros stored across this AMS hierarchy (for memory comparisons). |
-| fn | `AmsP2::new` | `linalg/ams.rs:429` | `pub fn new(a: &Csr<T>, topo: &AmsP2Topology, opts: &AmsP2Options) -> Result<Self, SolverError>` —  Builds the $P_2$ AMS preconditioner for `a` (`ndofs_p2 × ndofs_p2`, SPD or complex symmetric |
-| fn | `AmsP2::dim` | `linalg/ams.rs:489` | `pub fn dim(&self) -> usize` |
-| fn | `AmsP2::nnz_storage` | `linalg/ams.rs:495` | `pub fn nnz_storage(&self) -> usize` —  Approximate total sparse matrix non-zeros stored across this $P_2$ AMS preconditioner |
+| struct | `AmsOptions` | `linalg/ams.rs:37` | fields: `amg`, `smoother_sweeps` |
+| struct | `Ams` | `linalg/ams.rs:58` |  |
+| struct | `AmsP2Topology` | `linalg/ams.rs:189` | fields: `p1_to_p2`, `gradient_p1`, `gradient_p2`, `edge_vectors`, `blocks` —  Topological operators connecting a second-order ($P_2$) Nédélec `H(curl)` space to its |
+| struct | `AmsP2Options` | `linalg/ams.rs:210` | fields: `coarse_ams`, `amg_g2`, `smoother_sweeps`, `coarse_sweeps` |
+| struct | `AmsP2` | `linalg/ams.rs:415` |  **Auxiliary-space Maxwell solver for second-order ($P_2$) Nédélec `H(curl)` spaces** (p-multigrid |
+| struct | `AmsFgmresOptions` | `linalg/ams.rs:567` | fields: `rtol`, `atol`, `max_it`, `restart`, `flexible`, `ams`, `ams_p2` —  Options for [`AmsFgmresSolver`] (deterministic right-preconditioned FGMRES/GMRES driven by |
+| struct | `AmsFgmresStats` | `linalg/ams.rs:600` | fields: `total_iterations`, `max_relative_residual`, `all_converged`, `preconditioner_nnz` —  Summary statistics of one [`AmsFgmresSolver::solve_one`] or [`AmsFgmresSolver::solve_many`] call. |
+| fn | `assemble_shifted_curl_curl` | `linalg/ams.rs:647` | `pub fn assemble_shifted_curl_curl( k: &Csr<C64>, c_damp: Option<&Csr<C64>>, m: &Csr<C64>, k0: f64, ) -> (Csr<C64>, Csr<C64>)` —  Assembles the complex-symmetric driven curl-curl operator and its shifted-Laplacian auxiliary |
+| struct | `AmsFgmresSolver` | `linalg/ams.rs:668` |  Deterministic preconditioned FGMRES/GMRES solver driven by [`Ams`] ($P_1$) or [`AmsP2`] ($P_2$) |
+| fn | `solve_ams_fgmres_many` | `linalg/ams.rs:853` | `pub fn solve_ams_fgmres_many<T: FaerScalar>( a: &Csr<T>, pc_matrix: Option<&Csr<T>>, g: &Csr<f64>, edge_vectors: &[[f64; 3]], rhs_cols: &[Vec<T>], opts: &AmsFgmresOptions, ) -> Result<(Vec<Vec<T>>, AmsFgmresStats), SolverError>` —  Convenience helper solving `A X = B` for multiple RHS columns using $P_1$ [`Ams`] + deterministic FGMRES. |
+| fn | `solve_ams_p2_fgmres_many` | `linalg/ams.rs:866` | `pub fn solve_ams_p2_fgmres_many<T: FaerScalar>( a: &Csr<T>, pc_matrix: Option<&Csr<T>>, topo: &AmsP2Topology, rhs_cols: &[Vec<T>], opts: &AmsFgmresOptions, ) -> Result<(Vec<Vec<T>>, AmsFgmresStats), SolverError>` —  Convenience helper solving `A X = B` for multiple RHS columns using $P_2$ [`AmsP2`] + deterministic FGMRES. |
+| fn | `Ams::new` | `linalg/ams.rs:78` | `pub fn new(a: &Csr<T>, g: &Csr<f64>, edge_vectors: &[[f64; 3]], opts: &AmsOptions) -> Result<Self, SolverError>` —  `a`: the edge matrix (SPD, or complex symmetric); `g`: discrete gradient (edges × interior |
+| fn | `Ams::nnz_storage` | `linalg/ams.rs:137` | `pub fn nnz_storage(&self) -> usize` —  Approximate total sparse matrix non-zeros stored across this AMS hierarchy (for memory comparisons). |
+| fn | `AmsP2::new` | `linalg/ams.rs:431` | `pub fn new(a: &Csr<T>, topo: &AmsP2Topology, opts: &AmsP2Options) -> Result<Self, SolverError>` —  Builds the $P_2$ AMS preconditioner for `a` (`ndofs_p2 × ndofs_p2`, SPD or complex symmetric |
+| fn | `AmsP2::dim` | `linalg/ams.rs:491` | `pub fn dim(&self) -> usize` |
+| fn | `AmsP2::nnz_storage` | `linalg/ams.rs:497` | `pub fn nnz_storage(&self) -> usize` —  Approximate total sparse matrix non-zeros stored across this $P_2$ AMS preconditioner |
+| fn | `AmsFgmresSolver::new_p1` | `linalg/ams.rs:680` | `pub fn new_p1( a: &Csr<T>, pc_matrix: Option<&Csr<T>>, g: &Csr<f64>, edge_vectors: &[[f64; 3]], opts: AmsFgmresOptions, ) -> Result<Self, SolverError>` —  Builds a $P_1$ `Ams`-preconditioned FGMRES/GMRES solver for `a`. |
+| fn | `AmsFgmresSolver::new_p2` | `linalg/ams.rs:708` | `pub fn new_p2( a: &Csr<T>, pc_matrix: Option<&Csr<T>>, topo: &AmsP2Topology, opts: AmsFgmresOptions, ) -> Result<Self, SolverError>` —  Builds a $P_2$ `AmsP2`-preconditioned FGMRES/GMRES solver for `a`. |
+| fn | `AmsFgmresSolver::update_matrix` | `linalg/ams.rs:733` | `pub fn update_matrix(&mut self, a: &Csr<T>, pc_matrix: Option<&Csr<T>>) -> Result<(), SolverError>` —  Updates the system matrix `a` (and optional auxiliary preconditioner matrix `pc_matrix`) at a |
+| fn | `AmsFgmresSolver::dim` | `linalg/ams.rs:752` | `pub fn dim(&self) -> usize` |
+| fn | `AmsFgmresSolver::preconditioner_nnz` | `linalg/ams.rs:756` | `pub fn preconditioner_nnz(&self) -> usize` |
+| fn | `AmsFgmresSolver::options` | `linalg/ams.rs:760` | `pub fn options(&self) -> &AmsFgmresOptions` |
+| fn | `AmsFgmresSolver::solve_one` | `linalg/ams.rs:765` | `pub fn solve_one(&self, rhs: &[T]) -> (Vec<T>, AmsFgmresStats)` —  Solves `A x = rhs` for a single right-hand side using deterministic FGMRES/GMRES. |
+| fn | `AmsFgmresSolver::solve_many` | `linalg/ams.rs:797` | `pub fn solve_many(&self, rhs_cols: &[Vec<T>]) -> (Vec<Vec<T>>, AmsFgmresStats)` —  Solves `A X = B` across multiple right-hand-side columns using deterministic FGMRES/GMRES. |
+| fn | `AmsFgmresSolver::new_shifted_complex_p1` | `linalg/ams.rs:824` | `pub fn new_shifted_complex_p1( k: &Csr<C64>, c_damp: Option<&Csr<C64>>, m: &Csr<C64>, k0: f64, g: &Csr<f64>, edge_vectors: &[[f64; 3]], opts: AmsFgmresOptions, ) -> Result<Self, SolverError>` —  Builds a $P_1$ `Ams<C64>` FGMRES/GMRES solver for `(K + i k_0 C - k_0^2 M) X = B` |
+| fn | `AmsFgmresSolver::new_shifted_complex_p2` | `linalg/ams.rs:839` | `pub fn new_shifted_complex_p2( k: &Csr<C64>, c_damp: Option<&Csr<C64>>, m: &Csr<C64>, k0: f64, topo: &AmsP2Topology, opts: AmsFgmresOptions, ) -> Result<Self, SolverError>` —  Builds a $P_2$ `AmsP2<C64>` FGMRES/GMRES solver for `(K + i k_0 C - k_0^2 M) X = B` |
 | type | `MakePc` | `linalg/fieldsplit.rs:26` | `<'a, T>` —  Builds a sub-preconditioner from a diagonal block. |
 | fn | `extract_block` | `linalg/fieldsplit.rs:29` | `pub fn extract_block<T: Scalar>(a: &Csr<T>, rows: &[usize], cols: &[usize]) -> Csr<T>` —  Extracts `A[rows, cols]` (rows/cols are global indices; the result is renumbered locally). |
 | enum | `SplitKind` | `linalg/fieldsplit.rs:48` | variants: `Additive`, `Multiplicative`, `SymmetricMultiplicative` |
@@ -329,4 +391,4 @@ classDiagram
 | fn | `Schwarz::subdomains` | `linalg/schwarz.rs:289` | `pub fn subdomains(&self) -> usize` |
 | fn | `Schwarz::sizes` | `linalg/schwarz.rs:294` | `pub fn sizes(&self) -> Vec<usize>` —  Sizes of the (overlapping) subdomains. |
 
-Trait implementations in this component: `AdsOptions: Default`, `Ads: Preconditioner`, `AmgOptions: Default`, `Amg: Preconditioner`, `AmgOptions: Default`, `AmsOptions: Default`, `Ams: Preconditioner`, `AmsP2Options: Default`, `AmsP2: Preconditioner`, `FieldSplit: Preconditioner`, `SchurFieldSplit: Preconditioner`, `Ilu: Preconditioner`, `Ic: Preconditioner`, `SchwarzOptions: Default`, `Schwarz: Preconditioner`
+Trait implementations in this component: `AdsOptions: Default`, `Ads: Preconditioner`, `AmgOptions: Default`, `Amg: Preconditioner`, `AmgOptions: Default`, `AmsOptions: Default`, `Ams: Preconditioner`, `AmsP2Options: Default`, `AmsP2: Preconditioner`, `AmsFgmresOptions: Default`, `AmsPrecondKind: Preconditioner`, `FieldSplit: Preconditioner`, `SchurFieldSplit: Preconditioner`, `Ilu: Preconditioner`, `Ic: Preconditioner`, `SchwarzOptions: Default`, `Schwarz: Preconditioner`

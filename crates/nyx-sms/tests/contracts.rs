@@ -290,7 +290,7 @@ fn the_envelope_is_refused_where_it_is_wrong() {
         spec.bcs.push(BcSpec { on: on.into(), kind: kind.into(), params });
         let e = Sms.solve(&mesh, &spec, &mut Ctx::new(&table)).unwrap_err();
         assert_eq!(e.code(), "invalid", "{kind}");
-        assert!(e.to_string().contains("eigenfrequency study"), "{kind}: {e}");
+        assert!(e.to_string().contains("eigenfrequency"), "{kind}: {e}");
     }
     // a boundary load in an eigenfrequency study
     let mut spec = bar_spec("eigenfrequency");
@@ -314,8 +314,14 @@ fn the_envelope_is_refused_where_it_is_wrong() {
 #[test]
 fn kernel_stage_api_is_public() {
     // ADR 9: naming the functions makes removing or renaming one a compile error here (contract `kernel_stages`)
-    use nyx_sms::{axisym, cross_section, floquet, lrb, pml, solid, waveguide};
-    let _ = (solid::setup, solid::assemble_solid, solid::assemble_static, solid::solve_static, solid::solve_real_modes);
+    use nyx_sms::{
+        axisym, cross_section, floquet, lrb, piezo, piezo_asm, piezo_driven, piezo_mat, pml, solid, waveguide,
+    };
+    let _ = (solid::setup, solid::assemble_static, solid::solve_static, solid::solve_real_modes);
+    let _ = (piezo::solve_piezo, piezo::solve_piezo_mixed);
+    let _ = (piezo_asm::assemble_piezo_static_simplex, piezo_asm::assemble_piezo_eigen_simplex);
+    let _ = (piezo_mat::condense_plane_stress, piezo_mat::eval_piezo_point);
+    let _ = (piezo_driven::solve_piezo_driven, piezo_driven::solve_piezo_driven_mixed);
     let _ = (pml::assemble_solid_pml, pml::solve_pml_modes, pml::pml_fields);
     let _ = (floquet::assemble_floquet, floquet::solve_floquet_modes, floquet::floquet_fields);
     let _ = (lrb::assemble_lrb, lrb::solve_lrb_modes, lrb::lrb_fields);
@@ -326,7 +332,13 @@ fn kernel_stage_api_is_public() {
         cross_section::solve_axisymmetric,
         cross_section::solve_waveguide_modes,
     );
-    let _ = (axisym::assemble_stiffness_axisym, axisym::assemble_mass_axisym, axisym::average_about_axis);
+    let _ = (
+        axisym::assemble_stiffness_axisym,
+        axisym::assemble_mass_axisym,
+        axisym::average_about_axis,
+        axisym::average_piezo_about_axis,
+        axisym::average_tensor_about_axis,
+    );
     let _ = (waveguide::assemble_stiffness_waveguide, waveguide::mode_energy_waveguide);
     let _ = (
         nyx_sms::solve_solid,
@@ -418,6 +430,32 @@ fn result_shape_exemplar_is_stable() {
         r.solutions.truncate(1);
         result_shape(&r)
     };
+    let mut piezo_stat = stat.clone();
+    piezo_stat.piezoelectric = nyx_sms::PiezoMode::On;
+    piezo_stat.materials.default.insert("eps_r".into(), 9.0);
+    piezo_stat.bcs = vec![
+        clamp.clone(),
+        Bc { labels: vec![1], kind: BcKind::Ground },
+        Bc { labels: vec![4], kind: BcKind::Potential(1.0) },
+    ];
+    let mut piezo_drv = piezo_stat.clone();
+    piezo_drv.study = Study::Driven {
+        f_min: 1.0e3,
+        f_max: 2.0e3,
+        n_points: 2,
+        freqs_hz: Some(vec![1.0e3, 2.0e3]),
+        prom_tol: None,
+        max_hdm_solves: 4,
+        strict_prom_tol: false,
+        seed_freqs_hz: Vec::new(),
+        solver: "auto".into(),
+        blr_tol: 1e-6,
+    };
+    piezo_drv.bcs = vec![
+        clamp,
+        Bc { labels: vec![1], kind: BcKind::Ground },
+        Bc { labels: vec![4], kind: BcKind::Terminal { name: "P1".into(), z0_ohm: 50.0 } },
+    ];
     let got = json!({
         "static": run(&stat),
         "eigenfrequency": run(&eigen),
@@ -428,6 +466,8 @@ fn result_shape_exemplar_is_stable() {
         "axisymmetric_eigenfrequency_pml": run_ring(&axi_pml),
         "modes": run(&wg),
         "modes_pml": run(&wg_pml),
+        "piezo_static": run(&piezo_stat),
+        "piezo_driven": run(&piezo_drv),
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_sms_result.v1.json", &got);
 }

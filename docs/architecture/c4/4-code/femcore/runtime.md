@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 5 files, 850 lines.
+**Size:** 5 files, 852 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/lib.rs` | 52 |  |
+| `crates/femcore/src/lib.rs` | 54 |  |
 | `crates/femcore/src/par.rs` | 163 |  |
 | `crates/femcore/src/progress.rs` | 297 |  |
 | `crates/femcore/src/validate.rs` | 48 |  |
@@ -32,8 +32,9 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | par | threads |
 | [ems: Physics adapter](../ems/adapter.md) | progress | Progress |
-| [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads_up_to |
+| [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | par, progress | check, map_chunks |
+| [ems: Native mixed-cell EM](../ems/mixed.md) | progress | note |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
 | [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
@@ -48,6 +49,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [Direct solvers](./ladirect.md) | par | factor_threads |
 | [Linear algebra driver](./ladriver.md) | par, progress, warm | begin, on_factor_pool, threads |
 | [Eigensolvers](./laeigen.md) | par, progress, warm | begin, check, threads |
+| [Time, nonlinear, sweeps](./laother.md) | par, progress | check, map_chunks, on_factor_pool |
 | [Preconditioners](./laprecond.md) | par, progress | check, lap_since, note, stage, threads |
 | [Mesh](./mesh.md) | par | threads |
 | [Meshing facade](./meshing.md) | progress | note |
@@ -55,8 +57,10 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [Metric fields](./metric.md) | par |  |
 | [physics: Physics trait and registry](../physics/trait.md) | progress | Progress |
 | [sms: Physics adapter](../sms/adapter.md) | progress | Progress |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | par, progress | CANCELLED, check, map_chunks, threads |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | par | threads_up_to |
 | [sms: Typed problem](../sms/problem.md) | validate | non_finite_token |
-| [sms: Solid kernel](../sms/solid.md) | par, progress | lap_since, threads_up_to |
+| [sms: Solid kernel](../sms/solid.md) | par, progress | check, lap_since, threads_up_to |
 
 ## Class diagram
 

@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 > Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md)  
-**Size:** 7 files, 1398 lines.
+**Size:** 7 files, 1400 lines.
 
 ## Files
 
@@ -17,7 +17,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 | `crates/app/src/matcmd.rs` | 559 |  |
 | `crates/app/src/pyscript.rs` | 55 |  |
 | `crates/app/src/runfile.rs` | 237 |  |
-| `crates/app/src/script.rs` | 340 |  |
+| `crates/app/src/script.rs` | 342 |  |
 
 ## What it uses
 

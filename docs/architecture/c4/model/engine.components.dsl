@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93, 94, 102"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs"
-        "lines" "6456"
+        "lines" "6541"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -11,7 +11,7 @@ project = component "Project" "The saved state: feature list, mesh settings, one
     properties {
         "adr" "63"
         "code" "crates/nyx-engine/src: project.rs"
-        "lines" "291"
+        "lines" "312"
         "codeDiagram" "4-code/engine/project.md"
     }
 }
@@ -19,7 +19,7 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
     properties {
         "adr" "38, 3, 102"
         "code" "crates/nyx-engine/src: gds.rs, geomdesc.rs, geometry.rs"
-        "lines" "1343"
+        "lines" "1381"
         "codeDiagram" "4-code/engine/geometry.md"
     }
 }
@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 80, 85, 87, 86, 11, 95, 96"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "5901"
+        "lines" "6055"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -51,7 +51,7 @@ meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, lab
     properties {
         "adr" "54, 50, 92"
         "code" "crates/nyx-engine/src: amr.rs, meshing.rs, pml.rs, preview.rs"
-        "lines" "1075"
+        "lines" "1616"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }
@@ -59,7 +59,7 @@ materials = component "Materials" "The material library plus the materials a pro
     properties {
         "adr" "58, 104"
         "code" "crates/nyx-engine/src: material_fetch.rs, materials.rs"
-        "lines" "1103"
+        "lines" "1159"
         "codeDiagram" "4-code/engine/materials.md"
     }
 }
@@ -67,7 +67,7 @@ analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest 
     properties {
         "adr" "56, 99, 103, 105"
         "code" "crates/nyx-engine/src: analyse.rs, figure.rs"
-        "lines" "608"
+        "lines" "911"
         "codeDiagram" "4-code/engine/analyse.md"
     }
 }
@@ -91,7 +91,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "106"
+        "lines" "107"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

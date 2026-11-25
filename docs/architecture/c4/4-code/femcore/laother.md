@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Time, nonlinear, sweeps** (`femcore.laother`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps and matrix-free high-order operators.
+> Time integration, Newton and optimisation, matrix exponential action, reduced-order frequency sweeps, multi-port Hermite PROM, and matrix-free high-order operators.
 
-**Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md)  
-**Size:** 10 files, 3636 lines.
+**Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md), [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md)  
+**Size:** 11 files, 4859 lines.
 
 ## Files
 
@@ -14,6 +14,7 @@ C4 level 4 (code) of the component **Time, nonlinear, sweeps** (`femcore.laother
 | `crates/femcore/src/linalg/expm.rs` | 245 | Action of the matrix exponential (port item X1; the role of SLEPc `MFN`): `w = exp(tA) v` for a large sparse or matrix-free `A`, by Krylov projection with adaptive sub-stepping (Sidje's EXPOKIT `expv` strategy), and the dense building bl... |
 | `crates/femcore/src/linalg/matfree.rs` | 782 | **Matrix-free high-order operators** by sum factorisation (port item M2): the spectral-element (Gauss–Lobatto, "SEM") stiffness and mass operators on a structured box mesh, applied without ever assembling a matrix. |
 | `crates/femcore/src/linalg/opt.rs` | 577 | Optimisation (port item O1; the role of PETSc `TAO`): **L-BFGS**, **nonlinear conjugate gradients** (Polak–Ribière⁺) with a strong-Wolfe line search for smooth unconstrained problems, and the **method of moving asymptotes** (MMA, Sv... |
+| `crates/femcore/src/linalg/prom.rs` | 1223 |  |
 | `crates/femcore/src/linalg/snes.rs` | 577 | Nonlinear solvers for `F(x) = 0` (port item L1; the role of PETSc `SNES`): Newton with a backtracking line search and an optional Jacobian lag, Jacobian-free Newton–Krylov (JFNK) with Eisenstat–Walker forcing, Picard iteration and An... |
 | `crates/femcore/src/linalg/sweep.rs` | 412 | Frequency sweeps by **reduced-order modelling** (port item W1): the response `x(ω)` of `T(ω) x = b`, `T(ω) = Σ_j f_j(ω) A_j` (the split form of [`crate::linalg::nep`]: `K − ω²M + iωC`, dispersive materials, frequency-dependent ... |
 | `crates/femcore/src/linalg/ts/bdf.rs` | 511 | Variable-step, variable-order BDF (orders 1–5) for `M y' + K y = f(t)`. |
@@ -26,16 +27,20 @@ C4 level 4 (code) of the component **Time, nonlinear, sweeps** (`femcore.laother
 
 | Target | Modules | Items |
 |---|---|---|
-| [Matrices and vectors](./lacore.md) | linalg::csr, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar, linalg::vecops | C64, Csr, Dense, FaerScalar, FnOperator, Identity, LinearOperator, Preconditioner, Scalar, axpy +5 |
-| [Direct solvers](./ladirect.md) | linalg::direct | Definiteness, FactorStats, ShiftedFactorization, ShiftedSolver, SolverError |
+| [Matrices and vectors](./lacore.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar, linalg::vecops | C, C64, CCoo, CCsr, Csr, Dense, FaerScalar, FnOperator, Identity, LinearOperator +9 |
+| [Direct solvers](./ladirect.md) | linalg::blr, linalg::direct | BlrOptions, Definiteness, FactorBackend, FactorStats, ShiftedBlrLu, ShiftedFactorization, ShiftedSolver, SolverError |
+| [Linear algebra driver](./ladriver.md) | linalg::driver | DirectSolver, thin_svd_c64 |
 | [Eigensolvers](./laeigen.md) | linalg::nep | NepError, NonlinearEigenProblem |
 | [Krylov solvers](./laksp.md) | linalg::ksp, linalg::ksp::gmres | ConvergedReason, Gmres, GmresOptions, PcSide, Tolerances |
+| [Runtime services](./runtime.md) | par, progress | check, map_chunks, on_factor_pool |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::expm | expm |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::prom | ImageProm, PromLinearSolver, PromOperator, SparseDrivenSolver, run_greedy_prom_sweep, s_to_z_and_y |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::prom | ImageProm, PromLinearSolver, PromOperator, SparseDrivenSolver, run_greedy_prom_sweep, y_to_z_and_s |
 
 ## Class diagram
 
@@ -159,6 +164,76 @@ classDiagram
         +nonlinear_cg(fg, x0, opts) MinResult
         +adjoint_gradient(k_mat, f, g, n_params, dk_u, df, definiteness) Result
         +mma(eval, x0, opts) MmaResult
+    }
+  }
+  namespace linalg_prom_rs {
+    class PromLinearSolver {
+        <<interface>>
+        +update_and_solve(omega, a_mat, rhs_cols) Result
+        +solve_same_factor(rhs_cols) Result
+    }
+    class SparseDrivenSolver {
+        <<enumeration>>
+        Direct
+        Blr
+        +new(requested, blr_tol) Self
+        +update_matrix(a_mat) Result
+        +solve_many(rhs_cols) Result
+        +symbolic_count() usize
+        +backend_name() String
+    }
+    class PromOperator {
+        <<interface>>
+        +n_dofs() usize
+        +n_ports() usize
+        +terms_hat() slice
+        +term_coeffs(omega) Vec
+        +d_ruiz() slice
+        +port_b_hat(port) Vec~C~
+        +port_b_recv_hat(_port) Option
+        +port_gamma(port, omega) tuple
+        +more_4_methods()
+    }
+    class ImageProm {
+        <<struct>>
+        +op O
+        +q_cols Vec
+        +a_r Vec
+        +b_r_drive Vec
+        +b_r_recv Vec
+        +has_distinct_recv bool
+        +u_cols Vec
+        +u_b Vec
+        +more_2_fields
+        +new(op) Self
+        +dim() usize
+        +b_r_recv() slice
+        +add_real_vector(cand) bool
+        +add_complex_snapshot(z)
+        +add_hermite_anchor(omega_a, solver) Result
+        +solve_reduced_and_residual(omega) Option
+        +reconstruct_unscaled(xr) Vec~C~
+    }
+    class PromSweepSummary {
+        <<struct>>
+        +hdm_solves usize
+        +rom_dim usize
+        +anchor_freqs_hz Vec~f64~
+        +max_residual f64
+        +rom_sweep_seconds f64
+    }
+    class fns_linalg_prom_rs {
+        <<module linalg/prom.rs>>
+        +dot_real(a, b) f64
+        +dot_real_complex(a, b) C
+        +format_factor_backend(b) str
+        +append_l2_orthonormal(basis, cand) bool
+        +solve_dense_complex_multi(a_mat, b_cols, r) Option
+        +s_to_z_and_y(s_mat, z0_ports) tuple
+        +y_to_z_and_s(y_mat, z0_ports) tuple
+        +partition_prom_subbands(freqs_hz) Vec
+        +run_greedy_prom_sweep(op, solver, freqs_hz, prom_tol, max_hdm_solves, strict_prom_tol, seed_freqs_hz, on_band) Result
+        +PortMatrixPairs type
     }
   }
   namespace linalg_snes_rs {
@@ -369,6 +444,7 @@ classDiagram
   }
   MinResult --> StopReason
   MmaResult --> StopReason
+  SparseDrivenSolver ..|> PromLinearSolver
   NonlinearResult --> Reason
   NewtonOptions --> LineSearch
   JfnkOptions --> LineSearch
@@ -419,6 +495,34 @@ classDiagram
 | fn | `mma` | `linalg/opt.rs:470` | `pub fn mma(eval: &mut dyn FnMut(&[f64]) -> MmaEval, x0: &[f64], opts: &MmaOptions) -> MmaResult` —  Method of moving asymptotes. `eval(x)` returns the objective, constraints and gradients. |
 | fn | `StopReason::is_converged` | `linalg/opt.rs:36` | `pub fn is_converged(self) -> bool` |
 | fn | `MmaOptions::new` | `linalg/opt.rs:410` | `pub fn new(xmin: Vec<f64>, xmax: Vec<f64>) -> Self` |
+| type | `PortMatrixPairs` | `linalg/prom.rs:23` |  `[re, im]` dense port matrix table (`P x P`). |
+| fn | `dot_real` | `linalg/prom.rs:27` | `pub fn dot_real(a: &[f64], b: &[f64]) -> f64` —  Euclidean inner product of two equal-length real slices. |
+| fn | `dot_real_complex` | `linalg/prom.rs:33` | `pub fn dot_real_complex(a: &[f64], b: &[C]) -> C` —  Non-conjugate dot product $\mathbf{a}^T \mathbf{b}$ of a real slice and a complex slice. |
+| fn | `format_factor_backend` | `linalg/prom.rs:42` | `pub fn format_factor_backend(b: FactorBackend) -> &'static str` —  Maps `FactorBackend` to a concise canonical label matching driven solver logs. |
+| fn | `append_l2_orthonormal` | `linalg/prom.rs:57` | `pub fn append_l2_orthonormal(basis: &mut Vec<Vec<f64>>, cand: &[f64]) -> bool` —  Two-pass Modified Gram-Schmidt $l_2$-orthonormalization of `cand` into `basis`. |
+| fn | `solve_dense_complex_multi` | `linalg/prom.rs:85` | `pub fn solve_dense_complex_multi(a_mat: &[C], b_cols: &[Vec<C>], r: usize) -> Option<Vec<Vec<C>>>` —  Solves an $r \times r$ complex dense linear system $A X = B$ for $P$ right-hand sides (`b_cols[q]` of length $r$) |
+| fn | `s_to_z_and_y` | `linalg/prom.rs:154` | `pub fn s_to_z_and_y( s_mat: &[Vec<C>], z0_ports: &[f64], ) -> (PortMatrixPairs, PortMatrixPairs, PortMatrixPairs)` —  Converts a $P \times P$ scattering matrix $\mathbf{S}$ and reference impedances $Z_{0,p}$ into |
+| fn | `y_to_z_and_s` | `linalg/prom.rs:210` | `pub fn y_to_z_and_s( y_mat: &[Vec<C>], z0_ports: &[f64], ) -> (PortMatrixPairs, PortMatrixPairs, PortMatrixPairs)` —  Converts a $P \times P$ admittance matrix $\mathbf{Y}$ and positive reference impedances $Z_{0,p}$ |
+| fn | `partition_prom_subbands` | `linalg/prom.rs:267` | `pub fn partition_prom_subbands(freqs_hz: &[f64]) -> Vec<Range<usize>>` —  Partitions `freqs_hz` into `[start..end)` sub-bands with `f_end / f_start <= 3.0` (`~2.5x` per band when `f_max / f_min > 3.0`). |
+| trait | `PromLinearSolver` | `linalg/prom.rs:294` | methods: `update_and_solve`, `solve_same_factor` —  Linear solver backend reusable across Hermite anchor derivatives (`Y`, `Y'`, `Y''`) and symbolic patterns. |
+| enum | `SparseDrivenSolver` | `linalg/prom.rs:306` | variants: `Direct`, `Blr` —  Shared sparse direct / LBLT / BLR LU solver wrapper for both `nyx-ems` and `nyx-sms` driven solves. |
+| trait | `PromOperator` | `linalg/prom.rs:429` | methods: `n_dofs`, `n_ports`, `terms_hat`, `term_coeffs`, `d_ruiz`, `port_b_hat`, `port_b_recv_hat`, `port_gamma`, `is_symmetric`, `block_splits`, `assemble_matrix_at`, `apply_matrix_deriv` —  Affine frequency-domain operator $\hat{\mathbf{A}}(\omega) = \sum_m \alpha_m(\omega) \hat{\mathbf{A}}_m$ |
+| struct | `ImageProm` | `linalg/prom.rs:496` | fields: `op`, `q_cols`, `a_r`, `b_r_drive`, `b_r_recv`, `has_distinct_recv`, `u_cols`, `u_b`, `b_norm2`, `u_aq` —  Real Hermite Tangential Galerkin PROM with isometric QR image-space basis $\mathbf{U}$ for exact |
+| struct | `PromSweepSummary` | `linalg/prom.rs:846` | fields: `hdm_solves`, `rom_dim`, `anchor_freqs_hz`, `max_residual`, `rom_sweep_seconds` —  Summary metrics produced by [`run_greedy_prom_sweep`]. |
+| fn | `run_greedy_prom_sweep` | `linalg/prom.rs:858` | `pub fn run_greedy_prom_sweep<O, S, F>( op: &O, solver: &mut S, freqs_hz: &[f64], prom_tol: f64, max_hdm_solves: usize, strict_prom_tol: bool, seed_freqs_hz: &[f64], mut on_band: F, ) -> Result<PromSweepSummary, String>` —  Runs a multi-band adaptive Hermite/Galerkin PROM sweep across `freqs_hz`, certifying the full-space |
+| fn | `SparseDrivenSolver::new` | `linalg/prom.rs:319` | `pub fn new(requested: &str, blr_tol: f64) -> Self` |
+| fn | `SparseDrivenSolver::update_matrix` | `linalg/prom.rs:327` | `pub fn update_matrix(&mut self, a_mat: &CCsr) -> Result<(), String>` |
+| fn | `SparseDrivenSolver::solve_many` | `linalg/prom.rs:359` | `pub fn solve_many(&self, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String>` |
+| fn | `SparseDrivenSolver::symbolic_count` | `linalg/prom.rs:382` | `pub fn symbolic_count(&self) -> usize` |
+| fn | `SparseDrivenSolver::backend_name` | `linalg/prom.rs:389` | `pub fn backend_name(&self) -> String` |
+| fn | `ImageProm::new` | `linalg/prom.rs:513` | `pub fn new(op: &'a O) -> Self` |
+| fn | `ImageProm::dim` | `linalg/prom.rs:566` | `pub fn dim(&self) -> usize` |
+| fn | `ImageProm::b_r_recv` | `linalg/prom.rs:572` | `pub fn b_r_recv(&self) -> &[Vec<C>]` —  Returns projected port vectors `b_r_recv[q_basis][port]` used for port recovery ($\mathbf{b}_p^T \hat{\mathbf{x}}_q$). |
+| fn | `ImageProm::add_real_vector` | `linalg/prom.rs:582` | `pub fn add_real_vector(&mut self, cand: &[f64]) -> bool` —  Appends a real candidate vector to $\mathbf{Q}$ (if not already in the span) and updates |
+| fn | `ImageProm::add_complex_snapshot` | `linalg/prom.rs:657` | `pub fn add_complex_snapshot(&mut self, z: &[C])` —  Splits a complex snapshot vector `z` into phase-aligned `Re(z)` and `Im(z)` and appends both to $\mathbf{Q}$. |
+| fn | `ImageProm::add_hermite_anchor` | `linalg/prom.rs:707` | `pub fn add_hermite_anchor<S: PromLinearSolver>(&mut self, omega_a: f64, solver: &mut S) -> Result<(), String>` —  Performs one full HDM numeric factorization at angular frequency `omega_a` (rad/s), |
+| fn | `ImageProm::solve_reduced_and_residual` | `linalg/prom.rs:761` | `pub fn solve_reduced_and_residual(&self, omega: f64) -> Option<(Vec<Vec<C>>, f64)>` —  Solves the $r \times r$ reduced system at `omega` (rad/s) for all $P$ ports and returns |
+| fn | `ImageProm::reconstruct_unscaled` | `linalg/prom.rs:829` | `pub fn reconstruct_unscaled(&self, xr: &[C]) -> Vec<C>` —  Reconstructs the unscaled reduced-DOF physical solution vector $\mathbf{x} = \mathbf{D} \mathbf{Q} \mathbf{x}_r$. |
 | enum | `Reason` | `linalg/snes.rs:32` | variants: `ConvergedRtol`, `ConvergedAtol`, `ConvergedStep`, `DivergedMaxIt`, `DivergedLineSearch`, `DivergedStagnation`, `DivergedFunctionNorm`, `DivergedLinearSolve` |
 | struct | `NonlinearResult` | `linalg/snes.rs:56` | fields: `x`, `reason`, `iterations`, `residual_norms`, `function_evals`, `jacobian_evals`, `factorizations`, `symbolic_analyses`, `linear_iterations`, `backtracks` |
 | enum | `LineSearch` | `linalg/snes.rs:80` | variants: `None`, `Backtracking` |
@@ -464,4 +568,4 @@ classDiagram
 | fn | `RosenbrockOptions::new` | `linalg/ts/rosenbrock.rs:40` | `pub fn new(rtol: f64, atol: f64, first_step: f64) -> Self` |
 | fn | `theta_solve` | `linalg/ts/theta.rs:15` | `pub fn theta_solve<T: FaerScalar>( m: &Csr<T>, k: &Csr<T>, force: &mut dyn FnMut(f64, &mut [T]), t0: f64, t_end: f64, steps: usize, y0: &[T], theta: f64, output_every: usize, definiteness: Definiteness, ) -> Result<Solution<T>, TsError>` |
 
-Trait implementations in this component: `ExpvOptions: Default`, `SpectralBox: LinearOperator`, `MinOptions: Default`, `LineSearch: Default`, `NewtonOptions: Default`, `JfnkOptions: Default`, `FixedPointOptions: Default`, `TsError: Display`, `TsError: Error`, `TsError: From`
+Trait implementations in this component: `ExpvOptions: Default`, `SpectralBox: LinearOperator`, `MinOptions: Default`, `SparseDrivenSolver: PromLinearSolver`, `LineSearch: Default`, `NewtonOptions: Default`, `JfnkOptions: Default`, `FixedPointOptions: Default`, `TsError: Display`, `TsError: Error`, `TsError: From`

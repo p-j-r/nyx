@@ -39,6 +39,7 @@ C4 level 4 (code) of the component **Metric fields** (`femcore.metric`) in the c
 | [3D meshing](./meshing3d.md) | adapt::field3, adapt::metric, adapt::work | BackgroundMetric3, SimplexMesh, Sym, isotropic, simplex_to_adapt |
 | [Structured absorbing layers](./structpml.md) | adapt::work | FacetKey, SimplexMesh, bbox_of, facet_key, simplex_to_adapt |
 | [physics: Result and frame](../physics/result.md) | adapt | PlotFields |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | adapt::metric | sym_eig, symmetrize |
 
 ## Class diagram
 

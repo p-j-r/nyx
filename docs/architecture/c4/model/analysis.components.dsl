@@ -3,7 +3,7 @@ api = component "Analysis API" "The entry points an engine calls: an analysis is
     properties {
         "adr" "56, 103, 105"
         "code" "crates/nyx-analysis/src: lib.rs"
-        "lines" "127"
+        "lines" "133"
         "codeDiagram" "4-code/analysis/api.md"
     }
 }
@@ -11,16 +11,24 @@ capacitance = component "Capacitance and inductance matrices" "Maxwell/mutual ca
     properties {
         "adr" "103"
         "code" "crates/nyx-analysis/src: capacitance.rs"
-        "lines" "1259"
+        "lines" "1584"
         "codeDiagram" "4-code/analysis/capacitance.md"
     }
 }
-cqed = component "cQED quantization and TLS participation" "KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, and edge-regularized 3D TLS participation ratios." "Rust modules" {
+cqed = component "cQED quantization and TLS participation" "KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, `NetworkAnalysis`, and edge-regularized 3D TLS participation ratios." "Rust modules" {
     properties {
-        "adr" "105"
+        "adr" "105, 118"
         "code" "crates/nyx-analysis/src: epr.rs, hamiltonian.rs, network.rs, tls.rs"
-        "lines" "6980"
+        "lines" "7358"
         "codeDiagram" "4-code/analysis/cqed.md"
+    }
+}
+piezo = component "Piezo resonator analysis" "Piezoelectric resonator mBVD 6-parameter fit (`C_0, R_0, R_s, C_m, L_m, R_m`), Schur-reduced multi-port admittance, phase-slope `Q_s`/`Q_p`, and IEEE `k_t^2`/`k_eff^2`." "Rust modules" {
+    properties {
+        "adr" "129, 118"
+        "code" "crates/nyx-analysis/src: piezo_resonator.rs"
+        "lines" "796"
+        "codeDiagram" "4-code/analysis/piezo.md"
     }
 }
 samples = component "Field samples" "The modes of a SolveResult as weighted samples of the field, which is what the polarization analysis integrates." "Rust modules" {

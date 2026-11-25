@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, problem bundles and test-problem generators.
+> The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, symmetric Ruiz equilibration, problem bundles and test-problem generators.
 
-**Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 17 files, 4388 lines.
+**Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md)  
+**Size:** 18 files, 4695 lines.
 
 ## Files
 
@@ -18,12 +18,13 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | `crates/femcore/src/linalg/csr/assembly.rs` | 271 | The one matrix type of the finite-element code: assembly (`Triplets`), the operations the kernels use, and the aliases that keep kernel code readable (`RCsr` real, `CCsr` complex, `Coo`, `CCoo`). Before phase 3 the kernels had a real and... |
 | `crates/femcore/src/linalg/dense/mod.rs` | 170 | Small dense linear algebra for the projected (Rayleigh–Ritz / Schur) problems of the Krylov methods, the role of SLEPc's `DS`. |
 | `crates/femcore/src/linalg/dense/schur.rs` | 374 | Complex Schur decomposition `A = Z T Zᴴ` by Householder Hessenberg reduction and single-shift QR, plus the adjacent-swap reordering used by Krylov–Schur restarts. |
-| `crates/femcore/src/linalg/faer_glue.rs` | 305 | Everything that touches `faer`'s dense API. |
+| `crates/femcore/src/linalg/equilibrate.rs` | 210 |  |
+| `crates/femcore/src/linalg/faer_glue.rs` | 396 | Everything that touches `faer`'s dense API. |
 | `crates/femcore/src/linalg/kernels.rs` | 253 | Chunk-level numerical kernels, written once and instantiated for `f64` and `Complex<f64>`. |
 | `crates/femcore/src/linalg/linop.rs` | 133 | Operator and preconditioner interfaces. |
 | `crates/femcore/src/linalg/maxwell.rs` | 633 | A small **Nédélec (edge element) test-problem generator**: lowest-order `H(curl)` elements on a structured tetrahedral mesh of the unit cube with perfect-electric-conductor walls. |
 | `crates/femcore/src/linalg/mm.rs` | 292 | Matrix Market (`.mtx`) reading and writing: the export format of port item V1. |
-| `crates/femcore/src/linalg/mod.rs` | 73 | # solvers |
+| `crates/femcore/src/linalg/mod.rs` | 79 | # solvers |
 | `crates/femcore/src/linalg/par.rs` | 120 | Deterministic chunk parallelism. |
 | `crates/femcore/src/linalg/rng.rs` | 37 | Small deterministic generator for start vectors and tests (SplitMix64). |
 | `crates/femcore/src/linalg/scalar.rs` | 158 | The scalar abstraction: every solver in this crate is written once for `f64` and `Complex<f64>`. |
@@ -34,6 +35,8 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | Target | Modules | Items |
 |---|---|---|
 | [Finite-element basics](./fem.md) | fem | quad_rule |
+| [Direct solvers](./ladirect.md) | linalg::direct | deterministic_factor_env |
+| [Preconditioners](./laprecond.md) | linalg::ams | Ams, AmsFgmresOptions, AmsFgmresSolver, AmsFgmresStats, AmsOptions, AmsP2, AmsP2Options, AmsP2Topology, assemble_shifted_curl_curl, solve_ams_fgmres_many +1 |
 | [Runtime services](./runtime.md) | par | threads |
 
 ## Used by
@@ -42,13 +45,16 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 |---|---|---|
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::dense, linalg::scalar | C64, Dense, Scalar, hermitian_eig, solve_small |
 | [analysis: Mode figures](../analysis/figures.md) | linalg::csr::assembly | C |
+| [analysis: Piezo resonator analysis](../analysis/piezo.md) | linalg::dense, linalg::scalar | C64, Dense |
+| [dfs: Shared helpers](../dfs/common.md) | linalg::csr, linalg::csr::assembly | C, Coo, RCsr, c |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::csr::assembly, linalg::par, linalg::vecops | Coo, RCsr, chunk_map, dotu |
 | [dfs: Heat kernel](../dfs/heat.md) | linalg::csr::assembly | RCsr |
-| [dfs: Magnetostatics kernel](../dfs/magneto.md) | linalg::csr::assembly | Coo |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | linalg::csr, linalg::csr::assembly | Coo, RCsr |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
-| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Coo, RCsr, c |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::csr, linalg::csr::assembly, linalg::equilibrate | C, CCsr, Coo, DEFAULT_RUIZ_PASSES, RCsr, RuizTerm, c, ruiz_symmetric_terms +2 |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue | C, CCoo, CCsr, Coo, Dense, RCsr, c, generalized_eig_c64 |
+| [ems: Native mixed-cell EM](../ems/mixed.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Coo, RCsr, c |
 | [ems: Mode kernel](../ems/modes.md) | linalg::csr, linalg::csr::assembly | CCoo, Coo, RCsr, c |
 | [ems: Complex-mode kernel](../ems/modescx.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [ems: Optical mode sets](../ems/optical.md) | linalg::csr::assembly | c |
@@ -56,21 +62,22 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |
 | [Error estimators](./estimators.md) | linalg::csr::assembly | C |
 | [Expressions](./expr.md) | linalg::csr::assembly | C |
-| [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
+| [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly, linalg::par, linalg::scalar | C, CCoo, CCsr, Coo, Csr, RCsr, Scalar, c |
 | [Direct solvers](./ladirect.md) | linalg::csr, linalg::faer_glue, linalg::linop, linalg::scalar, linalg::vecops | C64, Csr, FaerScalar, LinearOperator, Preconditioner, Scalar, axpy, clear_upper_vector_state +6 |
-| [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +5 |
-| [Eigensolvers](./laeigen.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop +3 | Basis, BasisView, C64, Csr, Dense, DenseError, FaerScalar, Identity +16 |
+| [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +7 |
+| [Eigensolvers](./laeigen.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop +4 | Basis, BasisView, C64, Csr, Dense, DenseError, FaerScalar, Identity +18 |
 | [Krylov solvers](./laksp.md) | linalg::basis, linalg::dense, linalg::linop, linalg::rng, linalg::scalar, linalg::vecops | Basis, C64, Dense, LinearOperator, Preconditioner, Scalar, Scaling, axpy +5 |
-| [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar +1 | C64, Csr, Dense, FaerScalar, FnOperator, Identity, LinearOperator, Preconditioner +7 |
-| [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map +1 |
+| [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par +2 | C, C64, CCoo, CCsr, Csr, Dense, FaerScalar, FnOperator +11 |
+| [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar +1 | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map +1 |
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
 | [Runtime services](./runtime.md) | linalg::scalar | C64, Scalar |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
-| [sms: Cross-section study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Csr, RCsr, c |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
-| [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
-| [sms: Solid kernel](../sms/solid.md) | linalg::csr, linalg::csr::assembly | C, RCsr, c |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::csr, linalg::csr::assembly, linalg::equilibrate, linalg::faer_glue, linalg::linop, linalg::par +1 | C, C64, CCoo, CCsr, Coo, Csr, DEFAULT_RUIZ_PASSES, FaerScalar +11 |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, RCsr, c |
+| [sms: Solid kernel](../sms/solid.md) | linalg::csr, linalg::csr::assembly | C, Coo, RCsr, c |
 | [sms: Waveguide kernel](../sms/waveguide.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 
 ## Class diagram
@@ -238,6 +245,23 @@ classDiagram
         +triangular_eigenvector(t, m, i) Vec~C64~
     }
   }
+  namespace linalg_equilibrate_rs {
+    class RuizTerm {
+        <<enumeration>>
+        Real
+        Complex
+    }
+    class fns_linalg_equilibrate_rs {
+        <<module linalg/equilibrate.rs>>
+        +ruiz_symmetric_terms(n, terms, passes) Vec~f64~
+        +ruiz_symmetric(a) Vec~f64~
+        +ruiz_symmetric_weighted(terms, n, passes) Vec~f64~
+        +scale_symmetric(a, d) Csr~T~
+        +scale_vec(v, d) Vec~T~
+        +unscale_vec(v, d) Vec~T~
+        +DEFAULT_RUIZ_PASSES const
+    }
+  }
   namespace linalg_faer_glue_rs {
     class FaerScalar {
         <<interface>>
@@ -261,11 +285,12 @@ classDiagram
         ~thin_svd_c64(data, n, cols) Result
         ~thin_svd_uv_c64(data, n, cols) Result
         +generalized_eig_c64(a, b) Result
+        ~dense_par_dim(n) Par
+        ~dense_par(work) Par
         ~dense_lu(a, n) Option
-        ~solve_unit_lower(lu, n, b, k)
-        ~solve_upper_right(lu, n, b, r)
-        +more_1_functions()
+        +more_3_functions()
         ~SvdUv type
+        ~SMALL_DENSE_SEQ_N const
     }
   }
   namespace linalg_kernels_rs {
@@ -587,19 +612,30 @@ classDiagram
 | fn | `schur` | `linalg/dense/schur.rs:98` | `pub fn schur(a: &Dense<C64>) -> Result<(Dense<C64>, Dense<C64>), DenseError>` —  Schur decomposition `A = Z T Zᴴ` with `T` upper triangular and `Z` unitary. |
 | fn | `reorder` | `linalg/dense/schur.rs:182` | `pub fn reorder(t: &mut Dense<C64>, z: &mut Dense<C64>, m: usize, key: impl Fn(C64) -> f64) -> Vec<usize>` —  Reorders the Schur form so the diagonal follows `key` (ascending: smaller key first). |
 | fn | `triangular_eigenvector` | `linalg/dense/schur.rs:202` | `pub fn triangular_eigenvector(t: &Dense<C64>, m: usize, i: usize) -> Vec<C64>` —  Eigenvector `y` (length `m`, `y[i] = 1`, zero below `i`) of the upper triangular `t` for the |
+| const | `DEFAULT_RUIZ_PASSES` | `linalg/equilibrate.rs:12` | `usize` —  Default number of symmetric Ruiz scaling sweeps. |
+| enum | `RuizTerm` | `linalg/equilibrate.rs:17` | variants: `Real`, `Complex` —  A weighted sparse matrix term contributing to the joint infinity-norm envelope in |
+| fn | `ruiz_symmetric_terms` | `linalg/equilibrate.rs:27` | `pub fn ruiz_symmetric_terms(n: usize, terms: &[RuizTerm<'_>], passes: usize) -> Vec<f64>` —  Computes the symmetric Ruiz diagonal scaling vector `d` (`n`) over `passes` sweeps for |
+| fn | `ruiz_symmetric` | `linalg/equilibrate.rs:85` | `pub fn ruiz_symmetric<T: Scalar>(a: &Csr<T>) -> Vec<f64>` —  Computes `DEFAULT_RUIZ_PASSES` symmetric Ruiz diagonal scaling weights for a single CSR matrix. |
+| fn | `ruiz_symmetric_weighted` | `linalg/equilibrate.rs:90` | `pub fn ruiz_symmetric_weighted<T: Scalar>(terms: &[(&Csr<T>, f64)], n: usize, passes: usize) -> Vec<f64>` —  Computes symmetric Ruiz diagonal scaling weights for weighted homogeneous `Csr<T>` terms. |
+| fn | `scale_symmetric` | `linalg/equilibrate.rs:131` | `pub fn scale_symmetric<T: Scalar>(a: &Csr<T>, d: &[f64]) -> Csr<T>` —  Forms `D A D` symmetrically on the identical sparsity pattern of `a`. |
+| fn | `scale_vec` | `linalg/equilibrate.rs:152` | `pub fn scale_vec<T: Scalar>(v: &[T], d: &[f64]) -> Vec<T>` —  Scales a vector component-wise: `out[i] = v[i] * d[i]`. |
+| fn | `unscale_vec` | `linalg/equilibrate.rs:158` | `pub fn unscale_vec<T: Scalar>(v: &[T], d: &[f64]) -> Vec<T>` —  Unscales a vector component-wise: `out[i] = v[i] / d[i]`. |
 | trait | `FaerScalar` | `linalg/faer_glue.rs:14` | methods: `to_faer`, `from_faer`, `faer_slice`, `faer_slice_mut` —  Scalars that `faer` can handle, with the conversions to its element type (identical |
 | fn | `hermitian_eig` | `linalg/faer_glue.rs:63` | `pub(crate) fn hermitian_eig<T: FaerScalar>(a: &Dense<T>) -> Result<(Vec<f64>, Dense<T>), DenseError>` |
-| fn | `tile_mult` | `linalg/faer_glue.rs:87` | `pub(crate) fn tile_mult<T: FaerScalar>( src: &[T], len: usize, nrows: usize, q: &[T], ldq: usize, ncols: usize, out: &mut [T], )` —  `out = src · q` on one row tile with `faer`'s matrix product, sequential (one tile is one |
-| fn | `clear_upper_vector_state` | `linalg/faer_glue.rs:112` | `pub(crate) fn clear_upper_vector_state()` —  Executes `vzeroupper` where available. On the benchmark VM (Cascade Lake class), one small |
-| fn | `clear_upper_vector_state` | `linalg/faer_glue.rs:125` | `pub(crate) fn clear_upper_vector_state()` |
-| fn | `thin_svd_c64` | `linalg/faer_glue.rs:129` | `pub(crate) fn thin_svd_c64(data: &[C64], n: usize, cols: usize) -> Result<(Vec<f64>, Vec<C64>), DenseError>` —  Thin SVD of the `n × cols` complex matrix `data` (column-major, `n ≥ cols`): singular values in |
-| type | `SvdUv` | `linalg/faer_glue.rs:150` |  `(singular values, U, V)` of [`thin_svd_uv_c64`], matrices column-major. |
-| fn | `thin_svd_uv_c64` | `linalg/faer_glue.rs:154` | `pub(crate) fn thin_svd_uv_c64(data: &[C64], n: usize, cols: usize) -> Result<SvdUv, DenseError>` —  Thin SVD like [`thin_svd_c64`] but also returning the right singular vectors `V` |
-| fn | `generalized_eig_c64` | `linalg/faer_glue.rs:180` | `pub fn generalized_eig_c64(a: &Dense<C64>, b: &Dense<C64>) -> Result<(Vec<C64>, Dense<C64>), DenseError>` —  Generalised eigendecomposition `A x = λ B x` of small dense complex matrices. Eigenvalues with |
-| fn | `dense_lu` | `linalg/faer_glue.rs:219` | `pub(crate) fn dense_lu<T: FaerScalar>(a: &mut [T], n: usize) -> Option<Vec<usize>>` —  In-place LU with partial pivoting of the `n × n` column-major matrix `a` (unit lower `L` below the diagonal, `U` |
-| fn | `solve_unit_lower` | `linalg/faer_glue.rs:240` | `pub(crate) fn solve_unit_lower<T: FaerScalar>(lu: &[T], n: usize, b: &mut [T], k: usize)` —  `B ← L⁻¹ B` with the unit lower triangle of the packed `n × n` matrix `lu`; `B` is `n × k` column-major. |
-| fn | `solve_upper_right` | `linalg/faer_glue.rs:251` | `pub(crate) fn solve_upper_right<T: FaerScalar>(lu: &[T], n: usize, b: &mut [T], r: usize)` —  `B ← B U⁻¹` with the upper triangle of the packed `n × n` matrix `lu`; `B` is `r × n` column-major. |
-| fn | `gemm_sub` | `linalg/faer_glue.rs:267` | `pub(crate) fn gemm_sub<T: FaerScalar>(c: &mut [T], a: &[T], b: &[T], m: usize, n: usize, k: usize)` —  `C -= A B` for column-major `A: m × k`, `B: k × n`, `C: m × n` (all contiguous). |
+| fn | `tile_mult` | `linalg/faer_glue.rs:106` | `pub(crate) fn tile_mult<T: FaerScalar>( src: &[T], len: usize, nrows: usize, q: &[T], ldq: usize, ncols: usize, out: &mut [T], )` —  `out = src · q` on one row tile with `faer`'s matrix product, sequential (one tile is one |
+| fn | `clear_upper_vector_state` | `linalg/faer_glue.rs:131` | `pub(crate) fn clear_upper_vector_state()` —  Executes `vzeroupper` where available. On the benchmark VM (Cascade Lake class), one small |
+| fn | `clear_upper_vector_state` | `linalg/faer_glue.rs:144` | `pub(crate) fn clear_upper_vector_state()` |
+| fn | `thin_svd_c64` | `linalg/faer_glue.rs:148` | `pub(crate) fn thin_svd_c64(data: &[C64], n: usize, cols: usize) -> Result<(Vec<f64>, Vec<C64>), DenseError>` —  Thin SVD of the `n × cols` complex matrix `data` (column-major, `n ≥ cols`): singular values in |
+| type | `SvdUv` | `linalg/faer_glue.rs:191` |  `(singular values, U, V)` of [`thin_svd_uv_c64`], matrices column-major. |
+| fn | `thin_svd_uv_c64` | `linalg/faer_glue.rs:195` | `pub(crate) fn thin_svd_uv_c64(data: &[C64], n: usize, cols: usize) -> Result<SvdUv, DenseError>` —  Thin SVD like [`thin_svd_c64`] but also returning the right singular vectors `V` |
+| fn | `generalized_eig_c64` | `linalg/faer_glue.rs:244` | `pub fn generalized_eig_c64(a: &Dense<C64>, b: &Dense<C64>) -> Result<(Vec<C64>, Dense<C64>), DenseError>` —  Generalised eigendecomposition `A x = λ B x` of small dense complex matrices. Eigenvalues with |
+| const | `SMALL_DENSE_SEQ_N` | `linalg/faer_glue.rs:278` | `usize` —  Dimension threshold up to which small-to-medium dense eigensolves, LU, triangular solves, and GEMMs stay |
+| fn | `dense_par_dim` | `linalg/faer_glue.rs:282` | `pub(crate) fn dense_par_dim(n: usize) -> Par` —  Parallelism for a dense `n × n` decomposition (`n <= 1024` is strictly `Par::Seq`). |
+| fn | `dense_par` | `linalg/faer_glue.rs:295` | `pub(crate) fn dense_par(work: usize) -> Par` —  Parallelism for dense BLR/SVD work of size `work` (`<= 512 × 512` is strictly `Par::Seq`). |
+| fn | `dense_lu` | `linalg/faer_glue.rs:309` | `pub(crate) fn dense_lu<T: FaerScalar>(a: &mut [T], n: usize) -> Option<Vec<usize>>` —  In-place LU with partial pivoting of the `n × n` column-major matrix `a` (unit lower `L` below the diagonal, `U` |
+| fn | `solve_unit_lower` | `linalg/faer_glue.rs:331` | `pub(crate) fn solve_unit_lower<T: FaerScalar>(lu: &[T], n: usize, b: &mut [T], k: usize)` —  `B ← L⁻¹ B` with the unit lower triangle of the packed `n × n` matrix `lu`; `B` is `n × k` column-major. |
+| fn | `solve_upper_right` | `linalg/faer_glue.rs:342` | `pub(crate) fn solve_upper_right<T: FaerScalar>(lu: &[T], n: usize, b: &mut [T], r: usize)` —  `B ← B U⁻¹` with the upper triangle of the packed `n × n` matrix `lu`; `B` is `r × n` column-major. |
+| fn | `gemm_sub` | `linalg/faer_glue.rs:358` | `pub(crate) fn gemm_sub<T: FaerScalar>(c: &mut [T], a: &[T], b: &[T], m: usize, n: usize, k: usize)` —  `C -= A B` for column-major `A: m × k`, `B: k × n`, `C: m × n` (all contiguous). |
 | trait | `Kernels` | `linalg/kernels.rs:18` | methods: `k_dotc`, `k_dotu`, `k_axpy`, `k_dots_cols`, `k_sub_cols`, `k_add_cols`, `k_tile_mult` —  The hot loops, overridable per scalar type. |
 | trait | `LinearOperator` | `linalg/linop.rs:17` | methods: `dim`, `apply`, `apply_block`, `apply_dotc`, `apply_dotu`, `apply_block_with_bx` —  A square linear operator `y = A x`. |
 | enum | `Scaling` | `linalg/linop.rs:76` | variants: `Identity`, `Diagonal` —  How a preconditioner acts element-wise, so solvers can fuse it into their vector updates. |

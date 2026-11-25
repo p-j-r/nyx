@@ -5,20 +5,20 @@ C4 level 4 (code) of the component **Materials** (`engine.materials`) in the con
 > The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point.
 
 **Decisions:** [ADR 58](../../../adr/0058-the-engine-resolves-materials-from-the-library-and-the-project.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
-**Size:** 2 files, 1103 lines.
+**Size:** 2 files, 1159 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/material_fetch.rs` | 538 |  |
-| `crates/nyx-engine/src/materials.rs` | 565 |  |
+| `crates/nyx-engine/src/materials.rs` | 621 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::bcs, material::coupled, material::import, material::spec | EV_TO_J, FilmModel, ImportFormat, ImportOptions, Library, MaterialSpec, REMOTE_CATALOG, Superconducting, bcs_surface_impedance, catalog_entry +4 |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::bcs, material::coupled, material::import, material::spec | EV_TO_J, FilmModel, ImportFormat, ImportOptions, Library, M3, M6, MaterialSpec, PiezoForm, Piezoelectric +10 |
 | container `materialLibrary` (Material library) |  (declared: Loads) |  |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | desc, error, physics, spec | Error, ParamKind, Physics, ProblemSpec |
 | [Commands](./commands.md) | engine | Engine |
@@ -108,14 +108,14 @@ classDiagram
 | fn | `user_materials_dir` | `materials.rs:77` | `pub fn user_materials_dir() -> Option<PathBuf>` —  The user's writable material overlay folder (`<workspace>/materials`, i.e. `$NYX_WORKSPACE/materials` or `Documents/nyx/materials`). |
 | fn | `load_library` | `materials.rs:106` | `pub fn load_library(dirs: &[PathBuf]) -> (Library, Vec<String>)` —  Loads the first folder that has material files as the base library, then overlays any user `*.toml` files |
 | fn | `study_frequency` | `materials.rs:161` | `pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64>` —  The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default), |
-| fn | `study_wavelength` | `materials.rs:183` | `pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64>` —  The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default); the free-space |
-| fn | `describe` | `materials.rs:191` | `pub(crate) fn describe(m: &MaterialSpec) -> Value` |
-| fn | `Engine::library` | `materials.rs:227` | `pub fn library(&self) -> Result<Arc<Library>, Error>` —  The library a solve sees: the folder's materials and the project's own, which may extend them. |
-| fn | `Engine::set_base_library` | `materials.rs:241` | `pub fn set_base_library(&mut self, library: Library)` —  Replaces the folder library (tests, or a front-end that lets the person pick another folder). |
-| fn | `Engine::list_materials` | `materials.rs:245` | `pub fn list_materials(&self) -> Result<Value, Error>` |
-| fn | `Engine::describe_material` | `materials.rs:270` | `pub fn describe_material(&self, name: &str) -> Result<Value, Error>` |
-| fn | `Engine::evaluate_material` | `materials.rs:278` | `pub fn evaluate_material( &self, name: &str, temperature_k: Option<f64>, frequency_hz: Option<f64>, wavelength_m: Option<f64>, e_field_v_per_m: Option<f64>, thickness_m: Option<f64>, film_model: Option<&str>, euler_deg: Option<[f64; 3]>, ) -> Result<Value, Error>` —  Evaluates a material's temperature-, frequency-, wavelength-, and field-dependent multi-physics properties. |
-| fn | `Engine::bcs_surface_impedance_cmd` | `materials.rs:443` | `pub fn bcs_surface_impedance_cmd(&self, args: &Value) -> Result<Value, Error>` —  Evaluates Zimmermann arbitrary-purity BCS + sub-gap mK surface impedance for a named superconducting |
-| fn | `Engine::add_material` | `materials.rs:537` | `pub fn add_material(&mut self, name: &str, toml_text: &str) -> Result<Value, Error>` —  Adds (or replaces) a material the project carries, given as TOML text. It is read now, so a mistake is reported here. |
-| fn | `Engine::remove_material` | `materials.rs:553` | `pub fn remove_material(&mut self, name: &str) -> Result<(), Error>` |
-| fn | `Engine::bcs_surface_impedance` | `materials.rs:561` | `pub fn bcs_surface_impedance(&self, args: &Value) -> Result<Value, Error>` —  Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance. |
+| fn | `study_wavelength` | `materials.rs:216` | `pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64>` —  The frequency (Hz) of a study, from the first parameter of the study descriptor with the unit Hz (given, else its default); the free-space |
+| fn | `describe` | `materials.rs:224` | `pub(crate) fn describe(m: &MaterialSpec) -> Value` |
+| fn | `Engine::library` | `materials.rs:260` | `pub fn library(&self) -> Result<Arc<Library>, Error>` —  The library a solve sees: the folder's materials and the project's own, which may extend them. |
+| fn | `Engine::set_base_library` | `materials.rs:274` | `pub fn set_base_library(&mut self, library: Library)` —  Replaces the folder library (tests, or a front-end that lets the person pick another folder). |
+| fn | `Engine::list_materials` | `materials.rs:278` | `pub fn list_materials(&self) -> Result<Value, Error>` |
+| fn | `Engine::describe_material` | `materials.rs:303` | `pub fn describe_material(&self, name: &str) -> Result<Value, Error>` |
+| fn | `Engine::evaluate_material` | `materials.rs:311` | `pub fn evaluate_material( &self, name: &str, temperature_k: Option<f64>, frequency_hz: Option<f64>, wavelength_m: Option<f64>, e_field_v_per_m: Option<f64>, thickness_m: Option<f64>, film_model: Option<&str>, euler_deg: Option<[f64; 3]>, ) -> Result<Value, Error>` —  Evaluates a material's temperature-, frequency-, wavelength-, and field-dependent multi-physics properties. |
+| fn | `Engine::bcs_surface_impedance_cmd` | `materials.rs:499` | `pub fn bcs_surface_impedance_cmd(&self, args: &Value) -> Result<Value, Error>` —  Evaluates Zimmermann arbitrary-purity BCS + sub-gap mK surface impedance for a named superconducting |
+| fn | `Engine::add_material` | `materials.rs:593` | `pub fn add_material(&mut self, name: &str, toml_text: &str) -> Result<Value, Error>` —  Adds (or replaces) a material the project carries, given as TOML text. It is read now, so a mistake is reported here. |
+| fn | `Engine::remove_material` | `materials.rs:609` | `pub fn remove_material(&mut self, name: &str) -> Result<(), Error>` |
+| fn | `Engine::bcs_surface_impedance` | `materials.rs:617` | `pub fn bcs_surface_impedance(&self, args: &Value) -> Result<Value, Error>` —  Evaluates Zimmermann arbitrary-purity BCS complex conductivity and thin-film surface impedance. |

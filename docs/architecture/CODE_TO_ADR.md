@@ -88,7 +88,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/LICENSE` | 3 | |
 | `crates/geom/rustfmt.toml` | 13 | only formatted crate (R23) |
 | `crates/geom/Cargo.toml` | 3, 13 | serde only |
-| `crates/femcore/src/linalg/*` | 33, 8, 11, 117, 125, 127 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
+| `crates/femcore/src/linalg/equilibrate.rs` | 129, 106, 33 | 8-pass symmetric Ruiz equilibration (`RCsr`, `CCsr`, affine term terms) shared by `nyx-sms` and `nyx-ems` |
+| `crates/femcore/src/linalg/prom.rs` | 129, 106, 33 | multi-port Hermite + isometric-QR reduced-order model (`PROM`) sweep builder shared by `nyx-ems` and `nyx-sms` |
+| `crates/femcore/src/linalg/*` | 33, 8, 11, 117, 125, 127, 129 | ported solver library; `driver.rs` is the door the kernels use, `csr.rs` the one matrix type, `amg_elastic/` the elasticity multigrid, `arnoldi_real.rs` the real waveguide eigensolver |
 | `crates/femcore/src/mesh/mod.rs` | 4, 82 | `SimplexMesh`, the solver contract (was `mesh.rs`) |
 | `crates/femcore/src/mesh/view.rs` | 4 | draw-only mesh |
 | `crates/femcore/src/mesh/cells.rs` | 5, 82 | per-cell-type mesh (was `meshers/cellmesh.rs`) |
@@ -206,8 +208,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-physics/src/testkit.rs` | 41, 10, 110 | the golden-file harness |
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/src/cqed.rs` | 103, 104, 105, 106, 118, 120, 121 | typed cQED payloads (`CapacitanceMatrixData` bounds/loss/AMR history, `InductanceMatrixData`, `TlsMeta`, `CircuitRom`, `DrivenPortData`, `ElectroAmrData`) |
-| `crates/nyx-physics/tests/inline_tensor.rs` | 113, 25 | inline diagonal, 6-component, and 3x3 symmetric tensor (`PropValue` / `PropsTensor`) tests |
-| `crates/nyx-physics/*` | 25, 19, 113, 118, 120, 121 | the Physics trait, envelope, descriptors, registry |
+| `crates/nyx-physics/tests/inline_tensor.rs` | 113, 25, 129 | inline diagonal, 6-component, 3x3 symmetric, and `3x6` piezoelectric tensor (`PropValue` / `PropsTensor` / `Oriented`) tests |
+| `crates/nyx-physics/*` | 25, 19, 113, 118, 120, 121, 129 | the Physics trait, envelope, descriptors, registry |
 | `crates/nyx-dfs/tests/golden/*` | 10, 41 | the dfs goldens, moved unchanged from femcore |
 | `crates/nyx-dfs/src/ac_loss.rs` | 121, 103 | quasi-electrostatic AC dielectric conductance $G_{ij}(\omega)$, $Q_{ij}$ matrix, and positive complex Schur $\Delta C^{(2)} > 0$ |
 | `crates/nyx-dfs/src/magneto.rs` | 103 | gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`) and inductance matrix extraction |
@@ -219,13 +221,15 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-dfs/tests/open_boundaries_ie.rs` | 128, 120, 41 | 3-tier open-boundary verification (`heat_stationary` & `magneto` curl-Robin `far_field`, native `Quad`/`Prism`/`Hex` Rational & Exponential Infinite Elements, `heat_transient` guard) |
 | `crates/nyx-dfs/*` | 41, 25, 12, 9, 103, 115, 118, 120, 121 | diffusion: typed problem, multi-RHS electrostatics, Prager–Synge bounds, AC loss, planar BEM, magnetostatics, and heat kernels |
 | `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
-| `crates/nyx-sms/src/{axisym,cross_section,waveguide}.rs` | 43, 42, 68, 69, 80, 101 | bodies of revolution on their half-plane and 2.5D waveguide cross-sections (`exp(-j q y)`): the library entries (`solve_solid_axisym`, `solve_solid_waveguide`), the `axisymmetric_eigenfrequency` and `modes` studies, axis conditions, cylindrical and planar layers, the scalars that identify a mode (numeric frequency parts, energy shares per component and domain) |
+| `crates/nyx-sms/src/{piezo_mat,piezo_asm,piezo,piezo_driven}.rs` | 129, 42, 106, 128 | coupled piezoelectric `(u, phi)` constitutive condensation, simplex/mixed assembly, equilibrated direct / Schur Krylov-Schur / QEP / Schur-AMG Right-FGMRES static/eigen solvers, and driven multi-port `Y`/`Z`/`S` PROM sweep |
+| `crates/nyx-sms/src/{axisym,cross_section,waveguide}.rs` | 43, 42, 68, 69, 80, 101, 129 | bodies of revolution on their half-plane and 2.5D waveguide cross-sections (`exp(-j q y)`): library entries, `axisymmetric_eigenfrequency` and `modes` studies, piezoelectric 4-block extensions, axis regularity, cylindrical/planar PMLs, and mode scalars |
 | `crates/nyx-sms/tests/axisym_mode_scalars.rs` | 80 | the numeric frequency parts and the energy shares against closed forms whose family is known |
 | `crates/nyx-sms/tests/{pml_floquet,waveguide_modes}.rs` | 101 | Floquet-periodic absorbing layers (`P^H K P` congruence, inactive mass skip) and native 2.5D elastic waveguide modes (`study = "modes"`, closed-form SH cutoff, 3D swept Floquet agreement, PML complex frequencies and shares) |
 | `crates/nyx-sms/tests/mixed_pml_and_ie.rs` | 128, 42, 69 | native mixed-cell elastodynamic PML, Christoffel backward-wave stabilization, signed-$Q$ amplifying-mode detection, outer clamping, and static Kelvin IE tests |
+| `crates/nyx-sms/tests/{piezo,piezo_driven,piezo_waveguide,piezo_axisym}.rs` | 129 | coupled piezoelectric static/eigen/Schur-AMG (`piezo.rs`), multi-port driven admittance PROM (`piezo_driven.rs`), 2.5D waveguide SAW/Lamb (`piezo_waveguide.rs`), and axisymmetric `6mm` (`piezo_axisym.rs`) test suites |
 | `crates/nyx-engine/src/convergence.rs` | 61, 80, 97, 101, 112, 119, 120 | mesh convergence on a scratch engine: bidirectional `factor`, `scale_sizes`, mode-signature `track`, `quantities`, sub-pF relative tolerance, and log-space SPD Richardson extrapolation |
 | `crates/nyx-engine/src/solve.rs` | 61, 80 | the solve chain in coupling order; puts the region names into the scalars a kernel names by domain number |
-| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68, 101, 109 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, absorbing-layer, viscoelastic damping and Floquet kernels (moved from femcore::sms*), descriptors |
+| `crates/nyx-sms/*` | 42, 41, 25, 12, 9, 68, 101, 109, 129 | solid mechanics: typed problem, static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, driven multi-port piezo, absorbing-layer, viscoelastic damping and Floquet kernels, descriptors |
 | `crates/nyx-ems/tests/golden/*` | 10, 45 | the ems goldens, moved unchanged from femcore (the two SOI wire files at the G2 tolerances) |
 | `crates/nyx-ems/tests/axisym.rs` | 46, 45 | the axisymmetric kernel against closed forms (gate G1) |
 | `crates/nyx-ems/tests/{emw2d,emw3d,pml,aniso_optics,bragg_stack,photonics,physics_meshing,meshing,moved}.rs` | 45, 1, 12, 67 | the ems tests moved from femcore |
@@ -249,7 +253,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-analysis/tests/figure3d.rs` | 111, 99 | 3D figure kinds, dielectric jump preservation, Bloch tiling, latency, and `NYX_THREADS` bit-exact PNG tests |
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
 | `crates/nyx-analysis/tests/squadds_smoke.rs` | 103, 105, 118, 120, 125 | PR CI smoke suite for TransmonCross Mode G2 + `far_field` + `I_edge` (`bug1`), DC-SQUID `Dissipator` sweep, and `MUNINN` 3D TLS |
-| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, 2D/3D mode figures) |
+| `crates/nyx-analysis/src/piezo_resonator.rs` | 129, 118 | piezoelectric resonator mBVD 6-param fit, Schur-reduced multi-port admittance, phase-slope `Q_s`/`Q_p`, and IEEE `k_t^2`/`k_eff^2` |
+| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127, 129 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, piezo_resonator, 2D/3D mode figures) |
 | `crates/nyx-engine/tests/layering.rs` | 26, 107 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
@@ -289,7 +294,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/accuracy_features_e2e.rs` | 120, 121 | end-to-end Phase A sub-$0.1\%$ electrostatic accuracy features (`AF-1..AF-6`) and Cross-Feature Compatibility Rules 1–5 tests |
 | `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 125, 126, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, `bug2`–`bug5`, and thread determinism |
 | `crates/nyx-engine/tests/fr25_33_e2e.rs` | 125, 126, 127 | end-to-end post-SQuADDS (`FR-25..FR-33`) integration tests through `Engine::call` (`ibc_mode: "perturbative"`, hybrid quasi-electrostatic TLS, and `ems::driven` `blr`/`ams_fgmres` + memory calibration) |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/tests/piezo_driven_network.rs` | 129, 106, 118 | Mason 1D BAW driven piezo FEM -> `NetworkAnalysis` and `piezo_resonator` mBVD round-trip tests |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
 | `crates/nyx-script/src/kernel.rs` | 94, 93, 113 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, and worker recovery |

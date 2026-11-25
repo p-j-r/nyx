@@ -36,7 +36,7 @@ C4 level 4 (code) of the component **2D kernel** (`geom.kernel2d`) in the contai
 | [Evaluation](./evaluation.md) | arrange, complex, poly_batch, prim | Complex, Edge, Edge3, Face, PairRes, Region, Vertex, arrange +2 |
 | [Feature list](./featurelist.md) | arrange, complex, poly_batch, prim | Complex, GRAZE_K, arrange, clean_ring, polygon_area, shoelace_area, simplify_rings_with_pins |
 | [3D kernel](./kernel3d.md) | arrange, complex, curve, prim | Body, Curve, GRAZE_K, Prim, Revolved, arrange, arrange_with |
-| [Queries and selectors](./queries.md) | complex, curve | Complex, Curve, FaceGeom, curve_kind |
+| [Queries and selectors](./queries.md) | complex, curve, prim | Body, Complex, Curve, Edge, Face, FaceGeom, Region, curve_kind |
 | [Display tessellation](./tessellation.md) | complex | Complex, FaceGeom, Loop |
 
 ## Class diagram
