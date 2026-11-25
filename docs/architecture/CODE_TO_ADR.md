@@ -27,6 +27,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/HOST_SETUP.md` | 97, 98, 94 | what costs time when an AI host drives nyx, and what to set in the host and do in the agent |
 | `docs/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
 | `docs/ux/*` | 88, 123 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
+| `docs/vvuq/*` | 10, 19, 61, 91, 112, 120, 131 | ASME VVUQ & Rust formal verification plan and EGM-refined plan |
 | `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
 | `docs/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
 | `docs/GEOMETRY_ARCHITECTURE.md` | 2, 3, 18 | historical |
