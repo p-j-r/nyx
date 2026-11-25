@@ -117,18 +117,12 @@ impl<T: Scalar> Basis<T> {
             // columns, so concurrent blocks never alias.
             let mut src = vec![T::ZERO; len * nrows_q];
             for j in 0..nrows_q {
-                // SAFETY: rows s..e of column `first+j` belong to this block only.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(cols.at(s, first + j), src[j * len..].as_mut_ptr(), len);
-                }
+                src[j * len..(j + 1) * len].copy_from_slice(cols.chunk_mut(first + j, s, e));
             }
             let mut out = vec![T::ZERO; len * ncols_q];
             T::k_tile_mult(&src, len, nrows_q, q, ldq, ncols_q, &mut out);
             for c in 0..ncols_q {
-                // SAFETY: as above.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(out[c * len..].as_ptr(), cols.at(s, first + c), len);
-                }
+                cols.chunk_mut(first + c, s, e).copy_from_slice(&out[c * len..(c + 1) * len]);
             }
         };
         par::chunk_map(nblocks, par::worth_parallel(n * nrows_q), work);
@@ -211,8 +205,7 @@ impl<T: Scalar> BasisView<'_, T> {
         par::chunk_map(nch, par::worth_parallel(n * (k + b)), |c| {
             let (s, e) = (c * BCHUNK, ((c + 1) * BCHUNK).min(n));
             for cc in 0..b {
-                // SAFETY: chunk `c` owns rows s..e of every column of `w`.
-                let dst = unsafe { wc.rows(cc, s, e) };
+                let dst = wc.chunk_mut(cc, s, e);
                 T::k_sub_cols(self.data, n, s, &h[cc * k..(cc + 1) * k], dst);
             }
         });
@@ -242,8 +235,7 @@ impl<T: Scalar> BasisView<'_, T> {
             let (s, e) = (c * BCHUNK, ((c + 1) * BCHUNK).min(n));
             let mut part = vec![T::ZERO; slot];
             for cc in 0..b {
-                // SAFETY: chunk `c` owns rows s..e of every column of `w`.
-                let dst = unsafe { wc.rows(cc, s, e) };
+                let dst = wc.chunk_mut(cc, s, e);
                 T::k_sub_cols(self.data, n, s, &h[cc * k..(cc + 1) * k], dst);
                 T::k_dots_cols(self.data, n, s, dst, &mut part[cc * k..(cc + 1) * k]);
                 part[k * b + cc] = T::k_dotc(dst, dst);
@@ -270,8 +262,7 @@ impl<T: Scalar> BasisView<'_, T> {
         let yc = RawCols::new(y, n, 1);
         par::chunk_map(nch, par::worth_parallel(n * k), |ch| {
             let (s, e) = (ch * BCHUNK, ((ch + 1) * BCHUNK).min(n));
-            // SAFETY: chunk `ch` owns rows s..e of `y`.
-            T::k_add_cols(self.data, n, s, &c[..k], unsafe { yc.rows(0, s, e) });
+            T::k_add_cols(self.data, n, s, &c[..k], yc.chunk_mut(0, s, e));
         });
     }
 }

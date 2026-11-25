@@ -58,14 +58,17 @@ pub fn discretise_mixed(mesh: &Mesh) -> Result<MixedDiscretisation, Error> {
     mesh.discretise_mixed().map_err(Error::invalid)
 }
 
-/// Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis.
+/// Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis, or an invalid
+/// topology, orientation, facet incidence, or curved/quarter-point edge definition.
 pub fn check_mesh(mesh: &Mesh) -> Result<(), Error> {
-    match mesh.first_non_finite() {
-        Some((i, k)) => Err(Error::NonFinite(format!(
+    if let Some((i, k)) = mesh.first_non_finite() {
+        return Err(Error::NonFinite(format!(
             "the mesh has a non-finite coordinate (point {i}, axis {k}): NaN or infinity in the geometry"
-        ))),
-        None => Ok(()),
+        )));
     }
+    let simplex = mesh.discretise().map_err(Error::invalid)?;
+    simplex.check().map_err(|e| Error::invalid(e.to_string()))?;
+    Ok(())
 }
 pub use physics::{Ctx, LabelResolver, Physics};
 pub use registry::Registry;

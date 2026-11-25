@@ -145,6 +145,17 @@ impl Ned3 {
         [self.vkey[v[0] as usize], self.vkey[v[1] as usize], self.vkey[v[2] as usize], self.vkey[v[3] as usize]]
     }
 
+    /// Composite ordering keys `(vkey[v], v)` of cell `ci`, breaking periodic ties deterministically by vertex ID.
+    pub fn key_pairs(&self, mesh: &Discretisation, ci: usize) -> [(u32, u32); 4] {
+        let v = mesh.cell(ci);
+        [
+            (self.vkey[v[0] as usize], v[0]),
+            (self.vkey[v[1] as usize], v[1]),
+            (self.vkey[v[2] as usize], v[2]),
+            (self.vkey[v[3] as usize], v[3]),
+        ]
+    }
+
     /// Dofs of the functions of face `v` (sorted triple of vertex numbers).
     pub fn face_dofs(&self, v: [u32; 3]) -> [usize; 2] {
         let f = self.face_id[&sorted3(v[0], v[1], v[2])] as usize;
@@ -201,6 +212,20 @@ pub fn basis3(
     lam: &[f64; 4],
     g: &[[f64; 3]; 4],
     gid: &[u32; 4],
+    w: &mut Vec<[f64; 3]>,
+    curl: &mut Vec<[f64; 3]>,
+) {
+    let keyed = [(gid[0], 0), (gid[1], 1), (gid[2], 2), (gid[3], 3)];
+    basis3_keyed(order, lam, g, &keyed, w, curl);
+}
+
+/// Like [`basis3`], taking composite `(vkey, vertex_id)` keys so edges/faces touching periodic
+/// counterparts on 1-layer extrusions break `vkey` ties identically across sharing tetrahedra.
+pub fn basis3_keyed(
+    order: usize,
+    lam: &[f64; 4],
+    g: &[[f64; 3]; 4],
+    gid: &[(u32, u32); 4],
     w: &mut Vec<[f64; 3]>,
     curl: &mut Vec<[f64; 3]>,
 ) {
@@ -362,7 +387,7 @@ pub fn assemble_maxwell_with_pml(
             let mut ke = vec![c(0.0, 0.0); nb * nb];
             let mut gs = [[0.0; 3]; 4];
             for ci in range {
-                let gid = ned.keys(mesh, ci);
+                let gid = ned.key_pairs(mesh, ci);
                 for b in 0..4 {
                     for k in 0..3 {
                         gs[b][k] = geo.g[ci * 12 + b * 3 + k];
@@ -376,7 +401,7 @@ pub fn assemble_maxwell_with_pml(
                     for q in 0..cquad.w.len() {
                         let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
                         let (gq, det) = ct.jacobian(&lam);
-                        basis3(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
+                        basis3_keyed(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
                         let wq = cquad.w[q] * det.abs() / 6.0;
                         let (ep, mui) = if let Some(p) = pml.filter(|_| is_pml) {
                             let nv10 = &cshape2[q].0;
@@ -402,7 +427,7 @@ pub fn assemble_maxwell_with_pml(
                     ];
                     for q in 0..cquad.w.len() {
                         let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
-                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                         let wq = cquad.w[q] * geo.vol[ci];
                         let mut xq = [0.0; 3];
                         for b in 0..4 {
@@ -416,7 +441,7 @@ pub fn assemble_maxwell_with_pml(
                 } else {
                     for q in 0..quad.w.len() {
                         let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
-                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                         let wq = quad.w[q] * geo.vol[ci];
                         add_point(which, nb, &mut ke, &w, &cu, wq, &eps[ci], &mu_inv[ci]);
                     }
@@ -437,7 +462,7 @@ pub(crate) fn gradient_full(mesh: &Discretisation, ned: &Ned3) -> Csr {
     let ncols = if ned.order == 2 { nv + mesh.n_edges() } else { nv };
     let mut coo = femcore::linalg::csr::Coo::new(ned.n_dofs(), ncols);
     for (e, &(a, b)) in mesh.edges().iter().enumerate() {
-        let (lo, hi) = if ned.vkey[a as usize] < ned.vkey[b as usize] { (a, b) } else { (b, a) };
+        let (lo, hi) = if (ned.vkey[a as usize], a) < (ned.vkey[b as usize], b) { (a, b) } else { (b, a) };
         let dof = if ned.order == 1 { e } else { 2 * e };
         coo.push(dof, hi as usize, 1.0);
         coo.push(dof, lo as usize, -1.0);
@@ -1311,7 +1336,7 @@ pub fn emw_eigen_fields(
         let (mut w, mut cu) = (Vec::new(), Vec::new());
         let mut gs = [[0.0; 3]; 4];
         for ci in 0..nc {
-            let gid = ned.keys(mesh, ci);
+            let gid = ned.key_pairs(mesh, ci);
             for b in 0..4 {
                 for kk in 0..3 {
                     gs[b][kk] = geo.g[ci * 12 + b * 3 + kk];
@@ -1324,9 +1349,9 @@ pub fn emw_eigen_fields(
                     // gradients at the point for a cell with a curved edge (ADR 82); the plotted nodes stay at the straight positions
                     Some(ct) => {
                         let gq = safe_curved_jacobian(ct, &lam, &gs);
-                        basis3(order, &lam, &gq, &gid, &mut w, &mut cu);
+                        basis3_keyed(order, &lam, &gq, &gid, &mut w, &mut cu);
                     }
-                    None => basis3(order, &lam, &gs, &gid, &mut w, &mut cu),
+                    None => basis3_keyed(order, &lam, &gs, &gid, &mut w, &mut cu),
                 }
                 let mut val = [c(0.0, 0.0); 3];
                 let mut cval = [c(0.0, 0.0); 3];
@@ -1614,7 +1639,7 @@ pub(crate) fn compute_3d_mode_metrics(
     let mut gs = [[0.0; 3]; 4];
 
     for ci in 0..mesh.n_cells() {
-        let gid = ned.keys(mesh, ci);
+        let gid = ned.key_pairs(mesh, ci);
         for b in 0..4 {
             for k in 0..3 {
                 gs[b][k] = geo.g[ci * 12 + b * 3 + k];
@@ -1675,13 +1700,13 @@ pub(crate) fn compute_3d_mode_metrics(
             for q in 0..cquad.w.len() {
                 let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
                 let (gq, det) = ct.jacobian(&lam);
-                basis3(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
+                basis3_keyed(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
                 eval_point(&w, &cu, cquad.w[q] * det.abs() / 6.0);
             }
         } else {
             for q in 0..quad.w.len() {
                 let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
-                basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                 eval_point(&w, &cu, quad.w[q] * geo.vol[ci]);
             }
         }

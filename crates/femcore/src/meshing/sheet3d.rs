@@ -2387,6 +2387,7 @@ fn extrude_overlay_2d_inner(
             );
         }
         apply_quarter_point_on_meshed_geom(&mut g, plan, waves);
+        g.mesh.check()?;
         g.cells = Some(crate::mesh::Mesh::from_solver_mesh(&g.mesh)?);
         return Ok(g);
     }
@@ -2956,6 +2957,7 @@ fn extrude_overlay_2d_inner(
         );
     }
     apply_quarter_point_on_meshed_geom(&mut g, plan, waves);
+    g.mesh.check()?;
     g.cells = Some(crate::mesh::Mesh::from_solver_mesh(&g.mesh)?);
     Ok(g)
 }

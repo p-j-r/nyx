@@ -59,7 +59,10 @@ impl<T: Scalar> Csr<T> {
         if ncols > u32::MAX as usize {
             return Err(CsrError::DimensionTooLarge);
         }
-        if indptr.len() != nrows + 1 {
+        let Some(expected_indptr_len) = nrows.checked_add(1) else {
+            return Err(CsrError::DimensionTooLarge);
+        };
+        if indptr.len() != expected_indptr_len {
             return Err(CsrError::BadIndptr("length must be nrows + 1"));
         }
         if indptr[0] != 0 {
@@ -84,6 +87,9 @@ impl<T: Scalar> Csr<T> {
 
     /// Builds from `(row, col, value)` triplets; duplicates are summed, columns sorted.
     pub fn from_triplets(nrows: usize, ncols: usize, triplets: &[(usize, usize, T)]) -> Result<Self, CsrError> {
+        if nrows.checked_add(1).is_none() || ncols > u32::MAX as usize {
+            return Err(CsrError::DimensionTooLarge);
+        }
         let mut count = vec![0usize; nrows + 1];
         for &(r, c, _) in triplets {
             if r >= nrows {
@@ -100,7 +106,8 @@ impl<T: Scalar> Csr<T> {
         let mut next = count.clone();
         let mut entries = vec![(0u32, T::ZERO); triplets.len()];
         for &(r, c, v) in triplets {
-            entries[next[r]] = (c as u32, v);
+            let cu = u32::try_from(c).map_err(|_| CsrError::DimensionTooLarge)?;
+            entries[next[r]] = (cu, v);
             next[r] += 1;
         }
         let mut indptr = Vec::with_capacity(nrows + 1);
@@ -126,7 +133,9 @@ impl<T: Scalar> Csr<T> {
     }
 
     pub fn identity(n: usize) -> Self {
-        Self::try_new(n, n, (0..=n).collect(), (0..n as u32).collect(), vec![T::ONE; n]).unwrap()
+        assert!(n <= u32::MAX as usize, "Csr::identity dimension {n} overflows u32");
+        let indices: Vec<u32> = (0..n).map(|i| u32::try_from(i).expect("u32 index")).collect();
+        Self::try_new(n, n, (0..=n).collect(), indices, vec![T::ONE; n]).unwrap()
     }
 
     pub fn nrows(&self) -> usize {
@@ -171,6 +180,7 @@ impl<T: Scalar> Csr<T> {
 
     /// Plain transpose `Aᵀ` (no conjugation).
     pub fn transpose(&self) -> Csr<T> {
+        assert!(self.nrows <= u32::MAX as usize, "Csr::transpose nrows overflows u32");
         let mut count = vec![0usize; self.ncols + 1];
         for &c in &self.indices {
             count[c as usize + 1] += 1;
@@ -182,15 +192,16 @@ impl<T: Scalar> Csr<T> {
         let mut indices = vec![0u32; self.nnz()];
         let mut values = vec![T::ZERO; self.nnz()];
         for i in 0..self.nrows {
+            let iu = u32::try_from(i).expect("u32 row index");
             let (cols, vals) = self.row(i);
             for (&c, &v) in cols.iter().zip(vals) {
                 let p = next[c as usize];
                 next[c as usize] += 1;
-                indices[p] = i as u32;
+                indices[p] = iu;
                 values[p] = v;
             }
         }
-        Csr { nrows: self.ncols, ncols: self.nrows, indptr: count, indices, values }
+        Self::try_new(self.ncols, self.nrows, count, indices, values).expect("valid transposed CSR")
     }
 
     /// `A = Aᵀ` (complex symmetric for complex scalars) up to `tol·max|a|`, pattern included.
@@ -254,7 +265,7 @@ impl<T: Scalar> Csr<T> {
             }
             indptr.push(indices.len());
         }
-        Csr { nrows: a.nrows, ncols: a.ncols, indptr, indices, values }
+        Self::try_new(a.nrows, a.ncols, indptr, indices, values).expect("valid axpby CSR")
     }
 
     /// Sparse matrix product `self · other` (Gustavson's row-by-row algorithm); the result has
@@ -290,7 +301,7 @@ impl<T: Scalar> Csr<T> {
             }
             indptr.push(indices.len());
         }
-        Csr { nrows: self.nrows, ncols: n, indptr, indices, values }
+        Self::try_new(self.nrows, n, indptr, indices, values).expect("valid matmul CSR")
     }
 
     /// Entry-wise map to another scalar type (e.g. widening a real matrix to complex).
@@ -360,8 +371,7 @@ impl<T: Scalar> Csr<T> {
         let ys = par::RawCols::new(y, n, 1);
         let parts = par::chunk_map(n.div_ceil(CHUNK), par::worth_parallel(self.nnz()), |c| {
             let (s, e) = (c * CHUNK, ((c + 1) * CHUNK).min(n));
-            // SAFETY: chunk `c` owns rows s..e of `y`.
-            let yc = unsafe { ys.rows(0, s, e) };
+            let yc = ys.chunk_mut(0, s, e);
             self.rows_into(s, x, yc);
             T::k_dotc(&x[s..e], yc)
         });
@@ -529,5 +539,55 @@ mod tests {
         let m = Csr::from_triplets(2, 2, &[(0, 1, 1.0), (0, 1, 2.0), (1, 0, 4.0)]).unwrap();
         assert_eq!(m.values(), &[3.0, 4.0]);
         assert!(Csr::<f64>::from_triplets(2, 2, &[(0, 2, 1.0)]).is_err());
+    }
+
+    #[test]
+    fn triplets_accessors_work() {
+        let mut t = Coo::with_capacity(2, 3, 2);
+        t.push(0, 2, 1.5);
+        t.push(1, 0, -2.0);
+        assert_eq!(t.nrows(), 2);
+        assert_eq!(t.ncols(), 3);
+        assert_eq!(t.rows(), &[0, 1]);
+        assert_eq!(t.cols(), &[2, 0]);
+        assert_eq!(t.vals(), &[1.5, -2.0]);
+        let csr = t.to_csr();
+        assert_eq!(csr.get(0, 2), 1.5);
+        assert_eq!(csr.get(0, 99), 0.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn triplets_push_rejects_oob() {
+        let mut t = Coo::new(2, 2);
+        t.push(2, 0, 1.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn triplets_push_block_rejects_len_mismatch() {
+        let mut t = Coo::new(3, 3);
+        t.push_block(&[0, 1], &[0, 1], &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflows u32")]
+    fn from_raw_rejects_u32_truncation() {
+        let big = (1usize << 32) + 1;
+        let _ = RCsr::from_raw(1, 2, vec![0, 1], vec![big], vec![1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "shape mismatch")]
+    fn sum_all_rejects_shape_mismatch() {
+        let a = RCsr::zeros(2, 2);
+        let b = RCsr::zeros(2, 3);
+        let _ = RCsr::sum_all(vec![a, b]);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one part")]
+    fn sum_all_rejects_empty() {
+        let _ = RCsr::sum_all(Vec::<RCsr>::new());
     }
 }

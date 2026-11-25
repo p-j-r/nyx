@@ -10,8 +10,8 @@
 //! solved directly near `sigma = n_target + (m - 1) * (lambda_0 / Lambda)` via `eigs_quadratic_complex`.
 
 use crate::cavity::{
-    assemble_complex, basis3, compute_3d_mode_metrics, compute_3d_mode_metrics_mixed, ned_relations, vertex_keys, Ned3,
-    C3, CURVED_QUAD_DEGREE,
+    assemble_complex, basis3_keyed, compute_3d_mode_metrics, compute_3d_mode_metrics_mixed, ned_relations, vertex_keys,
+    Ned3, C3, CURVED_QUAD_DEGREE,
 };
 use crate::ibc::{assemble_ibc_and_jj_3d, MU0};
 use crate::mixed_ops::{
@@ -113,7 +113,7 @@ fn assemble_bloch_matrices(
             let mut ke = vec![c(0.0, 0.0); nb * nb];
             let mut gs = [[0.0; 3]; 4];
             for ci in range {
-                let gid = ned.keys(mesh, ci);
+                let gid = ned.key_pairs(mesh, ci);
                 for b in 0..4 {
                     for k in 0..3 {
                         gs[b][k] = geo.g[ci * 12 + b * 3 + k];
@@ -127,7 +127,7 @@ fn assemble_bloch_matrices(
                     for q in 0..cquad.w.len() {
                         let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
                         let (gq, det) = ct.jacobian(&lam);
-                        basis3(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
+                        basis3_keyed(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
                         let wq = cquad.w[q] * det.abs() / 6.0;
                         let (ep, mui) = if let Some(p) = pml.filter(|_| is_pml) {
                             let nv10 = &cshape2[q].0;
@@ -153,7 +153,7 @@ fn assemble_bloch_matrices(
                     ];
                     for q in 0..cquad.w.len() {
                         let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
-                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                         let wq = cquad.w[q] * geo.vol[ci];
                         let mut xq = [0.0; 3];
                         for b in 0..4 {
@@ -167,7 +167,7 @@ fn assemble_bloch_matrices(
                 } else {
                     for q in 0..quad.w.len() {
                         let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
-                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                         let wq = quad.w[q] * geo.vol[ci];
                         add_bloch_point_c3(which, nb, &mut ke, &w, &cu, wq, inv_k0, inv_k0_2, &eps[ci], &mu_inv[ci]);
                     }
@@ -402,7 +402,7 @@ pub fn bloch_fields_cells(
         let mut gs = [[0.0; 3]; 4];
 
         for ci in 0..nc {
-            let gid = asm.ned.keys(mesh, ci);
+            let gid = asm.ned.key_pairs(mesh, ci);
             let v_cell = mesh.cell(ci);
             for b in 0..4 {
                 for kk in 0..3 {
@@ -415,11 +415,11 @@ pub fn bloch_fields_cells(
                 let y_node = match &curved {
                     Some(ct) => {
                         let (gq, _) = ct.jacobian(&lam);
-                        basis3(asm.order, &lam, &gq, &gid, &mut w, &mut cu);
+                        basis3_keyed(asm.order, &lam, &gq, &gid, &mut w, &mut cu);
                         ct.position(&lam)[1]
                     }
                     None => {
-                        basis3(asm.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        basis3_keyed(asm.order, &lam, &gs, &gid, &mut w, &mut cu);
                         (0..4).map(|b| lam[b] * mesh.point(v_cell[b] as usize)[1]).sum()
                     }
                 };

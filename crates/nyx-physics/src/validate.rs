@@ -298,11 +298,30 @@ fn check_value(v: &Value, d: &ParamDesc) -> Result<(), String> {
     Ok(())
 }
 
-/// Every field of the result must be finite: NaN or infinity does not stop a factorisation or a Krylov iteration, it flows into every
-/// field. The message names the solution, the field and how many values are bad. Scalar results (for example Q = infinity of a lossless
-/// mode) may legitimately be infinite and are not checked.
+/// Every field and scalar solution metric of the result must be finite, with one physical
+/// exception: `SolveResult::scalars` allows `+inf` (for example lossless cavity `Q = inf`), while
+/// still rejecting `NaN` in scalars and any non-finite value in fields, cell fields, eigenvalues,
+/// or solution scalar values.
 pub fn check_result_finite(result: &crate::result::SolveResult) -> Result<(), Error> {
     for (k, sol) in result.solutions.iter().enumerate() {
+        if let Some(v) = sol.value {
+            if !v.is_finite() {
+                return Err(Error::NonFinite(format!(
+                    "the solution is not finite: value of solution {} ('{}') is {v}; check materials, boundary conditions and the mesh",
+                    k + 1,
+                    sol.label,
+                )));
+            }
+        }
+        if let Some(ev) = sol.eigenvalue {
+            if !ev[0].is_finite() || !ev[1].is_finite() {
+                return Err(Error::NonFinite(format!(
+                    "the solution is not finite: eigenvalue of solution {} ('{}') is {ev:?}; check materials, boundary conditions and the mesh",
+                    k + 1,
+                    sol.label,
+                )));
+            }
+        }
         for f in &sol.fields {
             let bad = f.values.iter().filter(|v| !v.is_finite()).count();
             if bad > 0 {
@@ -315,6 +334,101 @@ pub fn check_result_finite(result: &crate::result::SolveResult) -> Result<(), Er
                 )));
             }
         }
+        for cf in &sol.cell_fields {
+            let bad_re = cf.re.iter().filter(|v| !v.is_finite()).count();
+            let bad_im = cf.im.iter().filter(|v| !v.is_finite()).count();
+            if bad_re > 0 || bad_im > 0 {
+                return Err(Error::NonFinite(format!(
+                    "the solution is not finite: cell field '{}' of solution {} ('{}') has {bad_re}/{} bad real and {bad_im}/{} bad imaginary values; check materials, boundary conditions and the mesh",
+                    cf.name,
+                    k + 1,
+                    sol.label,
+                    cf.re.len(),
+                    cf.im.len(),
+                )));
+            }
+        }
+    }
+    for (name, scalar) in &result.scalars {
+        if let crate::result::Scalar::Num(v) = scalar {
+            if v.is_nan() {
+                return Err(Error::NonFinite(format!(
+                    "the solution is not finite: scalar '{name}' is NaN; check materials, boundary conditions and the mesh"
+                )));
+            }
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::result::{CellField, Field, Scalar, Solution, SolveResult};
+
+    fn base_result() -> SolveResult {
+        SolveResult {
+            physics: "ems".into(),
+            study: "cavity".into(),
+            order: 1,
+            dim: 3,
+            dofs: 1,
+            seconds: 0.1,
+            solutions: vec![Solution {
+                label: "mode 1".into(),
+                fields: vec![Field::scalar("V", "V", vec![1.0, 2.0])],
+                value: Some(1.5e9),
+                eigenvalue: Some([2.4, -0.01]),
+                cell_fields: vec![CellField {
+                    name: "E".into(),
+                    unit: "V/m".into(),
+                    nloc: 1,
+                    re: vec![0.1, 0.2, 0.3],
+                    im: vec![0.0, -0.1, 0.0],
+                }],
+            }],
+            scalars: vec![("f1".into(), Scalar::Num(1.5e9)), ("note".into(), Scalar::Text("ok".into()))],
+            log: vec![],
+        }
+    }
+
+    #[test]
+    fn check_result_finite_allows_lossless_q_infinity() {
+        let mut r = base_result();
+        r.scalars.push(("Q1".into(), Scalar::Num(f64::INFINITY)));
+        check_result_finite(&r).unwrap();
+    }
+
+    #[test]
+    fn check_result_finite_rejects_every_non_finite_slot() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut r = base_result();
+            r.solutions[0].fields[0].values[1] = bad;
+            assert!(check_result_finite(&r).is_err());
+
+            let mut r = base_result();
+            r.solutions[0].cell_fields[0].re[0] = bad;
+            assert!(check_result_finite(&r).is_err());
+
+            let mut r = base_result();
+            r.solutions[0].cell_fields[0].im[2] = bad;
+            assert!(check_result_finite(&r).is_err());
+
+            let mut r = base_result();
+            r.solutions[0].eigenvalue = Some([bad, 0.0]);
+            assert!(check_result_finite(&r).is_err());
+
+            let mut r = base_result();
+            r.solutions[0].eigenvalue = Some([1.0, bad]);
+            assert!(check_result_finite(&r).is_err());
+
+            let mut r = base_result();
+            r.solutions[0].value = Some(bad);
+            assert!(check_result_finite(&r).is_err());
+        }
+
+        let mut r = base_result();
+        r.scalars.push(("Q1".into(), Scalar::Num(f64::NAN)));
+        assert!(check_result_finite(&r).is_err());
+    }
 }

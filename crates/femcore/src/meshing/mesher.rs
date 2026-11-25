@@ -899,7 +899,11 @@ pub(crate) fn mesh_chains_with_seeds(
         dropped_slivers,
         warnings,
     };
-    Ok((SimplexMesh::new(2, points, cells, cell_labels, facets, facet_labels), report))
+    let mesh = SimplexMesh::new(2, points, cells, cell_labels, facets, facet_labels);
+    if mp.strict_mesh || dropped_slivers == 0 {
+        mesh.check()?;
+    }
+    Ok((mesh, report))
 }
 
 /// A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer.
@@ -953,6 +957,16 @@ fn extrude_with(
         }
     }
     let id = |v: u32, k: usize| (k * n2) as u32 + v;
+    let pt3 = |v: u32| -> [f64; 3] {
+        let i = v as usize * 3;
+        [points[i], points[i + 1], points[i + 2]]
+    };
+    let det3 = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| -> f64 {
+        a[0] * (b[1] * c[2] - b[2] * c[1])
+            - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0])
+    };
+    let sub3 = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] };
     let (mut cells, mut cell_labels) = (vec![], vec![]);
     for c in 0..m2.n_cells() {
         let mut v = m2.cell(c).to_vec();
@@ -963,7 +977,11 @@ fn extrude_with(
             let (l, remap) = &layers[layer_of_slab[k]];
             let base = m2.cell_labels[c];
             let dom = l.fill.or_else(|| remap.get(&base).copied()).unwrap_or(base + l.domain_offset);
-            for tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
+            for mut tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
+                let (p0, p1, p2, p3) = (pt3(tet[0]), pt3(tet[1]), pt3(tet[2]), pt3(tet[3]));
+                if det3(sub3(p1, p0), sub3(p2, p0), sub3(p3, p0)) < 0.0 {
+                    tet.swap(1, 2);
+                }
                 cells.extend_from_slice(&tet);
                 cell_labels.push(dom);
             }
@@ -988,7 +1006,9 @@ fn extrude_with(
             facet_labels.push(m2.facet_labels[f]);
         }
     }
-    Ok(SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels))
+    let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
+    mesh.check()?;
+    Ok(mesh)
 }
 
 /// Sweeps a 3D `geom` model along the propagation axis `y` through `layers`: extracts the combined 2D `(x, z)` cross-section
@@ -1451,7 +1471,9 @@ pub fn sweep_model_3d(
         i = j;
     }
 
-    Ok(SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels))
+    let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
+    mesh.check()?;
+    Ok(mesh)
 }
 
 #[cfg(test)]

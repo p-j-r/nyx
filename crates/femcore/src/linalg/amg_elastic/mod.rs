@@ -109,20 +109,50 @@ struct TridiagCol {
 /// Block-diagonal tridiagonal vertical-line smoother across disjoint vertical columns, with scalar
 /// diagonal fallback on any vertex not belonging to a column of length `>= 3`.
 struct LineSmoother {
+    n: usize,
     cols: Vec<TridiagCol>,
     isolated: Vec<usize>,
 }
 
 impl LineSmoother {
+    fn new(n: usize, cols: Vec<TridiagCol>, isolated: Vec<usize>) -> Self {
+        let mut seen = vec![false; n];
+        for col in &cols {
+            assert!(!col.nodes.is_empty(), "LineSmoother column cannot be empty");
+            for &u in &col.nodes {
+                assert!(u < n, "LineSmoother vertex {u} >= {n}");
+                assert!(!seen[u], "LineSmoother duplicate vertex {u}");
+                seen[u] = true;
+            }
+        }
+        for &u in &isolated {
+            assert!(u < n, "LineSmoother isolated vertex {u} >= {n}");
+            assert!(!seen[u], "LineSmoother duplicate isolated vertex {u}");
+            seen[u] = true;
+        }
+        LineSmoother { n, cols, isolated }
+    }
+
     fn build(a: &Csr, raw_cols: &[Vec<usize>], diag: &[f64]) -> Option<Self> {
         if raw_cols.is_empty() {
             return None;
         }
         let n = a.nrows();
+        assert!(diag.len() >= n, "LineSmoother diag len {} < {n}", diag.len());
         let mut in_col = vec![false; n];
         let mut cols = Vec::with_capacity(raw_cols.len());
         for nodes in raw_cols {
-            if nodes.len() < 3 || nodes.iter().any(|&u| u >= n || in_col[u]) {
+            if nodes.len() < 3 || nodes.iter().any(|&u| u >= n) {
+                continue;
+            }
+            let mut local_dup = false;
+            for (idx, &u) in nodes.iter().enumerate() {
+                if in_col[u] || nodes[..idx].contains(&u) {
+                    local_dup = true;
+                    break;
+                }
+            }
+            if local_dup {
                 continue;
             }
             for &u in nodes {
@@ -154,10 +184,11 @@ impl LineSmoother {
             return None;
         }
         let isolated: Vec<usize> = (0..n).filter(|&i| !in_col[i]).collect();
-        Some(LineSmoother { cols, isolated })
+        Some(LineSmoother::new(n, cols, isolated))
     }
 
     fn apply_into(&self, diag: &[f64], r: &[f64], z: &mut [f64]) {
+        assert!(diag.len() >= self.n && r.len() >= self.n && z.len() >= self.n);
         for &i in &self.isolated {
             z[i] = r[i] / diag[i];
         }
@@ -165,7 +196,7 @@ impl LineSmoother {
         // across columns produces the exact same bits regardless of NYX_THREADS.
         const COL_CHUNK: usize = 64;
         if self.cols.len() >= 256 && crate::par::threads() > 1 {
-            let z_ptr = crate::linalg::par::RawCols::new(z, z.len(), 1);
+            let z_cols = crate::linalg::par::RawCols::new(z, self.n, 1);
             self.cols.par_chunks(COL_CHUNK).for_each(|chunk| {
                 let mut y = Vec::new();
                 for col in chunk {
@@ -176,14 +207,10 @@ impl LineSmoother {
                         y[i + 1] = r[col.nodes[i + 1]] - col.l[i] * y[i];
                     }
                     let mut prev = y[m - 1] * col.inv_d[m - 1];
-                    unsafe {
-                        *z_ptr.at(col.nodes[m - 1], 0) = prev;
-                    }
+                    z_cols.chunk_mut(0, col.nodes[m - 1], col.nodes[m - 1] + 1)[0] = prev;
                     for i in (0..m - 1).rev() {
                         prev = y[i] * col.inv_d[i] - col.l[i] * prev;
-                        unsafe {
-                            *z_ptr.at(col.nodes[i], 0) = prev;
-                        }
+                        z_cols.chunk_mut(0, col.nodes[i], col.nodes[i] + 1)[0] = prev;
                     }
                 }
             });
@@ -211,6 +238,9 @@ impl LineSmoother {
             self.apply_into(diag, r, z);
             return;
         }
+        assert!(diag.len() >= self.n);
+        let nk = self.n.checked_mul(k).expect("block overflow");
+        assert!(r.len() >= nk && z.len() >= nk);
         for &i in &self.isolated {
             let inv = 1.0 / diag[i];
             let base = i * k;
@@ -220,7 +250,7 @@ impl LineSmoother {
         }
         const COL_CHUNK: usize = 64;
         if self.cols.len() >= 128 && crate::par::threads() > 1 {
-            let z_ptr = crate::linalg::par::RawCols::new(z, z.len(), 1);
+            let z_cols = crate::linalg::par::RawCols::new(z, nk, 1);
             self.cols.par_chunks(COL_CHUNK).for_each(|chunk| {
                 let mut y = Vec::new();
                 for col in chunk {
@@ -237,23 +267,21 @@ impl LineSmoother {
                     }
                     let nm = col.nodes[m - 1] * k;
                     let inv_dm = col.inv_d[m - 1];
+                    let z_nm = z_cols.chunk_mut(0, nm, nm + k);
                     for j in 0..k {
                         let val = y[(m - 1) * k + j] * inv_dm;
                         y[(m - 1) * k + j] = val;
-                        unsafe {
-                            *z_ptr.at(nm + j, 0) = val;
-                        }
+                        z_nm[j] = val;
                     }
                     for i in (0..m - 1).rev() {
                         let ni = col.nodes[i] * k;
                         let inv_di = col.inv_d[i];
                         let li = col.l[i];
+                        let z_ni = z_cols.chunk_mut(0, ni, ni + k);
                         for j in 0..k {
                             let val = y[i * k + j] * inv_di - li * y[(i + 1) * k + j];
                             y[i * k + j] = val;
-                            unsafe {
-                                *z_ptr.at(ni + j, 0) = val;
-                            }
+                            z_ni[j] = val;
                         }
                     }
                 }
@@ -1214,8 +1242,8 @@ pub fn block_pcg(a: &Csr, b: &[f64], k: usize, amg: &Amg, tol: f64, max_iter: us
         let r_sq_parts = crate::linalg::par::chunk_map(nchunks, par, |ci| {
             let (r0, r1) = (ci * BLOCK_ROW_CHUNK, ((ci + 1) * BLOCK_ROW_CHUNK).min(n));
             let (s, e) = (r0 * k, r1 * k);
-            let xc = unsafe { xs.rows(0, s, e) };
-            let rc = unsafe { rs.rows(0, s, e) };
+            let xc = xs.chunk_mut(0, s, e);
+            let rc = rs.chunk_mut(0, s, e);
             let pc = &p[s..e];
             let apc = &ap[s..e];
             let mut rsq = vec![0.0; k];
@@ -1299,5 +1327,50 @@ pub fn block_pcg(a: &Csr, b: &[f64], k: usize, amg: &Amg, tol: f64, max_iter: us
 pub fn pcg(a: &Csr, b: &[f64], amg: &Amg, tol: f64, max_iter: usize) -> PcgResult {
     let res = block_pcg(a, b, 1, amg, tol, max_iter);
     PcgResult { x: res.x, iterations: res.iterations, relative_residual: res.relative_residual }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "LineSmoother vertex")]
+    fn line_smoother_rejects_oob_vertex_at_construction() {
+        let col = TridiagCol { nodes: vec![0, 1, 5], inv_d: vec![1.0; 3], l: vec![0.0; 2] };
+        let _ = LineSmoother::new(4, vec![col], vec![]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn line_smoother_apply_into_rejects_short_buffers() {
+        let col = TridiagCol { nodes: vec![0, 1, 2], inv_d: vec![1.0; 3], l: vec![0.0; 2] };
+        let ls = LineSmoother::new(4, vec![col], vec![3]);
+        let diag = vec![1.0; 4];
+        let r = vec![1.0; 3];
+        let mut z = vec![0.0; 4];
+        ls.apply_into(&diag, &r, &mut z);
+    }
+
+    #[test]
+    #[should_panic(expected = "block overflow")]
+    fn line_smoother_apply_block_into_rejects_overflow() {
+        let col = TridiagCol { nodes: vec![0, 1, 2], inv_d: vec![1.0; 3], l: vec![0.0; 2] };
+        let ls = LineSmoother::new(4, vec![col], vec![3]);
+        let diag = vec![1.0; 4];
+        let r = vec![1.0; 8];
+        let mut z = vec![0.0; 8];
+        ls.apply_block_into(&diag, &r, &mut z, usize::MAX);
+    }
+
+    #[test]
+    #[should_panic]
+    fn line_smoother_apply_block_into_rejects_short_block_buffers() {
+        let col = TridiagCol { nodes: vec![0, 1, 2], inv_d: vec![1.0; 3], l: vec![0.0; 2] };
+        let ls = LineSmoother::new(4, vec![col], vec![3]);
+        let diag = vec![1.0; 4];
+        let r = vec![1.0; 8];
+        let mut z = vec![0.0; 7];
+        ls.apply_block_into(&diag, &r, &mut z, 2);
+    }
 }
 

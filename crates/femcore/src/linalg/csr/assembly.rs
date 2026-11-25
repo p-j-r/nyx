@@ -19,11 +19,11 @@ pub fn c(re: f64, im: f64) -> C64 {
 /// Coordinate-format builder; duplicate entries are summed when converted ([`Triplets::to_csr`]).
 #[derive(Clone, Debug)]
 pub struct Triplets<T: Scalar> {
-    pub nrows: usize,
-    pub ncols: usize,
-    pub rows: Vec<u32>,
-    pub cols: Vec<u32>,
-    pub vals: Vec<T>,
+    nrows: usize,
+    ncols: usize,
+    rows: Vec<u32>,
+    cols: Vec<u32>,
+    vals: Vec<T>,
 }
 
 pub type Coo = Triplets<f64>;
@@ -31,21 +31,59 @@ pub type CCoo = Triplets<C64>;
 
 impl<T: Scalar> Triplets<T> {
     pub fn new(nrows: usize, ncols: usize) -> Self {
+        assert!(nrows <= u32::MAX as usize && ncols <= u32::MAX as usize, "Triplets dimensions ({nrows}, {ncols}) overflow u32");
         Triplets { nrows, ncols, rows: vec![], cols: vec![], vals: vec![] }
     }
     pub fn with_capacity(nrows: usize, ncols: usize, cap: usize) -> Self {
+        assert!(nrows <= u32::MAX as usize && ncols <= u32::MAX as usize, "Triplets dimensions ({nrows}, {ncols}) overflow u32");
         Triplets { nrows, ncols, rows: Vec::with_capacity(cap), cols: Vec::with_capacity(cap), vals: Vec::with_capacity(cap) }
+    }
+    pub fn nrows(&self) -> usize {
+        self.nrows
+    }
+    pub fn ncols(&self) -> usize {
+        self.ncols
+    }
+    pub fn rows(&self) -> &[u32] {
+        &self.rows
+    }
+    pub fn cols(&self) -> &[u32] {
+        &self.cols
+    }
+    pub fn vals(&self) -> &[T] {
+        &self.vals
     }
     #[inline]
     pub fn push(&mut self, r: usize, c: usize, v: T) {
-        debug_assert!(r < self.nrows && c < self.ncols);
-        self.rows.push(r as u32);
-        self.cols.push(c as u32);
+        assert!(r < self.nrows && c < self.ncols, "Triplets::push ({r}, {c}) out of bounds ({}, {})", self.nrows, self.ncols);
+        let r_u32 = u32::try_from(r).expect("Triplets row index overflows u32");
+        let c_u32 = u32::try_from(c).expect("Triplets column index overflows u32");
+        self.rows.push(r_u32);
+        self.cols.push(c_u32);
         self.vals.push(v);
+    }
+    /// Appends all entries from `other` after checking matching `(nrows, ncols)` dimensions.
+    pub fn extend(&mut self, other: &Self) {
+        assert!(
+            self.nrows == other.nrows && self.ncols == other.ncols,
+            "Triplets::extend shape mismatch: ({}, {}) != ({}, {})",
+            self.nrows,
+            self.ncols,
+            other.nrows,
+            other.ncols
+        );
+        assert!(
+            other.rows.len() == other.cols.len() && other.rows.len() == other.vals.len(),
+            "Triplets::extend buffer length mismatch"
+        );
+        self.rows.extend_from_slice(&other.rows);
+        self.cols.extend_from_slice(&other.cols);
+        self.vals.extend_from_slice(&other.vals);
     }
     /// Adds the dense block `local[a*cols.len() + b]` at `(rows[a], cols[b])`; exact zeros are skipped.
     pub fn push_block(&mut self, rows: &[usize], cols: &[usize], local: &[T]) {
-        debug_assert_eq!(local.len(), rows.len() * cols.len());
+        let expected = rows.len().checked_mul(cols.len()).expect("push_block block size overflow");
+        assert_eq!(local.len(), expected);
         for (a, &r) in rows.iter().enumerate() {
             for (b, &cc) in cols.iter().enumerate() {
                 let v = local[a * cols.len() + b];
@@ -58,14 +96,17 @@ impl<T: Scalar> Triplets<T> {
     /// Counting sort by row, then each row sorted by column with duplicates summed.
     pub fn to_csr(&self) -> Csr<T> {
         let n = self.nrows;
-        let mut count = vec![0usize; n + 1];
+        let nnz = self.rows.len();
+        assert!(nnz == self.cols.len() && nnz == self.vals.len(), "Triplets buffer length mismatch");
+        let mut count = vec![0usize; n.checked_add(1).expect("Triplets nrows overflow")];
         for &r in &self.rows {
-            count[r as usize + 1] += 1;
+            let ru = r as usize;
+            assert!(ru < n, "Triplets row index {ru} >= {n}");
+            count[ru + 1] += 1;
         }
         for i in 0..n {
             count[i + 1] += count[i];
         }
-        let nnz = self.rows.len();
         let mut order = vec![0usize; nnz];
         let mut next = count.clone();
         for k in 0..nnz {
@@ -81,7 +122,9 @@ impl<T: Scalar> Triplets<T> {
         for r in 0..n {
             row.clear();
             for &k in &order[count[r]..count[r + 1]] {
-                row.push((self.cols[k], self.vals[k]));
+                let col = self.cols[k];
+                assert!((col as usize) < self.ncols, "Triplets col index {col} >= {}", self.ncols);
+                row.push((col, self.vals[k]));
             }
             row.sort_unstable_by_key(|e| e.0);
             let mut i = 0;
@@ -97,21 +140,28 @@ impl<T: Scalar> Triplets<T> {
             }
             indptr.push(indices.len());
         }
-        Csr { nrows: n, ncols: self.ncols, indptr, indices, values }
+        Csr::try_new(n, self.ncols, indptr, indices, values).expect("valid CSR from Triplets")
     }
 }
 
 impl<T: Scalar> Csr<T> {
     pub fn zeros(nrows: usize, ncols: usize) -> Self {
-        Csr { nrows, ncols, indptr: vec![0; nrows + 1], indices: vec![], values: vec![] }
+        let len = nrows.checked_add(1).expect("Csr::zeros nrows overflow");
+        Self::try_new(nrows, ncols, vec![0; len], vec![], vec![]).expect("valid zero CSR")
     }
     pub fn from_diag(d: &[T]) -> Self {
         let n = d.len();
-        Csr { nrows: n, ncols: n, indptr: (0..=n).collect(), indices: (0..n as u32).collect(), values: d.to_vec() }
+        assert!(n <= u32::MAX as usize, "Csr::from_diag dimension {n} overflows u32");
+        let indices: Vec<u32> = (0..n).map(|i| u32::try_from(i).expect("u32 index")).collect();
+        Self::try_new(n, n, (0..=n).collect(), indices, d.to_vec()).expect("valid diagonal CSR")
     }
     /// From `usize` column indices (rows sorted by the caller); panics on an inconsistent matrix, which is a bug of the caller.
     pub fn from_raw(nrows: usize, ncols: usize, indptr: Vec<usize>, indices: Vec<usize>, values: Vec<T>) -> Self {
-        Self::try_new(nrows, ncols, indptr, indices.into_iter().map(|c| c as u32).collect(), values).expect("a consistent CSR matrix")
+        let u32_indices: Vec<u32> = indices
+            .into_iter()
+            .map(|c| u32::try_from(c).expect("Csr::from_raw column index overflows u32"))
+            .collect();
+        Self::try_new(nrows, ncols, indptr, u32_indices, values).expect("a consistent CSR matrix")
     }
     #[inline]
     pub fn row_range(&self, r: usize) -> std::ops::Range<usize> {
@@ -120,7 +170,13 @@ impl<T: Scalar> Csr<T> {
     /// Entry `(r, c)` (zero where not stored); rows must be sorted.
     pub fn get(&self, r: usize, c: usize) -> T {
         let (cols, vals) = self.row(r);
-        match cols.binary_search(&(c as u32)) {
+        if c >= self.ncols {
+            return T::ZERO;
+        }
+        let Ok(c_u32) = u32::try_from(c) else {
+            return T::ZERO;
+        };
+        match cols.binary_search(&c_u32) {
             Ok(p) => vals[p],
             Err(_) => T::ZERO,
         }
@@ -149,9 +205,10 @@ impl<T: Scalar> Csr<T> {
     }
     /// Rows `rows` and columns `cols` (index lists in the given order); entries whose column is not in `cols` are dropped.
     pub fn submatrix(&self, rows: &[usize], cols: &[usize]) -> Csr<T> {
+        assert!(cols.len() <= u32::MAX as usize, "Csr::submatrix column count overflows u32");
         let mut map = vec![u32::MAX; self.ncols];
         for (j, &c) in cols.iter().enumerate() {
-            map[c] = j as u32;
+            map[c] = u32::try_from(j).expect("u32 index");
         }
         let mut indptr = vec![0usize];
         let mut indices: Vec<u32> = Vec::new();
@@ -173,35 +230,52 @@ impl<T: Scalar> Csr<T> {
             }
             indptr.push(indices.len());
         }
-        Csr { nrows: rows.len(), ncols: cols.len(), indptr, indices, values }
+        Self::try_new(rows.len(), cols.len(), indptr, indices, values).expect("valid submatrix CSR")
     }
     pub fn block_diag(blocks: &[&Csr<T>]) -> Csr<T> {
-        let nrows = blocks.iter().map(|b| b.nrows).sum();
-        let ncols = blocks.iter().map(|b| b.ncols).sum();
+        let nrows = blocks
+            .iter()
+            .try_fold(0usize, |acc, b| acc.checked_add(b.nrows))
+            .expect("Csr::block_diag nrows overflow");
+        let ncols = blocks
+            .iter()
+            .try_fold(0usize, |acc, b| acc.checked_add(b.ncols))
+            .expect("Csr::block_diag ncols overflow");
+        assert!(ncols <= u32::MAX as usize, "Csr::block_diag ncols {ncols} overflows u32");
         let mut indptr = vec![0usize];
         let (mut indices, mut values) = (Vec::new(), Vec::new());
-        let mut co = 0u32;
+        let mut co = 0usize;
         for b in blocks {
+            let co_u32 = u32::try_from(co).expect("u32 column offset");
             for r in 0..b.nrows {
                 let (cs, vs) = b.row(r);
                 for (&cc, &v) in cs.iter().zip(vs) {
-                    indices.push(cc + co);
+                    indices.push(cc.checked_add(co_u32).expect("Csr::block_diag index overflow"));
                     values.push(v);
                 }
                 indptr.push(indices.len());
             }
-            co += b.ncols as u32;
+            co += b.ncols;
         }
-        Csr { nrows, ncols, indptr, indices, values }
+        Self::try_new(nrows, ncols, indptr, indices, values).expect("valid block_diag CSR")
     }
     /// Sum of matrices of one shape. Blocks of rows are merged on all cores; a row of the sum is a small merge of at most `parts.len()`
     /// sorted lists.
     pub fn sum_all(mut parts: Vec<Csr<T>>) -> Csr<T> {
         use rayon::prelude::*;
+        assert!(!parts.is_empty(), "Csr::sum_all requires at least one part");
         if parts.len() == 1 {
             return parts.pop().unwrap();
         }
         let (nrows, ncols) = (parts[0].nrows, parts[0].ncols);
+        for (idx, p) in parts.iter().enumerate().skip(1) {
+            assert!(
+                p.nrows == nrows && p.ncols == ncols,
+                "Csr::sum_all shape mismatch at part {idx}: ({}, {}) != ({nrows}, {ncols})",
+                p.nrows,
+                p.ncols
+            );
+        }
         let chunk = nrows.div_ceil(crate::par::threads()).max(1);
         let parts_ref = &parts;
         type Block<T> = (Vec<usize>, Vec<u32>, Vec<T>);
@@ -246,7 +320,7 @@ impl<T: Scalar> Csr<T> {
             indices.extend(idx);
             values.extend(val);
         }
-        Csr { nrows, ncols, indptr, indices, values }
+        Self::try_new(nrows, ncols, indptr, indices, values).expect("valid summed CSR")
     }
     /// Symmetrised copy `(A + A^T)/2`.
     pub fn symmetrized(&self) -> Csr<T> {

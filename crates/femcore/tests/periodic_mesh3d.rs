@@ -196,22 +196,52 @@ fn periodic_boundary_rivara_bisection_and_adaptive_3d_keep_congruence() {
 #[test]
 fn periodic_3d_meshing_is_deterministic_across_thread_counts() {
     let lambda = 437e-9;
-    let list = corrugated_grating(lambda, 0.085e-6);
-    let run_with_threads = |nt: usize| -> SimplexMesh {
-        std::env::set_var("NYX_THREADS", nt.to_string());
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(nt).build().unwrap();
-        pool.install(|| {
-            let ev = evaluate(&list).unwrap();
-            mesh_geom_3d(ev, &GeomMeshOpts::new(0.28e-6)).unwrap().mesh
-        })
-    };
-    let m1 = run_with_threads(1);
-    let m4 = run_with_threads(4);
-    std::env::remove_var("NYX_THREADS");
+    if let Ok(out_path) = std::env::var("NYX_PERIODIC3D_OUT") {
+        let list = corrugated_grating(lambda, 0.085e-6);
+        let ev = evaluate(&list).unwrap();
+        let m = mesh_geom_3d(ev, &GeomMeshOpts::new(0.28e-6)).unwrap().mesh;
+        let mut buf = Vec::new();
+        let push_usize = |b: &mut Vec<u8>, v: usize| b.extend_from_slice(&(v as u64).to_le_bytes());
+        push_usize(&mut buf, m.points.len());
+        for &p in &m.points {
+            buf.extend_from_slice(&p.to_bits().to_le_bytes());
+        }
+        push_usize(&mut buf, m.cells.len());
+        for &c in &m.cells {
+            buf.extend_from_slice(&c.to_le_bytes());
+        }
+        push_usize(&mut buf, m.cell_labels.len());
+        for &l in &m.cell_labels {
+            buf.extend_from_slice(&l.to_le_bytes());
+        }
+        push_usize(&mut buf, m.facets.len());
+        for &f in &m.facets {
+            buf.extend_from_slice(&f.to_le_bytes());
+        }
+        push_usize(&mut buf, m.facet_labels.len());
+        for &l in &m.facet_labels {
+            buf.extend_from_slice(&l.to_le_bytes());
+        }
+        std::fs::write(out_path, buf).unwrap();
+        return;
+    }
 
-    assert_eq!(m1.points, m4.points, "vertex coordinates must be identical for NYX_THREADS=1 and 4");
-    assert_eq!(m1.cells, m4.cells, "cells must be identical for NYX_THREADS=1 and 4");
-    assert_eq!(m1.cell_labels, m4.cell_labels, "cell labels must be identical for NYX_THREADS=1 and 4");
-    assert_eq!(m1.facets, m4.facets, "facets must be identical for NYX_THREADS=1 and 4");
-    assert_eq!(m1.facet_labels, m4.facet_labels, "facet labels must be identical for NYX_THREADS=1 and 4");
+    let exe = std::env::current_exe().unwrap();
+    let run_with_threads = |nt: &str| -> Vec<u8> {
+        let out_file = std::env::temp_dir().join(format!("nyx-periodic3d-det-{}-t{nt}.bin", std::process::id()));
+        let status = std::process::Command::new(&exe)
+            .args(["--exact", "periodic_3d_meshing_is_deterministic_across_thread_counts", "--nocapture"])
+            .env("NYX_THREADS", nt)
+            .env("NYX_PERIODIC3D_OUT", &out_file)
+            .status()
+            .unwrap();
+        assert!(status.success(), "child process NYX_THREADS={nt} failed");
+        let bytes = std::fs::read(&out_file).unwrap();
+        let _ = std::fs::remove_file(&out_file);
+        bytes
+    };
+
+    let b1 = run_with_threads("1");
+    let b4 = run_with_threads("4");
+    assert_eq!(b1, b4, "periodic 3D mesh must be bit-identical for NYX_THREADS=1 and 4");
 }

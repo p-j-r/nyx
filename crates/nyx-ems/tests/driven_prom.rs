@@ -480,6 +480,7 @@ fn test_6_waveport_3d_through_line_s_parameters_and_prom_accuracy() {
     assert!(min_s21 > 0.99, "waveport min |S21| = {min_s21:.6} <= 0.99");
     assert!(max_s11 < 0.05, "waveport max |S11| = {max_s11:.6} >= 0.05");
     assert!(max_z0_rel_err < 5e-3, "waveport Z0 relative error {max_z0_rel_err:e} >= 5e-3");
+    assert!(max_phase_err_rad < 5e-3, "waveport max |S21 - exp(-i beta L)| = {max_phase_err_rad:e} >= 5e-3");
 
     // 2. Compare PROM vs direct HDM (`prom_tol = null`) across 11 frequencies
     let n_chk = 11usize;

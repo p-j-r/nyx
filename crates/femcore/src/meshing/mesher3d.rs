@@ -994,7 +994,8 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
                 (v_canon_key[a as usize], a) < (v_canon_key[b as usize], b)
             }
         };
-        let mut rep: Vec<u32> = (0..points.len() as u32).collect();
+        let orig_points = points.clone();
+        let orig_vflag = vflag.clone();
         let find = |rep: &mut Vec<u32>, mut x: u32| {
             while rep[x as usize] != x {
                 rep[x as usize] = rep[rep[x as usize] as usize];
@@ -1002,56 +1003,105 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
             }
             x
         };
-        for (a, b) in weld_pairs {
-            let (ra, rb) = (find(&mut rep, a), find(&mut rep, b));
-            if ra != rb {
-                if prefers(ra, rb) {
-                    rep[rb as usize] = ra;
-                } else {
-                    rep[ra as usize] = rb;
-                }
-            }
-        }
-        for v in 0..points.len() as u32 {
-            let r = find(&mut rep, v);
-            if r != v && vflag[v as usize] {
-                vflag[r as usize] = true;
-            }
-        }
-        if has_periodic {
-            let mut parent_rep_pos: HashMap<u64, [f64; 3]> = HashMap::new();
-            for u in 0..points.len() as u32 {
-                if find(&mut rep, u) == u && v_plane_mask[u as usize] != 0 && (v_plane_mask[u as usize] & 0b111) == 0 {
-                    parent_rep_pos.insert(v_canon_key[u as usize], points[u as usize]);
-                }
-            }
-            for u in 0..points.len() as u32 {
-                let mask = v_plane_mask[u as usize];
-                if find(&mut rep, u) == u && (mask & 0b111) != 0 {
-                    if let Some(&pp) = parent_rep_pos.get(&v_canon_key[u as usize]) {
-                        let mut p = pp;
-                        for a in 0..3 {
-                            if let Some((plo, phi)) = per_axis[a] {
-                                if (mask & (1 << a)) != 0 {
-                                    p[a] = phi;
-                                } else if (mask & (1 << (a + 3))) != 0 {
-                                    p[a] = plo;
-                                }
-                            }
-                        }
-                        points[u as usize] = p;
+        let mut active_pairs = weld_pairs;
+        let final_kept = loop {
+            let mut trial_points = orig_points.clone();
+            let mut trial_vflag = orig_vflag.clone();
+            let mut rep: Vec<u32> = (0..trial_points.len() as u32).collect();
+            for &(a, b) in &active_pairs {
+                let (ra, rb) = (find(&mut rep, a), find(&mut rep, b));
+                if ra != rb {
+                    if prefers(ra, rb) {
+                        rep[rb as usize] = ra;
+                    } else {
+                        rep[ra as usize] = rb;
                     }
                 }
             }
-        }
-        let mut kept = Vec::with_capacity(cells.len());
-        for (t, r) in &cells {
-            let t = t.map(|v| find(&mut rep, v));
-            if (0..4).all(|i| (i + 1..4).all(|j| t[i] != t[j])) {
-                kept.push((t, *r));
+            for v in 0..trial_points.len() as u32 {
+                let r = find(&mut rep, v);
+                if r != v && trial_vflag[v as usize] {
+                    trial_vflag[r as usize] = true;
+                }
             }
-        }
-        cells = kept;
+            if has_periodic {
+                let mut parent_rep_pos: HashMap<u64, [f64; 3]> = HashMap::new();
+                for u in 0..trial_points.len() as u32 {
+                    if find(&mut rep, u) == u && v_plane_mask[u as usize] != 0 && (v_plane_mask[u as usize] & 0b111) == 0 {
+                        parent_rep_pos.insert(v_canon_key[u as usize], trial_points[u as usize]);
+                    }
+                }
+                for u in 0..trial_points.len() as u32 {
+                    let mask = v_plane_mask[u as usize];
+                    if find(&mut rep, u) == u && (mask & 0b111) != 0 {
+                        if let Some(&pp) = parent_rep_pos.get(&v_canon_key[u as usize]) {
+                            let mut p = pp;
+                            for a in 0..3 {
+                                if let Some((plo, phi)) = per_axis[a] {
+                                    if (mask & (1 << a)) != 0 {
+                                        p[a] = phi;
+                                    } else if (mask & (1 << (a + 3))) != 0 {
+                                        p[a] = plo;
+                                    }
+                                }
+                            }
+                            trial_points[u as usize] = p;
+                        }
+                    }
+                }
+            }
+            let mut blocked_roots: HashSet<u32> = HashSet::new();
+            let mut blocked_canon: HashSet<u64> = HashSet::new();
+            let mut kept = Vec::with_capacity(cells.len());
+            for &(t_orig, r) in &cells {
+                let t = t_orig.map(|v| find(&mut rep, v));
+                if (0..4).all(|i| (i + 1..4).all(|j| t[i] != t[j])) {
+                    let q = t.map(|v| trial_points[v as usize]);
+                    let det = det3(sub3(q[1], q[0]), sub3(q[2], q[0]), sub3(q[3], q[0]));
+                    let q0 = t_orig.map(|v| orig_points[v as usize]);
+                    let det0 = det3(sub3(q0[1], q0[0]), sub3(q0[2], q0[0]), sub3(q0[3], q0[0]));
+                    // Roll back welds whose surviving non-degenerate tetrahedron becomes zero-volume or inverted (`det <= 0.0`).
+                    if !(det > 0.0) && (det0 > 0.0 || t != t_orig) {
+                        for &v in &t {
+                            blocked_roots.insert(v);
+                            if has_periodic && v_plane_mask[v as usize] != 0 {
+                                blocked_canon.insert(v_canon_key[v as usize]);
+                            }
+                        }
+                        for &v in &t_orig {
+                            let rv = find(&mut rep, v);
+                            blocked_roots.insert(rv);
+                            if has_periodic && v_plane_mask[v as usize] != 0 {
+                                blocked_canon.insert(v_canon_key[v as usize]);
+                            }
+                        }
+                    } else {
+                        kept.push((t, r));
+                    }
+                }
+            }
+            if blocked_roots.is_empty() || active_pairs.is_empty() {
+                points = trial_points;
+                vflag = trial_vflag;
+                break kept;
+            }
+            let prev_len = active_pairs.len();
+            active_pairs.retain(|&(a, b)| {
+                let ra = find(&mut rep, a);
+                let rb = find(&mut rep, b);
+                !blocked_roots.contains(&ra)
+                    && !blocked_roots.contains(&rb)
+                    && (!has_periodic
+                        || (!blocked_canon.contains(&v_canon_key[a as usize])
+                            && !blocked_canon.contains(&v_canon_key[b as usize])))
+            });
+            if active_pairs.len() == prev_len {
+                points = orig_points;
+                vflag = orig_vflag;
+                break cells.clone();
+            }
+        };
+        cells = final_kept;
     }
 
     // 6. boundary facets: faces of cells with the void on the other side, and faces between cells of different regions. Such a face has
@@ -1151,6 +1201,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     let local: Vec<(u32, f64)> = (0..nreg as u32).filter_map(|r| dom.region_size(r).filter(|&hb| hb > 0.0 && hb < 0.999 * spec.h).map(|hb| (r, hb))).collect();
     let faces = dom.asks_size_at();
     if local.is_empty() && !faces {
+        crate::mesh::SimplexMesh::from_cells(&mesh)?.check()?;
         return Ok((mesh, report));
     }
     let size = |p: [f64; 3]| -> f64 {
@@ -1173,6 +1224,7 @@ pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3
     report.refined = rr.bisections;
     lap("  mesh3d: local refinement");
     crate::progress::check()?;
+    crate::mesh::SimplexMesh::from_cells(&mesh)?.check()?;
     Ok((mesh, report))
 }
 

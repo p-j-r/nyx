@@ -253,28 +253,18 @@ pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize)
     let mut a = CCoo::new(2 * n, 2 * n);
     let mut b = CCoo::new(2 * n, 2 * n);
     for i in 0..n {
-        a.rows.push(i as u32);
-        a.cols.push((n + i) as u32);
-        a.vals.push(c(1.0, 0.0));
-        b.rows.push(i as u32);
-        b.cols.push(i as u32);
-        b.vals.push(c(1.0, 0.0));
+        a.push(i, n + i, c(1.0, 0.0));
+        b.push(i, i, c(1.0, 0.0));
     }
     for r in 0..n {
         for p in kf.indptr()[r]..kf.indptr()[r + 1] {
-            a.rows.push((n + r) as u32);
-            a.cols.push(kf.indices()[p] as usize as u32);
-            a.vals.push(-kf.values()[p]);
+            a.push(n + r, kf.indices()[p] as usize, -kf.values()[p]);
         }
         for p in cc.indptr()[r]..cc.indptr()[r + 1] {
-            a.rows.push((n + r) as u32);
-            a.cols.push((n + cc.indices()[p] as usize) as u32);
-            a.vals.push(-cc.values()[p]);
+            a.push(n + r, n + cc.indices()[p] as usize, -cc.values()[p]);
         }
         for p in mf.indptr()[r]..mf.indptr()[r + 1] {
-            b.rows.push((n + r) as u32);
-            b.cols.push((n + mf.indices()[p] as usize) as u32);
-            b.vals.push(mf.values()[p]);
+            b.push(n + r, n + mf.indices()[p] as usize, mf.values()[p]);
         }
     }
     let (ac, bc) = (a.to_csr(), b.to_csr());

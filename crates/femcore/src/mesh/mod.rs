@@ -75,6 +75,66 @@ impl SplitReport {
     }
 }
 
+/// Structural, geometric, or edge-endpoint defect detected by [`SimplexMesh::check`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum MeshIntegrityError {
+    InvalidDimension(usize),
+    LengthMismatch(&'static str),
+    NonFiniteCoordinate { point: usize, axis: usize },
+    VertexOutOfBounds { context: &'static str, index: usize, vertex: u32, n_points: usize },
+    DuplicateVertexInSimplex { context: &'static str, index: usize, vertex: u32 },
+    NonPositiveMeasure { cell: usize, det: f64 },
+    NonManifoldFacet { vertices: Vec<u32>, incident_cells: usize },
+    InconsistentFacetTag { vertices: Vec<u32>, detail: String },
+    FacetNotInAnyCell { facet: usize, vertices: Vec<u32> },
+    InvalidCurvedEdge { edge_index: u32, detail: String },
+    InvalidQpEdge { edge_index: u32, detail: String },
+}
+
+impl std::fmt::Display for MeshIntegrityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidDimension(d) => write!(f, "unsupported mesh dimension {d}"),
+            Self::LengthMismatch(msg) => write!(f, "mesh array length mismatch: {msg}"),
+            Self::NonFiniteCoordinate { point, axis } => {
+                write!(f, "non-finite coordinate at point {point}, axis {axis}")
+            }
+            Self::VertexOutOfBounds { context, index, vertex, n_points } => {
+                write!(f, "{context} {index}: vertex {vertex} out of bounds (n_points = {n_points})")
+            }
+            Self::DuplicateVertexInSimplex { context, index, vertex } => {
+                write!(f, "{context} {index}: duplicate vertex {vertex}")
+            }
+            Self::NonPositiveMeasure { cell, det } => {
+                write!(f, "cell {cell}: non-positive orientation determinant {det:e}")
+            }
+            Self::NonManifoldFacet { vertices, incident_cells } => {
+                write!(f, "non-manifold facet {vertices:?} shared by {incident_cells} cells")
+            }
+            Self::InconsistentFacetTag { vertices, detail } => {
+                write!(f, "inconsistent facet tag on {vertices:?}: {detail}")
+            }
+            Self::FacetNotInAnyCell { facet, vertices } => {
+                write!(f, "facet {facet} ({vertices:?}) does not belong to any cell")
+            }
+            Self::InvalidCurvedEdge { edge_index, detail } => {
+                write!(f, "invalid curved edge {edge_index}: {detail}")
+            }
+            Self::InvalidQpEdge { edge_index, detail } => {
+                write!(f, "invalid quarter-point edge {edge_index}: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MeshIntegrityError {}
+
+impl From<MeshIntegrityError> for String {
+    fn from(e: MeshIntegrityError) -> String {
+        e.to_string()
+    }
+}
+
 /// The mesh type the physics crates take (`nyx_physics::Mesh`). Today it is the simplex mesh; restructure phase 2 makes it the one native
 /// per-cell-type mesh (ADR 5). Code outside femcore names the mesh through this alias so that change is one line.
 
@@ -109,8 +169,11 @@ fn build_edges(dim: usize, cells: &[u32], nv: usize) -> (Vec<(u32, u32)>, Vec<u3
     use rayon::prelude::*;
     use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
     let nloc = dim + 1;
-    let nc = cells.len() / nloc;
     let npair = nloc * (nloc - 1) / 2;
+    if nv == 0 || !cells.len().is_multiple_of(nloc) || cells.iter().any(|&v| (v as usize) >= nv) {
+        return (Vec::new(), Vec::new());
+    }
+    let nc = cells.len() / nloc;
     let nt = if nc < 20_000 { 1 } else { crate::par::threads() };
     let cchunk = nc.div_ceil(nt).max(1);
     let pairs_of = |c: usize, f: &mut dyn FnMut(u32, u32)| {
@@ -222,6 +285,250 @@ impl SimplexMesh {
         let nv = points.len() / dim;
         let (edges, cell_edges) = build_edges(dim, &cells, nv);
         SimplexMesh { dim, points, cells, cell_labels, facets, facet_labels, edges, cell_edges, edge_nodes: Vec::new(), qp_edges: Vec::new() }
+    }
+
+    /// Verifies mesh coordinate finiteness, vertex index bounds, distinct simplex vertices, strictly
+    /// positive cell orientation/measure (`det > 0.0`), manifold facet incidence (`<= 2` incident
+    /// cells), consistent sheet/boundary tags, facet vertex membership, and curved/QP edge endpoints.
+    pub fn check(&self) -> Result<(), MeshIntegrityError> {
+        use std::collections::HashMap;
+        if self.dim != 2 && self.dim != 3 {
+            return Err(MeshIntegrityError::InvalidDimension(self.dim));
+        }
+        if !self.points.len().is_multiple_of(self.dim) {
+            return Err(MeshIntegrityError::LengthMismatch("points length is not a multiple of dim"));
+        }
+        let n_verts = self.points.len() / self.dim;
+        let nloc = self.dim + 1;
+        if !self.cells.len().is_multiple_of(nloc) {
+            return Err(MeshIntegrityError::LengthMismatch("cells length is not a multiple of dim + 1"));
+        }
+        let n_cells = self.cells.len() / nloc;
+        if self.cell_labels.len() != n_cells {
+            return Err(MeshIntegrityError::LengthMismatch("cell_labels length does not match cell count"));
+        }
+        if !self.facets.len().is_multiple_of(self.dim) {
+            return Err(MeshIntegrityError::LengthMismatch("facets length is not a multiple of dim"));
+        }
+        let n_facets = self.facets.len() / self.dim;
+        if self.facet_labels.len() != n_facets {
+            return Err(MeshIntegrityError::LengthMismatch("facet_labels length does not match facet count"));
+        }
+        let npair = self.dim * nloc / 2;
+        for (p_idx, pt) in self.points.chunks_exact(self.dim).enumerate() {
+            for (axis, &coord) in pt.iter().enumerate() {
+                if !coord.is_finite() {
+                    return Err(MeshIntegrityError::NonFiniteCoordinate { point: p_idx, axis });
+                }
+            }
+        }
+        let mut facet_cells: HashMap<[u32; 3], Vec<(usize, i32)>> =
+            HashMap::with_capacity(n_cells.saturating_mul(nloc) / 2);
+        let facet_key = |vs: &[u32]| -> [u32; 3] {
+            if vs.len() == 2 {
+                [vs[0].min(vs[1]), vs[0].max(vs[1]), u32::MAX]
+            } else {
+                let mut k = [vs[0], vs[1], vs[2]];
+                k.sort_unstable();
+                k
+            }
+        };
+        let key_verts = |k: [u32; 3]| -> Vec<u32> {
+            if self.dim == 2 { vec![k[0], k[1]] } else { k.to_vec() }
+        };
+        for c in 0..n_cells {
+            let vs = &self.cells[c * nloc..(c + 1) * nloc];
+            for (i, &v) in vs.iter().enumerate() {
+                if (v as usize) >= n_verts {
+                    return Err(MeshIntegrityError::VertexOutOfBounds {
+                        context: "cell",
+                        index: c,
+                        vertex: v,
+                        n_points: n_verts,
+                    });
+                }
+                if vs[..i].contains(&v) {
+                    return Err(MeshIntegrityError::DuplicateVertexInSimplex {
+                        context: "cell",
+                        index: c,
+                        vertex: v,
+                    });
+                }
+            }
+            let det = if self.dim == 2 {
+                let p = |v: u32| -> [f64; 2] {
+                    let i = v as usize * 2;
+                    [self.points[i], self.points[i + 1]]
+                };
+                let (a, b, cc) = (p(vs[0]), p(vs[1]), p(vs[2]));
+                (b[0] - a[0]) * (cc[1] - a[1]) - (cc[0] - a[0]) * (b[1] - a[1])
+            } else {
+                let p = |v: u32| -> [f64; 3] {
+                    let i = v as usize * 3;
+                    [self.points[i], self.points[i + 1], self.points[i + 2]]
+                };
+                let (p0, p1, p2, p3) = (p(vs[0]), p(vs[1]), p(vs[2]), p(vs[3]));
+                let u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                let v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                let w = [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]];
+                u[0] * (v[1] * w[2] - v[2] * w[1])
+                    - u[1] * (v[0] * w[2] - v[2] * w[0])
+                    + u[2] * (v[0] * w[1] - v[1] * w[0])
+            };
+            if !(det.is_finite() && det > 0.0) {
+                return Err(MeshIntegrityError::NonPositiveMeasure { cell: c, det });
+            }
+            let lab = self.cell_labels[c];
+            let mut fbuf = [0u32; 3];
+            for skip in 0..nloc {
+                let mut idx = 0;
+                for (i, &x) in vs.iter().enumerate() {
+                    if i != skip {
+                        fbuf[idx] = x;
+                        idx += 1;
+                    }
+                }
+                let key = facet_key(&fbuf[..self.dim]);
+                let entry = facet_cells.entry(key).or_default();
+                entry.push((c, lab));
+                if entry.len() > 2 {
+                    return Err(MeshIntegrityError::NonManifoldFacet {
+                        vertices: key_verts(key),
+                        incident_cells: entry.len(),
+                    });
+                }
+            }
+        }
+        // Track duplicate geometric facets and ensure interior sheet labels never clash with exterior/interface roles.
+        let mut seen_facets: HashMap<[u32; 3], i32> = HashMap::with_capacity(n_facets);
+        let mut tag_roles: HashMap<i32, (bool, bool)> = HashMap::new();
+        for f in 0..n_facets {
+            let fv = &self.facets[f * self.dim..(f + 1) * self.dim];
+            for (i, &v) in fv.iter().enumerate() {
+                if (v as usize) >= n_verts {
+                    return Err(MeshIntegrityError::VertexOutOfBounds {
+                        context: "facet",
+                        index: f,
+                        vertex: v,
+                        n_points: n_verts,
+                    });
+                }
+                if fv[..i].contains(&v) {
+                    return Err(MeshIntegrityError::DuplicateVertexInSimplex {
+                        context: "facet",
+                        index: f,
+                        vertex: v,
+                    });
+                }
+            }
+            let key = facet_key(fv);
+            let lab = self.facet_labels[f];
+            let Some(cs) = facet_cells.get(&key) else {
+                return Err(MeshIntegrityError::FacetNotInAnyCell {
+                    facet: f,
+                    vertices: key_verts(key),
+                });
+            };
+            if let Some(&prev_lab) = seen_facets.get(&key) {
+                return Err(MeshIntegrityError::InconsistentFacetTag {
+                    vertices: key_verts(key),
+                    detail: format!("duplicate facet entry (labels {prev_lab} and {lab})"),
+                });
+            }
+            seen_facets.insert(key, lab);
+            let role = tag_roles.entry(lab).or_insert((false, false));
+            if cs.len() == 2 && cs[0].1 == cs[1].1 {
+                role.0 = true;
+            } else {
+                role.1 = true;
+            }
+            if role.0 && role.1 {
+                return Err(MeshIntegrityError::InconsistentFacetTag {
+                    vertices: key_verts(key),
+                    detail: format!("label {lab} mixes interior same-domain sheet and non-sheet facets"),
+                });
+            }
+        }
+        if self.cell_edges.len() != n_cells * npair {
+            return Err(MeshIntegrityError::LengthMismatch("cell_edges length does not match cells"));
+        }
+        for (i, &(u, v)) in self.edges.iter().enumerate() {
+            if u >= v || (v as usize) >= n_verts {
+                return Err(MeshIntegrityError::InvalidCurvedEdge {
+                    edge_index: i as u32,
+                    detail: format!("mesh edge ({u}, {v}) invalid for {n_verts} points"),
+                });
+            }
+        }
+        for &eid in &self.cell_edges {
+            if (eid as usize) >= self.edges.len() {
+                return Err(MeshIntegrityError::InvalidCurvedEdge {
+                    edge_index: eid,
+                    detail: format!("cell_edges reference {eid} out of range (n_edges = {})", self.edges.len()),
+                });
+            }
+        }
+        let mut prev_edge: Option<u32> = None;
+        for &(eid, pos) in &self.edge_nodes {
+            if let Some(prev) = prev_edge {
+                if eid <= prev {
+                    return Err(MeshIntegrityError::InvalidCurvedEdge {
+                        edge_index: eid,
+                        detail: "edge_nodes are not strictly sorted by edge index".into(),
+                    });
+                }
+            }
+            prev_edge = Some(eid);
+            let Some(&(u, v)) = self.edges.get(eid as usize) else {
+                return Err(MeshIntegrityError::InvalidCurvedEdge {
+                    edge_index: eid,
+                    detail: format!("edge index {eid} out of bounds (n_edges = {})", self.edges.len()),
+                });
+            };
+            if u >= v || (u as usize) >= n_verts || (v as usize) >= n_verts {
+                return Err(MeshIntegrityError::InvalidCurvedEdge {
+                    edge_index: eid,
+                    detail: format!("invalid endpoints ({u}, {v}) for {n_verts} points"),
+                });
+            }
+            if !pos.iter().all(|x| x.is_finite()) {
+                return Err(MeshIntegrityError::InvalidCurvedEdge {
+                    edge_index: eid,
+                    detail: "curved edge midpoint has non-finite coordinate".into(),
+                });
+            }
+        }
+        let mut prev_qp: Option<u32> = None;
+        for &eid in &self.qp_edges {
+            if let Some(prev) = prev_qp {
+                if eid <= prev {
+                    return Err(MeshIntegrityError::InvalidQpEdge {
+                        edge_index: eid,
+                        detail: "qp_edges are not strictly sorted by edge index".into(),
+                    });
+                }
+            }
+            prev_qp = Some(eid);
+            let Some(&(u, v)) = self.edges.get(eid as usize) else {
+                return Err(MeshIntegrityError::InvalidQpEdge {
+                    edge_index: eid,
+                    detail: format!("edge index {eid} out of bounds (n_edges = {})", self.edges.len()),
+                });
+            };
+            if u >= v || (u as usize) >= n_verts || (v as usize) >= n_verts {
+                return Err(MeshIntegrityError::InvalidQpEdge {
+                    edge_index: eid,
+                    detail: format!("invalid endpoints ({u}, {v}) for {n_verts} points"),
+                });
+            }
+            if self.edge_nodes.binary_search_by_key(&eid, |x| x.0).is_err() {
+                return Err(MeshIntegrityError::InvalidQpEdge {
+                    edge_index: eid,
+                    detail: "quarter-point edge has no matching edge_nodes entry".into(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Sets the curved edges of a mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the
@@ -525,6 +832,22 @@ impl SimplexMesh {
         if d != 2 && d != 3 {
             return Err(format!("mesh dimension {d} is not supported"));
         }
+        let n_pts = nm.n_points();
+        for c in 0..nm.n_cells() {
+            let vs = nm.cell(c);
+            if vs.len() != nm.types[c].nv() {
+                return Err(format!("cell {c}: wrong node count {}", vs.len()));
+            }
+            if let Some(&v) = vs.iter().find(|&&v| (v as usize) >= n_pts) {
+                return Err(format!("cell {c}: vertex {v} out of range (n_points = {n_pts})"));
+            }
+        }
+        for f in 0..nm.n_facets() {
+            let fv = nm.facet(f);
+            if let Some(&v) = fv.iter().find(|&&v| (v as usize) >= n_pts) {
+                return Err(format!("facet {f}: vertex {v} out of range (n_points = {n_pts})"));
+            }
+        }
         let mut report = SplitReport::default();
         let mut points: Vec<f64> = nm.points.iter().flat_map(|p| p.iter().copied()).collect();
         let (mut cells, mut cell_labels) = (vec![], vec![]);
@@ -730,6 +1053,90 @@ impl SimplexMesh {
             }
         }
         Ok((mesh, report))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_2d() -> SimplexMesh {
+        SimplexMesh::new(
+            2,
+            vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0, 1, 2, 1, 3, 2],
+            vec![1, 1],
+            vec![0, 1, 1, 3, 3, 2, 2, 0],
+            vec![1, 2, 3, 4],
+        )
+    }
+
+    fn valid_3d() -> SimplexMesh {
+        SimplexMesh::new(
+            3,
+            vec![
+                0.0, 0.0, 0.0,
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0,
+                1.0, 1.0, 1.0,
+            ],
+            vec![0, 1, 2, 3, 1, 2, 3, 4],
+            vec![1, 1],
+            vec![0, 1, 2, 0, 1, 3],
+            vec![1, 2],
+        )
+    }
+
+    #[test]
+    fn simplex_mesh_check_accepts_valid_and_rejects_defects() {
+        valid_2d().check().unwrap();
+        valid_3d().check().unwrap();
+
+        let mut bad_coord = valid_2d();
+        bad_coord.points[3] = f64::NAN;
+        assert!(matches!(bad_coord.check(), Err(MeshIntegrityError::NonFiniteCoordinate { .. })));
+
+        let oob = SimplexMesh::new(2, vec![0.0; 6], vec![0, 1, 9], vec![1], vec![], vec![]);
+        assert!(matches!(oob.check(), Err(MeshIntegrityError::VertexOutOfBounds { .. })));
+
+        let dup_v = SimplexMesh::new(2, vec![0.0; 6], vec![0, 1, 1], vec![1], vec![], vec![]);
+        assert!(matches!(dup_v.check(), Err(MeshIntegrityError::DuplicateVertexInSimplex { .. })));
+
+        let mut inverted_2d = valid_2d();
+        inverted_2d.cells[1] = 2;
+        inverted_2d.cells[2] = 1;
+        assert!(matches!(inverted_2d.check(), Err(MeshIntegrityError::NonPositiveMeasure { cell: 0, .. })));
+
+        let mut inverted_3d = valid_3d();
+        inverted_3d.cells.swap(2, 3);
+        assert!(matches!(inverted_3d.check(), Err(MeshIntegrityError::NonPositiveMeasure { cell: 0, .. })));
+
+        let non_manifold = SimplexMesh::new(
+            2,
+            vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.5, 0.5],
+            vec![0, 1, 2, 0, 3, 1, 0, 1, 4],
+            vec![1, 1, 1],
+            vec![],
+            vec![],
+        );
+        assert!(matches!(non_manifold.check(), Err(MeshIntegrityError::NonManifoldFacet { .. })));
+
+        let mut orphan_facet = valid_2d();
+        orphan_facet.facets.extend_from_slice(&[0, 3]);
+        orphan_facet.facet_labels.push(9);
+        assert!(matches!(orphan_facet.check(), Err(MeshIntegrityError::FacetNotInAnyCell { .. })));
+
+        // Sheet consistency: same label cannot be both an interior same-domain sheet and an exterior wall.
+        let mut mixed_sheet = valid_2d();
+        mixed_sheet.facets.extend_from_slice(&[1, 2]);
+        mixed_sheet.facet_labels.push(1);
+        assert!(matches!(mixed_sheet.check(), Err(MeshIntegrityError::InconsistentFacetTag { .. })));
+
+        // Non-finite curved edge midpoint must fail check().
+        let mut bad_curve = valid_3d();
+        bad_curve.set_edge_nodes(&[([0, 1], [0.5, f64::INFINITY, 0.0])]);
+        assert!(matches!(bad_curve.check(), Err(MeshIntegrityError::InvalidCurvedEdge { .. })));
     }
 }
 

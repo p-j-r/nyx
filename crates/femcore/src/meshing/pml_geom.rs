@@ -198,6 +198,7 @@ pub fn structured_pml_with_curved(g: MeshedGeom, curved: bool) -> Result<(Meshed
         Native::Unchanged(g, report) => Ok((g, report)),
         Native::Cells(cells, report) => {
             let (mesh, _) = SimplexMesh::from_cells_split(&cells)?;
+            mesh.check()?;
             Ok((
                 MeshedGeom {
                     mesh,
@@ -545,6 +546,9 @@ pub fn structured_pml_native_with_curved(g: MeshedGeom, curved: bool) -> Result<
         layer_quads += 1;
     }
 
+    built.mesh.facet_offsets = vec![0];
+    built.mesh.facet_conn.clear();
+    built.mesh.facet_label.clear();
     let owners = single_cell_owners(&built.mesh);
     let faces = built.mesh.boundary_faces_ordered();
     for f in faces {

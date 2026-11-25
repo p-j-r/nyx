@@ -18,7 +18,7 @@
 //! and an isometric QR image-space basis $\mathbf{U} \in \mathbb{R}^{n_{\text{red}}\times s}$ for microsecond
 //! full-space residual certification across all sweep frequencies.
 
-use crate::cavity::{assemble_maxwell_with_pml, basis3, gradient_full, safe_curved_jacobian, Ned3};
+use crate::cavity::{assemble_maxwell_with_pml, basis3_keyed, gradient_full, safe_curved_jacobian, Ned3};
 use crate::ibc::{assemble_ibc_and_jj_3d, reduce_real_csr, reduce_real_vec, AssembledJjPort, SheetCellKind, MU0};
 use crate::mixed_ops::{
     assemble_ibc_and_jj_3d_mixed, assemble_lumped_ports_3d_mixed, assemble_maxwell_mixed, assemble_waveports_3d_mixed,
@@ -586,7 +586,7 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
                 }
                 indptr.push(indices.len());
                 let (a, b) = edges[r];
-                let (lo, hi) = if ned.vkey[a as usize] < ned.vkey[b as usize] { (a, b) } else { (b, a) };
+                let (lo, hi) = if (ned.vkey[a as usize], a) < (ned.vkey[b as usize], b) { (a, b) } else { (b, a) };
                 let plo = mesh.point(lo as usize);
                 let phi = mesh.point(hi as usize);
                 edge_vecs.push([phi[0] - plo[0], phi[1] - plo[1], phi[2] - plo[2]]);
@@ -626,7 +626,7 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
                 for (col_e, &(e, row_p2)) in free_edges.iter().enumerate() {
                     coo_p.push(row_p2, col_e, 1.0);
                     let (a, b) = edges[e];
-                    let (lo, hi) = if ned.vkey[a as usize] < ned.vkey[b as usize] { (a, b) } else { (b, a) };
+                    let (lo, hi) = if (ned.vkey[a as usize], a) < (ned.vkey[b as usize], b) { (a, b) } else { (b, a) };
                     let (c_hi_opt, c_lo_opt) = (vert_col[hi as usize], vert_col[lo as usize]);
                     if c_hi_opt != c_lo_opt {
                         if let Some(c_hi) = c_hi_opt {
@@ -931,7 +931,7 @@ fn build_driven_solution(
     let mut gs = [[0.0; 3]; 4];
 
     for ci in 0..nc {
-        let gid = asm.ned.keys(mesh, ci);
+        let gid = asm.ned.key_pairs(mesh, ci);
         for b in 0..4 {
             for kk in 0..3 {
                 gs[b][kk] = geo.g[ci * 12 + b * 3 + kk];
@@ -943,9 +943,9 @@ fn build_driven_solution(
             match &curved {
                 Some(ct) => {
                     let gq = safe_curved_jacobian(ct, &lam, &gs);
-                    basis3(asm.order, &lam, &gq, &gid, &mut w, &mut cu);
+                    basis3_keyed(asm.order, &lam, &gq, &gid, &mut w, &mut cu);
                 }
-                None => basis3(asm.order, &lam, &gs, &gid, &mut w, &mut cu),
+                None => basis3_keyed(asm.order, &lam, &gs, &gid, &mut w, &mut cu),
             }
             let mut val = [c(0.0, 0.0); 3];
             let mut cval = [c(0.0, 0.0); 3];

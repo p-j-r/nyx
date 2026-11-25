@@ -15,7 +15,7 @@ use femcore::adapt::topo3::TopoOptions3;
 use femcore::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use femcore::linalg::csr::C;
 use femcore::mesh::SimplexMesh;
-use nyx_ems::cavity::{assemble_emw_eigen, basis3, solve_emw_modes, Ned3};
+use nyx_ems::cavity::{assemble_emw_eigen, basis3_keyed, solve_emw_modes, Ned3};
 use nyx_ems::{Problem, Study};
 
 const C0: f64 = 299_792_458.0;
@@ -74,9 +74,9 @@ impl CurlField for Mode<'_> {
         let g2 = cross(e3, e1).map(|x| x / six_v);
         let g3 = cross(e1, e2).map(|x| x / six_v);
         let g0 = [-(g1[0] + g2[0] + g3[0]), -(g1[1] + g2[1] + g3[1]), -(g1[2] + g2[2] + g3[2])];
-        let gid = self.ned.keys(self.mesh, cell);
+        let gid = self.ned.key_pairs(self.mesh, cell);
         let (mut w, mut cu) = (vec![], vec![]);
-        basis3(self.order, &lam, &[g0, g1, g2, g3], &gid, &mut w, &mut cu);
+        basis3_keyed(self.order, &lam, &[g0, g1, g2, g3], &gid, &mut w, &mut cu);
         let mut e = [C::new(0.0, 0.0); 3];
         let mut c = [C::new(0.0, 0.0); 3];
         for (s, &dof) in self.ned.cell_dofs[cell].iter().enumerate() {

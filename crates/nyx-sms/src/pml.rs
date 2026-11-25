@@ -1052,12 +1052,8 @@ pub fn solve_solid_pml_mixed(
     let mut kc_all = CCoo::new(n, n);
     let mut mc_all = CCoo::new(n, n);
     for (kc, mc) in chunks {
-        kc_all.rows.extend(kc.rows);
-        kc_all.cols.extend(kc.cols);
-        kc_all.vals.extend(kc.vals);
-        mc_all.rows.extend(mc.rows);
-        mc_all.cols.extend(mc.cols);
-        mc_all.vals.extend(mc.vals);
+        kc_all.extend(&kc);
+        mc_all.extend(&mc);
     }
     let (kfull, mfull) = (kc_all.to_csr(), mc_all.to_csr());
 
@@ -1315,12 +1311,8 @@ pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAs
     let mut kc_all = CCoo::new(n, n);
     let mut mc_all = CCoo::new(n, n);
     for (kc, mc) in chunks {
-        kc_all.rows.extend(kc.rows);
-        kc_all.cols.extend(kc.cols);
-        kc_all.vals.extend(kc.vals);
-        mc_all.rows.extend(mc.rows);
-        mc_all.cols.extend(mc.cols);
-        mc_all.vals.extend(mc.vals);
+        kc_all.extend(&kc);
+        mc_all.extend(&mc);
     }
     let (kfull, mfull) = (kc_all.to_csr(), mc_all.to_csr());
 

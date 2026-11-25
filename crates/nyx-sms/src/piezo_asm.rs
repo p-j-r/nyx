@@ -1086,9 +1086,7 @@ pub fn assemble_piezo_real_simplex(
 
     let mut all = Coo::new(n, n);
     for blk in blocks {
-        all.rows.extend(blk.rows);
-        all.cols.extend(blk.cols);
-        all.vals.extend(blk.vals);
+        all.extend(&blk);
     }
     all.to_csr()
 }
@@ -1196,9 +1194,7 @@ pub(crate) fn assemble_piezo_real_mixed(
 
     let mut all = Coo::new(n, n);
     for blk in blocks {
-        all.rows.extend(blk.rows);
-        all.cols.extend(blk.cols);
-        all.vals.extend(blk.vals);
+        all.extend(&blk);
     }
     let k_vol = all.to_csr();
     if !ie_domains.has_exponential_robin() {
@@ -1865,9 +1861,7 @@ fn assemble_piezo_complex_simplex(
 
     let mut all = CCoo::new(n, n);
     for blk in blocks {
-        all.rows.extend(blk.rows);
-        all.cols.extend(blk.cols);
-        all.vals.extend(blk.vals);
+        all.extend(&blk);
     }
     all.to_csr()
 }
@@ -1981,9 +1975,7 @@ fn assemble_piezo_complex_mixed(
 
     let mut all = CCoo::new(n, n);
     for blk in blocks {
-        all.rows.extend(blk.rows);
-        all.cols.extend(blk.cols);
-        all.vals.extend(blk.vals);
+        all.extend(&blk);
     }
     all.to_csr()
 }
@@ -2064,9 +2056,7 @@ fn assemble_pml_mass_simplex(
     });
     let mut all = CCoo::new(n, n);
     for b in blocks {
-        all.rows.extend(b.rows);
-        all.cols.extend(b.cols);
-        all.vals.extend(b.vals);
+        all.extend(&b);
     }
     all.to_csr()
 }
@@ -2135,9 +2125,7 @@ fn assemble_pml_mass_mixed(
     });
     let mut all = CCoo::new(n, n);
     for b in blocks {
-        all.rows.extend(b.rows);
-        all.cols.extend(b.cols);
-        all.vals.extend(b.vals);
+        all.extend(&b);
     }
     all.to_csr()
 }

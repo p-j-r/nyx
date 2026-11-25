@@ -118,13 +118,12 @@ pub fn cg_update<T: Scalar>(
         (par::RawCols::new(x, n, 1), par::RawCols::new(r, n, 1), par::RawCols::new(z, n, usize::from(diag.is_some())));
     let parts = par::chunk_map(n.div_ceil(CHUNK), par::worth_parallel(n), |c| {
         let (s, e) = (c * CHUNK, ((c + 1) * CHUNK).min(n));
-        // SAFETY: chunk `c` owns rows s..e of x, r and z, which nothing else touches.
-        let (xc, rc) = unsafe { (xs.rows(0, s, e), rs.rows(0, s, e)) };
+        let (xc, rc) = (xs.chunk_mut(0, s, e), rs.chunk_mut(0, s, e));
         T::k_axpy(alpha, &p[s..e], xc);
         T::k_axpy(-alpha, &w[s..e], rc);
         match diag {
             Some(d) => {
-                let zc = unsafe { zs.rows(0, s, e) };
+                let zc = zs.chunk_mut(0, s, e);
                 for ((zi, di), ri) in zc.iter_mut().zip(&d[s..e]).zip(rc.iter()) {
                     *zi = *di * *ri;
                 }

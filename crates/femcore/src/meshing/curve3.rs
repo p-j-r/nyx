@@ -262,8 +262,8 @@ fn relax_edge_nodes_periodic(
         let ct = CurvedTet::new(x);
         // the straight determinant (constant): the Jacobian of the straight cell
         let det_s = CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
-        if det_s == 0.0 || !det_s.is_finite() {
-            return 1.0;
+        if !det_s.is_finite() || det_s <= 0.0 {
+            return 0.0;
         }
         test.iter().map(|l| ct.jacobian(l).1 / det_s).fold(f64::INFINITY, f64::min)
     };
@@ -340,8 +340,8 @@ pub fn scaled_jacobian_min(mesh: &SimplexMesh, c: usize) -> f64 {
     let ct = CurvedTet::new(mesh.cell_geometry_nodes(c));
     let v = [ct.x[0], ct.x[1], ct.x[2], ct.x[3]];
     let det_s = CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
-    if det_s == 0.0 || !det_s.is_finite() {
-        return 1.0;
+    if !det_s.is_finite() || det_s <= 0.0 {
+        return 0.0;
     }
     let rule = quad_rule_collapsed(6);
     let mut m = f64::INFINITY;
@@ -358,7 +358,7 @@ pub fn scaled_jacobian_min_interior_q8(mesh: &SimplexMesh, c: usize) -> f64 {
     let ct = CurvedTet::new(mesh.cell_geometry_nodes(c));
     let v = [ct.x[0], ct.x[1], ct.x[2], ct.x[3]];
     let det_s = CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
-    if det_s == 0.0 || !det_s.is_finite() {
+    if !det_s.is_finite() || det_s <= 0.0 {
         return 0.0;
     }
     let rule = quad_rule_collapsed(8);
@@ -508,4 +508,69 @@ pub fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeNodes) -
     );
     mesh.set_edge_nodes(&cand);
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn one_tet_mesh(pts: Vec<f64>) -> SimplexMesh {
+        SimplexMesh::new(3, pts, vec![0, 1, 2, 3], vec![1], vec![0, 1, 2], vec![1])
+    }
+
+    #[test]
+    fn scaled_jacobian_min_rejects_degenerate_inverted_and_non_finite_cells() {
+        let coplanar = one_tet_mesh(vec![
+            0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            1.0, 1.0, 0.0,
+        ]);
+        assert_eq!(scaled_jacobian_min(&coplanar, 0), 0.0);
+        assert_eq!(scaled_jacobian_min_interior_q8(&coplanar, 0), 0.0);
+
+        let inverted = one_tet_mesh(vec![
+            0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0,
+        ]);
+        assert_eq!(scaled_jacobian_min(&inverted, 0), 0.0);
+        assert_eq!(scaled_jacobian_min_interior_q8(&inverted, 0), 0.0);
+
+        let non_finite = one_tet_mesh(vec![
+            0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, f64::NAN,
+        ]);
+        assert_eq!(scaled_jacobian_min(&non_finite, 0), 0.0);
+        assert_eq!(scaled_jacobian_min_interior_q8(&non_finite, 0), 0.0);
+
+        let mut valid_with_bad_curve = one_tet_mesh(vec![
+            0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0,
+        ]);
+        assert!((scaled_jacobian_min(&valid_with_bad_curve, 0) - 1.0).abs() < 1e-12);
+        // Pushing an edge midpoint past the opposite face forces relaxation back towards straight.
+        let rep = apply_edge_nodes_validated(&mut valid_with_bad_curve, vec![([0, 1], [0.5, -2.0, 0.0])]);
+        assert!(scaled_jacobian_min(&valid_with_bad_curve, 0) > MIN_SCALED_JACOBIAN || rep.straightened > 0);
+    }
+
+    #[test]
+    fn relax_edge_nodes_does_not_accept_degenerate_tet_as_healthy() {
+        // Coplanar tet must yield ratio 0.0 (not 1.0) so candidate edge perturbation is relaxed/straightened.
+        let pts = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+        ];
+        let cells = [[0, 1, 2, 3]];
+        let mut cand = vec![([0, 1], [0.5, 0.25, 0.0])];
+        let rep = relax_edge_nodes(&|v| pts[v as usize], &cells, &mut cand);
+        assert!(rep.straightened > 0 || cand.is_empty());
+    }
 }

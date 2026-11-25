@@ -373,75 +373,14 @@ fn collapse_eval(w: &Work3, snap: &Snap3, a: u32, b: u32, opt: &AdaptOptions3, h
         return None;
     }
 
-    if !has_sheets {
-        // The vertex test above is not enough in 3D (the links must also agree on edges and triangles): no face at b may end up with more
-        // than two tetrahedra, counting the ones that stay and the ones that move from a to b.
-        let mut faces_at_b: FxMap<[u32; 3], u8> = FxMap::default();
-        for &t in &snap.vert_tets[b as usize] {
-            let tt = w.tets[t as usize];
-            if !tt.contains(&a) {
-                for (f, _) in tet_faces(&tt) {
-                    if f.contains(&b) {
-                        *faces_at_b.entry(f).or_default() += 1;
-                    }
-                }
-            }
-        }
-        let mut worst = f64::INFINITY;
-        for &t in &snap.vert_tets[a as usize] {
-            let tt = w.tets[t as usize];
-            if tt.contains(&b) {
-                continue;
-            }
-            let nt = replace(&tt, a, b);
-            for (f, _) in tet_faces(&nt) {
-                if f.contains(&b) {
-                    let c = faces_at_b.entry(f).or_default();
-                    *c += 1;
-                    if *c > 2 {
-                        return None;
-                    }
-                }
-            }
-            if !(tet_volume(&w.pts, &nt) > 0.0) {
-                return None;
-            }
-            if w.vclass[a as usize] != VClass3::Interior {
-                // a surface face that moves with a must not turn by more than about 25 degrees (flat patches do not turn at all)
-                for (f, _) in tet_faces(&tt) {
-                    if f.contains(&a) && !f.contains(&b) && w.patch_of.contains_key(&f) {
-                        let g: Vec<u32> = f.iter().map(|&x| if x == a { b } else { x }).collect();
-                        let (n0, n1) = (outward_normal(&w.pts, &tt, &f), outward_normal(&w.pts, &nt, &fkey(g[0], g[1], g[2])));
-                        if n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < 0.9 {
-                            return None;
-                        }
-                    }
-                }
-            }
-            let q = tet_q(w, &nt);
-            if q < opt.collapse_qmin.min(tet_q(w, &tt)) {
-                return None;
-            }
-            for &x in &nt {
-                if x != b && elen(w, b, x) > opt.lmax {
-                    return None;
-                }
-            }
-            worst = worst.min(q);
-        }
-        return Some(worst);
-    }
-
     // Track post-collapse surface patches on faces containing `b` so sheet/interface/boundary topology is strictly preserved.
     let mut post_patch_at_b: FxMap<[u32; 3], u32> = FxMap::default();
     for &t in &snap.vert_tets[b as usize] {
         let tt = w.tets[t as usize];
-        if !tt.contains(&a) {
-            for (f, _) in tet_faces(&tt) {
-                if f.contains(&b) {
-                    if let Some(&p) = w.patch_of.get(&f) {
-                        post_patch_at_b.insert(f, p);
-                    }
+        for (f, _) in tet_faces(&tt) {
+            if f.contains(&b) && !f.contains(&a) {
+                if let Some(&p) = w.patch_of.get(&f) {
+                    post_patch_at_b.insert(f, p);
                 }
             }
         }
@@ -1000,7 +939,6 @@ pub fn edge_removal_pass(w: &mut Work3) -> usize {
 /// Flip of a boundary edge between two coplanar faces of a boundary patch with exactly two tetrahedra on it: the diagonal of the
 /// quadrilateral changes, the surface (flat there) does not. Returns the number of flips.
 pub fn surface_flip_pass(w: &mut Work3) -> usize {
-    let has_sheets = has_sheet_patches(w);
     let snap = snapshot(w);
     let mut lock = vec![false; w.tets.len()];
     let mut new_faces: std::collections::HashSet<[u32; 3]> = Default::default();
@@ -1022,7 +960,7 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
             continue;
         }
         let (c, d) = (*sf[0].0.iter().find(|&&x| x != e[0] && x != e[1]).unwrap(), *sf[1].0.iter().find(|&&x| x != e[0] && x != e[1]).unwrap());
-        if has_sheets && c == d {
+        if c == d {
             continue;
         }
         // the two faces must be coplanar: the four points of the quadrilateral a, c, b, d lie in one plane
@@ -1037,20 +975,18 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
         let others = |t: u32| -> Vec<u32> { w.tets[t as usize].iter().copied().filter(|&y| y != e[0] && y != e[1]).collect() };
         let (o0, o1) = (others(ts[0]), others(ts[1]));
         let Some(&xv) = o0.iter().find(|y| o1.contains(y)) else { continue };
-        if has_sheets {
-            let cand_faces = [fkey(c, d, xv), fkey(c, d, e[0]), fkey(c, d, e[1])];
-            if cand_faces.iter().any(|f| {
-                w.patch_of.contains_key(f)
-                    || new_faces.contains(f)
-                    || snap.vert_tets[c as usize].iter().any(|&t| {
-                        t != ts[0]
-                            && t != ts[1]
-                            && w.talive[t as usize]
-                            && f.iter().all(|r| w.tets[t as usize].contains(r))
-                    })
-            }) {
-                continue;
-            }
+        let cand_faces = [fkey(c, d, xv), fkey(c, d, e[0]), fkey(c, d, e[1])];
+        if cand_faces.iter().any(|f| {
+            w.patch_of.contains_key(f)
+                || new_faces.contains(f)
+                || snap.vert_tets[c as usize].iter().any(|&t| {
+                    t != ts[0]
+                        && t != ts[1]
+                        && w.talive[t as usize]
+                        && f.iter().all(|r| w.tets[t as usize].contains(r))
+                })
+        }) {
+            continue;
         }
         // old tets: (a,b,c,x) and (a,b,x,d) in some order; new: (c,d,x,a) and (c,d,x,b)
         let new = [orient(w, [c, d, xv, e[0]]), orient(w, [c, d, xv, e[1]])];
@@ -1074,11 +1010,9 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
             w.talive.push(true);
             lock.push(true);
         }
-        if has_sheets {
-            new_faces.insert(fkey(c, d, xv));
-            new_faces.insert(fkey(c, d, e[0]));
-            new_faces.insert(fkey(c, d, e[1]));
-        }
+        new_faces.insert(fkey(c, d, xv));
+        new_faces.insert(fkey(c, d, e[0]));
+        new_faces.insert(fkey(c, d, e[1]));
         for (f, _) in &sf {
             w.patch_of.remove(f);
         }
@@ -1087,4 +1021,84 @@ pub fn surface_flip_pass(w: &mut Work3) -> usize {
         n_done += 1;
     }
     n_done
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapt::topo3::PatchInfo;
+
+    #[test]
+    fn collapse_eval_rejects_same_side_interior_face_overlap_without_sheets() {
+        // Without sheets, collapsing 0 -> 1 leaves tets [1,2,3,4] and [1,2,3,5] on the SAME side
+        // of shared face [1,2,3] while satisfying the vertex link condition and det > 0.
+        let pts = vec![
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.2, 0.2, 0.8],
+            [0.2, 0.2, 0.4],
+        ];
+        let mut tets = vec![[0, 1, 2, 3], [1, 2, 3, 4], [0, 2, 3, 5]];
+        for t in &mut tets {
+            if tet_volume(&pts, t) < 0.0 {
+                t.swap(2, 3);
+            }
+            assert!(tet_volume(&pts, t) > 0.0);
+        }
+        let w = Work3 {
+            pts,
+            met: vec![super::super::metric::identity::<3>(); 6],
+            vclass: vec![VClass3::Interior; 6],
+            tets,
+            tlabel: vec![1, 1, 1],
+            talive: vec![true, true, true],
+            patches: vec![],
+            curves: vec![],
+            patch_of: FxMap::default(),
+            curve_of: FxMap::default(),
+        };
+        let snap = snapshot(&w);
+        let opt = AdaptOptions3 { collapse_qmin: 0.0, ..AdaptOptions3::default() };
+        assert!(collapse_eval(&w, &snap, 0, 1, &opt, false).is_none());
+    }
+
+    #[test]
+    fn surface_flip_pass_blocks_colliding_face_without_sheets() {
+        // Long diagonal (0,1) would strictly improve quality by flipping to short diagonal (2,3),
+        // but candidate face [2,3,4] already exists on tet [2,3,4,5]. Even with zero sheet patches,
+        // the existing-face collision guard must reject the flip.
+        let pts = vec![
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [1.0, -0.3, 0.0],
+            [1.0, 0.3, 0.0],
+            [1.0, 0.0, 0.8],
+            [2.0, 0.0, 1.2],
+        ];
+        let mut tets = vec![[0, 1, 2, 4], [0, 3, 1, 4], [2, 3, 4, 5]];
+        for t in &mut tets {
+            if tet_volume(&pts, t) < 0.0 {
+                t.swap(2, 3);
+            }
+            assert!(tet_volume(&pts, t) > 0.0);
+        }
+        let mut patch_of = FxMap::default();
+        patch_of.insert(fkey(0, 1, 2), 0);
+        patch_of.insert(fkey(0, 1, 3), 0);
+        let mut w = Work3 {
+            pts,
+            met: vec![super::super::metric::identity::<3>(); 6],
+            vclass: vec![VClass3::Surface(0); 6],
+            tets,
+            tlabel: vec![1, 1, 1],
+            talive: vec![true, true, true],
+            patches: vec![PatchInfo { sig: Sig::Bnd(1), frozen: false, normal: None }],
+            curves: vec![],
+            patch_of,
+            curve_of: FxMap::default(),
+        };
+        assert_eq!(surface_flip_pass(&mut w), 0);
+    }
 }

@@ -12,7 +12,7 @@
 //!   anchors), and modal wave impedance `Z_{0,p}(omega) = omega mu_0 / beta_p(omega)`, and assembles
 //!   the sparse 3D waveport boundary matrix `W_p` and modal vector `b_p`.
 
-use crate::cavity::{basis3, safe_curved_jacobian, Ned3};
+use crate::cavity::{basis3_keyed, safe_curved_jacobian, Ned3};
 use crate::ibc::{build_face_to_cell_3d, sorted3, MU0};
 use crate::modes::{assemble_modes_with_bcs, solve_mode_pairs, EpsCell, C0};
 use crate::problem::{symmetry_facet_flags, LumpedPortBc, Problem, SurfaceImpedanceBc, WavePortBc};
@@ -159,7 +159,7 @@ pub fn eval_triangle_tangential_basis_ordered(
         })
         .collect();
 
-    let gid = ned.keys(mesh, ci);
+    let gid = ned.key_pairs(mesh, ci);
     let mut gs = [[0.0; 3]; 4];
     for b in 0..4 {
         for k in 0..3 {
@@ -183,7 +183,7 @@ pub fn eval_triangle_tangential_basis_ordered(
         let (area_q, n_q) = match &curved {
             Some(ct) => {
                 let gq = safe_curved_jacobian(ct, &lam4, &gs);
-                basis3(ned.order, &lam4, &gq, &gid, &mut w, &mut cu);
+                basis3_keyed(ned.order, &lam4, &gq, &gid, &mut w, &mut cu);
                 let d = ct.dx_dlam(&lam4);
                 let nr = cross3(sub3(d[lf[1]], d[lf[0]]), sub3(d[lf[2]], d[lf[0]]));
                 let nl = norm3(nr);
@@ -198,7 +198,7 @@ pub fn eval_triangle_tangential_basis_ordered(
                 }
             }
             None => {
-                basis3(ned.order, &lam4, &gs, &gid, &mut w, &mut cu);
+                basis3_keyed(ned.order, &lam4, &gs, &gid, &mut w, &mut cu);
                 (area, n_out)
             }
         };

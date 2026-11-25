@@ -4,7 +4,7 @@
 //! `pec` sheets, rank-1 and distributed-sheet lumped Josephson junction (`lumped_jj`) operators, single-facet deduplication,
 //! and symmetric Ruiz diagonal equilibration for 3D `cavity` and 2D `modes` / `axisymmetric_modes`.
 
-use crate::cavity::{basis3, safe_curved_jacobian, Ned3, CURVED_QUAD_DEGREE};
+use crate::cavity::{basis3_keyed, safe_curved_jacobian, Ned3, CURVED_QUAD_DEGREE};
 use crate::modes::C0;
 use crate::problem::{symmetry_facet_flags_mixed, LumpedJjBc, SurfaceImpedanceBc, Symmetry};
 use femcore::edge::{cell_data, edge_basis, tri_g};
@@ -244,7 +244,7 @@ impl PerturbativeIbcEvaluator {
                 ci: usize,
                 lf: [usize; 3],
                 sign_inv_mur: f64,
-                gid: [u32; 4],
+                gid: [(u32, u32); 4],
                 gs: [[f64; 3]; 4],
                 curved: Option<CurvedTet>,
             }
@@ -254,7 +254,7 @@ impl PerturbativeIbcEvaluator {
                 let opp = 6 - lf[0] - lf[1] - lf[2];
                 let p_opp = pt3(mesh, v[opp]);
                 let sign = if dot3(sub3(p_opp, p0), n_hat) >= 0.0 { 1.0 } else { -1.0 };
-                let gid = ned.keys(mesh, ci);
+                let gid = ned.key_pairs(mesh, ci);
                 let mut gs = [[0.0; 3]; 4];
                 for b in 0..4 {
                     for k in 0..3 {
@@ -279,7 +279,7 @@ impl PerturbativeIbcEvaluator {
                     match &ac.curved {
                         Some(ct) => {
                             let gq = safe_curved_jacobian(ct, &lam4, &ac.gs);
-                            basis3(ned.order, &lam4, &gq, &ac.gid, &mut w, &mut cu);
+                            basis3_keyed(ned.order, &lam4, &gq, &ac.gid, &mut w, &mut cu);
                             if ac_idx == 0 {
                                 let d = ct.dx_dlam(&lam4);
                                 let nr = cross3(sub3(d[ac.lf[1]], d[ac.lf[0]]), sub3(d[ac.lf[2]], d[ac.lf[0]]));
@@ -293,7 +293,7 @@ impl PerturbativeIbcEvaluator {
                                 }
                             }
                         }
-                        None => basis3(ned.order, &lam4, &ac.gs, &ac.gid, &mut w, &mut cu),
+                        None => basis3_keyed(ned.order, &lam4, &ac.gs, &ac.gid, &mut w, &mut cu),
                     }
                     let cdofs = &ned.cell_dofs[ac.ci];
                     for s in 0..nb {
@@ -547,7 +547,7 @@ fn eval_triangle_tangential_basis(
         })
         .collect();
 
-    let gid = ned.keys(mesh, ci);
+    let gid = ned.key_pairs(mesh, ci);
     let mut gs = [[0.0; 3]; 4];
     for b in 0..4 {
         for k in 0..3 {
@@ -571,7 +571,7 @@ fn eval_triangle_tangential_basis(
         let (area_q, n_q) = match &curved {
             Some(ct) => {
                 let gq = safe_curved_jacobian(ct, &lam4, &gs);
-                basis3(ned.order, &lam4, &gq, &gid, &mut w, &mut cu);
+                basis3_keyed(ned.order, &lam4, &gq, &gid, &mut w, &mut cu);
                 let d = ct.dx_dlam(&lam4);
                 let nr = cross3(sub3(d[lf[1]], d[lf[0]]), sub3(d[lf[2]], d[lf[0]]));
                 let nl = norm3(nr);
@@ -586,7 +586,7 @@ fn eval_triangle_tangential_basis(
                 }
             }
             None => {
-                basis3(ned.order, &lam4, &gs, &gid, &mut w, &mut cu);
+                basis3_keyed(ned.order, &lam4, &gs, &gid, &mut w, &mut cu);
                 (area, n_hat)
             }
         };

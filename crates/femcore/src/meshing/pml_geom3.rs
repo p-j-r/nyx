@@ -50,6 +50,7 @@ pub fn structured_pml_3d_with_curved(
         Native3::Unchanged(g, report) => Ok((g, report)),
         Native3::Cells(cells, report) => {
             let mesh = split_3d_cells_preserving_curved_quads(&cells)?;
+            mesh.check()?;
             Ok((
                 MeshedGeom {
                     mesh,

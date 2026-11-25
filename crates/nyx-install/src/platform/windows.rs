@@ -10,7 +10,9 @@ use crate::manifest::{
     TargetOs,
 };
 use crate::report::DoctorCheck;
-use anyhow::{bail, Result};
+#[cfg(windows)]
+use anyhow::bail;
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 pub const ARP_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\nyx";

@@ -291,8 +291,82 @@ fn mesh_fmsh_round_trip_and_version() {
 // ---------------------------------------------------------------------------------------------------------------- kernel_stages
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn kernel_stage_api_is_public() {
-    // ADR 9. Naming the functions makes removing or renaming one a compile error here. The kernels not in this list
+    // ADR 9: naming the functions with explicit fn-pointer checks makes removing or renaming any stage signature a compile error here.
+    let _: fn(&femcore::mesh::SimplexMesh) -> femcore::fem::Geometry = femcore::fem::geometry;
+    let _: fn(&femcore::mesh::SimplexMesh, usize, &[f64]) -> femcore::linalg::csr::RCsr =
+        femcore::fem::assemble_laplace;
+    let _: fn(&femcore::mesh::SimplexMesh, usize, &[f64]) -> femcore::linalg::csr::RCsr =
+        femcore::fem::assemble_mass;
+    let _: fn(&femcore::mesh::SimplexMesh, usize, &[f64]) -> Vec<f64> = femcore::fem::assemble_source;
+    let _: fn(
+        &femcore::mesh::SimplexMesh,
+        usize,
+        usize,
+        femcore::props::LinearSolver,
+        &femcore::linalg::csr::RCsr,
+        &[f64],
+        &[usize],
+        &[f64],
+    ) -> Result<(Vec<f64>, Option<String>), String> = femcore::fem::solve_spd;
+    let _: fn(
+        &femcore::linalg::csr::RCsr,
+        &[f64],
+        &[usize],
+        &[f64],
+    ) -> Result<Vec<f64>, String> = femcore::fem::solve_dirichlet;
+    let _: fn(&femcore::mesh::SimplexMesh, &[f64], usize, usize) -> Vec<f64> =
+        femcore::fields::gradients_at_nodes;
+    let _: fn(&femcore::mesh::SimplexMesh, &[f64], usize, usize) -> Vec<f64> =
+        femcore::fields::node_average;
+    let _: fn(&femcore::mesh::SimplexMesh, &[f64], usize) -> Vec<f64> =
+        femcore::fem::cell_values_at_nodes;
+    let _: fn(&femcore::mesh::SimplexMesh, usize) -> femcore::edge::CellData = femcore::edge::cell_data;
+    let _: fn(
+        &[f64],
+        &[[f64; 2]; 3],
+        &[f64; 3],
+        usize,
+        &mut [[f64; 2]],
+        &mut [f64],
+    ) = femcore::edge::edge_basis;
+    let _: fn(
+        &geom::model::FeatureList,
+        &femcore::meshing::MeshPlan,
+    ) -> Result<femcore::meshing::geomdrive::MeshedGeom, String> = femcore::meshing::mesh_model;
+    let _: fn(&femcore::mesh::SimplexMesh) -> Result<(), femcore::mesh::MeshIntegrityError> =
+        femcore::mesh::SimplexMesh::check;
+    let _: fn(
+        &femcore::mesh::SimplexMesh,
+        &[i32],
+        usize,
+        fn(usize, usize, [f64; 3], [f64; 3]) -> f64,
+    ) -> femcore::linalg::csr::RCsr = femcore::farfield::assemble_boundary_mass_weighted;
+    let _: fn(
+        &femcore::mesh::SimplexMesh,
+        &[i32],
+        usize,
+        usize,
+        f64,
+        [f64; 3],
+        f64,
+        femcore::farfield::FarFieldPermittivity<'_>,
+    ) -> femcore::linalg::csr::RCsr = femcore::farfield::assemble_farfield_robin;
+    let _: fn(
+        &femcore::mesh::SimplexMesh,
+        usize,
+        &[Vec<f64>],
+        femcore::rt::CellPermittivity<'_>,
+        &[bool],
+        &[bool],
+        femcore::rt::RobinBoundary<'_>,
+        Option<&[Vec<f64>]>,
+    ) -> Result<femcore::rt::EquilibratedFluxResult, String> = femcore::rt::equilibrate_flux_patches;
+    let _: fn(
+        &femcore::mesh::SimplexMesh,
+        &femcore::props::Periodic,
+    ) -> Result<femcore::periodic::Match, String> = femcore::periodic::match_vertices;
 }
 
 // ---------------------------------------------------------------------------------------------------------------- mesh, 3D geom models (ADR 40)

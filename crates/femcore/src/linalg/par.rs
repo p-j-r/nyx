@@ -79,41 +79,84 @@ pub fn worth_parallel(elems: usize) -> bool {
 /// This is the one `unsafe` building block of the parallel basis kernels. Chunks of rows are
 /// processed concurrently; each chunk only touches its own rows `s..e` of every column, so the
 /// ranges handed out never overlap.
-pub struct RawCols<T> {
+/// Pointer to `ncols` contiguous columns of length `n` inside `&'a mut [T]`, shared across
+/// threads when each worker claims disjoint tiles.
+pub struct RawCols<'a, T> {
     ptr: *mut T,
     n: usize,
     ncols: usize,
+    _marker: std::marker::PhantomData<&'a mut [T]>,
 }
 
-// SAFETY: `RawCols` is only a pointer + shape; the safety contract of `rows` (disjoint ranges)
-// is what makes sharing it between threads sound.
-unsafe impl<T: Send> Send for RawCols<T> {}
-unsafe impl<T: Send> Sync for RawCols<T> {}
+// SAFETY: `RawCols` carries `'a` provenance from `&'a mut [T]`; sharing between threads is sound
+// when concurrent callers claim disjoint `(c, start..end)` tiles.
+unsafe impl<T: Send> Send for RawCols<'_, T> {}
+unsafe impl<T: Send> Sync for RawCols<'_, T> {}
 
-impl<T> RawCols<T> {
-    pub fn new(data: &mut [T], n: usize, ncols: usize) -> Self {
-        assert!(data.len() >= n * ncols);
-        Self { ptr: data.as_mut_ptr(), n, ncols }
+impl<'a, T> RawCols<'a, T> {
+    pub fn new(data: &'a mut [T], n: usize, ncols: usize) -> Self {
+        let total = n.checked_mul(ncols).expect("RawCols size overflow");
+        assert!(data.len() >= total, "RawCols buffer too short: {} < {total}", data.len());
+        Self { ptr: data.as_mut_ptr(), n, ncols, _marker: std::marker::PhantomData }
     }
 
-    /// Mutable rows `s..e` of column `c`.
-    ///
-    /// # Safety
-    /// No other live reference may overlap rows `s..e` of column `c`, and the originating slice
-    /// must outlive the returned reference.
+    /// Mutable tile `start..end` of column `c` with release bounds checks.
     #[allow(clippy::mut_from_ref)]
     #[inline]
-    pub unsafe fn rows(&self, c: usize, s: usize, e: usize) -> &mut [T] {
-        debug_assert!(c < self.ncols && s <= e && e <= self.n);
-        // SAFETY: in bounds by the assertions above; exclusivity is the caller's obligation.
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.add(c * self.n + s), e - s) }
+    pub fn chunk_mut(&self, c: usize, start: usize, end: usize) -> &'a mut [T] {
+        assert!(
+            c < self.ncols && start <= end && end <= self.n,
+            "RawCols::chunk_mut out of bounds: c={c}/{} range={start}..{end}/{}",
+            self.ncols,
+            self.n
+        );
+        // SAFETY: `c < self.ncols`, `start <= end <= self.n`, and `self.n * self.ncols <= data.len()`
+        // (verified with checked multiplication in `new`), so the slice lies inside the allocation.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.add(c * self.n + start), end - start) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_cols_disjoint_tiles_work() {
+        let mut buf = vec![0usize; 12];
+        let cols = RawCols::new(&mut buf, 4, 3);
+        cols.chunk_mut(0, 0, 2).copy_from_slice(&[1, 2]);
+        cols.chunk_mut(2, 1, 4).copy_from_slice(&[7, 8, 9]);
+        assert_eq!(&buf[0..4], &[1, 2, 0, 0]);
+        assert_eq!(&buf[8..12], &[0, 7, 8, 9]);
     }
 
-    /// Raw pointer to element `(row, col)`, for gather/scatter copies.
-    #[inline]
-    pub fn at(&self, row: usize, c: usize) -> *mut T {
-        debug_assert!(c < self.ncols && row <= self.n);
-        // SAFETY: only pointer arithmetic inside the allocation (one-past-the-end allowed).
-        unsafe { self.ptr.add(c * self.n + row) }
+    #[test]
+    #[should_panic(expected = "RawCols size overflow")]
+    fn raw_cols_rejects_size_overflow() {
+        let mut buf = [0u8; 4];
+        let _ = RawCols::new(&mut buf, usize::MAX, 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn raw_cols_rejects_short_buffer() {
+        let mut buf = [0u8; 7];
+        let _ = RawCols::new(&mut buf, 4, 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn raw_cols_rejects_oob_col() {
+        let mut buf = [0u8; 8];
+        let cols = RawCols::new(&mut buf, 4, 2);
+        let _ = cols.chunk_mut(2, 0, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn raw_cols_rejects_oob_rows() {
+        let mut buf = [0u8; 8];
+        let cols = RawCols::new(&mut buf, 4, 2);
+        let _ = cols.chunk_mut(0, 2, 5);
     }
 }
