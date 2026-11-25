@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 > The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
 
 **Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
-**Size:** 8 files, 5478 lines.
+**Size:** 8 files, 5481 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the 
 |---|---:|---|
 | `crates/app/src/activity.rs` | 413 |  |
 | `crates/app/src/dashboard.rs` | 400 |  |
-| `crates/app/src/examples.rs` | 168 |  |
+| `crates/app/src/examples.rs` | 171 |  |
 | `crates/app/src/menu.rs` | 368 |  |
 | `crates/app/src/sheets.rs` | 1050 |  |
 | `crates/app/src/shell.rs` | 1492 |  |
@@ -352,7 +352,7 @@ classDiagram
 | fn | `list` | `examples.rs:76` | `pub fn list() -> Vec<Example>` —  The examples of the first folder that has any, in file-name order. |
 | fn | `typical` | `examples.rs:100` | `pub fn typical(name: &str) -> f64` —  A value for a property the descriptor gives no default for: a typical number, so that a new simulation runs before anything is edited. |
 | fn | `blank` | `examples.rs:115` | `pub fn blank(engine: &mut Engine, physics: &str, three_d: bool) -> Result<(), String>` —  Starts a blank simulation in `engine`: a unit plate (one region `plate`, x-z) or, in 3D, the unit cube made by sweeping it along y, |
-| fn | `blank_json` | `examples.rs:163` | `pub fn blank_json(physics: &str, three_d: bool) -> Result<String, String>` —  The JSON text of a blank simulation (`blank`) made on a scratch engine: the spec a new experiment starts from. |
+| fn | `blank_json` | `examples.rs:166` | `pub fn blank_json(physics: &str, three_d: bool) -> Result<String, String>` —  The JSON text of a blank simulation (`blank`) made on a scratch engine: the spec a new experiment starts from. |
 | enum | `Act` | `menu.rs:13` | variants: `New`, `Open`, `ScriptEditor`, `ExportScript`, `CloseTab`, `Quit`, `Palette`, `Dashboard`, `ShowGeometry`, `ShowMaterials`, `ShowPhysics`, `ShowStudy`, ... |
 | struct | `Item` | `menu.rs:44` | fields: `menu`, `label`, `keys`, `act` |
 | const | `ACTIONS` | `menu.rs:54` | `[Item` —  Menus in order; the items of a menu in the order of this table. |

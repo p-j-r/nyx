@@ -7,11 +7,11 @@ model = component "Data model and card" "The workflow manifest, experiments, run
         "codeDiagram" "4-code/store/model.md"
     }
 }
-workspace = component "Workspace" "The folder behind the dashboard: settings, the list of workflows (manifests only) and the sections of the dashboard." "Rust modules" {
+workspace = component "Workspace" "The folder behind the dashboard: settings (`scale_mode`, `zoom`), the list of workflows (manifests only) and the sections of the dashboard." "Rust modules" {
     properties {
-        "adr" "14"
+        "adr" "14, 130"
         "code" "crates/nyx-store/src: lib.rs, workspace.rs"
-        "lines" "310"
+        "lines" "327"
         "codeDiagram" "4-code/store/workspace.md"
     }
 }

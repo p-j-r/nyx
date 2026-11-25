@@ -79,11 +79,11 @@ resultsIO = component "Results files" "HDF5 results via pure-Rust hdf5-pure and 
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
-storeLink = component "Store link" "Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here)." "Rust modules" {
+storeLink = component "Store link" "Binds the project to a workflow of the workspace, commits versions, records runs (card with swept 3D detection and metrics made here)." "Rust modules" {
     properties {
-        "adr" "39, 59"
+        "adr" "39, 59, 130"
         "code" "crates/nyx-engine/src: store_link.rs"
-        "lines" "360"
+        "lines" "408"
         "codeDiagram" "4-code/engine/storeLink.md"
     }
 }
