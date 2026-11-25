@@ -194,8 +194,15 @@ impl LineSmoother {
         }
         // Each vertical column writes to strictly disjoint indices `col.nodes`, so parallel chunking
         // across columns produces the exact same bits regardless of NYX_THREADS.
+        #[cfg(not(miri))]
         const COL_CHUNK: usize = 64;
-        if self.cols.len() >= 256 && crate::par::threads() > 1 {
+        #[cfg(miri)]
+        const COL_CHUNK: usize = 2;
+        #[cfg(not(miri))]
+        const PAR_MIN_COLS: usize = 256;
+        #[cfg(miri)]
+        const PAR_MIN_COLS: usize = 8;
+        if self.cols.len() >= PAR_MIN_COLS && crate::par::threads() > 1 {
             let z_cols = crate::linalg::par::RawCols::new(z, self.n, 1);
             self.cols.par_chunks(COL_CHUNK).for_each(|chunk| {
                 let mut y = Vec::new();
@@ -248,8 +255,15 @@ impl LineSmoother {
                 z[base + j] = r[base + j] * inv;
             }
         }
+        #[cfg(not(miri))]
         const COL_CHUNK: usize = 64;
-        if self.cols.len() >= 128 && crate::par::threads() > 1 {
+        #[cfg(miri)]
+        const COL_CHUNK: usize = 2;
+        #[cfg(not(miri))]
+        const PAR_MIN_COLS: usize = 128;
+        #[cfg(miri)]
+        const PAR_MIN_COLS: usize = 8;
+        if self.cols.len() >= PAR_MIN_COLS && crate::par::threads() > 1 {
             let z_cols = crate::linalg::par::RawCols::new(z, nk, 1);
             self.cols.par_chunks(COL_CHUNK).for_each(|chunk| {
                 let mut y = Vec::new();
@@ -347,11 +361,15 @@ pub struct Amg {
     coarse: DirectSolver<f64>,
 }
 
-/// Sparse matrix product, on all cores by blocks of rows of `a` for large matrices.
+#[cfg(not(miri))]
+const PAR_SPMM_MIN_ROWS: usize = 20_000;
+#[cfg(miri)]
+const PAR_SPMM_MIN_ROWS: usize = 8;
+
 /// Sparse matrix product, on all cores by blocks of rows of `a` for large matrices.
 pub fn spmm(a: &Csr, b: &Csr) -> Csr {
     assert_eq!(a.ncols(), b.nrows());
-    let nt = if a.nrows() < 20_000 { 1 } else { crate::par::threads() };
+    let nt = if a.nrows() < PAR_SPMM_MIN_ROWS { 1 } else { crate::par::threads() };
     let chunk = a.nrows().div_ceil(nt).max(1);
     let block = |r0: usize, r1: usize| -> (Vec<usize>, Vec<usize>, Vec<f64>) {
         let mut counts = Vec::with_capacity(r1 - r0);
@@ -551,14 +569,25 @@ fn rho_line_a(a: &Csr, ls: &LineSmoother, diag: &[f64]) -> f64 {
     rho * 1.05
 }
 
+#[cfg(not(miri))]
 const BLOCK_ROW_CHUNK: usize = 512;
+#[cfg(miri)]
+const BLOCK_ROW_CHUNK: usize = 4;
+#[cfg(not(miri))]
+const PAR_MATVEC_MIN_WORK: usize = 40_000;
+#[cfg(miri)]
+const PAR_MATVEC_MIN_WORK: usize = 8;
+#[cfg(not(miri))]
+const PAR_BLOCK_MIN_WORK: usize = 16_384;
+#[cfg(miri)]
+const PAR_BLOCK_MIN_WORK: usize = 8;
 
 /// Row-major block matrix-vector product `Y = A X` for `Csr32`, where `X` has shape `[ncols x k]`
 /// and `Y` has shape `[nrows x k]`. Each row is computed independently in fixed-size row chunks,
 /// so the output is 100% bit-identical across all thread counts.
 fn cs32_matvec_block(a: &Csr32, x: &[f64], y: &mut [f64], k: usize) {
     assert_eq!(y.len(), a.nrows * k);
-    let par = a.nnz().saturating_mul(k) >= 40_000 && crate::par::threads() > 1;
+    let par = a.nnz().saturating_mul(k) >= PAR_MATVEC_MIN_WORK && crate::par::threads() > 1;
     crate::linalg::par::for_chunks_mut(y, BLOCK_ROW_CHUNK * k, par, |ci, yc| {
         let r0 = ci * BLOCK_ROW_CHUNK;
         let nrows_c = yc.len() / k;
@@ -582,7 +611,7 @@ fn csr_matvec_block(a: &Csr, x: &[f64], y: &mut [f64], k: usize) {
     let nrows = a.nrows();
     assert_eq!(y.len(), nrows * k);
     assert_eq!(x.len(), a.ncols() * k);
-    let par = a.nnz().saturating_mul(k) >= 40_000 && crate::par::threads() > 1;
+    let par = a.nnz().saturating_mul(k) >= PAR_MATVEC_MIN_WORK && crate::par::threads() > 1;
     let indptr = a.indptr();
     let indices = a.indices();
     let values = a.values();
@@ -1184,7 +1213,7 @@ pub struct BlockPcgResult {
 /// chunk order so results are 100% bit-identical (`0.0` drift) across `NYX_THREADS`.
 fn block_col_dots(a: &[f64], b: &[f64], n: usize, k: usize) -> Vec<f64> {
     let nchunks = n.div_ceil(BLOCK_ROW_CHUNK);
-    let par = n.saturating_mul(k) >= 16_384 && crate::par::threads() > 1;
+    let par = n.saturating_mul(k) >= PAR_BLOCK_MIN_WORK && crate::par::threads() > 1;
     let parts = crate::linalg::par::chunk_map(nchunks, par, |ci| {
         let (r0, r1) = (ci * BLOCK_ROW_CHUNK, ((ci + 1) * BLOCK_ROW_CHUNK).min(n));
         let mut s = vec![0.0; k];
@@ -1235,7 +1264,7 @@ pub fn block_pcg(a: &Csr, b: &[f64], k: usize, amg: &Amg, tol: f64, max_iter: us
                 alpha[j] = rz[j] / pap[j];
             }
         }
-        let par = n.saturating_mul(k) >= 16_384 && crate::par::threads() > 1;
+        let par = n.saturating_mul(k) >= PAR_BLOCK_MIN_WORK && crate::par::threads() > 1;
         let xs = crate::linalg::par::RawCols::new(&mut x, n * k, 1);
         let rs = crate::linalg::par::RawCols::new(&mut r, n * k, 1);
         let nchunks = n.div_ceil(BLOCK_ROW_CHUNK);
@@ -1371,6 +1400,64 @@ mod tests {
         let r = vec![1.0; 8];
         let mut z = vec![0.0; 7];
         ls.apply_block_into(&diag, &r, &mut z, 2);
+    }
+
+    #[test]
+    fn line_smoother_small_n_matches_tridiagonal_solve() {
+        // 8 disjoint 3-node columns + 2 isolated vertices = 26 DOFs (<= 32):
+        // under #[cfg(miri)] + NYX_THREADS=2 this exercises parallel tile writes via RawCols.
+        let n_cols = 8usize;
+        let n = n_cols * 3 + 2;
+        let mut cols = Vec::with_capacity(n_cols);
+        let mut diag = vec![4.0; n];
+        let mut trips = Vec::new();
+        for c in 0..n_cols {
+            let u0 = c * 3;
+            let u1 = c * 3 + 1;
+            let u2 = c * 3 + 2;
+            trips.push((u0, u0, 4.0));
+            trips.push((u1, u1, 4.0));
+            trips.push((u2, u2, 4.0));
+            trips.push((u0, u1, -1.0));
+            trips.push((u1, u0, -1.0));
+            trips.push((u1, u2, -1.0));
+            trips.push((u2, u1, -1.0));
+            cols.push(vec![u0, u1, u2]);
+        }
+        for iso in (n_cols * 3)..n {
+            diag[iso] = 2.5;
+            trips.push((iso, iso, 2.5));
+        }
+        let a = Csr::from_triplets(n, n, &trips).unwrap();
+        let ls = LineSmoother::build(&a, &cols, &diag).unwrap();
+
+        let r: Vec<f64> = (0..n).map(|i| (i + 1) as f64 * 0.25).collect();
+        let mut z = vec![0.0; n];
+        ls.apply_into(&diag, &r, &mut z);
+
+        // Verify exact tridiagonal solve T z = r on every column and scalar solve on isolated nodes.
+        for col in &cols {
+            let (u0, u1, u2) = (col[0], col[1], col[2]);
+            assert!((4.0 * z[u0] - z[u1] - r[u0]).abs() < 1e-13);
+            assert!((-z[u0] + 4.0 * z[u1] - z[u2] - r[u1]).abs() < 1e-13);
+            assert!((-z[u1] + 4.0 * z[u2] - r[u2]).abs() < 1e-13);
+        }
+        for iso in (n_cols * 3)..n {
+            assert!((diag[iso] * z[iso] - r[iso]).abs() < 1e-13);
+        }
+
+        // Also exercise apply_block_into with k = 2 RHS.
+        let mut rb = vec![0.0; n * 2];
+        for i in 0..n {
+            rb[i * 2] = r[i];
+            rb[i * 2 + 1] = -2.0 * r[i];
+        }
+        let mut zb = vec![0.0; n * 2];
+        ls.apply_block_into(&diag, &rb, &mut zb, 2);
+        for i in 0..n {
+            assert!((zb[i * 2] - z[i]).abs() < 1e-13);
+            assert!((zb[i * 2 + 1] + 2.0 * z[i]).abs() < 1e-13);
+        }
     }
 }
 

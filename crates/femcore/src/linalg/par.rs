@@ -12,7 +12,11 @@
 //! written on; the thresholds below keep small problems serial.
 
 /// Minimum number of scalar elements touched by one kernel call before it is run in parallel.
+#[cfg(not(miri))]
 pub const PAR_MIN_ELEMS: usize = 1 << 17;
+/// Lowered parallel threshold under Miri so small `n <= 32` tests exercise parallel `RawCols` tile paths.
+#[cfg(miri)]
+pub const PAR_MIN_ELEMS: usize = 8;
 
 /// Creates the shared nyx pool (honouring `NYX_THREADS`) if no kernel has done so yet.
 #[inline]
@@ -153,10 +157,100 @@ mod tests {
     }
 
     #[test]
+    fn raw_cols_parallel_tiles_small_n_disjoint() {
+        let n = 16;
+        let ncols = 3;
+        let chunk = 4;
+        let mut buf = vec![0usize; n * ncols];
+        let cols = RawCols::new(&mut buf, n, ncols);
+        let nchunks = n.div_ceil(chunk);
+        // Force parallel path when `crate::par::threads() > 1` (and under Miri with `PAR_MIN_ELEMS = 8`).
+        let run_par = worth_parallel(n * ncols) || nchunks > 1;
+        let partials = chunk_map(nchunks, run_par, |ci| {
+            let s = ci * chunk;
+            let e = (s + chunk).min(n);
+            let mut sum = 0usize;
+            for c in 0..ncols {
+                let tile = cols.chunk_mut(c, s, e);
+                for (offset, slot) in tile.iter_mut().enumerate() {
+                    let v = (c + 1) * 100 + s + offset;
+                    *slot = v;
+                    sum += v;
+                }
+            }
+            sum
+        });
+        let total: usize = partials.into_iter().sum();
+        assert_eq!(total, buf.iter().sum::<usize>());
+        for c in 0..ncols {
+            for r in 0..n {
+                assert_eq!(buf[c * n + r], (c + 1) * 100 + r);
+            }
+        }
+    }
+
+    #[test]
     #[should_panic]
     fn raw_cols_rejects_oob_rows() {
         let mut buf = [0u8; 8];
         let cols = RawCols::new(&mut buf, 4, 2);
         let _ = cols.chunk_mut(0, 2, 5);
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn verify_raw_cols_disjoint_chunks() {
+        let n: usize = kani::any();
+        let ncols: usize = kani::any();
+        kani::assume(n >= 1 && n <= 4);
+        kani::assume(ncols >= 1 && ncols <= 4);
+
+        let mut buf = [0u8; 16];
+        let cols = RawCols::new(&mut buf[..n * ncols], n, ncols);
+
+        let c1: usize = kani::any();
+        let s1: usize = kani::any();
+        let e1: usize = kani::any();
+        kani::assume(c1 < ncols && s1 <= e1 && e1 <= n);
+
+        let c2: usize = kani::any();
+        let s2: usize = kani::any();
+        let e2: usize = kani::any();
+        kani::assume(c2 < ncols && s2 <= e2 && e2 <= n);
+
+        // Disjoint tiles: either different columns or non-overlapping row ranges.
+        kani::assume(c1 != c2 || e1 <= s2 || e2 <= s1);
+
+        let slice1 = cols.chunk_mut(c1, s1, e1);
+        for v in slice1.iter_mut() {
+            *v = 1;
+        }
+        let slice2 = cols.chunk_mut(c2, s2, e2);
+        for v in slice2.iter_mut() {
+            *v = 2;
+        }
+
+        for r in s1..e1 {
+            assert_eq!(buf[c1 * n + r], 1);
+        }
+        for r in s2..e2 {
+            assert_eq!(buf[c2 * n + r], 2);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    #[kani::should_panic]
+    fn verify_raw_cols_rejects_overflow() {
+        let n: usize = kani::any();
+        let ncols: usize = kani::any();
+        kani::assume(n.checked_mul(ncols).is_none());
+        let mut buf = [0u8; 4];
+        let _ = RawCols::new(&mut buf, n, ncols);
     }
 }

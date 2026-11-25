@@ -2646,3 +2646,79 @@ pub fn import_gds_library_with_limits(
         pins: pins_map.into_iter().collect(),
     })
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_decode_ibm_f64_total() {
+        let bytes: [u8; 8] = kani::any();
+        let val = decode_ibm_f64(bytes);
+        assert!(val.is_finite());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_decode_ibm_f32_total() {
+        let bytes: [u8; 4] = kani::any();
+        let val = decode_ibm_f32(bytes);
+        assert!(val.is_finite());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_encode_ibm_f64_edge_cases() {
+        let v: f64 = kani::any();
+        let enc = encode_ibm_f64(v);
+        let dec = decode_ibm_f64(enc);
+        assert!(dec.is_finite());
+
+        if v == 0.0 || !v.is_finite() {
+            assert_eq!(enc, [0u8; 8]);
+        } else if v.abs() < 5.4e-79 {
+            // Sub-minimum representable IBM magnitude underflows cleanly to zero.
+            assert_eq!(enc, [0u8; 8]);
+        } else if v.abs() > 7.237005577332262e75 {
+            // Overflow clamps to max representable IBM exponent + all-ones mantissa.
+            let sign = if v.is_sign_negative() { 0x80u8 } else { 0x00u8 };
+            assert_eq!(enc[0], sign | 0x7f);
+            assert_eq!(&enc[1..], &[0xff; 7]);
+        } else if dec != 0.0 {
+            assert_eq!(dec.is_sign_negative(), v.is_sign_negative());
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn verify_gds_ibm_and_framing() {
+        // 1. IBM f64 / f32 decoders never panic or produce non-finite outputs.
+        let raw8: [u8; 8] = kani::any();
+        assert!(decode_ibm_f64(raw8).is_finite());
+        let raw4: [u8; 4] = kani::any();
+        assert!(decode_ibm_f32(raw4).is_finite());
+
+        // 2. IBM f64 encoder handles zero, -0.0, NaN, Inf, underflow, overflow.
+        let v: f64 = kani::any();
+        let enc = encode_ibm_f64(v);
+        assert!(decode_ibm_f64(enc).is_finite());
+        if v == 0.0 || !v.is_finite() {
+            assert_eq!(enc, [0u8; 8]);
+        }
+
+        // 3. Framing parser enforces GdsImportLimits and bounded pointer advance on <= 48 B.
+        let buf: [u8; 48] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 48);
+        let max_file: usize = kani::any();
+        let max_rec: usize = kani::any();
+        kani::assume(max_file <= 64);
+        kani::assume(max_rec <= 16);
+        let limits = GdsImportLimits { max_file_bytes: max_file, max_records: max_rec, ..GdsImportLimits::default() };
+        let res = parse_gds_with_limits(&buf[..len], &limits);
+        if len > max_file {
+            assert!(res.is_err());
+        }
+    }
+}

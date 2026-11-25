@@ -15,8 +15,9 @@ pub fn wants_console(args: &[String]) -> bool {
 /// as it does for any program of the GUI subsystem.
 #[cfg(windows)]
 pub fn attach_parent() {
-    use std::os::windows::io::IntoRawHandle;
+    use std::os::windows::io::{IntoRawHandle, RawHandle};
     type Handle = *mut core::ffi::c_void;
+    const _: () = assert!(std::mem::size_of::<Handle>() == std::mem::size_of::<RawHandle>());
     const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
     const STD_INPUT_HANDLE: u32 = -10i32 as u32;
     const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
@@ -27,28 +28,56 @@ pub fn attach_parent() {
         fn GetStdHandle(which: u32) -> Handle;
         fn SetStdHandle(which: u32, handle: Handle) -> i32;
     }
-    // SAFETY: plain kernel32 calls with valid constants; the handles opened here are leaked on purpose (they live as long as the process).
-    unsafe {
-        if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
-            return;
-        }
-        let missing = |h: Handle| h.is_null() || h as isize == -1;
-        if missing(GetStdHandle(STD_OUTPUT_HANDLE)) {
-            if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
-                let h = f.into_raw_handle();
-                SetStdHandle(STD_OUTPUT_HANDLE, h as Handle);
-                if missing(GetStdHandle(STD_ERROR_HANDLE)) {
-                    SetStdHandle(STD_ERROR_HANDLE, h as Handle);
+
+    let missing = |h: Handle| h.is_null() || h as isize == -1;
+
+    // SAFETY: `AttachConsole(ATTACH_PARENT_PROCESS)` uses the Win32 sentinel `0xFFFF_FFFF` with
+    // matching `extern "system"` ABI (`BOOL AttachConsole(DWORD)`), takes no pointers, and returns
+    // zero if the parent process has no console.
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+        return;
+    }
+
+    // SAFETY: `GetStdHandle` is called only with valid Win32 `STD_*_HANDLE` constants. Any
+    // returned handle is checked by `missing` (non-null and != `INVALID_HANDLE_VALUE`) before use.
+    let out_missing = missing(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) });
+    // SAFETY: Same valid Win32 `STD_ERROR_HANDLE` constant as above.
+    let err_missing = missing(unsafe { GetStdHandle(STD_ERROR_HANDLE) });
+
+    if out_missing {
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+            let h = f.into_raw_handle() as Handle;
+            if !missing(h) {
+                // SAFETY: `h` is a live, non-null, non-`INVALID_HANDLE_VALUE` OS file handle from
+                // `OpenOptions::open("CONOUT$")`. Leaking ownership via `into_raw_handle` is
+                // intentional so the Win32 standard output slot remains valid for process lifetime.
+                let _ = unsafe { SetStdHandle(STD_OUTPUT_HANDLE, h) };
+                if err_missing {
+                    // SAFETY: Reusing the same live process-lifetime `CONOUT$` handle for stder
+                    // when stderr was also unredirected (`STD_ERROR_HANDLE` is valid).
+                    let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, h) };
                 }
             }
-        } else if missing(GetStdHandle(STD_ERROR_HANDLE)) {
-            if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
-                SetStdHandle(STD_ERROR_HANDLE, f.into_raw_handle() as Handle);
+        }
+    } else if err_missing {
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+            let h = f.into_raw_handle() as Handle;
+            if !missing(h) {
+                // SAFETY: `h` is a live `CONOUT$` OS handle; leaked intentionally for process lifetime
+                // as the Win32 standard error handle.
+                let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, h) };
             }
         }
-        if missing(GetStdHandle(STD_INPUT_HANDLE)) {
-            if let Ok(f) = std::fs::OpenOptions::new().read(true).open("CONIN$") {
-                SetStdHandle(STD_INPUT_HANDLE, f.into_raw_handle() as Handle);
+    }
+
+    // SAFETY: `STD_INPUT_HANDLE` is a valid Win32 `GetStdHandle` selector.
+    if missing(unsafe { GetStdHandle(STD_INPUT_HANDLE) }) {
+        if let Ok(f) = std::fs::OpenOptions::new().read(true).open("CONIN$") {
+            let h = f.into_raw_handle() as Handle;
+            if !missing(h) {
+                // SAFETY: `h` is a live `CONIN$` OS handle; leaked intentionally for process lifetime
+                // as the Win32 standard input handle.
+                let _ = unsafe { SetStdHandle(STD_INPUT_HANDLE, h) };
             }
         }
     }

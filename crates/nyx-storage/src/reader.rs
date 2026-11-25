@@ -233,32 +233,13 @@ impl NyxReader {
     }
 
     fn account_bytes(&self, total_bytes: &mut u64, add_bytes: u64, context: &str) -> Result<()> {
-        let next = total_bytes
-            .checked_add(add_bytes)
-            .ok_or_else(|| anyhow!("cumulative result byte count overflow at {context}"))?;
-        if next > self.budget.max_total_result_bytes {
-            bail!(
-                "cumulative result size {} B exceeds configured total read budget {} B at {context}",
-                next,
-                self.budget.max_total_result_bytes
-            );
-        }
-        *total_bytes = next;
-        Ok(())
+        account_budget_bytes(total_bytes, add_bytes, self.budget.max_total_result_bytes, context)
     }
 
     /// Enforces [`ReadBudgetConfig::max_dataset_bytes`] using checked multiplication across `ds.shape()`.
     pub fn check_dataset_budget(&self, ds: &Dataset, elem_bytes: u64) -> Result<u64> {
         let shape = ds.shape()?;
-        let elems = shape
-            .iter()
-            .try_fold(1u64, |acc, &d| acc.checked_mul(d))
-            .ok_or_else(|| anyhow!("dataset shape overflow: {:?}", shape))?;
-        let bytes = elems.checked_mul(elem_bytes).ok_or_else(|| anyhow!("dataset byte size overflow"))?;
-        if bytes > self.budget.max_dataset_bytes {
-            bail!("dataset size {} B exceeds configured read budget {} B", bytes, self.budget.max_dataset_bytes);
-        }
-        Ok(elems)
+        check_shape_budget(&shape, elem_bytes, self.budget.max_dataset_bytes)
     }
 
     fn check_dataset_budget_tracked(
@@ -277,37 +258,11 @@ impl NyxReader {
     }
 
     fn validate_n_solutions(&self, raw_n: i64, min_bytes_per_solution: u64, context: &str) -> Result<usize> {
-        if raw_n < 0 {
-            bail!("negative n_solutions {} at {}", raw_n, context);
-        }
-        let n_solutions = usize::try_from(raw_n)
-            .map_err(|_| anyhow!("n_solutions {} overflows usize at {}", raw_n, context))?;
-        if n_solutions > self.budget.max_solutions {
-            bail!(
-                "n_solutions {} exceeds configured max_solutions budget {} at {}",
-                n_solutions,
-                self.budget.max_solutions,
-                context
-            );
-        }
-        if min_bytes_per_solution > 0 {
-            let min_needed = (n_solutions as u64).saturating_mul(min_bytes_per_solution);
-            if min_needed > self.file_bytes {
-                bail!(
-                    "declared n_solutions {} requires at least {} B, exceeding file size {} B at {}",
-                    n_solutions,
-                    min_needed,
-                    self.file_bytes,
-                    context
-                );
-            }
-        }
-        Ok(n_solutions)
+        validate_solution_count(raw_n, min_bytes_per_solution, self.budget.max_solutions, self.file_bytes, context)
     }
 
     fn capped_solution_capacity(&self, n_solutions: usize) -> usize {
-        let file_cap = (self.file_bytes / 16).min(usize::MAX as u64) as usize;
-        n_solutions.min(self.budget.max_solutions).min(4096).min(file_cap)
+        capped_solution_capacity_for(n_solutions, self.budget.max_solutions, self.file_bytes)
     }
 
     /// Reads raw dataset bytes only after checking datatype size and dataspace dimensions against [`ReadBudgetConfig`].
@@ -516,13 +471,7 @@ impl NyxReader {
         };
         let shape = ds.shape()?;
         if shape.len() == 5 {
-            return Ok(Some([
-                shape[0] as usize,
-                shape[1] as usize,
-                shape[2] as usize,
-                shape[3] as usize,
-                shape[4] as usize,
-            ]));
+            return Ok(Some(shape_5d(&shape)?));
         }
         if shape.len() == 1 {
             let attrs = ds.attrs()?;
@@ -530,26 +479,14 @@ impl NyxReader {
                 .get("logical_shape_tail")
                 .and_then(AttrValue::to_i64s)
                 .ok_or_else(|| anyhow!("rank-1 cell_fields_packed missing logical_shape_tail attribute"))?;
-            if tail.len() != 4 {
-                bail!("invalid logical_shape_tail length {}: expected 4", tail.len());
-            }
-            let c = tail[0].max(0) as usize;
-            let n_c = tail[1].max(0) as usize;
-            let n_v = tail[2].max(0) as usize;
-            let ri = tail[3].max(0) as usize;
-            let mode_elems = c
-                .checked_mul(n_c)
-                .and_then(|x| x.checked_mul(n_v))
-                .and_then(|x| x.checked_mul(ri))
-                .ok_or_else(|| anyhow!("logical_shape_tail overflow"))?;
-            let m = if let Some(div) = (shape[0] as usize).checked_div(mode_elems) {
-                div
-            } else {
+            let (partial, needs_nsol) = packed_shape_from_tail(shape[0], &tail)?;
+            if needs_nsol {
                 let phys_path = format!("results/{physics}");
                 let pattrs = self.file.group(&phys_path)?.attrs()?;
-                self.validate_n_solutions(attr_i64(&pattrs, "n_solutions")?, 0, &phys_path)?
-            };
-            return Ok(Some([m, c, n_c, n_v, ri]));
+                let m = self.validate_n_solutions(attr_i64(&pattrs, "n_solutions")?, 0, &phys_path)?;
+                return Ok(Some([m, partial[1], partial[2], partial[3], partial[4]]));
+            }
+            return Ok(Some(partial));
         }
         bail!("unexpected rank {} for {}", shape.len(), packed_path)
     }
@@ -573,21 +510,8 @@ impl NyxReader {
         if let Ok(ds) = self.file.dataset(&packed_path) {
             let shape = ds.shape()?;
             if shape.len() == 5 {
-                if (mode_idx as u64) >= shape[0] {
-                    bail!("mode_idx {} out of bounds for shape {:?}", mode_idx, shape);
-                }
-                let row_elems = shape[1..]
-                    .iter()
-                    .try_fold(1u64, |acc, &d| acc.checked_mul(d))
-                    .ok_or_else(|| anyhow!("row shape overflow: {:?}", shape))?;
-                let row_bytes = row_elems.checked_mul(8).ok_or_else(|| anyhow!("row byte size overflow"))?;
-                if row_bytes > self.budget.max_dataset_bytes {
-                    bail!(
-                        "single mode slice ({} B) exceeds read budget {} B",
-                        row_bytes,
-                        self.budget.max_dataset_bytes
-                    );
-                }
+                let (row_elems, row_bytes) =
+                    packed_5d_slice_bytes(&shape, mode_idx, self.budget.max_dataset_bytes)?;
                 self.account_bytes(total_bytes, row_bytes, &packed_path)?;
                 if row_elems == 0 {
                     return Ok(Vec::new());
@@ -600,18 +524,8 @@ impl NyxReader {
                     .get("logical_shape_tail")
                     .and_then(AttrValue::to_i64s)
                     .ok_or_else(|| anyhow!("rank-1 cell_fields_packed missing logical_shape_tail attribute"))?;
-                let mode_elems = tail
-                    .iter()
-                    .try_fold(1u64, |acc, &d| acc.checked_mul(d.max(0) as u64))
-                    .ok_or_else(|| anyhow!("mode_elems overflow"))?;
-                let mode_bytes = mode_elems.checked_mul(8).ok_or_else(|| anyhow!("mode_bytes overflow"))?;
-                if mode_bytes > self.budget.max_dataset_bytes {
-                    bail!(
-                        "single mode slice ({} B) exceeds read budget {} B",
-                        mode_bytes,
-                        self.budget.max_dataset_bytes
-                    );
-                }
+                let (mode_elems, mode_bytes, start) =
+                    packed_1d_slice_range(shape[0], &tail, mode_idx, self.budget.max_dataset_bytes)?;
                 self.account_bytes(total_bytes, mode_bytes, &packed_path)?;
                 if mode_elems == 0 {
                     let phys_path = format!("results/{physics}");
@@ -621,13 +535,6 @@ impl NyxReader {
                         bail!("mode_idx {} out of bounds for n_solutions={}", mode_idx, n_sol);
                     }
                     return Ok(Vec::new());
-                }
-                let start = (mode_idx as u64)
-                    .checked_mul(mode_elems)
-                    .ok_or_else(|| anyhow!("mode slice start offset overflow"))?;
-                let end = start.checked_add(mode_elems).ok_or_else(|| anyhow!("mode slice end offset overflow"))?;
-                if end > shape[0] {
-                    bail!("mode_idx {} (elems {}..{}) out of bounds for len {}", mode_idx, start, end, shape[0]);
                 }
                 return Ok(ds.read_f64_rows(start, mode_elems)?);
             }
@@ -887,12 +794,169 @@ impl NyxReader {
     }
 }
 
+fn check_shape_budget(shape: &[u64], elem_bytes: u64, max_dataset_bytes: u64) -> Result<u64> {
+    let elems = shape
+        .iter()
+        .try_fold(1u64, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| anyhow!("dataset shape overflow: {:?}", shape))?;
+    let bytes = elems.checked_mul(elem_bytes).ok_or_else(|| anyhow!("dataset byte size overflow"))?;
+    if bytes > max_dataset_bytes {
+        bail!("dataset size {} B exceeds configured read budget {} B", bytes, max_dataset_bytes);
+    }
+    Ok(elems)
+}
+
+fn account_budget_bytes(
+    total_bytes: &mut u64,
+    add_bytes: u64,
+    max_total_result_bytes: u64,
+    context: &str,
+) -> Result<()> {
+    let next = total_bytes
+        .checked_add(add_bytes)
+        .ok_or_else(|| anyhow!("cumulative result byte count overflow at {context}"))?;
+    if next > max_total_result_bytes {
+        bail!(
+            "cumulative result size {} B exceeds configured total read budget {} B at {context}",
+            next,
+            max_total_result_bytes
+        );
+    }
+    *total_bytes = next;
+    Ok(())
+}
+
+fn validate_solution_count(
+    raw_n: i64,
+    min_bytes_per_solution: u64,
+    max_solutions: usize,
+    file_bytes: u64,
+    context: &str,
+) -> Result<usize> {
+    if raw_n < 0 {
+        bail!("negative n_solutions {} at {}", raw_n, context);
+    }
+    let n_solutions = usize::try_from(raw_n)
+        .map_err(|_| anyhow!("n_solutions {} overflows usize at {}", raw_n, context))?;
+    if n_solutions > max_solutions {
+        bail!(
+            "n_solutions {} exceeds configured max_solutions budget {} at {}",
+            n_solutions,
+            max_solutions,
+            context
+        );
+    }
+    if min_bytes_per_solution > 0 {
+        let min_needed = (n_solutions as u64).saturating_mul(min_bytes_per_solution);
+        if min_needed > file_bytes {
+            bail!(
+                "declared n_solutions {} requires at least {} B, exceeding file size {} B at {}",
+                n_solutions,
+                min_needed,
+                file_bytes,
+                context
+            );
+        }
+    }
+    Ok(n_solutions)
+}
+
+fn capped_solution_capacity_for(n_solutions: usize, max_solutions: usize, file_bytes: u64) -> usize {
+    let file_cap = (file_bytes / 16).min(usize::MAX as u64) as usize;
+    n_solutions.min(max_solutions).min(4096).min(file_cap)
+}
+
 fn shape_2d(shape: &[u64], label: &str) -> Result<[usize; 2]> {
     match shape {
-        [r, c] => Ok([*r as usize, *c as usize]),
+        [r, c] => Ok([
+            usize::try_from(*r).map_err(|_| anyhow!("2D shape row {} overflows usize for {}", r, label))?,
+            usize::try_from(*c).map_err(|_| anyhow!("2D shape col {} overflows usize for {}", c, label))?,
+        ]),
         [0] => Ok([0, 0]),
         _ => bail!("expected 2D shape for {}, got {:?}", label, shape),
     }
+}
+
+fn shape_5d(shape: &[u64]) -> Result<[usize; 5]> {
+    if shape.len() != 5 {
+        bail!("expected 5D shape, got {:?}", shape);
+    }
+    Ok([
+        usize::try_from(shape[0]).map_err(|_| anyhow!("5D dim 0 overflows usize"))?,
+        usize::try_from(shape[1]).map_err(|_| anyhow!("5D dim 1 overflows usize"))?,
+        usize::try_from(shape[2]).map_err(|_| anyhow!("5D dim 2 overflows usize"))?,
+        usize::try_from(shape[3]).map_err(|_| anyhow!("5D dim 3 overflows usize"))?,
+        usize::try_from(shape[4]).map_err(|_| anyhow!("5D dim 4 overflows usize"))?,
+    ])
+}
+
+fn packed_shape_from_tail(flat_len: u64, tail: &[i64]) -> Result<([usize; 5], bool)> {
+    if tail.len() != 4 {
+        bail!("invalid logical_shape_tail length {}: expected 4", tail.len());
+    }
+    let c = usize::try_from(tail[0].max(0)).map_err(|_| anyhow!("logical_shape_tail[0] overflows usize"))?;
+    let n_c = usize::try_from(tail[1].max(0)).map_err(|_| anyhow!("logical_shape_tail[1] overflows usize"))?;
+    let n_v = usize::try_from(tail[2].max(0)).map_err(|_| anyhow!("logical_shape_tail[2] overflows usize"))?;
+    let ri = usize::try_from(tail[3].max(0)).map_err(|_| anyhow!("logical_shape_tail[3] overflows usize"))?;
+    let mode_elems = c
+        .checked_mul(n_c)
+        .and_then(|x| x.checked_mul(n_v))
+        .and_then(|x| x.checked_mul(ri))
+        .ok_or_else(|| anyhow!("logical_shape_tail overflow"))?;
+    let flat_usize = usize::try_from(flat_len).map_err(|_| anyhow!("packed flat_len overflows usize"))?;
+    if let Some(m) = flat_usize.checked_div(mode_elems) {
+        Ok(([m, c, n_c, n_v, ri], false))
+    } else {
+        Ok(([0, c, n_c, n_v, ri], true))
+    }
+}
+
+fn packed_5d_slice_bytes(shape: &[u64], mode_idx: usize, max_dataset_bytes: u64) -> Result<(u64, u64)> {
+    if shape.len() != 5 {
+        bail!("expected 5D shape, got {:?}", shape);
+    }
+    let mode_u64 = u64::try_from(mode_idx).map_err(|_| anyhow!("mode_idx overflows u64"))?;
+    if mode_u64 >= shape[0] {
+        bail!("mode_idx {} out of bounds for shape {:?}", mode_idx, shape);
+    }
+    let row_elems = shape[1..]
+        .iter()
+        .try_fold(1u64, |acc, &d| acc.checked_mul(d))
+        .ok_or_else(|| anyhow!("row shape overflow: {:?}", shape))?;
+    let row_bytes = row_elems.checked_mul(8).ok_or_else(|| anyhow!("row byte size overflow"))?;
+    if row_bytes > max_dataset_bytes {
+        bail!("single mode slice ({} B) exceeds read budget {} B", row_bytes, max_dataset_bytes);
+    }
+    Ok((row_elems, row_bytes))
+}
+
+fn packed_1d_slice_range(
+    flat_len: u64,
+    tail: &[i64],
+    mode_idx: usize,
+    max_dataset_bytes: u64,
+) -> Result<(u64, u64, u64)> {
+    if tail.len() != 4 {
+        bail!("invalid logical_shape_tail length {}: expected 4", tail.len());
+    }
+    let mode_elems = tail
+        .iter()
+        .try_fold(1u64, |acc, &d| acc.checked_mul(d.max(0) as u64))
+        .ok_or_else(|| anyhow!("mode_elems overflow"))?;
+    let mode_bytes = mode_elems.checked_mul(8).ok_or_else(|| anyhow!("mode_bytes overflow"))?;
+    if mode_bytes > max_dataset_bytes {
+        bail!("single mode slice ({} B) exceeds read budget {} B", mode_bytes, max_dataset_bytes);
+    }
+    if mode_elems == 0 {
+        return Ok((0, mode_bytes, 0));
+    }
+    let mode_u64 = u64::try_from(mode_idx).map_err(|_| anyhow!("mode_idx overflows u64"))?;
+    let start = mode_u64.checked_mul(mode_elems).ok_or_else(|| anyhow!("mode slice start offset overflow"))?;
+    let end = start.checked_add(mode_elems).ok_or_else(|| anyhow!("mode slice end offset overflow"))?;
+    if end > flat_len {
+        bail!("mode_idx {} (elems {}..{}) out of bounds for len {}", mode_idx, start, end, flat_len);
+    }
+    Ok((mode_elems, mode_bytes, start))
 }
 
 fn walk_group_checked(reader: &NyxReader, grp: &Group, depth: usize, total_bytes: &mut u64) -> Result<usize> {
@@ -1094,5 +1158,87 @@ mod tests {
         let err_no_im = r_no_im.read_mode_cell_fields("ems", 0).err().ok_or_else(|| anyhow!("expected error"))?.to_string();
         assert!(err_no_im.contains("cumulative result size"), "unexpected no-im budget error: {err_no_im}");
         Ok(())
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn verify_read_budget_no_overflow() {
+        let max_ds: u64 = kani::any();
+        let max_tot: u64 = kani::any();
+        let max_sol: usize = kani::any();
+        let cfg = ReadBudgetConfig {
+            max_dataset_bytes: max_ds,
+            max_total_result_bytes: max_tot,
+            max_group_depth: 24,
+            max_solutions: max_sol,
+        };
+
+        // 1. `check_shape_budget` across arbitrary rank <= 5 and element sizes.
+        let dims: [u64; 5] = kani::any();
+        let rank: usize = kani::any();
+        kani::assume(rank <= 5);
+        let elem_bytes: u64 = kani::any();
+        if let Ok(elems) = check_shape_budget(&dims[..rank], elem_bytes, cfg.max_dataset_bytes) {
+            if let Some(bytes) = elems.checked_mul(elem_bytes) {
+                assert!(bytes <= cfg.max_dataset_bytes);
+            }
+        }
+
+        // 2. Cumulative byte accounting (`account_budget_bytes`).
+        let mut total: u64 = kani::any();
+        let add: u64 = kani::any();
+        if account_budget_bytes(&mut total, add, cfg.max_total_result_bytes, "kani").is_ok() {
+            assert!(total <= cfg.max_total_result_bytes);
+        }
+
+        // 3. Solution count and capacity capping.
+        let raw_n: i64 = kani::any();
+        let min_per_sol: u64 = kani::any();
+        let file_bytes: u64 = kani::any();
+        if let Ok(n_sol) = validate_solution_count(raw_n, min_per_sol, cfg.max_solutions, file_bytes, "kani") {
+            assert!(n_sol <= cfg.max_solutions);
+            let cap = capped_solution_capacity_for(n_sol, cfg.max_solutions, file_bytes);
+            assert!(cap <= cfg.max_solutions && cap <= 4096);
+        }
+
+        // 4. `shape_2d` & `packed_logical_shape` tail arithmetic.
+        let s2: [u64; 3] = kani::any();
+        let s2_len: usize = kani::any();
+        kani::assume(s2_len <= 3);
+        let _ = shape_2d(&s2[..s2_len], "kani");
+
+        let flat_len: u64 = kani::any();
+        let tail: [i64; 4] = kani::any();
+        if let Ok(([m, c, n_c, n_v, ri], _needs_nsol)) = packed_shape_from_tail(flat_len, &tail) {
+            let per_mode = c.checked_mul(n_c).and_then(|x| x.checked_mul(n_v)).and_then(|x| x.checked_mul(ri));
+            assert!(per_mode.is_some());
+            if let Some(pm) = per_mode {
+                if pm > 0 {
+                    assert!(m.checked_mul(pm).is_some());
+                }
+            }
+        }
+
+        // 5. `read_mode_cell_fields` 5D & 1D index arithmetic.
+        let mode_idx: usize = kani::any();
+        if let Ok((_re, rb)) = packed_5d_slice_bytes(&dims, mode_idx, cfg.max_dataset_bytes) {
+            assert!(rb <= cfg.max_dataset_bytes);
+            assert!((mode_idx as u64) < dims[0]);
+        }
+        if let Ok((mode_elems, mode_bytes, start)) =
+            packed_1d_slice_range(flat_len, &tail, mode_idx, cfg.max_dataset_bytes)
+        {
+            assert!(mode_bytes <= cfg.max_dataset_bytes);
+            if mode_elems > 0 {
+                let end = start.checked_add(mode_elems);
+                assert!(end.is_some());
+                assert!(end.unwrap() <= flat_len);
+            }
+        }
     }
 }

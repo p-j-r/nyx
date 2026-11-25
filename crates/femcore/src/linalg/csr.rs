@@ -591,3 +591,140 @@ mod tests {
         let _ = RCsr::sum_all(Vec::<RCsr>::new());
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    fn bounded_csr_from_symbolic(
+        nrows: usize,
+        ncols: usize,
+        indptr: Vec<usize>,
+        indices: Vec<u32>,
+        values: Vec<f64>,
+    ) -> Result<Csr<f64>, CsrError> {
+        Csr::try_new(nrows, ncols, indptr, indices, values)
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn verify_csr_rows_into() {
+        let nrows: usize = kani::any();
+        let ncols: usize = kani::any();
+        let nnz: usize = kani::any();
+        kani::assume(nrows <= 6);
+        kani::assume(ncols <= 6);
+        kani::assume(nnz <= 12);
+
+        let indptr_raw: [usize; 7] = kani::any();
+        let indices_raw: [u32; 12] = kani::any();
+        let values_raw: [f64; 12] = kani::any();
+
+        let indptr_len: usize = kani::any();
+        kani::assume(indptr_len <= 7);
+        let indptr = indptr_raw[..indptr_len].to_vec();
+        let indices = indices_raw[..nnz].to_vec();
+        let values = values_raw[..nnz].to_vec();
+
+        if let Ok(csr) = bounded_csr_from_symbolic(nrows, ncols, indptr, indices, values) {
+            let start: usize = kani::any();
+            let len: usize = kani::any();
+            kani::assume(start <= nrows);
+            kani::assume(len <= nrows - start);
+
+            let x_raw: [f64; 6] = kani::any();
+            let x = x_raw[..ncols].to_vec();
+            let mut yc = vec![0.0f64; len];
+            csr.rows_into(start, &x, &mut yc);
+
+            let mut y = vec![0.0f64; nrows];
+            csr.spmv(&x, &mut y);
+            if nrows == ncols {
+                let mut yd = vec![0.0f64; nrows];
+                let _ = csr.spmv_dotc(&x, &mut yd);
+            }
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn verify_triplets_to_csr() {
+        let nrows: usize = kani::any();
+        let ncols: usize = kani::any();
+        let count: usize = kani::any();
+        kani::assume(nrows >= 1 && nrows <= 4);
+        kani::assume(ncols >= 1 && ncols <= 4);
+        kani::assume(count <= 6);
+
+        let rows_raw: [usize; 6] = kani::any();
+        let cols_raw: [usize; 6] = kani::any();
+        let vals_raw: [f64; 6] = kani::any();
+
+        let mut triplets = Triplets::<f64>::with_capacity(nrows, ncols, count);
+        for i in 0..count {
+            let r = rows_raw[i];
+            let c = cols_raw[i];
+            kani::assume(r < nrows && c < ncols);
+            triplets.push(r, c, vals_raw[i]);
+        }
+
+        let csr = triplets.to_csr();
+        assert_eq!(csr.nrows(), nrows);
+        assert_eq!(csr.ncols(), ncols);
+        assert!(csr.has_sorted_unique_rows());
+        assert!(Csr::try_new(
+            csr.nrows(),
+            csr.ncols(),
+            csr.indptr().to_vec(),
+            csr.indices().to_vec(),
+            csr.values().to_vec(),
+        )
+        .is_ok());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn verify_csr_sum_all() {
+        let nrows: usize = kani::any();
+        let ncols: usize = kani::any();
+        kani::assume(nrows >= 1 && nrows <= 3);
+        kani::assume(ncols >= 1 && ncols <= 3);
+
+        let mut parts = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let count: usize = kani::any();
+            kani::assume(count <= 3);
+            let rows_raw: [usize; 3] = kani::any();
+            let cols_raw: [usize; 3] = kani::any();
+            let vals_raw: [f64; 3] = kani::any();
+            let mut t = Triplets::<f64>::with_capacity(nrows, ncols, count);
+            for i in 0..count {
+                let r = rows_raw[i];
+                let c = cols_raw[i];
+                kani::assume(r < nrows && c < ncols);
+                t.push(r, c, vals_raw[i]);
+            }
+            parts.push(t.to_csr());
+        }
+
+        // Single-part fast path inside `sum_all`.
+        let single = Csr::sum_all(vec![parts[0].clone()]);
+        assert_eq!(single.nrows(), nrows);
+        assert_eq!(single.ncols(), ncols);
+
+        // Multi-part merge & `Csr::try_new` construction (exercised directly without OS threads).
+        let (r_cnt, c_cnt) = validate_sum_parts(&parts);
+        let block = sum_block_rows(&parts, 0, r_cnt);
+        let summed = assemble_sum_blocks(r_cnt, c_cnt, vec![block]);
+        assert_eq!(summed.nrows(), nrows);
+        assert_eq!(summed.ncols(), ncols);
+        assert!(Csr::try_new(
+            summed.nrows(),
+            summed.ncols(),
+            summed.indptr().to_vec(),
+            summed.indices().to_vec(),
+            summed.values().to_vec(),
+        )
+        .is_ok());
+    }
+}

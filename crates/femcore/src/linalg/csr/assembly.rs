@@ -144,6 +144,65 @@ impl<T: Scalar> Triplets<T> {
     }
 }
 
+pub(super) type SumBlock<T> = (Vec<usize>, Vec<u32>, Vec<T>);
+
+pub(super) fn validate_sum_parts<T: Scalar>(parts: &[Csr<T>]) -> (usize, usize) {
+    let (nrows, ncols) = (parts[0].nrows, parts[0].ncols);
+    for (idx, p) in parts.iter().enumerate().skip(1) {
+        assert!(
+            p.nrows == nrows && p.ncols == ncols,
+            "Csr::sum_all shape mismatch at part {idx}: ({}, {}) != ({nrows}, {ncols})",
+            p.nrows,
+            p.ncols
+        );
+    }
+    (nrows, ncols)
+}
+
+pub(super) fn sum_block_rows<T: Scalar>(parts: &[Csr<T>], r0: usize, r1: usize) -> SumBlock<T> {
+    let mut counts = Vec::with_capacity(r1 - r0);
+    let (mut idx, mut val): (Vec<u32>, Vec<T>) = (Vec::new(), Vec::new());
+    let mut row: Vec<(u32, T)> = Vec::new();
+    for r in r0..r1 {
+        row.clear();
+        for p in parts {
+            let (cs, vs) = p.row(r);
+            row.extend(cs.iter().copied().zip(vs.iter().copied()));
+        }
+        row.sort_unstable_by_key(|e| e.0);
+        let start = idx.len();
+        for &(cc, v) in &row {
+            if idx.len() > start && *idx.last().unwrap() == cc {
+                *val.last_mut().unwrap() += v;
+            } else {
+                idx.push(cc);
+                val.push(v);
+            }
+        }
+        counts.push(idx.len() - start);
+    }
+    (counts, idx, val)
+}
+
+pub(super) fn assemble_sum_blocks<T: Scalar>(
+    nrows: usize,
+    ncols: usize,
+    blocks: Vec<SumBlock<T>>,
+) -> Csr<T> {
+    let mut indptr = Vec::with_capacity(nrows + 1);
+    indptr.push(0usize);
+    let total: usize = blocks.iter().map(|b| b.1.len()).sum();
+    let (mut indices, mut values) = (Vec::with_capacity(total), Vec::with_capacity(total));
+    for (counts, idx, val) in blocks {
+        for cnt in counts {
+            indptr.push(indptr.last().unwrap() + cnt);
+        }
+        indices.extend(idx);
+        values.extend(val);
+    }
+    Csr::try_new(nrows, ncols, indptr, indices, values).expect("valid summed CSR")
+}
+
 impl<T: Scalar> Csr<T> {
     pub fn zeros(nrows: usize, ncols: usize) -> Self {
         let len = nrows.checked_add(1).expect("Csr::zeros nrows overflow");
@@ -267,60 +326,19 @@ impl<T: Scalar> Csr<T> {
         if parts.len() == 1 {
             return parts.pop().unwrap();
         }
-        let (nrows, ncols) = (parts[0].nrows, parts[0].ncols);
-        for (idx, p) in parts.iter().enumerate().skip(1) {
-            assert!(
-                p.nrows == nrows && p.ncols == ncols,
-                "Csr::sum_all shape mismatch at part {idx}: ({}, {}) != ({nrows}, {ncols})",
-                p.nrows,
-                p.ncols
-            );
-        }
+        let (nrows, ncols) = validate_sum_parts(&parts);
         let chunk = nrows.div_ceil(crate::par::threads()).max(1);
         let parts_ref = &parts;
-        type Block<T> = (Vec<usize>, Vec<u32>, Vec<T>);
-        let blocks: Vec<Block<T>> = (0..nrows.div_ceil(chunk))
+        let blocks: Vec<SumBlock<T>> = (0..nrows.div_ceil(chunk))
             .into_par_iter()
             .map(|b| {
                 let (r0, r1) = (b * chunk, ((b + 1) * chunk).min(nrows));
-                let mut counts = Vec::with_capacity(r1 - r0);
-                let (mut idx, mut val): (Vec<u32>, Vec<T>) = (Vec::new(), Vec::new());
-                let mut row: Vec<(u32, T)> = Vec::new();
-                for r in r0..r1 {
-                    row.clear();
-                    for p in parts_ref {
-                        let (cs, vs) = p.row(r);
-                        row.extend(cs.iter().copied().zip(vs.iter().copied()));
-                    }
-                    row.sort_unstable_by_key(|e| e.0);
-                    let start = idx.len();
-                    for &(cc, v) in &row {
-                        if idx.len() > start && *idx.last().unwrap() == cc {
-                            *val.last_mut().unwrap() += v;
-                        } else {
-                            idx.push(cc);
-                            val.push(v);
-                        }
-                    }
-                    counts.push(idx.len() - start);
-                }
-                (counts, idx, val)
+                sum_block_rows(parts_ref, r0, r1)
             })
             .collect();
         // the parts are as large as the sum: free them before the blocks are copied into the final arrays
         drop(parts);
-        let mut indptr = Vec::with_capacity(nrows + 1);
-        indptr.push(0usize);
-        let total: usize = blocks.iter().map(|b| b.1.len()).sum();
-        let (mut indices, mut values) = (Vec::with_capacity(total), Vec::with_capacity(total));
-        for (counts, idx, val) in blocks {
-            for cnt in counts {
-                indptr.push(indptr.last().unwrap() + cnt);
-            }
-            indices.extend(idx);
-            values.extend(val);
-        }
-        Self::try_new(nrows, ncols, indptr, indices, values).expect("valid summed CSR")
+        assemble_sum_blocks(nrows, ncols, blocks)
     }
     /// Symmetrised copy `(A + A^T)/2`.
     pub fn symmetrized(&self) -> Csr<T> {

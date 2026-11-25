@@ -20,3 +20,6 @@ rayon = { version = "1", optional = true }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 proptest = "1"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+

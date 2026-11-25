@@ -13,3 +13,6 @@ anyhow.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

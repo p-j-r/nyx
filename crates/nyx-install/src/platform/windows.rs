@@ -420,6 +420,79 @@ pub fn is_inside_dir(exe: &Path, dir: &Path) -> bool {
     e == d || e.starts_with(&format!("{d}\\"))
 }
 
+/// Returns `true` only when `subkey` names an application-owned `nyx` registry subtree safe fo
+/// recursive `RegDeleteTreeW` deletion (never empty, top-level hive roots, `Software`, or shared
+/// Windows keys such as `Software\Microsoft` or `Software\Classes`).
+pub fn is_safe_nyx_registry_subtree(subkey: &str) -> bool {
+    if subkey.is_empty() || subkey.contains('\0') {
+        return false;
+    }
+    let norm = subkey
+        .replace('/', "\\")
+        .trim_matches('\\')
+        .to_ascii_lowercase();
+    if norm.is_empty()
+        || norm
+            .split('\\')
+            .any(|p| p.is_empty() || p == "." || p == "..")
+    {
+        return false;
+    }
+    let parts: Vec<&str> = norm.split('\\').collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    if norm == ARP_SUBKEY.to_ascii_lowercase() {
+        return true;
+    }
+    // Isolated test sandbox roots (`Software\nyx-install-test-...`) and subkeys beneath them.
+    if parts[0] == "software" && parts[1].starts_with("nyx-install-test-") {
+        return true;
+    }
+    // Testing or per-app ARP uninstall subtree (`<prefix>\Uninstall\nyx`).
+    if norm.ends_with("\\uninstall\\nyx") {
+        return true;
+    }
+    // Exclusively owned ProgIDs (`...\Classes\nyx.*`) or `...\Classes\Applications\nyx.exe`.
+    if let Some(idx) = parts.iter().position(|&p| p == "classes") {
+        if let Some(&child) = parts.get(idx + 1) {
+            if child.starts_with("nyx.")
+                || (child == "applications" && parts.get(idx + 2) == Some(&"nyx.exe"))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Guards `execute_reap_final` against operating on bare drive roots or top-level Windows OS
+/// directories when scheduling `MoveFileExW(..., MOVEFILE_DELAY_UNTIL_REBOOT)` or directory removal.
+pub fn is_safe_reap_root(install_root: &Path) -> bool {
+    let s = norm_win_path(&install_root.to_string_lossy());
+    if s.is_empty() || s.contains('\0') {
+        return false;
+    }
+    let trimmed = s.trim_end_matches('\\');
+    if trimmed.len() <= 2 || trimmed.ends_with(':') {
+        return false;
+    }
+    let Some(leaf) = install_root.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if leaf.is_empty() {
+        return false;
+    }
+    !matches!(
+        trimmed,
+        r"c:\windows"
+            | r"c:\program files"
+            | r"c:\program files (x86)"
+            | r"c:\users"
+            | r"c:\programdata"
+    ) && install_root.parent().is_some()
+}
+
 /// Evacuates a running installed `nyx-uninstall.exe` into `%TEMP%` and relaunches GUI uninstall (Mode A).
 pub fn evacuate_to_temp_and_relaunch(current_exe: &Path, args: &[String]) -> Result<bool> {
     #[cfg(windows)]
@@ -553,6 +626,24 @@ pub mod win32 {
         tid: u32,
     }
 
+    // Compile-time ABI layout invariants matching the Windows SDK `#[repr(C)]` definitions.
+    const _: () = {
+        assert!(std::mem::size_of::<Guid>() == 16);
+        assert!(std::mem::align_of::<Guid>() == 4);
+        assert!(std::mem::size_of::<PropertyKey>() == 20);
+        assert!(std::mem::align_of::<PropertyKey>() == 4);
+        assert!(
+            std::mem::size_of::<PropVariant>()
+                == if cfg!(target_pointer_width = "64") {
+                    24
+                } else {
+                    16
+                }
+        );
+        assert!(std::mem::size_of::<StartupInfoW>() > 0);
+        assert!(std::mem::size_of::<ProcessInformation>() > 0);
+    };
+
     #[link(name = "kernel32")]
     extern "system" {
         fn SetDefaultDllDirectories(flags: u32) -> i32;
@@ -682,12 +773,17 @@ pub mod win32 {
     }
 
     pub fn harden_dll_search_order() {
+        // SAFETY: `LOAD_LIBRARY_SEARCH_SYSTEM32` is a valid `DWORD` flag fo
+        // `kernel32!SetDefaultDllDirectories`; takes no pointers and returns `BOOL`.
         unsafe {
             let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
         }
     }
 
     pub fn attach_console_if_unredirected() {
+        // SAFETY: `GetStdHandle` uses valid `STD_*_HANDLE` constants. `GetFileType` is only called
+        // after checking `!h.is_null()` and `h != INVALID_HANDLE_VALUE` (`-1isize`).
+        // `AttachConsole(ATTACH_PARENT_PROCESS)` uses the valid Win32 sentinel `0xFFFF_FFFF`.
         unsafe {
             let h_out = GetStdHandle(STD_OUTPUT_HANDLE);
             let h_err = GetStdHandle(STD_ERROR_HANDLE);
@@ -704,10 +800,14 @@ pub mod win32 {
     }
 
     pub fn is_process_elevated() -> bool {
+        // SAFETY: `GetCurrentProcess()` returns a valid pseudo-handle. `token` is checked non-null
+        // (and != `-1`) before passing to `GetTokenInformation` (with an aligned `u32` buffer and
+        // exact byte size) and is unconditionally closed with `CloseHandle(token)` before return.
         unsafe {
             let mut token: *mut c_void = null_mut();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0
                 || token.is_null()
+                || token == (-1isize as *mut c_void)
             {
                 return false;
             }
@@ -736,6 +836,9 @@ pub mod win32 {
     pub fn broadcast_environment_change() {
         let w_env = wide("Environment");
         let mut res: usize = 0;
+        // SAFETY: `w_env` is a NUL-terminated UTF-16 buffer alive for the entire synchronous
+        // `SendMessageTimeoutW` call (`WM_SETTINGCHANGE` expects an `LPCWSTR` in `LPARAM`), and
+        // `&mut res` is a valid aligned `PDWORD_PTR` output slot.
         unsafe {
             let _ = SendMessageTimeoutW(
                 HWND_BROADCAST,
@@ -750,22 +853,22 @@ pub mod win32 {
     }
 
     fn reg_query_string(hkey: isize, value_name: &str) -> Result<Option<(u32, String)>> {
+        if hkey == 0 {
+            bail!("RegQueryValueExW called with null HKEY");
+        }
         let w_val = wide(value_name);
+        let val_ptr = if value_name.is_empty() {
+            null()
+        } else {
+            w_val.as_ptr()
+        };
         let mut ty: u32 = 0;
         let mut bytes: u32 = 0;
+        // SAFETY: `hkey` is an open registry key handle, `val_ptr` is null or NUL-terminated UTF-16
+        // alive across the call, `&mut ty` and `&mut bytes` are valid aligned `u32` out-pointers,
+        // and `lpData` is null for a size query.
         let rc = unsafe {
-            RegQueryValueExW(
-                hkey,
-                if value_name.is_empty() {
-                    null()
-                } else {
-                    w_val.as_ptr()
-                },
-                null_mut(),
-                &mut ty,
-                null_mut(),
-                &mut bytes,
-            )
+            RegQueryValueExW(hkey, val_ptr, null_mut(), &mut ty, null_mut(), &mut bytes)
         };
         if rc == ERROR_FILE_NOT_FOUND {
             return Ok(None);
@@ -773,16 +876,19 @@ pub mod win32 {
         if rc != ERROR_SUCCESS {
             bail!("RegQueryValueExW failed ({rc}) for '{value_name}'");
         }
-        let mut buf = vec![0u16; (bytes as usize).div_ceil(2) + 1];
-        let mut actual_bytes = (buf.len() * 2) as u32;
+        let n_u16 = (bytes as usize).div_ceil(2) + 1;
+        let byte_cap = n_u16
+            .checked_mul(2)
+            .and_then(|b| u32::try_from(b).ok())
+            .ok_or_else(|| anyhow::anyhow!("registry value size overflows u32 for '{value_name}'"))?;
+        let mut buf = vec![0u16; n_u16];
+        let mut actual_bytes = byte_cap;
+        // SAFETY: `buf` is uniquely owned and has `byte_cap` writable bytes matching `actual_bytes`;
+        // `val_ptr`, `&mut ty`, and `&mut actual_bytes` remain valid for the duration of the call.
         let rc2 = unsafe {
             RegQueryValueExW(
                 hkey,
-                if value_name.is_empty() {
-                    null()
-                } else {
-                    w_val.as_ptr()
-                },
+                val_ptr,
                 null_mut(),
                 &mut ty,
                 buf.as_mut_ptr().cast(),
@@ -799,9 +905,18 @@ pub mod win32 {
     }
 
     fn reg_set_string(hkey: isize, value_name: &str, ty: u32, text: &str) -> Result<()> {
+        if hkey == 0 {
+            bail!("RegSetValueExW called with null HKEY");
+        }
         let w_val = wide(value_name);
         let w_data = wide(text);
-        let bytes = (w_data.len() * 2) as u32;
+        let bytes = w_data
+            .len()
+            .checked_mul(2)
+            .and_then(|b| u32::try_from(b).ok())
+            .ok_or_else(|| anyhow::anyhow!("registry string exceeds u32 byte length"))?;
+        // SAFETY: `hkey` is a valid open registry key, value name pointer is null or NUL-terminated
+        // UTF-16, and `w_data` is NUL-terminated UTF-16 valid for `bytes` readable bytes.
         let rc = unsafe {
             RegSetValueExW(
                 hkey,
@@ -823,8 +938,13 @@ pub mod win32 {
     }
 
     fn reg_set_dword(hkey: isize, value_name: &str, v: u32) -> Result<()> {
+        if hkey == 0 {
+            bail!("RegSetValueExW DWORD called with null HKEY");
+        }
         let w_val = wide(value_name);
         let bytes = v.to_le_bytes();
+        // SAFETY: `w_val` is NUL-terminated UTF-16 and `bytes` is a 4-byte stack array matching
+        // `cbData = 4` for `REG_DWORD`.
         let rc = unsafe { RegSetValueExW(hkey, w_val.as_ptr(), 0, REG_DWORD, bytes.as_ptr(), 4) };
         if rc != ERROR_SUCCESS {
             bail!("RegSetValueExW DWORD failed ({rc}) for '{value_name}'");
@@ -840,9 +960,14 @@ pub mod win32 {
         old_entry: Option<&str>,
         broadcast: bool,
     ) -> Result<Option<PathEdit>> {
+        if subkey.is_empty() {
+            bail!("edit_path_in_subkey refused empty subkey");
+        }
         let w_sub = wide(subkey);
         let mut hkey: isize = 0;
         let mut disp: u32 = 0;
+        // SAFETY: `root_hkey(use_hklm)` is a valid predefined `HKEY_*` constant, `w_sub` is a
+        // non-empty NUL-terminated UTF-16 string, and `&mut hkey` / `&mut disp` are valid pointers.
         let rc = unsafe {
             RegCreateKeyExW(
                 root_hkey(use_hklm),
@@ -882,6 +1007,7 @@ pub mod win32 {
                 preserved_expand_sz: write_type == REG_EXPAND_SZ,
             }))
         })();
+        // SAFETY: `hkey` was successfully opened by `RegCreateKeyExW` above and is closed once.
         unsafe {
             RegCloseKey(hkey);
         }
@@ -899,8 +1025,13 @@ pub mod win32 {
         created_value: bool,
         broadcast: bool,
     ) -> Result<bool> {
+        if subkey.is_empty() {
+            return Ok(false);
+        }
         let w_sub = wide(subkey);
         let mut hkey: isize = 0;
+        // SAFETY: `root_hkey(use_hklm)` is a valid predefined HKEY, `w_sub` is NUL-terminated
+        // UTF-16, and `&mut hkey` is a valid out-pointer.
         let rc = unsafe {
             RegOpenKeyExW(
                 root_hkey(use_hklm),
@@ -926,8 +1057,16 @@ pub mod win32 {
             }
             if updated.trim().is_empty() && created_value {
                 let w_val = wide(value_name);
+                // SAFETY: `hkey` is open with `KEY_WRITE` and `w_val` is NUL-terminated UTF-16.
                 unsafe {
-                    RegDeleteValueW(hkey, w_val.as_ptr());
+                    RegDeleteValueW(
+                        hkey,
+                        if value_name.is_empty() {
+                            null()
+                        } else {
+                            w_val.as_ptr()
+                        },
+                    );
                 }
             } else {
                 let write_type = if orig_type == REG_EXPAND_SZ || updated.contains('%') {
@@ -939,6 +1078,7 @@ pub mod win32 {
             }
             Ok(true)
         })();
+        // SAFETY: `hkey` was opened by `RegOpenKeyExW` above and is closed once.
         unsafe {
             RegCloseKey(hkey);
         }
@@ -953,8 +1093,13 @@ pub mod win32 {
         subkey: &str,
         value_name: &str,
     ) -> Result<Option<(u32, String)>> {
+        if subkey.is_empty() {
+            return Ok(None);
+        }
         let w_sub = wide(subkey);
         let mut hkey: isize = 0;
+        // SAFETY: `root_hkey(use_hklm)` is a valid predefined HKEY, `w_sub` is NUL-terminated
+        // UTF-16, and `&mut hkey` is a valid out-pointer.
         let rc = unsafe {
             RegOpenKeyExW(
                 root_hkey(use_hklm),
@@ -971,6 +1116,7 @@ pub mod win32 {
             bail!("RegOpenKeyExW failed ({rc})");
         }
         let r = reg_query_string(hkey, value_name);
+        // SAFETY: `hkey` was opened by `RegOpenKeyExW` above and is closed once.
         unsafe {
             RegCloseKey(hkey);
         }
@@ -978,14 +1124,54 @@ pub mod win32 {
     }
 
     pub fn delete_registry_tree(use_hklm: bool, subkey: &str) {
+        // Scope guard: refuse to pass empty or non-nyx registry subtrees to `RegDeleteTreeW`.
+        if !is_safe_nyx_registry_subtree(subkey) {
+            return;
+        }
         let w_sub = wide(subkey);
+        // SAFETY: `root_hkey(use_hklm)` is a valid predefined HKEY, `w_sub` is non-null
+        // NUL-terminated UTF-16, and `is_safe_nyx_registry_subtree` verified `subkey` is an
+        // exclusive nyx ARP/ProgID/test-sandbox subtree.
         unsafe {
             let _ = RegDeleteTreeW(root_hkey(use_hklm), w_sub.as_ptr());
         }
     }
 
+    // SAFETY precondition: `obj` must be a non-null, pointer-aligned live COM interface pointe
+    // whose first word is its vtable pointer.
     unsafe fn vtable_ptr(obj: *mut c_void) -> *const *const c_void {
-        *(obj as *const *const *const c_void)
+        assert!(!obj.is_null(), "COM interface pointer must be non-null");
+        assert!(
+            (obj as usize).is_multiple_of(std::mem::align_of::<*const *const c_void>()),
+            "COM interface pointer must be pointer-aligned"
+        );
+        // SAFETY: Caller guarantees `obj` points to a valid COM object with a leading vptr.
+        let vt = unsafe { *(obj as *const *const *const c_void) };
+        assert!(!vt.is_null(), "COM vtable pointer must be non-null");
+        assert!(
+            (vt as usize).is_multiple_of(std::mem::align_of::<*const c_void>()),
+            "COM vtable pointer must be pointer-aligned"
+        );
+        vt
+    }
+
+    // SAFETY precondition: `vt` is a valid COM vtable for the target interface and `slot` is within
+    // that interface's documented vtable length, matching function pointer signature `F`.
+    #[inline]
+    unsafe fn com_method<F: Copy>(vt: *const *const c_void, slot: usize) -> F {
+        const {
+            assert!(
+                std::mem::size_of::<F>() == std::mem::size_of::<*const c_void>(),
+                "COM vtable function pointer size mismatch"
+            );
+        }
+        // SAFETY: `vt` is non-null/aligned and caller guarantees `slot` is in-bounds for the COM
+        // interface; we also assert the loaded slot pointer is non-null before transmuting.
+        let entry = unsafe { *vt.add(slot) };
+        assert!(!entry.is_null(), "COM vtable slot {slot} is null");
+        // SAFETY: `F` has pointer size (`size_of::<F>() == size_of::<*const c_void>()`), `entry`
+        // is non-null, and caller guarantees `extern "system"` COM signature parity.
+        unsafe { std::mem::transmute_copy::<*const c_void, F>(&entry) }
     }
 
     /// Creates a Windows `.lnk` Shell Link using pure-Rust COM `IShellLinkW`, `IPropertyStore` (AUMID), and `IPersistFile`.
@@ -1002,6 +1188,12 @@ pub mod win32 {
         let clean_wd = nyx_connect::plain_path(working_dir.to_path_buf());
         let clean_lnk = nyx_connect::plain_path(lnk_path.to_path_buf());
 
+        // SAFETY: All COM calls run on the current thread inside a balanced `CoInitializeEx` /
+        // `CoUninitialize` scope. Every returned COM pointer (`shell_link`, `prop_store`, `persist`)
+        // is checked non-null and released via `IUnknown::Release` before `CoUninitialize`; all
+        // `wide*` UTF-16 buffers outlive the COM method calls that borrow them, and vtable slots
+        // match the documented Windows SDK `IUnknown` / `IShellLinkW` / `IPropertyStore` /
+        // `IPersistFile` layouts (`shobjidl_core.h`, `propsys.h`, `objidl.h`).
         unsafe {
             let hr_init = CoInitializeEx(null(), 2 /* COINIT_APARTMENTTHREADED */);
             let need_uninit = hr_init == 0 || hr_init == 1;
@@ -1019,21 +1211,22 @@ pub mod win32 {
                 }
 
                 let vt = vtable_ptr(shell_link);
+                // `IUnknown`: 0=QueryInterface, 2=Release; `IShellLinkW`: 7=SetDescription,
+                // 9=SetWorkingDirectory, 17=SetIconLocation, 20=SetPath.
                 let query_iface: unsafe extern "system" fn(
                     *mut c_void,
                     *const Guid,
                     *mut *mut c_void,
-                ) -> i32 = std::mem::transmute(*vt.add(0));
-                let release_sl: unsafe extern "system" fn(*mut c_void) -> u32 =
-                    std::mem::transmute(*vt.add(2));
+                ) -> i32 = com_method(vt, 0);
+                let release_sl: unsafe extern "system" fn(*mut c_void) -> u32 = com_method(vt, 2);
                 let set_desc: unsafe extern "system" fn(*mut c_void, *const u16) -> i32 =
-                    std::mem::transmute(*vt.add(7));
+                    com_method(vt, 7);
                 let set_wd: unsafe extern "system" fn(*mut c_void, *const u16) -> i32 =
-                    std::mem::transmute(*vt.add(9));
+                    com_method(vt, 9);
                 let set_icon: unsafe extern "system" fn(*mut c_void, *const u16, i32) -> i32 =
-                    std::mem::transmute(*vt.add(17));
+                    com_method(vt, 17);
                 let set_path: unsafe extern "system" fn(*mut c_void, *const u16) -> i32 =
-                    std::mem::transmute(*vt.add(20));
+                    com_method(vt, 20);
 
                 let w_target = wide_path(&clean_target);
                 let w_wd = wide_path(&clean_wd);
@@ -1060,15 +1253,16 @@ pub mod win32 {
                         && !prop_store.is_null()
                     {
                         let pvt = vtable_ptr(prop_store);
+                        // `IPropertyStore`: 2=Release, 6=SetValue, 7=Commit.
                         let rel_ps: unsafe extern "system" fn(*mut c_void) -> u32 =
-                            std::mem::transmute(*pvt.add(2));
+                            com_method(pvt, 2);
                         let set_val: unsafe extern "system" fn(
                             *mut c_void,
                             *const PropertyKey,
                             *const PropVariant,
-                        ) -> i32 = std::mem::transmute(*pvt.add(6));
+                        ) -> i32 = com_method(pvt, 6);
                         let commit: unsafe extern "system" fn(*mut c_void) -> i32 =
-                            std::mem::transmute(*pvt.add(7));
+                            com_method(pvt, 7);
                         let w_aumid = wide(AUMID);
                         let pv = PropVariant {
                             vt: 31, // VT_LPWSTR
@@ -1092,10 +1286,10 @@ pub mod win32 {
                         );
                     }
                     let fvt = vtable_ptr(persist);
-                    let rel_pf: unsafe extern "system" fn(*mut c_void) -> u32 =
-                        std::mem::transmute(*fvt.add(2));
+                    // `IPersistFile`: 2=Release, 6=Save.
+                    let rel_pf: unsafe extern "system" fn(*mut c_void) -> u32 = com_method(fvt, 2);
                     let save_pf: unsafe extern "system" fn(*mut c_void, *const u16, i32) -> i32 =
-                        std::mem::transmute(*fvt.add(6));
+                        com_method(fvt, 6);
                     let hr_save = save_pf(persist, w_lnk.as_ptr(), 1);
                     rel_pf(persist);
                     if hr_save < 0 {
@@ -1141,6 +1335,8 @@ pub mod win32 {
         let w_sub = wide(&subkey);
         let mut hkey: isize = 0;
         let mut disp: u32 = 0;
+        // SAFETY: `root_hkey(use_hklm)` is a valid predefined HKEY, `w_sub` is NUL-terminated
+        // UTF-16, and `&mut hkey` / `&mut disp` are valid out-pointers.
         let rc = unsafe {
             RegCreateKeyExW(
                 root_hkey(use_hklm),
@@ -1192,6 +1388,7 @@ pub mod win32 {
             reg_set_dword(hkey, "NoRepair", 0)?;
             Ok(())
         })();
+        // SAFETY: `hkey` was opened by `RegCreateKeyExW` above and is closed once.
         unsafe {
             RegCloseKey(hkey);
         }
@@ -1275,9 +1472,14 @@ pub mod win32 {
         value: &str,
         record_prev: bool,
     ) -> Result<(bool, Option<String>)> {
+        if subkey.is_empty() {
+            bail!("write_reg_key_value refused empty subkey");
+        }
         let w_sub = wide(subkey);
         let mut hkey: isize = 0;
         let mut disp: u32 = 0;
+        // SAFETY: `root_hkey(use_hklm)` is a valid predefined HKEY, `w_sub` is NUL-terminated
+        // UTF-16, and `&mut hkey` / `&mut disp` are valid out-pointers.
         let rc = unsafe {
             RegCreateKeyExW(
                 root_hkey(use_hklm),
@@ -1304,6 +1506,7 @@ pub mod win32 {
             None
         };
         let res = reg_set_string(hkey, value_name, REG_SZ, value);
+        // SAFETY: `hkey` was opened by `RegCreateKeyExW` above and is closed once.
         unsafe {
             RegCloseKey(hkey);
         }
@@ -1415,6 +1618,8 @@ pub mod win32 {
         });
 
         if opts.testing_reg_root.is_none() {
+            // SAFETY: `SHCNE_ASSOCCHANGED | SHCNF_IDLIST` with null item pointers is the
+            // documented Win32 shell notification indicating file-association updates.
             unsafe {
                 SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, null(), null());
             }
@@ -1435,9 +1640,14 @@ pub mod win32 {
                 created_key,
             } = a
             {
+                if subkey.is_empty() || !subkey.contains('\\') {
+                    continue;
+                }
                 let use_hklm = hive.eq_ignore_ascii_case("HKLM");
                 let w_sub = wide(subkey);
                 let mut hkey: isize = 0;
+                // SAFETY: `root_hkey(use_hklm)` is a valid predefined HKEY, `w_sub` is a non-empty
+                // NUL-terminated UTF-16 subkey path, and `&mut hkey` is a valid out-pointer.
                 if unsafe {
                     RegOpenKeyExW(
                         root_hkey(use_hklm),
@@ -1457,6 +1667,8 @@ pub mod win32 {
                             let _ = reg_set_string(hkey, value_name, REG_SZ, prev);
                         } else {
                             let w_val = wide(value_name);
+                            // SAFETY: `hkey` is open with `KEY_WRITE`; value name pointer is null
+                            // for `(Default)` or NUL-terminated UTF-16 `w_val`.
                             unsafe {
                                 RegDeleteValueW(
                                     hkey,
@@ -1472,6 +1684,8 @@ pub mod win32 {
                     }
                     let mut n_sub: u32 = 0;
                     let mut n_vals: u32 = 0;
+                    // SAFETY: `hkey` is open with `KEY_READ`; only `&mut n_sub` and `&mut n_vals`
+                    // are non-null, matching Win32 optional out-parameters for `RegQueryInfoKeyW`.
                     let info_ok = unsafe {
                         RegQueryInfoKeyW(
                             hkey,
@@ -1488,10 +1702,14 @@ pub mod win32 {
                             null_mut(),
                         )
                     } == ERROR_SUCCESS;
+                    // SAFETY: `hkey` was opened by `RegOpenKeyExW` above and is closed once.
                     unsafe {
                         RegCloseKey(hkey);
                     }
                     if *created_key && info_ok && n_sub == 0 && n_vals == 0 {
+                        // SAFETY: `RegDeleteKeyW` only deletes an empty leaf key (`n_sub == 0 &&
+                        // n_vals == 0`) that `install_file_associations` created (`subkey` verified
+                        // non-empty and nested); `w_sub` is NUL-terminated UTF-16.
                         unsafe {
                             let _ = RegDeleteKeyW(root_hkey(use_hklm), w_sub.as_ptr());
                         }
@@ -1507,6 +1725,7 @@ pub mod win32 {
                 changed = true;
             }
         }
+        // SAFETY: Documented `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL)` call.
         unsafe {
             SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, null(), null());
         }
@@ -1546,11 +1765,18 @@ pub mod win32 {
         let app: Vec<u16> = program.as_os_str().encode_wide().chain(Some(0)).collect();
         let temp_dir = std::env::temp_dir();
         let w_cwd = wide_path(&temp_dir);
+        // SAFETY: `StartupInfoW` is a `#[repr(C)]` POD struct of integers and pointers where zero
+        // is valid; `cb` is set to the exact struct byte size immediately below.
         let mut si: StartupInfoW = unsafe { std::mem::zeroed() };
         si.cb = std::mem::size_of::<StartupInfoW>() as u32;
+        // SAFETY: `ProcessInformation` is a `#[repr(C)]` POD struct of handles and IDs where zero
+        // is valid before `CreateProcessW` initializes it.
         let mut pi: ProcessInformation = unsafe { std::mem::zeroed() };
         // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
         let flags = 0x0000_0008 | 0x0000_0200 | 0x0800_0000;
+        // SAFETY: `app`, `line` (mutable buffer required by `CreateProcessW`), and `w_cwd` are
+        // NUL-terminated UTF-16 buffers alive for the duration of the call; `&si` and `&mut pi`
+        // are aligned valid pointers matching the Windows `STARTUPINFOW` / `PROCESS_INFORMATION` ABI.
         let ok = unsafe {
             CreateProcessW(
                 app.as_ptr(),
@@ -1568,9 +1794,15 @@ pub mod win32 {
         if ok == 0 {
             return Err(std::io::Error::last_os_error().into());
         }
+        // SAFETY: `CreateProcessW` succeeded (`ok != 0`), so any non-null `pi.process` and
+        // `pi.thread` handles are valid OS handles owned by us and closed exactly once.
         unsafe {
-            CloseHandle(pi.process);
-            CloseHandle(pi.thread);
+            if !pi.process.is_null() {
+                CloseHandle(pi.process);
+            }
+            if !pi.thread.is_null() {
+                CloseHandle(pi.thread);
+            }
         }
         Ok(())
     }
@@ -1605,10 +1837,18 @@ pub mod win32 {
     }
 
     pub fn execute_reap_final(wait_pid: u32, install_root: &Path) -> Result<()> {
+        if !is_safe_reap_root(install_root) {
+            bail!(
+                "refusing reap_final on unsafe install root '{}'",
+                install_root.display()
+            );
+        }
         let _ = std::env::set_current_dir(std::env::temp_dir());
+        // SAFETY: `OpenProcess(SYNCHRONIZE, FALSE, wait_pid)` takes scalar arguments; `h` is
+        // checked non-null (and != `INVALID_HANDLE_VALUE`) before waiting and closing via `CloseHandle`.
         unsafe {
             let h = OpenProcess(0x0010_0000 /* SYNCHRONIZE */, 0, wait_pid);
-            if !h.is_null() {
+            if !h.is_null() && h != (-1isize as *mut c_void) {
                 WaitForSingleObject(h, 10_000);
                 CloseHandle(h);
             }
@@ -1630,6 +1870,9 @@ pub mod win32 {
             let w_uninst = wide_path(&bin_uninst);
             let w_bin = wide_path(&install_root.join("bin"));
             let w_root = wide_path(install_root);
+            // SAFETY: `install_root` passed `is_safe_reap_root`; `w_uninst`, `w_bin`, and `w_root`
+            // are NUL-terminated UTF-16 buffers alive for the synchronous `MoveFileExW` calls, with
+            // `lpNewFileName = NULL` and `MOVEFILE_DELAY_UNTIL_REBOOT`.
             unsafe {
                 let _ = MoveFileExW(w_uninst.as_ptr(), null(), MOVEFILE_DELAY_UNTIL_REBOOT);
                 let _ = MoveFileExW(w_bin.as_ptr(), null(), MOVEFILE_DELAY_UNTIL_REBOOT);
@@ -1670,5 +1913,70 @@ pub mod win32 {
         }
         spawn_win32_detached(&copy_path, &child_args)?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_safe_nyx_registry_subtree, is_safe_reap_root, ARP_SUBKEY};
+    use std::path::Path;
+
+    #[test]
+    fn registry_tree_scope_guard_allows_only_nyx_subtrees() {
+        assert!(is_safe_nyx_registry_subtree(ARP_SUBKEY));
+        assert!(is_safe_nyx_registry_subtree(
+            r"Software\nyx-install-test-reg-1234"
+        ));
+        assert!(is_safe_nyx_registry_subtree(
+            r"Software\nyx-install-test-reg-1234\Uninstall\nyx"
+        ));
+        assert!(is_safe_nyx_registry_subtree(
+            r"Software\Classes\nyx.Archive.1"
+        ));
+        assert!(is_safe_nyx_registry_subtree(
+            r"Software\Classes\Applications\nyx.exe"
+        ));
+
+        for unsafe_key in [
+            "",
+            "Software",
+            r"Software\Microsoft",
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"Software\Classes",
+            r"Software\Classes\.json",
+            r"Software\Classes\Applications",
+            "Environment",
+            r"Software\nyx\..\Microsoft",
+            "Software\0bad",
+        ] {
+            assert!(
+                !is_safe_nyx_registry_subtree(unsafe_key),
+                "guard must reject {unsafe_key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reap_root_scope_guard_rejects_drive_and_system_roots() {
+        assert!(is_safe_reap_root(Path::new(
+            r"C:\Users\Alice\AppData\Local\Programs\nyx"
+        )));
+        assert!(is_safe_reap_root(Path::new(r"C:\Program Files\nyx")));
+
+        for bad in [
+            "",
+            ".",
+            r"C:\",
+            "C:",
+            r"C:\Windows",
+            r"C:\Program Files",
+            r"C:\Program Files (x86)",
+            r"C:\Users",
+        ] {
+            assert!(
+                !is_safe_reap_root(Path::new(bad)),
+                "guard must reject reap root {bad:?}"
+            );
+        }
     }
 }
