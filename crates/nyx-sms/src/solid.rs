@@ -43,22 +43,51 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
 fn check_labels(mesh: &Discretisation, bcs: &[Bc]) -> Result<(), String> {
-    check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
+    check_boundary_labels(
+        mesh,
+        bcs.iter().filter(|b| !b.kind.is_domain_condition()).flat_map(|b| b.labels.iter().copied()),
+    )?;
+    let doms = mesh.domain_labels();
+    let bad_dom: Vec<i32> = bcs
+        .iter()
+        .filter(|b| b.kind.is_domain_condition())
+        .flat_map(|b| b.labels.iter().copied())
+        .filter(|l| !doms.contains(l))
+        .collect();
+    if !bad_dom.is_empty() {
+        return Err(format!("domain number(s) {bad_dom:?} do not exist in this mesh (it has {doms:?})"));
+    }
+    Ok(())
 }
 
 pub(crate) fn mixed_check_boundary_labels(mixed: &MixedDiscretisation, bcs: &[Bc]) -> Result<(), String> {
     let mut known: Vec<i32> = mixed.facet_labels.clone();
     known.sort_unstable();
     known.dedup();
-    let mut bad: Vec<i32> =
-        bcs.iter().flat_map(|b| b.labels.iter().copied()).filter(|l| known.binary_search(l).is_err()).collect();
+    let mut bad: Vec<i32> = bcs
+        .iter()
+        .filter(|b| !b.kind.is_domain_condition())
+        .flat_map(|b| b.labels.iter().copied())
+        .filter(|l| known.binary_search(l).is_err())
+        .collect();
     bad.sort_unstable();
     bad.dedup();
-    if bad.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("boundary number(s) {bad:?} do not exist in this mesh (it has {known:?})"))
+    if !bad.is_empty() {
+        return Err(format!("boundary number(s) {bad:?} do not exist in this mesh (it has {known:?})"));
     }
+    let doms = mixed_domain_labels(mixed);
+    let mut bad_dom: Vec<i32> = bcs
+        .iter()
+        .filter(|b| b.kind.is_domain_condition())
+        .flat_map(|b| b.labels.iter().copied())
+        .filter(|l| doms.binary_search(l).is_err())
+        .collect();
+    bad_dom.sort_unstable();
+    bad_dom.dedup();
+    if !bad_dom.is_empty() {
+        return Err(format!("domain number(s) {bad_dom:?} do not exist in this mesh (it has {doms:?})"));
+    }
+    Ok(())
 }
 
 fn mixed_domain_labels(mixed: &MixedDiscretisation) -> Vec<i32> {
@@ -214,7 +243,13 @@ pub(crate) fn d_matrix(c: &M6, dim: usize, plane: Plane) -> Vec<f64> {
         for (b, &j) in INPLANE.iter().enumerate() {
             d[a * 3 + b] = match plane {
                 Plane::Strain => c[i][j],
-                Plane::Stress => c[i][j] - c[i][2] * c[2][j] / c[2][2],
+                Plane::Stress => {
+                    if c[2][2].abs() <= 1e-30 {
+                        0.0
+                    } else {
+                        c[i][j] - c[i][2] * c[2][j] / c[2][2]
+                    }
+                }
             };
         }
     }
@@ -223,7 +258,7 @@ pub(crate) fn d_matrix(c: &M6, dim: usize, plane: Plane) -> Vec<f64> {
 
 /// Thermal strain vector (solver Voigt order, engineering shear) for expansion tensor `a` and
 /// temperature rise `dt`.
-fn thermal_strain(a: &M3, dt: f64) -> [f64; 6] {
+pub(crate) fn thermal_strain(a: &M3, dt: f64) -> [f64; 6] {
     [a[0][0] * dt, a[1][1] * dt, a[2][2] * dt, 2.0 * a[0][1] * dt, 2.0 * a[1][2] * dt, 2.0 * a[0][2] * dt]
 }
 
@@ -328,10 +363,10 @@ pub fn assemble_solid(mesh: &Discretisation, c6: &[M6], order: usize, plane: Pla
 // ------------------------------------------------------------------ Static Infinite Elements (`ResolvedIeDomains`)
 
 #[derive(Clone, Copy, Debug)]
-struct IeJacobian {
-    j_inv: [[f64; 3]; 3],
-    det: f64,
-    r_tilde: f64,
+pub(crate) struct IeJacobian {
+    pub j_inv: [[f64; 3]; 3],
+    pub det: f64,
+    pub r_tilde: f64,
 }
 
 impl IeJacobian {
@@ -342,16 +377,16 @@ impl IeJacobian {
 }
 
 #[derive(Clone, Debug)]
-struct ResolvedIeDomain {
-    ie: InfiniteElement,
-    pml: Pml,
-    bounds: ([f64; 3], [f64; 3]),
+pub(crate) struct ResolvedIeDomain {
+    pub ie: InfiniteElement,
+    pub pml: Pml,
+    pub bounds: ([f64; 3], [f64; 3]),
 }
 
 #[derive(Clone, Debug, Default)]
-struct ResolvedIeDomains {
-    domains: BTreeMap<i32, ResolvedIeDomain>,
-    diagnostics: Vec<String>,
+pub(crate) struct ResolvedIeDomains {
+    pub domains: BTreeMap<i32, ResolvedIeDomain>,
+    pub diagnostics: Vec<String>,
 }
 
 fn permute_real_wafer_to_2d(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
@@ -448,7 +483,7 @@ fn eval_ie_ray_1d(ie: &InfiniteElement, t: f64, length: f64, default_pole: f64) 
 }
 
 impl ResolvedIeDomains {
-    fn from_mixed(mixed: &MixedDiscretisation, spec: &Problem) -> Self {
+    pub(crate) fn from_mixed(mixed: &MixedDiscretisation, spec: &Problem) -> Self {
         if spec.infinite_elements.is_empty() {
             return Self::default();
         }
@@ -498,22 +533,22 @@ impl ResolvedIeDomains {
     }
 
     #[inline]
-    fn contains(&self, dom: i32) -> bool {
+    pub(crate) fn contains(&self, dom: i32) -> bool {
         self.domains.contains_key(&dom)
     }
 
-    fn has_rational(&self) -> bool {
+    pub(crate) fn has_rational(&self) -> bool {
         self.domains.values().any(|rd| rd.ie.profile == IeProfile::Rational)
     }
 
-    fn has_exponential_robin(&self) -> bool {
+    pub(crate) fn has_exponential_robin(&self) -> bool {
         self.domains.values().any(|rd| rd.ie.profile == IeProfile::Exponential && !rd.ie.clamp_outer)
     }
 
     /// Evaluates the Infinite Element Jacobian inside cell `iso`, using nodal-radius isoparametric
     /// interpolation on uncurved (`!iso.curved`) Spherical/Cylindrical shells so flat polyhedral
     /// outer facets map conformingly to `t = 1` (`R_tilde -> infinity`) without secant gap error.
-    fn eval_cell_jacobian(
+    pub(crate) fn eval_cell_jacobian(
         &self,
         dom: i32,
         iso: &IsoparametricCell,
@@ -593,7 +628,7 @@ impl ResolvedIeDomains {
         self.eval_jacobian(dom, x_w, dim)
     }
 
-    fn eval_jacobian(&self, dom: i32, x_w: [f64; 3], dim: usize) -> IeJacobian {
+    pub(crate) fn eval_jacobian(&self, dom: i32, x_w: [f64; 3], dim: usize) -> IeJacobian {
         let Some(rd) = self.domains.get(&dom) else {
             return IeJacobian::identity();
         };
@@ -758,7 +793,7 @@ impl ResolvedIeDomains {
         }
     }
 
-    fn outer_clamped_dofs(
+    pub(crate) fn outer_clamped_dofs(
         &self,
         mixed: &MixedDiscretisation,
         dof_map: &MixedLagrangeDofMap,
@@ -784,7 +819,7 @@ impl ResolvedIeDomains {
 
 /// Evaluates `(x, ds, n_hat)` on an arbitrary face defined by corner vertex indices `fv` (`Edge2`, `Tri3`, `Quad4`)
 /// regardless of whether the face appears in `mixed.facets`.
-fn eval_raw_face_jacobian(
+pub(crate) fn eval_raw_face_jacobian(
     mixed: &MixedDiscretisation,
     ft: FacetType,
     fv: &[u32],
@@ -892,7 +927,7 @@ fn eval_raw_face_jacobian(
     }
 }
 
-fn raw_face_dofs(
+pub(crate) fn raw_face_dofs(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     ft: FacetType,
@@ -926,28 +961,23 @@ fn raw_face_dofs(
     }
 }
 
-/// Assembles the outer 1st-order asymptotic elastic spring Robin matrix on exterior termination
-/// facets of `IeProfile::Exponential` domains (`t_tilde = -(1 / R_tilde) [G I + (M_p - G) n_tilde n_tilde^T] u`).
-fn assemble_exponential_ie_robin(
+/// Collects exterior termination faces of active exponential Infinite Element domains (when `clamp_outer == false`).
+pub(crate) fn collect_exponential_ie_faces(
     mixed: &MixedDiscretisation,
-    dof_map: &MixedLagrangeDofMap,
-    c6: &[M6],
     ie_domains: &ResolvedIeDomains,
     inactive: &[i32],
-    thickness_2d: f64,
-) -> Csr {
+    skip_domains: &[i32],
+) -> Vec<(usize, FacetType, Vec<u32>)> {
     let d = mixed.dim;
-    let n1 = dof_map.n_dofs;
-    let n = d * n1;
-    if !ie_domains.has_exponential_robin() {
-        return Csr::zeros(n, n);
-    }
-
     let mut faces: Vec<(usize, FacetType, Vec<u32>)> = Vec::new();
+    let skip_cell = |ci: usize| {
+        let dom = mixed.cell_labels[ci];
+        inactive.contains(&dom) || skip_domains.contains(&dom)
+    };
     if d == 2 {
         let mut adj: HashMap<(u32, u32), (u32, usize, [u32; 2])> = HashMap::new();
         for ci in 0..mixed.n_cells() {
-            if inactive.contains(&mixed.cell_labels[ci]) {
+            if skip_cell(ci) {
                 continue;
             }
             let vs = mixed.cell(ci);
@@ -975,7 +1005,7 @@ fn assemble_exponential_ie_robin(
         let mut tri_adj: HashMap<[u32; 3], (u32, usize, [u32; 3])> = HashMap::new();
         let mut quad_adj: HashMap<[u32; 4], (u32, usize, [u32; 4])> = HashMap::new();
         for ci in 0..mixed.n_cells() {
-            if inactive.contains(&mixed.cell_labels[ci]) {
+            if skip_cell(ci) {
                 continue;
             }
             let vs = mixed.cell(ci);
@@ -1020,7 +1050,26 @@ fn assemble_exponential_ie_robin(
             }
         }
     }
+    faces
+}
 
+/// Assembles the outer 1st-order asymptotic elastic spring Robin matrix on exterior termination
+/// facets of `IeProfile::Exponential` domains (`t_tilde = -(1 / R_tilde) [G I + (M_p - G) n_tilde n_tilde^T] u`).
+pub(crate) fn assemble_exponential_ie_robin(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    c6: &[M6],
+    ie_domains: &ResolvedIeDomains,
+    inactive: &[i32],
+    thickness_2d: f64,
+) -> Csr {
+    let d = mixed.dim;
+    let n1 = dof_map.n_dofs;
+    let n = d * n1;
+    if !ie_domains.has_exponential_robin() {
+        return Csr::zeros(n, n);
+    }
+    let faces = collect_exponential_ie_faces(mixed, ie_domains, inactive, &[]);
     if faces.is_empty() {
         return Csr::zeros(n, n);
     }
@@ -1984,7 +2033,7 @@ pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr
     Ok(StaticAssembly { k, f, thermal })
 }
 
-fn add_boundary_load_mixed(
+pub(crate) fn add_boundary_load_mixed(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     labels: &[i32],
@@ -2546,6 +2595,7 @@ fn solve_variant_mixed(
                 ..Default::default()
             })
         }
+        Study::Driven { .. } => Err("driven study requires piezoelectric coupling".into()),
     }
 }
 
@@ -2676,6 +2726,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
                 ..Default::default()
             })
         }
+        Study::Driven { .. } => Err("driven study requires piezoelectric coupling".into()),
     }
 }
 

@@ -608,7 +608,7 @@ fn pairs_to_dense(m: &[Vec<[f64; 2]>]) -> Dense<C64> {
 /// Computes `Y_red = Y_AA - Y_AT (Y_TT + Y_load)^-1 Y_TA`, using the algebraically identical dual
 /// impedance Schur form `(Z_AA - Z_AT (Z_TT + Z_load)^-1 Z_TA)^-1` whenever `Z` is rank-deficient
 /// (`P > r`, where `Y = Z^-1` is regularized) or near an admittance pole.
-fn schur_reduced_admittance(
+pub(crate) fn schur_reduced_admittance(
     y_full: &Dense<C64>,
     z_full: &Dense<C64>,
     y_is_exact: bool,
@@ -617,24 +617,30 @@ fn schur_reduced_admittance(
     z_load_ohm: &[f64],
 ) -> Dense<C64> {
     let na = active_idx.len();
-    let nt = term_idx.len();
     if na == 0 {
         return Dense::zeros(0, 0);
     }
-    if nt == 0 {
-        if y_is_exact {
-            return Dense::from_fn(na, na, |i, j| y_full[(active_idx[i], active_idx[j])]);
-        }
-        let z_aa = Dense::from_fn(na, na, |i, j| z_full[(active_idx[i], active_idx[j])]);
-        return invert_complex_matrix(&z_aa);
-    }
 
     if y_is_exact && y_full.is_finite() {
+        // In Y-space, a shorted termination (Z_L = 0 => V_t = 0) already corresponds to dropping that port.
+        // Finite Z_L > 0 adds 1/Z_L to Y_tt; open ("open" / +inf) leaves Y_tt unchanged and Schur-eliminates I_t = 0.
+        let mut eff_idx = Vec::with_capacity(term_idx.len());
+        let mut eff_zl = Vec::with_capacity(term_idx.len());
+        for (&ti, &zl) in term_idx.iter().zip(z_load_ohm) {
+            if zl != 0.0 {
+                eff_idx.push(ti);
+                eff_zl.push(zl);
+            }
+        }
+        let nt = eff_idx.len();
         let y_aa = Dense::from_fn(na, na, |i, j| y_full[(active_idx[i], active_idx[j])]);
-        let y_at = Dense::from_fn(na, nt, |i, j| y_full[(active_idx[i], term_idx[j])]);
-        let y_ta = Dense::from_fn(nt, na, |i, j| y_full[(term_idx[i], active_idx[j])]);
-        let mut y_tt = Dense::from_fn(nt, nt, |i, j| y_full[(term_idx[i], term_idx[j])]);
-        for (t, &zl) in z_load_ohm.iter().enumerate() {
+        if nt == 0 {
+            return y_aa;
+        }
+        let y_at = Dense::from_fn(na, nt, |i, j| y_full[(active_idx[i], eff_idx[j])]);
+        let y_ta = Dense::from_fn(nt, na, |i, j| y_full[(eff_idx[i], active_idx[j])]);
+        let mut y_tt = Dense::from_fn(nt, nt, |i, j| y_full[(eff_idx[i], eff_idx[j])]);
+        for (t, &zl) in eff_zl.iter().enumerate() {
             if zl.is_finite() && zl > 0.0 {
                 y_tt[(t, t)] += C64::new(1.0 / zl, 0.0);
             }
@@ -658,12 +664,27 @@ fn schur_reduced_admittance(
         }
     }
 
+    // In Z-space, an open termination (I_t = 0) already corresponds to dropping that port; Z_L = 0 stays with Z_L = 0.
+    let mut z_eff_idx = Vec::with_capacity(term_idx.len());
+    let mut z_eff_zl = Vec::with_capacity(term_idx.len());
+    for (&ti, &zl) in term_idx.iter().zip(z_load_ohm) {
+        if zl.is_finite() {
+            z_eff_idx.push(ti);
+            z_eff_zl.push(zl);
+        }
+    }
+    let nt = z_eff_idx.len();
+    if nt == 0 {
+        let z_aa = Dense::from_fn(na, na, |i, j| z_full[(active_idx[i], active_idx[j])]);
+        return invert_complex_matrix(&z_aa);
+    }
+
     // Exact Frobenius-Schur / Woodbury dual form on Z (immune to P > r rank deficiency of Z)
     let z_aa = Dense::from_fn(na, na, |i, j| z_full[(active_idx[i], active_idx[j])]);
-    let z_at = Dense::from_fn(na, nt, |i, j| z_full[(active_idx[i], term_idx[j])]);
-    let z_ta = Dense::from_fn(nt, na, |i, j| z_full[(term_idx[i], active_idx[j])]);
-    let mut z_tt = Dense::from_fn(nt, nt, |i, j| z_full[(term_idx[i], term_idx[j])]);
-    for (t, &zl) in z_load_ohm.iter().enumerate() {
+    let z_at = Dense::from_fn(na, nt, |i, j| z_full[(active_idx[i], z_eff_idx[j])]);
+    let z_ta = Dense::from_fn(nt, na, |i, j| z_full[(z_eff_idx[i], active_idx[j])]);
+    let mut z_tt = Dense::from_fn(nt, nt, |i, j| z_full[(z_eff_idx[i], z_eff_idx[j])]);
+    for (t, &zl) in z_eff_zl.iter().enumerate() {
         z_tt[(t, t)] += C64::new(zl, 0.0);
     }
     let z_tt_inv = invert_complex_matrix(&z_tt);

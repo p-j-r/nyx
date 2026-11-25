@@ -22,6 +22,7 @@ pub mod hamiltonian;
 pub mod modes;
 pub mod modeview;
 pub mod network;
+pub mod piezo_resonator;
 pub mod polarization;
 pub mod raster;
 pub mod samples;
@@ -42,6 +43,10 @@ pub use hamiltonian::{
 pub use modes::{analyze_modes, AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved};
 pub use network::{
     network, network_applies, network_with_params, BbqMode, NetworkAnalysis, NetworkReport, QepMode, S21CircleFit,
+};
+pub use piezo_resonator::{
+    mbvd_admittance, piezo_resonator_applies, piezo_resonator_with_params, PiezoModeMetrics, PiezoResonatorAnalysis,
+    PiezoResonatorReport,
 };
 pub use samples::{polarization_input, PolarizationInput};
 pub use tls::{

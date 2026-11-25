@@ -3,7 +3,7 @@ featurelist = component "Feature list" "The serialisable feature list (single so
     properties {
         "adr" "2, 3, 63"
         "code" "crates/geom/src: error.rs, expr.rs, gds.rs, lib.rs, model.rs, print.rs"
-        "lines" "3578"
+        "lines" "3726"
         "codeDiagram" "4-code/geom/featurelist.md"
     }
 }
@@ -11,7 +11,7 @@ evaluation = component "Evaluation" "The Evaluator turns a feature list into an 
     properties {
         "adr" "2, 6"
         "code" "crates/geom/src: diff.rs, eval.rs, scene.rs"
-        "lines" "1641"
+        "lines" "2133"
         "codeDiagram" "4-code/geom/evaluation.md"
     }
 }
@@ -27,7 +27,7 @@ kernel3d = component "3D kernel" "Prismatic models as a layer stack, general pla
     properties {
         "adr" "3, 1"
         "code" "crates/geom/src: planar.rs, stack.rs, topo3.rs"
-        "lines" "2496"
+        "lines" "2762"
         "codeDiagram" "4-code/geom/kernel3d.md"
     }
 }
@@ -35,7 +35,7 @@ queries = component "Queries and selectors" "Exact queries on an evaluated model
     properties {
         "adr" "2, 3, 7, 18"
         "code" "crates/geom/src: bvh.rs, labels.rs, query.rs, select.rs, sim.rs"
-        "lines" "2319"
+        "lines" "2999"
         "codeDiagram" "4-code/geom/queries.md"
     }
 }

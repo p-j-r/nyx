@@ -5,18 +5,18 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 > The Engine and its catalog: every action by name with JSON arguments, JSON Schema and JSON reply; the dispatcher; the guide cards a host reads on demand; the reductions of results (field handles, integrals, extrema, probes, overlaps). The window and the MCP server use the same entries.
 
 **Decisions:** [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 38](../../../adr/0038-geometry-operations-are-described-once.md), [ADR 15](../../../adr/0015-ai-interface-separate-workspace-and-mcp-server.md), [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md), [ADR 91](../../../adr/0091-validated-is-a-state-checked-against-the-problem-key.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 94](../../../adr/0094-the-mcp-server-is-four-script-tools-over-one-kernel.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
-**Size:** 7 files, 6456 lines.
+**Size:** 7 files, 6541 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/commands.rs` | 1121 |  |
-| `crates/nyx-engine/src/engine.rs` | 1342 |  |
+| `crates/nyx-engine/src/commands.rs` | 1194 |  |
+| `crates/nyx-engine/src/engine.rs` | 1353 |  |
 | `crates/nyx-engine/src/guide.rs` | 36 |  |
 | `crates/nyx-engine/src/path_guard.rs` | 159 |  |
 | `crates/nyx-engine/src/reduce.rs` | 3203 |  |
-| `crates/nyx-engine/src/scriptout.rs` | 345 |  |
+| `crates/nyx-engine/src/scriptout.rs` | 346 |  |
 | `crates/nyx-engine/src/validated.rs` | 250 |  |
 
 ## What it uses
@@ -31,7 +31,7 @@ C4 level 4 (code) of the component **Commands** (`engine.commands`) in the conta
 | [Job runner and queue](./jobs.md) | convergence, estimate, jobs, process, queue, reuse, shared_queue, solve +2 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits, Matching, MemoryProbe +31 |
 | [Materials](./materials.md) | materials | default_dirs, load_library, study_wavelength |
 | [Meshing seam](./meshing.md) | amr, meshing | FemcoreMesher, MeshedModel, Mesher, project_uses_electro_amr |
-| [Project](./project.md) | project | MeshSettings, Project |
+| [Project](./project.md) | crate root, project | Auto, MeshSettings, Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
 | [Results files](./resultsIO.md) | results_file | read_and_mesh, write_snapshot |
 | [Store link](./storeLink.md) | store_link | RunOutcome, StoreLink |
@@ -236,7 +236,7 @@ classDiagram
 | enum | `Access` | `commands.rs:20` | variants: `Read`, `Edit`, `Expensive` —  How much a command changes or costs; a host may ask the person before an expensive or editing command. |
 | struct | `CommandDesc` | `commands.rs:30` | fields: `name`, `title`, `description`, `access`, `schema` |
 | fn | `Engine::catalog` | `commands.rs:131` | `pub fn catalog(&self) -> Vec<CommandDesc>` —  Every command of this build, with its schema. The geometry `add_*` commands come from `geomdesc`; the choices of physics from |
-| fn | `Engine::call` | `commands.rs:437` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
+| fn | `Engine::call` | `commands.rs:459` | `pub fn call(&mut self, name: &str, args: &Value) -> R` —  Runs the command `name` with JSON arguments and returns its JSON reply. |
 | struct | `Stored` | `engine.rs:24` | fields: `result`, `key`, `job`, `at`, `model`, `run` |
 | enum | `Purpose` | `engine.rs:40` | variants: `Current`, `Point` —  What a solve job is for: the engine's own project, or one point of a sweep. |
 | enum | `Pending` | `engine.rs:45` | variants: `Mesh`, `Solve`, `Point`, `Convergence`, `Open`, `Export` |
@@ -274,23 +274,23 @@ classDiagram
 | fn | `Engine::start_solve` | `engine.rs:444` | `pub fn start_solve(&mut self, targets: Option<Vec<String>>) -> Result<JobId, Error>` —  Starts solving `targets` (default: the active physics, else all) on a job. The mesh is built inside the job when none is current. |
 | fn | `Engine::start_solve_with` | `engine.rs:449` | `pub fn start_solve_with(&mut self, targets: Option<Vec<String>>, opts: &QueueOpts) -> Result<JobId, Error>` —  `start_solve` with queue options. The job waits in the queue while the heavy lane is busy; it carries a frozen copy of the project. |
 | fn | `Engine::submit_solve` | `engine.rs:455` | `pub(crate) fn submit_solve( &mut self, src: Option<&Engine>, targets: Option<Vec<String>>, opts: &QueueOpts, purpose: Purpose, ) -> Result<JobId, Error>` —  The one place a solve is submitted. `src` is the engine whose project is solved (a point of a sweep is a scratch engine with the point's |
-| fn | `Engine::queue_detached` | `engine.rs:815` | `pub fn queue_detached(&mut self, targets: Option<Vec<String>>, opts: &QueueOpts) -> Result<Value, Error>` —  Writes a solve into the queue of the workspace and leaves it there: nothing of this engine waits for it, so closing the front-end (or the |
-| fn | `Engine::queue_detached` | `engine.rs:870` | `pub fn queue_detached(&mut self, _targets: Option<Vec<String>>, _opts: &QueueOpts) -> Result<Value, Error>` |
-| fn | `Engine::start_convergence` | `engine.rs:878` | `pub fn start_convergence(&mut self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<JobId, Error>` —  Starts a mesh convergence check (two solves, the second on a finer mesh) on a job. Both solves run on the job's thread under its progress, |
-| fn | `Engine::start_convergence_with` | `engine.rs:884` | `pub fn start_convergence_with( &mut self, physics: &str, factor: f64, tolerance: Option<f64>, opts: &QueueOpts, ) -> Result<JobId, Error>` —  `start_convergence` with queue options. When the solve of `physics` alone on the present mesh was done already by an earlier request, the |
-| fn | `Engine::start_convergence_matched` | `engine.rs:896` | `pub fn start_convergence_matched( &mut self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &crate::convergence::Matching, opts: &QueueOpts, ) -> Result<JobId, Error>` —  `start_convergence_with` with the modes of the two meshes paired as `matching` says (ADR 80); anything but the default pairing solves the |
-| fn | `Engine::start_convergence_limited` | `engine.rs:916` | `pub fn start_convergence_limited( &mut self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &crate::convergence::Matching, opts: &QueueOpts, limits: crate::convergence::Limits, ) -> Result<JobId, Error>` —  `start_convergence_matched` that refuses, before any solve, a check whose finer mesh has more cells than `limits.max_cells` or is estimated |
-| fn | `Engine::start_open_results` | `engine.rs:952` | `pub fn start_open_results(&mut self, path: &str) -> Result<JobId, Error>` —  Starts reading a results file, meshing its project again and checking the mesh against the stored one, on a job. The engine is not touched |
-| fn | `Engine::start_export_results` | `engine.rs:967` | `pub fn start_export_results(&mut self, path: &str, parallel: bool) -> Result<JobId, Error>` —  Starts writing the results the engine holds now (the project, the mesh and the latest result of every physics) into an HDF5 file on a job. |
-| fn | `Engine::poll` | `engine.rs:986` | `pub fn poll(&mut self) -> Vec<(JobId, Result<Value, Error>)>` —  Takes the finished jobs and applies them: the mesh and results become current, a solve is recorded in the run table when the project |
-| fn | `Engine::job_blocked` | `engine.rs:999` | `pub fn job_blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for (it is held, or the queue is paused); `None` for a job that is running or |
-| fn | `Engine::wait` | `engine.rs:1020` | `pub fn wait(&mut self, id: JobId) -> Result<Value, Error>` —  Waits for a job and applies it. |
-| fn | `Engine::apply` | `engine.rs:1035` | `pub(crate) fn apply(&mut self, id: JobId, outcome: Result<JobOutput, Error>) -> Result<Value, Error>` |
-| fn | `Engine::learn` | `engine.rs:1218` | `pub(crate) fn learn(&self, results: &[SolveResult], cells: u64, dim: u8, worker: &Option<crate::jobs::WorkerRun>)` —  Learns what a finished worker run cost: its peak memory against the size of the problem, for the estimates of later solves. Only runs |
-| fn | `Engine::mesh_now` | `engine.rs:1294` | `pub fn mesh_now(&mut self) -> Result<Value, Error>` —  Mesh now (start and wait). |
-| fn | `Engine::solve_now` | `engine.rs:1300` | `pub fn solve_now(&mut self, targets: Option<Vec<String>>) -> Result<Value, Error>` —  Solve now (start and wait). |
-| fn | `Engine::save_to_workspace` | `engine.rs:1308` | `pub fn save_to_workspace(&mut self, workspace: Option<PathBuf>) -> Result<Value, Error>` —  Binds the project to a new workflow folder in `workspace` (or commits it, when already bound). |
-| fn | `Engine::open_workflow` | `engine.rs:1327` | `pub fn open_workflow(&mut self, folder: &std::path::Path, experiment: Option<&str>) -> Result<Value, Error>` —  Opens a workflow folder and makes its experiment the project. |
+| fn | `Engine::queue_detached` | `engine.rs:819` | `pub fn queue_detached(&mut self, targets: Option<Vec<String>>, opts: &QueueOpts) -> Result<Value, Error>` —  Writes a solve into the queue of the workspace and leaves it there: nothing of this engine waits for it, so closing the front-end (or the |
+| fn | `Engine::queue_detached` | `engine.rs:874` | `pub fn queue_detached(&mut self, _targets: Option<Vec<String>>, _opts: &QueueOpts) -> Result<Value, Error>` |
+| fn | `Engine::start_convergence` | `engine.rs:882` | `pub fn start_convergence(&mut self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<JobId, Error>` —  Starts a mesh convergence check (two solves, the second on a finer mesh) on a job. Both solves run on the job's thread under its progress, |
+| fn | `Engine::start_convergence_with` | `engine.rs:888` | `pub fn start_convergence_with( &mut self, physics: &str, factor: f64, tolerance: Option<f64>, opts: &QueueOpts, ) -> Result<JobId, Error>` —  `start_convergence` with queue options. When the solve of `physics` alone on the present mesh was done already by an earlier request, the |
+| fn | `Engine::start_convergence_matched` | `engine.rs:900` | `pub fn start_convergence_matched( &mut self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &crate::convergence::Matching, opts: &QueueOpts, ) -> Result<JobId, Error>` —  `start_convergence_with` with the modes of the two meshes paired as `matching` says (ADR 80); anything but the default pairing solves the |
+| fn | `Engine::start_convergence_limited` | `engine.rs:920` | `pub fn start_convergence_limited( &mut self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &crate::convergence::Matching, opts: &QueueOpts, limits: crate::convergence::Limits, ) -> Result<JobId, Error>` —  `start_convergence_matched` that refuses, before any solve, a check whose finer mesh has more cells than `limits.max_cells` or is estimated |
+| fn | `Engine::start_open_results` | `engine.rs:956` | `pub fn start_open_results(&mut self, path: &str) -> Result<JobId, Error>` —  Starts reading a results file, meshing its project again and checking the mesh against the stored one, on a job. The engine is not touched |
+| fn | `Engine::start_export_results` | `engine.rs:971` | `pub fn start_export_results(&mut self, path: &str, parallel: bool) -> Result<JobId, Error>` —  Starts writing the results the engine holds now (the project, the mesh and the latest result of every physics) into an HDF5 file on a job. |
+| fn | `Engine::poll` | `engine.rs:990` | `pub fn poll(&mut self) -> Vec<(JobId, Result<Value, Error>)>` —  Takes the finished jobs and applies them: the mesh and results become current, a solve is recorded in the run table when the project |
+| fn | `Engine::job_blocked` | `engine.rs:1003` | `pub fn job_blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for (it is held, or the queue is paused); `None` for a job that is running or |
+| fn | `Engine::wait` | `engine.rs:1024` | `pub fn wait(&mut self, id: JobId) -> Result<Value, Error>` —  Waits for a job and applies it. |
+| fn | `Engine::apply` | `engine.rs:1039` | `pub(crate) fn apply(&mut self, id: JobId, outcome: Result<JobOutput, Error>) -> Result<Value, Error>` |
+| fn | `Engine::learn` | `engine.rs:1222` | `pub(crate) fn learn( &self, project: &Project, results: &[SolveResult], cells: u64, dim: u8, worker: &Option<crate::jobs::WorkerRun>, )` —  Learns what a finished worker run cost: its peak memory against the size of the problem, for the estimates of later solves. Only runs |
+| fn | `Engine::mesh_now` | `engine.rs:1305` | `pub fn mesh_now(&mut self) -> Result<Value, Error>` —  Mesh now (start and wait). |
+| fn | `Engine::solve_now` | `engine.rs:1311` | `pub fn solve_now(&mut self, targets: Option<Vec<String>>) -> Result<Value, Error>` —  Solve now (start and wait). |
+| fn | `Engine::save_to_workspace` | `engine.rs:1319` | `pub fn save_to_workspace(&mut self, workspace: Option<PathBuf>) -> Result<Value, Error>` —  Binds the project to a new workflow folder in `workspace` (or commits it, when already bound). |
+| fn | `Engine::open_workflow` | `engine.rs:1338` | `pub fn open_workflow(&mut self, folder: &std::path::Path, experiment: Option<&str>) -> Result<Value, Error>` —  Opens a workflow folder and makes its experiment the project. |
 | const | `TOPICS` | `guide.rs:6` | `&[&str]` |
 | fn | `card` | `guide.rs:8` | `pub fn card(topic: &str) -> Option<&'static str>` |
 | const | `SERVER_INSTRUCTIONS` | `guide.rs:20` | `&str` —  The text a server sends with `initialize`: just enough to find the guide (the `api` tool) and to know that the work is scripts. |

@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **cQED quantization and TLS participation** (`analysis.cqed`) in the container **nyx-analysis** (crate `nyx_analysis`). [Component view of the container](../../3-components/analysis.md) · [All code pages](../README.md)
 
-> KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, and edge-regularized 3D TLS participation ratios.
+> KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, `NetworkAnalysis`, and edge-regularized 3D TLS participation ratios.
 
-**Decisions:** [ADR 105](../../../adr/0105-kicq-epr-craig-bampton-quantization-and-tls-participation.md)  
-**Size:** 4 files, 6980 lines.
+**Decisions:** [ADR 105](../../../adr/0105-kicq-epr-craig-bampton-quantization-and-tls-participation.md), [ADR 118](../../../adr/0118-cqed-cavity-driven-open-robin-network-bbq-and-squid.md)  
+**Size:** 4 files, 7358 lines.
 
 ## Files
 
@@ -13,8 +13,8 @@ C4 level 4 (code) of the component **cQED quantization and TLS participation** (
 |---|---:|---|
 | `crates/nyx-analysis/src/epr.rs` | 956 |  |
 | `crates/nyx-analysis/src/hamiltonian.rs` | 2728 |  |
-| `crates/nyx-analysis/src/network.rs` | 1949 |  |
-| `crates/nyx-analysis/src/tls.rs` | 1347 |  |
+| `crates/nyx-analysis/src/network.rs` | 1970 |  |
+| `crates/nyx-analysis/src/tls.rs` | 1704 |  |
 
 ## What it uses
 
@@ -28,9 +28,9 @@ C4 level 4 (code) of the component **cQED quantization and TLS participation** (
 
 | Component | Modules | Items |
 |---|---|---|
-| [Analysis API](./api.md) | tls | TlsParticipationAnalysis, TlsReport, tls_participation, tls_participation_applies, tls_participation_with_params |
+| [Analysis API](./api.md) | tls | QuasiElectrostaticTlsMode, TlsParticipationAnalysis, TlsReport, tls_participation, tls_participation_applies, tls_participation_quasi_electrostatic, tls_participation_with_params |
 | [Capacitance and inductance matrices](./capacitance.md) | tls | EFieldAccessor, detect_sheet_perimeter_3d, pt3, subdivided_tet_quad |
-| [engine: Analyses](../engine/analyse.md) | tls | TlsParticipationAnalysis |
+| [engine: Analyses](../engine/analyse.md) | tls | TlsParticipationAnalysis, tls_participation_quasi_electrostatic |
 
 ## Class diagram
 
@@ -165,6 +165,7 @@ classDiagram
     class fns_network_rs {
         <<module network.rs>>
         +network_applies(result) bool
+        ~schur_reduced_admittance(y_full, z_full, y_is_exact, active_idx, term_idx, z_load_ohm) Dense~C64~
         +network(result) Result
         +network_with_params(result, params) Result
     }
@@ -181,6 +182,15 @@ classDiagram
         +loss_tan_total f64
         +q_tls f64
         +more_8_fields
+        +to_json() Value
+    }
+    class QuasiElectrostaticTlsMode {
+        <<struct>>
+        +mode usize
+        +freq_hz f64
+        +terminal_voltages_v Vec~f64~
+        +report TlsReport
+        +t1_tls_s f64
         +to_json() Value
     }
     class EFieldAccessor {
@@ -226,6 +236,7 @@ classDiagram
         ~point_segment_dist_sq(x, a, b, inv_len_sq) f64
         ~detect_sheet_perimeter_3d(disc, meta, cell_eps) SheetPerimeter3D
         ~subdivided_tet_quad(n_sub) Vecf64
+        +tls_participation_quasi_electrostatic(electro_mesh, electro_result, modal_voltages, modal_freqs_hz, params) Result
         +tls_participation(mesh, result) Result
         +tls_participation_with_params(mesh, result, params) Result
         ~FaceToCells3D type
@@ -233,6 +244,7 @@ classDiagram
   }
   NetworkReport --> QepMode
   NetworkReport --> BbqMode
+  QuasiElectrostaticTlsMode --> TlsReport
   SheetPerimeter3D --> SegmentBvh3
 ```
 
@@ -274,36 +286,40 @@ classDiagram
 | struct | `S21CircleFit` | `network.rs:82` | fields: `ports`, `resonator_branch`, `f_r_hz`, `q_l`, `q_c`, `q_i`, `kappa_hz`, `phi_0_rad`, `circle_center`, `circle_radius` —  Algebraic Taubin circle + phase-vs-frequency resonator fit (Probst et al. 2015). |
 | struct | `NetworkReport` | `network.rs:114` | fields: `ports`, `freqs_hz`, `z0_ohm`, `s_matrix`, `z_matrix`, `y_matrix`, `qep_modes`, `bbq_modes`, `s21_fit`, `touchstone_snp`, `elapsed_s` —  Typed output of [`network`] and [`network_with_params`]. |
 | fn | `network_applies` | `network.rs:152` | `pub fn network_applies(result: &SolveResult) -> bool` —  True when `result` carries a [`CircuitRom`] or [`DrivenPortData`] payload. |
-| fn | `network` | `network.rs:1350` | `pub fn network(result: &SolveResult) -> Result<NetworkReport, Error>` —  Runs [`NetworkAnalysis`] with default parameters. |
-| fn | `network_with_params` | `network.rs:1355` | `pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<NetworkReport, Error>` —  Runs [`NetworkAnalysis`] with optional JSON parameters. |
-| struct | `NetworkAnalysis` | `network.rs:1671` |  Unified multi-port microwave network, QEP, BBQ, `S_21` fit, and Touchstone analysis (`id: "network"`). |
+| fn | `schur_reduced_admittance` | `network.rs:611` | `pub(crate) fn schur_reduced_admittance( y_full: &Dense<C64>, z_full: &Dense<C64>, y_is_exact: bool, active_idx: &[usize], term_idx: &[usize], z_load_ohm: &[f64], ) -> Dense<C64>` —  Computes `Y_red = Y_AA - Y_AT (Y_TT + Y_load)^-1 Y_TA`, using the algebraically identical dual |
+| fn | `network` | `network.rs:1371` | `pub fn network(result: &SolveResult) -> Result<NetworkReport, Error>` —  Runs [`NetworkAnalysis`] with default parameters. |
+| fn | `network_with_params` | `network.rs:1376` | `pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<NetworkReport, Error>` —  Runs [`NetworkAnalysis`] with optional JSON parameters. |
+| struct | `NetworkAnalysis` | `network.rs:1692` |  Unified multi-port microwave network, QEP, BBQ, `S_21` fit, and Touchstone analysis (`id: "network"`). |
 | fn | `QepMode::to_json` | `network.rs:44` | `pub fn to_json(&self) -> Value` |
 | fn | `BbqMode::to_json` | `network.rs:67` | `pub fn to_json(&self) -> Value` |
 | fn | `S21CircleFit::to_json` | `network.rs:96` | `pub fn to_json(&self) -> Value` |
 | fn | `NetworkReport::to_json` | `network.rs:129` | `pub fn to_json(&self) -> Value` |
 | struct | `TlsReport` | `tls.rs:32` | fields: `solution`, `u_elec_j`, `p_ma`, `p_ms`, `p_sa`, `p_total`, `loss_tan_total`, `q_tls`, `edge_cutoff_m`, `p_ma_interior`, `p_ms_interior`, `p_sa_interior`, ... —  Typed output of [`tls_participation`] and [`tls_participation_with_params`]. |
-| fn | `tls_participation_applies` | `tls.rs:166` | `pub fn tls_participation_applies(result: &SolveResult) -> bool` —  True when `result` has electric field cell fields (`Ex`) suitable for [`TlsParticipationAnalysis`]. |
-| struct | `EFieldAccessor` | `tls.rs:174` | fields: `order` |
-| fn | `sorted3` | `tls.rs:450` | `pub(crate) fn sorted3(a: u32, b: u32, c: u32) -> [u32` |
-| fn | `pt3` | `tls.rs:457` | `pub(crate) fn pt3(disc: &Discretisation, v: u32) -> [f64` |
-| fn | `point_segment_dist_sq` | `tls.rs:484` | `pub(crate) fn point_segment_dist_sq(x: [f64; 3], a: [f64; 3], b: [f64; 3], inv_len_sq: f64) -> f64` —  Squared distance from point `x` to 3D line segment `(a, b)`. |
-| struct | `Segment3` | `tls.rs:496` | fields: `a`, `b`, `inv_len_sq` —  One 3D singular sheet-perimeter line segment. |
-| struct | `SegmentBvh3` | `tls.rs:541` |  Deterministic flat `Vec`-backed 3D AABB bounding-volume hierarchy over 3D line segments (`Segment3`). |
-| type | `FaceToCells3D` | `tls.rs:694` |  |
-| struct | `SheetPerimeter3D` | `tls.rs:696` | fields: `face_to_cells`, `sheet_tris`, `sa_tris`, `bvh`, `total_perim_len`, `h_edge_mean`, `has_resolved_3d_step`, `inferred_cavity_thickness` |
-| fn | `detect_sheet_perimeter_3d` | `tls.rs:710` | `pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, cell_eps: &[f64]) -> SheetPerimeter3D` —  Detects interior zero-thickness superconducting sheet triangles (plus conformal 3D thick-sheet |
-| fn | `subdivided_tet_quad` | `tls.rs:910` | `pub(crate) fn subdivided_tet_quad(n_sub: usize) -> Vec<([f64` —  Generates `(2 * n_sub)^3` quadrature points on the 3D reference tetrahedron by collapsing the subdivided cube, |
-| fn | `tls_participation` | `tls.rs:1217` | `pub fn tls_participation(mesh: &Mesh, result: &SolveResult) -> Result<TlsReport, Error>` —  Computes dielectric TLS surface participation with default parameters. |
-| fn | `tls_participation_with_params` | `tls.rs:1222` | `pub fn tls_participation_with_params(mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<TlsReport, Error>` —  Computes dielectric TLS surface participation with optional JSON parameters. |
-| struct | `TlsParticipationAnalysis` | `tls.rs:1248` |  Dielectric TLS surface participation analysis behind the [`Analysis`] trait (`id: "tls_participation"`). |
+| struct | `QuasiElectrostaticTlsMode` | `tls.rs:84` | fields: `mode`, `freq_hz`, `terminal_voltages_v`, `report`, `t1_tls_s` —  Per-mode dielectric TLS surface participation and lifetime evaluated via quasi-electrostatic modal field |
+| fn | `tls_participation_applies` | `tls.rs:198` | `pub fn tls_participation_applies(result: &SolveResult) -> bool` —  True when `result` has electric field cell fields (`Ex`) suitable for [`TlsParticipationAnalysis`]. |
+| struct | `EFieldAccessor` | `tls.rs:206` | fields: `order` |
+| fn | `sorted3` | `tls.rs:482` | `pub(crate) fn sorted3(a: u32, b: u32, c: u32) -> [u32` |
+| fn | `pt3` | `tls.rs:489` | `pub(crate) fn pt3(disc: &Discretisation, v: u32) -> [f64` |
+| fn | `point_segment_dist_sq` | `tls.rs:516` | `pub(crate) fn point_segment_dist_sq(x: [f64; 3], a: [f64; 3], b: [f64; 3], inv_len_sq: f64) -> f64` —  Squared distance from point `x` to 3D line segment `(a, b)`. |
+| struct | `Segment3` | `tls.rs:528` | fields: `a`, `b`, `inv_len_sq` —  One 3D singular sheet-perimeter line segment. |
+| struct | `SegmentBvh3` | `tls.rs:573` |  Deterministic flat `Vec`-backed 3D AABB bounding-volume hierarchy over 3D line segments (`Segment3`). |
+| type | `FaceToCells3D` | `tls.rs:726` |  |
+| struct | `SheetPerimeter3D` | `tls.rs:728` | fields: `face_to_cells`, `sheet_tris`, `sa_tris`, `bvh`, `total_perim_len`, `h_edge_mean`, `has_resolved_3d_step`, `inferred_cavity_thickness` |
+| fn | `detect_sheet_perimeter_3d` | `tls.rs:742` | `pub(crate) fn detect_sheet_perimeter_3d(disc: &Discretisation, meta: &TlsMeta, cell_eps: &[f64]) -> SheetPerimeter3D` —  Detects interior zero-thickness superconducting sheet triangles (plus conformal 3D thick-sheet |
+| fn | `subdivided_tet_quad` | `tls.rs:997` | `pub(crate) fn subdivided_tet_quad(n_sub: usize) -> Vec<([f64` —  Generates `(2 * n_sub)^3` quadrature points on the 3D reference tetrahedron by collapsing the subdivided cube, |
+| fn | `tls_participation_quasi_electrostatic` | `tls.rs:1379` | `pub fn tls_participation_quasi_electrostatic( electro_mesh: &Mesh, electro_result: &SolveResult, modal_voltages: &[Vec<f64>], modal_freqs_hz: &[f64], params: &Value, ) -> Result<Vec<QuasiElectrostaticTlsMode>, Error>` —  Evaluates per-mode dielectric TLS participation (`p_MA`, `p_MS`, `p_SA`, `Q_TLS`) and TLS-limited relaxation |
+| fn | `tls_participation` | `tls.rs:1451` | `pub fn tls_participation(mesh: &Mesh, result: &SolveResult) -> Result<TlsReport, Error>` —  Computes dielectric TLS surface participation with default parameters. |
+| fn | `tls_participation_with_params` | `tls.rs:1456` | `pub fn tls_participation_with_params(mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<TlsReport, Error>` —  Computes dielectric TLS surface participation with optional JSON parameters. |
+| struct | `TlsParticipationAnalysis` | `tls.rs:1483` |  Dielectric TLS surface participation analysis behind the [`Analysis`] trait (`id: "tls_participation"`). |
 | fn | `TlsReport::to_json` | `tls.rs:52` | `pub fn to_json(&self) -> Value` |
-| fn | `EFieldAccessor::new` | `tls.rs:183` | `pub(crate) fn new(sol: &'a Solution, dim: usize, n_cells: usize) -> Result<Self, Error>` |
-| fn | `EFieldAccessor::eval_with_shapes` | `tls.rs:223` | `pub(crate) fn eval_with_shapes(&self, ci: usize, sh: &[f64]) -> [C64` |
-| fn | `EFieldAccessor::eval_real_with_shapes` | `tls.rs:247` | `pub(crate) fn eval_real_with_shapes(&self, ci: usize, sh: &[f64]) -> [f64` |
-| fn | `SegmentBvh3::build` | `tls.rs:547` | `pub(crate) fn build(segs: Vec<Segment3>) -> Self` |
-| fn | `SegmentBvh3::is_empty` | `tls.rs:623` | `pub(crate) fn is_empty(&self) -> bool` |
-| fn | `SegmentBvh3::len` | `tls.rs:628` | `pub(crate) fn len(&self) -> usize` |
-| fn | `SegmentBvh3::min_dist_sq` | `tls.rs:634` | `pub(crate) fn min_dist_sq(&self, x: [f64; 3]) -> f64` —  Exact minimum squared Euclidean distance from `x` to all segments in `O(log N_seg)` with zero heap allocations. |
-| fn | `SegmentBvh3::min_dist` | `tls.rs:689` | `pub(crate) fn min_dist(&self, x: [f64; 3]) -> f64` |
+| fn | `QuasiElectrostaticTlsMode::to_json` | `tls.rs:93` | `pub fn to_json(&self) -> Value` |
+| fn | `EFieldAccessor::new` | `tls.rs:215` | `pub(crate) fn new(sol: &'a Solution, dim: usize, n_cells: usize) -> Result<Self, Error>` |
+| fn | `EFieldAccessor::eval_with_shapes` | `tls.rs:255` | `pub(crate) fn eval_with_shapes(&self, ci: usize, sh: &[f64]) -> [C64` |
+| fn | `EFieldAccessor::eval_real_with_shapes` | `tls.rs:279` | `pub(crate) fn eval_real_with_shapes(&self, ci: usize, sh: &[f64]) -> [f64` |
+| fn | `SegmentBvh3::build` | `tls.rs:579` | `pub(crate) fn build(segs: Vec<Segment3>) -> Self` |
+| fn | `SegmentBvh3::is_empty` | `tls.rs:655` | `pub(crate) fn is_empty(&self) -> bool` |
+| fn | `SegmentBvh3::len` | `tls.rs:660` | `pub(crate) fn len(&self) -> usize` |
+| fn | `SegmentBvh3::min_dist_sq` | `tls.rs:666` | `pub(crate) fn min_dist_sq(&self, x: [f64; 3]) -> f64` —  Exact minimum squared Euclidean distance from `x` to all segments in `O(log N_seg)` with zero heap allocations. |
+| fn | `SegmentBvh3::min_dist` | `tls.rs:721` | `pub(crate) fn min_dist(&self, x: [f64; 3]) -> f64` |
 
 Trait implementations in this component: `EprAnalysis: Analysis`, `HamiltonianAnalysis: Analysis`, `NetworkAnalysis: Analysis`, `TlsParticipationAnalysis: Analysis`

@@ -729,6 +729,183 @@
           "unit": "rad"
         }
       ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Fixes electric potential phi = 0 V on the boundary (piezoelectric / electro-elastic coupling).",
+      "kind": "ground",
+      "name": "Ground",
+      "params": []
+    },
+    {
+      "applies": "boundary",
+      "doc": "Prescribes electric potential phi = value (V) on the boundary (0 V in eigenfrequency studies).",
+      "kind": "potential",
+      "name": "Electric potential",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Potential",
+          "name": "value",
+          "required": false,
+          "unit": "V"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Prescribes surface free charge density sigma_s (C/m^2) on the boundary (static study).",
+      "kind": "surface_charge",
+      "name": "Surface charge",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Surface charge density",
+          "name": "density",
+          "required": false,
+          "unit": "C/m^2"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Constrains all potential dofs on the boundary to a single equipotential value with prescribed net charge (0 C in eigenfrequency studies).",
+      "kind": "floating_potential",
+      "name": "Floating potential",
+      "params": [
+        {
+          "doc": "prescribed net free charge on the floating electrode",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Total charge",
+          "name": "charge",
+          "required": false,
+          "unit": "C"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Multi-port driven electrical terminal boundary (applies harmonic excitation V_p = 1 V to compute multi-port admittance Y, Z, and S in the driven study).",
+      "kind": "terminal",
+      "name": "Electrical terminal",
+      "params": [
+        {
+          "doc": "unique port identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Port name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "reference port impedance for S-parameters",
+          "kind": {
+            "default": 50.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Reference impedance",
+          "name": "Z_0",
+          "required": false,
+          "unit": "Ohm"
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Marks a domain as an equipotential metallic electrode (skipped in K_{phi phi} and K_{u phi}, with role floating, ground, fixed, or terminal).",
+      "kind": "conductor",
+      "name": "Conductor",
+      "params": [
+        {
+          "doc": "floating: unknown equipotential with prescribed net charge; ground: phi = 0 V; fixed: phi = value; terminal: multi-port driven terminal",
+          "kind": {
+            "default": "floating",
+            "options": [
+              "floating",
+              "ground",
+              "fixed",
+              "terminal"
+            ],
+            "type": "choice"
+          },
+          "label": "Electrical role",
+          "name": "role",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "electric potential when role = fixed",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Potential",
+          "name": "value",
+          "required": false,
+          "unit": "V"
+        },
+        {
+          "doc": "net free charge when role = floating (static only)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Total charge",
+          "name": "charge",
+          "required": false,
+          "unit": "C"
+        },
+        {
+          "doc": "port identifier when role = terminal",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Port name",
+          "name": "name",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "reference port impedance when role = terminal",
+          "kind": {
+            "default": 50.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Reference impedance",
+          "name": "Z_0",
+          "required": false,
+          "unit": "Ohm"
+        }
+      ]
     }
   ],
   "exports": [
@@ -768,6 +945,36 @@
         "doc": "magnitude of the azimuthal component",
         "name": "|uy|",
         "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the electric potential (coupled piezoelectric solves)",
+        "name": "Re phi",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the electric potential (coupled piezoelectric solves)",
+        "name": "|phi|",
+        "unit": "a.u."
+      }
+    ],
+    "driven": [
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "displacement of a mode (normalised)",
+        "name": "u",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "electric potential of a mode (piezoelectric)",
+        "name": "phi",
+        "unit": "a.u."
       }
     ],
     "eigenfrequency": [
@@ -779,6 +986,12 @@
         ],
         "doc": "displacement of a mode (normalised)",
         "name": "u",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "electric potential of a mode (piezoelectric)",
+        "name": "phi",
         "unit": "a.u."
       }
     ],
@@ -812,6 +1025,18 @@
         "doc": "magnitude of the longitudinal (y) component",
         "name": "|uy|",
         "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the electric potential of a mode (piezoelectric)",
+        "name": "Re phi",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the electric potential of a mode (piezoelectric)",
+        "name": "|phi|",
+        "unit": "a.u."
       }
     ],
     "static": [
@@ -830,6 +1055,32 @@
         "doc": "equivalent stress",
         "name": "von Mises",
         "unit": "Pa"
+      },
+      {
+        "components": [],
+        "doc": "electric potential (piezoelectric / electro-elastic)",
+        "name": "phi",
+        "unit": "V"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric field -grad phi (piezoelectric / electro-elastic)",
+        "name": "E",
+        "unit": "V/m"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric displacement D (piezoelectric / electro-elastic)",
+        "name": "D",
+        "unit": "C/m^2"
       }
     ]
   },
@@ -869,6 +1120,22 @@
       "name": "thickness",
       "required": false,
       "unit": "m"
+    },
+    {
+      "doc": "auto: enable coupled (u, phi) formulation when electrical boundary conditions are present; on: force coupled formulation; off: ignore piezoelectric coupling",
+      "kind": {
+        "default": "auto",
+        "options": [
+          "auto",
+          "on",
+          "off"
+        ],
+        "type": "choice"
+      },
+      "label": "Piezoelectric coupling",
+      "name": "piezoelectric",
+      "required": false,
+      "unit": ""
     },
     {
       "doc": "`imported` takes the temperature exported by another physics (dfs)",
@@ -976,6 +1243,32 @@
         "static"
       ],
       "unit": "1/K"
+    },
+    {
+      "default": 1.0,
+      "kind": "tensor",
+      "label": "Relative permittivity (clamped)",
+      "name": "eps_r",
+      "needed_by": [],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Mechanical viscosity",
+      "name": "eta",
+      "needed_by": [
+        "eigenfrequency"
+      ],
+      "unit": "Pa*s"
+    },
+    {
+      "default": null,
+      "kind": "matrix3x6",
+      "label": "Piezoelectric stress-charge tensor",
+      "name": "piezo_e",
+      "needed_by": [],
+      "unit": "C/m^2"
     }
   ],
   "schema": {
@@ -1524,6 +1817,215 @@
                 "kind"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Fixes electric potential phi = 0 V on the boundary (piezoelectric / electro-elastic coupling).",
+              "properties": {
+                "kind": {
+                  "const": "ground"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Prescribes electric potential phi = value (V) on the boundary (0 V in eigenfrequency studies).",
+              "properties": {
+                "kind": {
+                  "const": "potential"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "default": 1.0,
+                      "description": "Potential [V]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Prescribes surface free charge density sigma_s (C/m^2) on the boundary (static study).",
+              "properties": {
+                "kind": {
+                  "const": "surface_charge"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "density": {
+                      "default": 0.0,
+                      "description": "Surface charge density [C/m^2]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Constrains all potential dofs on the boundary to a single equipotential value with prescribed net charge (0 C in eigenfrequency studies).",
+              "properties": {
+                "kind": {
+                  "const": "floating_potential"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "charge": {
+                      "default": 0.0,
+                      "description": "Total charge [C]. prescribed net free charge on the floating electrode",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Multi-port driven electrical terminal boundary (applies harmonic excitation V_p = 1 V to compute multi-port admittance Y, Z, and S in the driven study).",
+              "properties": {
+                "kind": {
+                  "const": "terminal"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "Z_0": {
+                      "default": 50.0,
+                      "description": "Reference impedance [Ohm]. reference port impedance for S-parameters",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Port name. unique port identifier",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Marks a domain as an equipotential metallic electrode (skipped in K_{phi phi} and K_{u phi}, with role floating, ground, fixed, or terminal).",
+              "properties": {
+                "kind": {
+                  "const": "conductor"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "Z_0": {
+                      "default": 50.0,
+                      "description": "Reference impedance [Ohm]. reference port impedance when role = terminal",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "charge": {
+                      "default": 0.0,
+                      "description": "Total charge [C]. net free charge when role = floating (static only)",
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Port name. port identifier when role = terminal",
+                      "type": "string"
+                    },
+                    "role": {
+                      "default": "floating",
+                      "description": "Electrical role. floating: unknown equipotential with prescribed net charge; ground: phi = 0 V; fixed: phi = value; terminal: multi-port driven terminal",
+                      "enum": [
+                        "floating",
+                        "ground",
+                        "fixed",
+                        "terminal"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "default": 0.0,
+                      "description": "Potential [V]. electric potential when role = fixed",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -1580,15 +2082,94 @@
                     }
                   ]
                 },
+                "eps_r": {
+                  "description": "Relative permittivity (clamped) []",
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
+                    {
+                      "items": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "eta": {
+                  "description": "Mechanical viscosity [Pa*s]",
+                  "type": "number"
+                },
                 "nu": {
                   "description": "Poisson's ratio []",
                   "type": "number"
+                },
+                "piezo_e": {
+                  "description": "Piezoelectric stress-charge tensor [C/m^2]",
+                  "items": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
                 },
                 "rho": {
                   "description": "Density [kg/m^3]",
                   "type": "number"
                 }
               },
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "an oriented material by name and Bunge Euler angles",
+              "properties": {
+                "euler_deg": {
+                  "description": "Bunge Z-X-Z Euler angles in degrees",
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                },
+                "material": {
+                  "description": "a material by name",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "material",
+                "euler_deg"
+              ],
               "type": "object"
             }
           ]
@@ -1611,6 +2192,16 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "piezoelectric": {
+            "default": "auto",
+            "description": "Piezoelectric coupling. auto: enable coupled (u, phi) formulation when electrical boundary conditions are present; on: force coupled formulation; off: ignore piezoelectric coupling",
+            "enum": [
+              "auto",
+              "on",
+              "off"
+            ],
+            "type": "string"
           },
           "plane": {
             "default": "strain",
@@ -1792,6 +2383,95 @@
               "kind"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Driven piezoelectric frequency-domain multi-port admittance (Y), impedance (Z), and scattering (S) sweep on 2D or 3D meshes with electrical 'terminal' electrodes, accelerated by Hermite/Galerkin reduced-order modeling.",
+            "properties": {
+              "kind": {
+                "const": "driven"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "blr_tol": {
+                    "default": 1e-6,
+                    "description": "BLR compression tolerance. relative low-rank compression tolerance for the 'blr' multifrontal LU backend",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "f_max": {
+                    "default": 2000000000.0,
+                    "description": "Stop frequency [Hz]. maximum sweep frequency (>= f_min, required unless freqs_hz is given)",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "f_min": {
+                    "default": 1000000000.0,
+                    "description": "Start frequency [Hz]. minimum sweep frequency (required unless freqs_hz is given)",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "freqs_hz": {
+                    "default": [],
+                    "description": "Explicit frequencies [Hz]. optional explicit ascending frequency grid in Hz; overrides f_min, f_max, and n_points when non-empty",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "max_hdm_solves": {
+                    "default": 16,
+                    "description": "Maximum HDM solves. maximum number of greedy full-order HDM anchor factorizations during PROM sweep",
+                    "maximum": 64,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_points": {
+                    "default": 201,
+                    "description": "Frequency points. number of uniformly spaced frequencies in [f_min, f_max]",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "prom_tol": {
+                    "default": 0.001,
+                    "description": "PROM residual tolerance. relative residual tolerance for Hermite/Galerkin PROM fast sweep (0 or null disables PROM and solves point-by-point HDM)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "seed_freqs_hz": {
+                    "default": [],
+                    "description": "Seed anchor frequencies [Hz]. optional initial PROM anchor frequencies merged with [f_min, f_mid, f_max]",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "solver": {
+                    "default": "auto",
+                    "description": "Linear solver backend. sparse linear solver backend for driven frequency-domain solves ('auto', 'direct', 'lblt', or 'blr')",
+                    "enum": [
+                      "auto",
+                      "direct",
+                      "lblt",
+                      "blr"
+                    ],
+                    "type": "string"
+                  },
+                  "strict_prom_tol": {
+                    "default": false,
+                    "description": "Strict PROM tolerance. return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves",
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
           }
         ]
       }
@@ -1937,6 +2617,142 @@
           "name": "wavevector",
           "required": false,
           "unit": "rad/m"
+        }
+      ]
+    },
+    {
+      "dims": "both",
+      "doc": "Driven piezoelectric frequency-domain multi-port admittance (Y), impedance (Z), and scattering (S) sweep on 2D or 3D meshes with electrical 'terminal' electrodes, accelerated by Hermite/Galerkin reduced-order modeling.",
+      "kind": "driven",
+      "name": "Driven frequency sweep",
+      "params": [
+        {
+          "doc": "minimum sweep frequency (required unless freqs_hz is given)",
+          "kind": {
+            "default": 1000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Start frequency",
+          "name": "f_min",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "maximum sweep frequency (>= f_min, required unless freqs_hz is given)",
+          "kind": {
+            "default": 2000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Stop frequency",
+          "name": "f_max",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "number of uniformly spaced frequencies in [f_min, f_max]",
+          "kind": {
+            "default": 201,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Frequency points",
+          "name": "n_points",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional explicit ascending frequency grid in Hz; overrides f_min, f_max, and n_points when non-empty",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Explicit frequencies",
+          "name": "freqs_hz",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "relative residual tolerance for Hermite/Galerkin PROM fast sweep (0 or null disables PROM and solves point-by-point HDM)",
+          "kind": {
+            "default": 0.001,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "PROM residual tolerance",
+          "name": "prom_tol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "maximum number of greedy full-order HDM anchor factorizations during PROM sweep",
+          "kind": {
+            "default": 16,
+            "max": 64,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Maximum HDM solves",
+          "name": "max_hdm_solves",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Strict PROM tolerance",
+          "name": "strict_prom_tol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional initial PROM anchor frequencies merged with [f_min, f_mid, f_max]",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Seed anchor frequencies",
+          "name": "seed_freqs_hz",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "sparse linear solver backend for driven frequency-domain solves ('auto', 'direct', 'lblt', or 'blr')",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "direct",
+              "lblt",
+              "blr"
+            ],
+            "type": "choice"
+          },
+          "label": "Linear solver backend",
+          "name": "solver",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "relative low-rank compression tolerance for the 'blr' multifrontal LU backend",
+          "kind": {
+            "default": 1e-6,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "BLR compression tolerance",
+          "name": "blr_tol",
+          "required": false,
+          "unit": ""
         }
       ]
     }

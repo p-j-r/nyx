@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 > The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 4 files, 330 lines.
+**Size:** 4 files, 339 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-physics/src/error.rs` | 66 |  |
-| `crates/nyx-physics/src/lib.rs` | 68 |  |
+| `crates/nyx-physics/src/lib.rs` | 77 |  |
 | `crates/nyx-physics/src/physics.rs` | 103 |  |
 | `crates/nyx-physics/src/registry.rs` | 93 |  |
 
@@ -20,11 +20,11 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, mesh, mesh::exchange, progress | Library, Mesh, Progress, SimplexMesh |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | material::spec, mesh, mesh::exchange, mesh::mixed, progress | FacetType, Library, Mesh, MixedDiscretisation, Progress, SimplexMesh |
 | [cQED result payloads](./cqed.md) | cqed | AdaptPassRecord, CAPACITANCE_KEY, CIRCUIT_ROM_KEY, CapacitanceMatrixData, CircuitRom, DRIVEN_PORT_KEY, DrivenPortData, ELECTRO_AMR_KEY, ElectroAmrData, INDUCTANCE_KEY +7 |
 | [Descriptors and schemas](./descriptors.md) | crate root, desc | BcDesc, FieldDesc, FieldLink, ParamDesc, PropDesc, Sizing, StudyDesc |
 | [Problem envelope](./envelope.md) | decode, spec, validate | BcSpec, FORMAT, MaterialAssign, ProblemSpec, PropValue, StudySpec, canonical_json, check_params, check_result_finite, tls_interface_from_material_name +2 |
-| [Result and frame](./result.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_back, cell_fields_of |
+| [Result and frame](./result.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_back, cell_fields_of |
 
 ## Used by
 
@@ -34,22 +34,24 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | crate root, error | Error, Mesh, discretise |
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | crate root, error | Discretisation, Error, Mesh, discretise |
 | [analysis: Mode figures](../analysis/figures.md) | crate root, error | Discretisation, Error, Mesh, discretise |
+| [analysis: Piezo resonator analysis](../analysis/piezo.md) | crate root, error | Error, Mesh |
 | [analysis: Field samples](../analysis/samples.md) | crate root, error | Error, Mesh, discretise |
 | [dfs: Physics adapter](../dfs/adapter.md) | crate root |  |
 | [dfs: Shared helpers](../dfs/common.md) | crate root | Discretisation |
-| [dfs: Electrostatics kernel](../dfs/electro.md) | crate root | Discretisation |
-| [dfs: Heat kernel](../dfs/heat.md) | crate root | Discretisation |
-| [dfs: Magnetostatics kernel](../dfs/magneto.md) | crate root | Discretisation |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | crate root | Discretisation, Mesh, discretise, discretise_mixed |
+| [dfs: Heat kernel](../dfs/heat.md) | crate root | Discretisation, Mesh, discretise, discretise_mixed |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | crate root | Discretisation, Mesh, discretise, discretise_mixed |
 | [dfs: Typed problem](../dfs/problem.md) | error, physics | Ctx, Error, Physics |
 | [ems: Physics adapter](../ems/adapter.md) | crate root | Mesh |
-| [ems: Axisymmetric kernel](../ems/axisym.md) | crate root | Discretisation |
-| [ems: 3D cavity kernel](../ems/cavity.md) | crate root | Discretisation |
-| [ems: Driven frequency-domain and PROM](../ems/driven.md) | crate root | Discretisation |
+| [ems: Axisymmetric kernel](../ems/axisym.md) | crate root | Discretisation, Mesh |
+| [ems: 3D cavity kernel](../ems/cavity.md) | crate root | Discretisation, Mesh |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | crate root | Discretisation, Mesh |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | crate root | Discretisation |
-| [ems: Mode kernel](../ems/modes.md) | crate root | Discretisation |
-| [ems: Complex-mode kernel](../ems/modescx.md) | crate root | Discretisation |
+| [ems: Native mixed-cell EM](../ems/mixed.md) | crate root | Discretisation |
+| [ems: Mode kernel](../ems/modes.md) | crate root | Discretisation, Mesh |
+| [ems: Complex-mode kernel](../ems/modescx.md) | crate root | Discretisation, Mesh |
 | [ems: Optical mode sets](../ems/optical.md) | crate root | Discretisation |
-| [ems: Typed problem](../ems/problem.md) | crate root, error, physics | Ctx, Discretisation, Error, Physics |
+| [ems: Typed problem](../ems/problem.md) | crate root, error, physics | Ctx, Discretisation, Error, MixedDiscretisation, Physics |
 | [engine: Analyses](../engine/analyse.md) | error, physics | Error, LabelResolver |
 | [engine: Command lists](../engine/commandlist.md) | error | Error |
 | [engine: Commands](../engine/commands.md) | crate root, error, physics, registry | Ctx, Error, LabelResolver, Registry, Sizing |
@@ -63,15 +65,17 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [engine: Store link](../engine/storeLink.md) | error | Error |
 | [Descriptors and schemas](./descriptors.md) | physics | Physics |
 | [Problem envelope](./envelope.md) | error, physics | Ctx, Error, LabelResolver, Physics |
+| [Result and frame](./result.md) | crate root, error | Error, Mesh, discretise |
 | [Test support](./testsupport.md) | crate root, physics | Discretisation, Physics |
 | [sms: Physics adapter](../sms/adapter.md) | crate root | Mesh |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | crate root | Discretisation |
-| [sms: Cross-section study kernel](../sms/crosssection.md) | crate root | Discretisation |
-| [sms: Floquet kernel](../sms/floquet.md) | crate root | Discretisation |
-| [sms: Low-reflecting boundary](../sms/lrb.md) | crate root | Discretisation |
-| [sms: Absorbing-layer kernel](../sms/pml.md) | crate root | Discretisation |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | crate root | Discretisation, Mesh |
+| [sms: Floquet kernel](../sms/floquet.md) | crate root | Discretisation, Mesh |
+| [sms: Low-reflecting boundary](../sms/lrb.md) | crate root | Discretisation, Mesh |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | crate root | Discretisation, Mesh |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | crate root | Discretisation, Mesh |
 | [sms: Typed problem](../sms/problem.md) | error, physics | Ctx, Error, Physics |
-| [sms: Solid kernel](../sms/solid.md) | crate root | Discretisation |
+| [sms: Solid kernel](../sms/solid.md) | crate root | Discretisation, Mesh, discretise_mixed |
 | [sms: Waveguide kernel](../sms/waveguide.md) | crate root | Discretisation |
 
 ## Class diagram
@@ -98,6 +102,7 @@ classDiagram
     class fns_lib_rs {
         <<module lib.rs>>
         +discretise(mesh) Result
+        +discretise_mixed(mesh) Result
         +check_mesh(mesh) Result
         +Discretisation type
     }
@@ -162,9 +167,10 @@ classDiagram
 | fn | `Error::code` | `error.rs:25` | `pub fn code(&self) -> &'static str` —  A stable short name for the kind, for logs, JSON and MCP error codes. |
 | fn | `Error::from_kernel` | `error.rs:37` | `pub fn from_kernel(text: String) -> Error` —  Maps the `String` errors of the kernels in `femcore` (the text `"cancelled"` is the cancel signal there). |
 | fn | `Error::invalid` | `error.rs:47` | `pub fn invalid(text: impl Into<String>) -> Error` |
-| type | `Discretisation` | `lib.rs:47` |  The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type |
-| fn | `discretise` | `lib.rs:50` | `pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error>` —  The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices). |
-| fn | `check_mesh` | `lib.rs:55` | `pub fn check_mesh(mesh: &Mesh) -> Result<(), Error>` —  Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis. |
+| type | `Discretisation` | `lib.rs:49` |  The numbering of unknowns (edges, P2 dofs) a kernel assembles on. Each solve builds its own from the `Mesh` with `discretise`. The type |
+| fn | `discretise` | `lib.rs:52` | `pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error>` —  The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices). |
+| fn | `discretise_mixed` | `lib.rs:57` | `pub fn discretise_mixed(mesh: &Mesh) -> Result<MixedDiscretisation, Error>` —  Native mixed-cell discretisation made directly from `mesh` without splitting `Quad`, `Prism`, or `Hex` cells. |
+| fn | `check_mesh` | `lib.rs:62` | `pub fn check_mesh(mesh: &Mesh) -> Result<(), Error>` —  Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis. |
 | trait | `LabelResolver` | `physics.rs:21` | methods: `domains`, `boundaries`, `sheet_thickness_m`, `sheet_etch_depth_m` —  Turns the names of a problem (`geom` region names and boundary selectors) into the integer labels of the mesh being solved. |
 | struct | `Ctx` | `physics.rs:38` | fields: `resolver`, `progress`, `library`, `wavelength`, `frequency`, `temperature`, `inputs` —  What a solve may use besides the mesh and the problem: the label resolver, progress and cancellation, and the fields that other |
 | trait | `Physics` | `physics.rs:76` | methods: `id`, `name`, `studies`, `bc_kinds`, `properties`, `params`, `fields`, `exports`, `imports`, `validate`, `sizing`, `solve` |

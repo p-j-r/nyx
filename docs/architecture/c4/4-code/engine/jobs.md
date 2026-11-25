@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 11 files, 5901 lines.
+**Size:** 11 files, 6055 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 14 |  |
-| `crates/nyx-engine/src/convergence.rs` | 1554 |  |
-| `crates/nyx-engine/src/estimate.rs` | 395 |  |
+| `crates/nyx-engine/src/convergence.rs` | 1627 |  |
+| `crates/nyx-engine/src/estimate.rs` | 476 |  |
 | `crates/nyx-engine/src/jobs.rs` | 599 |  |
 | `crates/nyx-engine/src/process.rs` | 318 |  |
 | `crates/nyx-engine/src/queue.rs` | 677 |  |
@@ -34,7 +34,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | [Analyses](./analyse.md) | analyse | analyses |
 | [Commands](./commands.md) | commands, engine | Access, Engine, Purpose |
 | [Materials](./materials.md) | materials | study_frequency, study_wavelength |
-| [Meshing seam](./meshing.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of, project_uses_electro_amr, solve_dfs_with_amr |
+| [Meshing seam](./meshing.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, solve_dfs_with_amr |
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
 | [Results files](./resultsIO.md) | crate root, h5io | L2ShuffleLzfPacked, read_results, write_results_with_options |
@@ -48,7 +48,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | [Command lists](./commandlist.md) | convergence | Limits, Matching |
 | [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits +33 |
 | [Materials](./materials.md) | shared_queue | default_workspace |
-| [Meshing seam](./meshing.md) | estimate, solve | Estimate, History, chain_key, solve_one_single |
+| [Meshing seam](./meshing.md) | estimate, solve | Estimate, History, chain_key, chain_key_for_project, solve_one_single |
 | [Registry and facade](./registry.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane +3 |
 | [Results files](./resultsIO.md) | jobs | Opened |
 
@@ -166,6 +166,7 @@ classDiagram
         +resolve_memory_wait_timeout(explicit, caller_default) Result
         +admit(est, force, probe, progress, timeout_s) Result
         +chain_key(targets) String
+        +chain_key_for_project(project, targets) String
         +MemoryProbe type
         +REFUSE_ABOVE const
     }
@@ -512,31 +513,31 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | fn | `main` | `bin/nyx-worker.rs:5` | `fn main()` |
-| fn | `numbers` | `convergence.rs:121` | `pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)>` —  Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars. |
-| struct | `TrackFilter` | `convergence.rs:146` | fields: `target`, `region`, `min_share`, `component`, `min_component`, `max_layer_fraction` —  Signature and eigenvalue target for following modes across meshes (`Matching::Track`). |
-| enum | `Matching` | `convergence.rs:392` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
-| struct | `ConvergenceJob` | `convergence.rs:592` | fields: `reuse`, `limits` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
-| struct | `Limits` | `convergence.rs:610` | fields: `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated`, `quantities` —  What a convergence check may cost and how it refines and extrapolates: it is refused, before any solve, when the comparison mesh has more cells |
-| fn | `extrapolate_capacitance` | `convergence.rs:808` | `pub fn extrapolate_capacitance( coarse: &CapacitanceMatrixData, fine: &CapacitanceMatrixData, method: &str, r: f64, order: f64, ) -> Result<(CapacitanceMatrixData, Vec<Vec<f64>>, f64), Error>` —  Two-grid Richardson extrapolation of a multi-terminal Maxwell capacitance matrix (`r = h_coarse / h_fine > 1.0`, `order = p > 0.0`). |
-| fn | `apply_extrapolated_capacitance` | `convergence.rs:906` | `pub fn apply_extrapolated_capacitance(result: &mut SolveResult, cap: &CapacitanceMatrixData)` —  Replaces the `CapacitanceMatrixData` payload (and matching `C_*` / `E_C_*` scalars and solution values) in `result` with `cap`. |
-| fn | `extrapolated_capacitance` | `convergence.rs:956` | `pub fn extrapolated_capacitance(answer: &Value) -> Option<CapacitanceMatrixData>` —  Extracts the extrapolated `CapacitanceMatrixData` from a finished `convergence_check` JSON reply, if one was computed. |
-| fn | `should_apply_extrapolated` | `convergence.rs:965` | `pub fn should_apply_extrapolated(answer: &Value) -> bool` —  Whether a finished `convergence_check` JSON reply asked to promote its extrapolated values onto the stored result. |
-| fn | `TrackFilter::has_signature` | `convergence.rs:170` | `pub fn has_signature(&self) -> bool` —  Whether any per-mode scalar signature predicate is set. |
-| fn | `TrackFilter::validate` | `convergence.rs:179` | `pub fn validate(&self) -> Result<(), Error>` —  Validates all target and threshold invariants. |
-| fn | `TrackFilter::from_value` | `convergence.rs:233` | `pub fn from_value(t: &Value) -> Result<TrackFilter, Error>` —  Parses a `track` JSON object. |
-| fn | `TrackFilter::to_json` | `convergence.rs:294` | `pub fn to_json(&self) -> Value` |
-| fn | `Matching::from_args` | `convergence.rs:405` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` filters by signature and/or target (`f`, `n_b`, `n_eff`) and implies `nearest`. |
-| fn | `Limits::validate` | `convergence.rs:636` | `pub fn validate(&self) -> Result<(), Error>` —  Validates `Limits` invariants whether parsed from JSON or constructed in Rust. |
-| fn | `Limits::from_args` | `convergence.rs:669` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated` and `quantities` of the command arguments. |
-| fn | `ConvergenceJob::with_limits` | `convergence.rs:987` | `pub fn with_limits(mut self, limits: Limits) -> Self` —  Returns this job configured with `limits`. |
-| fn | `ConvergenceJob::run` | `convergence.rs:1000` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
-| fn | `ConvergenceJob::run_matched` | `convergence.rs:1005` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
-| fn | `ConvergenceJob::run_with` | `convergence.rs:1016` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
-| fn | `ConvergenceJob::plan` | `convergence.rs:1072` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the |
-| fn | `ConvergenceJob::plan_with` | `convergence.rs:1077` | `pub fn plan_with(&self, physics: &str, factor: f64, scale_sizes: bool) -> Result<Value, Error>` —  `plan` with an explicit `scale_sizes` toggle controlling whether local `add_size` features scale proportionally with `factor`. |
-| fn | `Engine::convergence_job` | `convergence.rs:1112` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
-| fn | `Engine::convergence_check` | `convergence.rs:1128` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
-| fn | `Engine::convergence_check_matched` | `convergence.rs:1135` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
+| fn | `numbers` | `convergence.rs:131` | `pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)>` —  Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars. |
+| struct | `TrackFilter` | `convergence.rs:156` | fields: `target`, `region`, `min_share`, `component`, `min_component`, `max_layer_fraction` —  Signature and eigenvalue target for following modes across meshes (`Matching::Track`). |
+| enum | `Matching` | `convergence.rs:402` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
+| struct | `ConvergenceJob` | `convergence.rs:602` | fields: `reuse`, `limits` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
+| struct | `Limits` | `convergence.rs:620` | fields: `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated`, `quantities` —  What a convergence check may cost and how it refines and extrapolates: it is refused, before any solve, when the comparison mesh has more cells |
+| fn | `extrapolate_capacitance` | `convergence.rs:818` | `pub fn extrapolate_capacitance( coarse: &CapacitanceMatrixData, fine: &CapacitanceMatrixData, method: &str, r: f64, order: f64, ) -> Result<(CapacitanceMatrixData, Vec<Vec<f64>>, f64), Error>` —  Two-grid Richardson extrapolation of a multi-terminal Maxwell capacitance matrix (`r = h_coarse / h_fine > 1.0`, `order = p > 0.0`). |
+| fn | `apply_extrapolated_capacitance` | `convergence.rs:916` | `pub fn apply_extrapolated_capacitance(result: &mut SolveResult, cap: &CapacitanceMatrixData)` —  Replaces the `CapacitanceMatrixData` payload (and matching `C_*` / `E_C_*` scalars and solution values) in `result` with `cap`. |
+| fn | `extrapolated_capacitance` | `convergence.rs:966` | `pub fn extrapolated_capacitance(answer: &Value) -> Option<CapacitanceMatrixData>` —  Extracts the extrapolated `CapacitanceMatrixData` from a finished `convergence_check` JSON reply, if one was computed. |
+| fn | `should_apply_extrapolated` | `convergence.rs:975` | `pub fn should_apply_extrapolated(answer: &Value) -> bool` —  Whether a finished `convergence_check` JSON reply asked to promote its extrapolated values onto the stored result. |
+| fn | `TrackFilter::has_signature` | `convergence.rs:180` | `pub fn has_signature(&self) -> bool` —  Whether any per-mode scalar signature predicate is set. |
+| fn | `TrackFilter::validate` | `convergence.rs:189` | `pub fn validate(&self) -> Result<(), Error>` —  Validates all target and threshold invariants. |
+| fn | `TrackFilter::from_value` | `convergence.rs:243` | `pub fn from_value(t: &Value) -> Result<TrackFilter, Error>` —  Parses a `track` JSON object. |
+| fn | `TrackFilter::to_json` | `convergence.rs:304` | `pub fn to_json(&self) -> Value` |
+| fn | `Matching::from_args` | `convergence.rs:415` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` filters by signature and/or target (`f`, `n_b`, `n_eff`) and implies `nearest`. |
+| fn | `Limits::validate` | `convergence.rs:646` | `pub fn validate(&self) -> Result<(), Error>` —  Validates `Limits` invariants whether parsed from JSON or constructed in Rust. |
+| fn | `Limits::from_args` | `convergence.rs:679` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated` and `quantities` of the command arguments. |
+| fn | `ConvergenceJob::with_limits` | `convergence.rs:997` | `pub fn with_limits(mut self, limits: Limits) -> Self` —  Returns this job configured with `limits`. |
+| fn | `ConvergenceJob::run` | `convergence.rs:1010` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
+| fn | `ConvergenceJob::run_matched` | `convergence.rs:1015` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
+| fn | `ConvergenceJob::run_with` | `convergence.rs:1026` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
+| fn | `ConvergenceJob::plan` | `convergence.rs:1082` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the |
+| fn | `ConvergenceJob::plan_with` | `convergence.rs:1087` | `pub fn plan_with(&self, physics: &str, factor: f64, scale_sizes: bool) -> Result<Value, Error>` —  `plan` with an explicit `scale_sizes` toggle controlling whether local `add_size` features scale proportionally with `factor`. |
+| fn | `Engine::convergence_job` | `convergence.rs:1123` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
+| fn | `Engine::convergence_check` | `convergence.rs:1139` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
+| fn | `Engine::convergence_check_matched` | `convergence.rs:1146` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
 | struct | `Row` | `estimate.rs:19` | fields: `chain`, `dim`, `cells`, `dofs`, `peak_working_set`, `peak_commit`, `seconds` —  One finished worker run. |
 | struct | `Estimate` | `estimate.rs:33` | fields: `bytes`, `bytes_with_margin`, `seconds`, `runs`, `extrapolated`, `exponent` —  An estimate with its basis. |
 | fn | `estimate` | `estimate.rs:63` | `pub fn estimate(rows: &[Row], chain: &str, dim: u8, cells: u64) -> Option<Estimate>` —  The estimate for a solve of `chain` in `dim` dimensions on `cells` cells from `rows`, or `None` when the rows do not support one. |
@@ -548,6 +549,7 @@ classDiagram
 | fn | `resolve_memory_wait_timeout` | `estimate.rs:240` | `pub fn resolve_memory_wait_timeout( explicit: Option<f64>, caller_default: Option<f64>, ) -> Result<Option<f64>, nyx_physics::Error>` —  Resolves the effective memory-wait timeout in priority order: |
 | fn | `admit` | `estimate.rs:261` | `pub fn admit( est: &Estimate, force: bool, probe: &MemoryProbe, progress: &std::sync::Arc<femcore::progress::Progress>, timeout_s: Option<f64>, ) -> Result<(), nyx_physics::Error>` —  Lets a solve start only when its estimate fits. Above `REFUSE_ABOVE` of the physical memory it fails at once, unless `force`: it cannot be |
 | fn | `chain_key` | `estimate.rs:329` | `pub fn chain_key(targets: &[String]) -> String` —  The chain's key: codes sorted and joined. |
+| fn | `chain_key_for_project` | `estimate.rs:338` | `pub fn chain_key_for_project(project: &crate::project::Project, targets: &[String]) -> String` —  Calibration chain key aware of `ems:driven`, `sms:driven`, and coupled `sms:piezo` `(solver_backend, order)` profiles (`FR-33`), |
 | fn | `History::set_file` | `estimate.rs:152` | `pub fn set_file(&self, path: &Path)` —  Keeps the rows in `path` from now on and reads the ones it holds; a line that cannot be read is skipped. |
 | fn | `History::reload` | `estimate.rs:163` | `pub fn reload(&self)` —  Reads the file again: another program (the queue worker of the workspace) appends rows to it too. |
 | fn | `History::rows` | `estimate.rs:170` | `pub fn rows(&self) -> Vec<Row>` |

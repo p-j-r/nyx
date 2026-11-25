@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Viewport** (`app.viewport`) in the containe
 > The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md)  
-**Size:** 4 files, 1674 lines.
+**Size:** 4 files, 1712 lines.
 
 ## Files
 
@@ -14,14 +14,14 @@ C4 level 4 (code) of the component **Viewport** (`app.viewport`) in the containe
 | `crates/app/src/colormap.rs` | 158 |  |
 | `crates/app/src/regions.rs` | 272 |  |
 | `crates/app/src/scene.rs` | 279 |  |
-| `crates/app/src/viewport.rs` | 965 |  |
+| `crates/app/src/viewport.rs` | 1003 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
 | [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root | Display, ViewMesh |
-| [Look and widgets](./style.md) | fmt, theme, tokens | Ink, Mode, ellipsize, rgb, with_alpha |
+| [Look and widgets](./style.md) | fmt, theme, tokens | Ink, Mode, axis_colour, ellipsize, rgb, with_alpha |
 
 ## Used by
 
@@ -146,6 +146,7 @@ classDiagram
         +cam Camera
         +fit_token u64
         +isolate Option~usize~
+        +legend_all bool
         +show(ui, content, picking, ink) ViewOutput
     }
     class fns_viewport_rs {
@@ -195,15 +196,15 @@ classDiagram
 | struct | `Camera` | `viewport.rs:17` | fields: `yaw`, `pitch`, `zoom`, `pan`, `center`, `base_scale`, `is3d` |
 | enum | `Content` | `viewport.rs:96` | variants: `Mesh`, `Field`, `Empty` —  What to draw. |
 | struct | `ViewOutput` | `viewport.rs:122` | fields: `picked`, `probe`, `rect` |
-| struct | `Viewport` | `viewport.rs:130` | fields: `cam`, `fit_token`, `isolate` |
-| fn | `shade` | `viewport.rs:176` | `pub(crate) fn shade(c: Color32, k: f32) -> Color32` —  Shades a colour by the cosine `k` between the face normal and the view direction. |
-| fn | `point_in_tri` | `viewport.rs:181` | `pub(crate) fn point_in_tri(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> Option<[f32` |
-| fn | `hatch_triangle` | `viewport.rs:625` | `pub(crate) fn hatch_triangle(painter: &egui::Painter, tri: [Pos2; 3], spacing: f32, stroke: Stroke)` —  1 px lines at 45 degrees, `spacing` apart on one grid for the whole canvas (so neighbouring triangles join their lines), clipped to the triangle. |
-| fn | `format_value` | `viewport.rs:776` | `pub fn format_value(v: f32) -> String` |
+| struct | `Viewport` | `viewport.rs:130` | fields: `cam`, `fit_token`, `isolate`, `legend_all` |
+| fn | `shade` | `viewport.rs:179` | `pub(crate) fn shade(c: Color32, k: f32) -> Color32` —  Shades a colour by the cosine `k` between the face normal and the view direction. |
+| fn | `point_in_tri` | `viewport.rs:184` | `pub(crate) fn point_in_tri(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> Option<[f32` |
+| fn | `hatch_triangle` | `viewport.rs:663` | `pub(crate) fn hatch_triangle(painter: &egui::Painter, tri: [Pos2; 3], spacing: f32, stroke: Stroke)` —  1 px lines at 45 degrees, `spacing` apart on one grid for the whole canvas (so neighbouring triangles join their lines), clipped to the triangle. |
+| fn | `format_value` | `viewport.rs:814` | `pub fn format_value(v: f32) -> String` |
 | fn | `Camera::fit` | `viewport.rs:34` | `pub fn fit(&mut self, bbox: ([f32; 3], [f32; 3]), size: Vec2, is3d: bool, margin_right: f32)` |
 | fn | `Camera::project` | `viewport.rs:63` | `pub fn project(&self, p: [f32; 3], c: Pos2) -> (Pos2, f32)` |
 | fn | `Camera::unproject_2d` | `viewport.rs:76` | `pub fn unproject_2d(&self, s: Pos2, c: Pos2) -> [f32` —  World (x, y) under a screen position in 2D mode. |
 | fn | `Camera::view_normal_z` | `viewport.rs:81` | `pub(crate) fn view_normal_z(&self, a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f32` |
-| fn | `Viewport::show` | `viewport.rs:240` | `pub fn show(&mut self, ui: &mut Ui, content: Content<'_>, picking: bool, ink: &Ink) -> ViewOutput` |
+| fn | `Viewport::show` | `viewport.rs:243` | `pub fn show(&mut self, ui: &mut Ui, content: Content<'_>, picking: bool, ink: &Ink) -> ViewOutput` |
 
 Trait implementations in this component: `Scene: Default`, `Camera: Default`, `Viewport: Default`

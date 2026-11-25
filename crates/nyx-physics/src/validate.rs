@@ -60,13 +60,18 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
         match m {
             MaterialAssign::Props(map) => {
                 for (name, v) in map {
-                    let allowed = props.iter().any(|d| &d.name == name)
-                        || (name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r"));
+                    let desc = props.iter().find(|d| &d.name == name);
+                    let allowed = desc.is_some() || (name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r"));
                     if !allowed {
                         return Err(Error::invalid(format!(
                             "region '{region}': {} does not read a property '{name}' (it reads: {})",
                             p.name(),
                             props.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
+                        )));
+                    }
+                    if desc.is_some_and(|d| d.kind == PropKind::Matrix3x6) {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': property '{name}' must be a 3x6 matrix, not a scalar number"
                         )));
                     }
                     if !v.is_finite() {
@@ -100,6 +105,11 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                     };
                     match v {
                         PropValue::Scalar(x) => {
+                            if desc_kind == PropKind::Matrix3x6 {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a 3x6 matrix, not a scalar number"
+                                )));
+                            }
                             if !x.is_finite() {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' is not a finite number"
@@ -179,6 +189,18 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                                 ])
                                 .check(femcore::material::tensor::Requirement::NonNegative, "loss_tangent")
                                 .map_err(|msg| Error::invalid(format!("region '{region}': {msg}")))?;
+                            }
+                        }
+                        PropValue::Matrix3x6(mat) => {
+                            if desc_kind != PropKind::Matrix3x6 {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' cannot use a 3x6 matrix"
+                                )));
+                            }
+                            if mat.iter().flatten().any(|x| !x.is_finite()) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite 3x6 matrix component"
+                                )));
                             }
                         }
                     }

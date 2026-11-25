@@ -17,7 +17,7 @@ Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a m
 | `memory_wait_timeout_s` | number | no |  | solve only: maximum seconds (>= 0) to wait when free RAM is below the solve estimate (overrides NYX_MEMORY_WAIT_TIMEOUT_S and engine default) |
 | `physics` | text or list of text | no |  | physics code(s); default the active one |
 | `post_analyses` | list of object | no |  | read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { "analysis": "...", "physics"?: "...", "params"?: {...} } shorthand or { "cmd": "analyse" \| "integrate" \| "confinement" \| "extremum" \| "probe" \| "line_cut" \| "overlap", "args": {...} }). each item: one read-only post-solve analysis or field-reduction request |
-| `post_analyses[].analysis` | text | no |  | shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation) |
+| `post_analyses[].analysis` | text | no |  | shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator) |
 | `post_analyses[].args` | object | no |  | arguments object passed to `cmd` |
 | `post_analyses[].cmd` | text | no |  | explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op) |
 | `post_analyses[].label` | text | no |  | optional label attached to this post-analysis entry in the reply |

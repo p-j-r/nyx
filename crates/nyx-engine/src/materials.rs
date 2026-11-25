@@ -162,6 +162,39 @@ pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
     use nyx_physics::ParamKind;
     let studies = p.studies();
     let sd = studies.iter().find(|s| s.kind == spec.study.kind)?;
+    if spec.study.kind == "driven" {
+        if let Some(arr) = spec.study.params.get("freqs_hz").and_then(Value::as_array) {
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            let mut count = 0usize;
+            for v in arr {
+                if let Some(f) = v.as_f64().filter(|&x| x > 0.0 && x.is_finite()) {
+                    lo = lo.min(f);
+                    hi = hi.max(f);
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                return Some(0.5 * (lo + hi));
+            }
+        }
+        let param_num = |name: &str| -> Option<f64> {
+            spec.study
+                .params
+                .get(name)
+                .and_then(Value::as_f64)
+                .or_else(|| {
+                    sd.params.iter().find(|d| d.name == name).and_then(|d| match d.kind {
+                        ParamKind::Number { default, .. } => Some(default),
+                        _ => None,
+                    })
+                })
+                .filter(|&f| f > 0.0 && f.is_finite())
+        };
+        if let (Some(f_min), Some(f_max)) = (param_num("f_min"), param_num("f_max")) {
+            return Some(0.5 * (f_min + f_max));
+        }
+    }
     if let Some(d) = sd.params.iter().find(|d| d.unit == "Hz") {
         let f = spec.study.params.get(&d.name).and_then(Value::as_f64).or(match d.kind {
             ParamKind::Number { default, .. } => Some(default),
@@ -181,7 +214,7 @@ pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
 /// wavelength follows. `None` for a study without a frequency, or for quasi-static `dfs` `electrostatic` studies where `freq` evaluates
 /// `[dielectric]` / `[electrical]` AC loss rather than `[optical]` dispersion.
 pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
-    if p.id() == "dfs" && spec.study.kind == "electrostatic" {
+    if (p.id() == "dfs" && spec.study.kind == "electrostatic") || p.id() == "sms" {
         return None;
     }
     let f = study_frequency(p, spec)?;
@@ -365,27 +398,48 @@ impl Engine {
             );
         }
 
-        // Piezoelectric Legendre duals (eps^S, eps^T, C^E, C^D)
+        // Piezoelectric Legendre duals (eps^S, eps^T, C^E, C^D) rotated into the wafer frame
         if let Some(pz) = &m.piezoelectric {
-            let ce_voigt = m.elastic.as_ref().map(|e| femcore::material::coupled::solver_to_voigt_m6(&e.c));
+            use femcore::material::{rotate_m6_textbook, rotate_tensor, rotation, PiezoForm, Piezoelectric};
+            let ce_voigt = m.elastic.as_ref().map(|e| e.c);
+            let rot = rotation(euler);
+            let rotated = euler != [0.0; 3];
+            let rot3 = |t: femcore::material::M3| if rotated { rotate_tensor(&t, &rot) } else { t };
+            let rot6 = |c: femcore::material::M6| if rotated { rotate_m6_textbook(&c, euler) } else { c };
+            let e_rot = pz.stress_charge(ce_voigt.as_ref()).ok().map(|e| {
+                if rotated {
+                    Piezoelectric { source: Vec::new(), form: PiezoForm::StressCharge, matrix: e }.rotate(&rot)
+                } else {
+                    e
+                }
+            });
+            let d_rot = pz.strain_charge(ce_voigt.as_ref()).ok().map(|d| {
+                if rotated {
+                    Piezoelectric { source: Vec::new(), form: PiezoForm::StrainCharge, matrix: d }.rotate(&rot)
+                } else {
+                    d
+                }
+            });
             out.insert(
                 "piezoelectric".into(),
                 json!({
-                    "eps_clamped": m.permittivity_clamped(),
-                    "eps_free": m.permittivity_free(),
-                    "c_e_pa": m.stiffness_constant_e(),
-                    "c_d_pa": m.stiffness_constant_d(),
-                    "e_c_m2": pz.stress_charge(ce_voigt.as_ref()).ok(),
-                    "d_c_n": pz.strain_charge(ce_voigt.as_ref()).ok(),
+                    "eps_clamped": m.permittivity_clamped().map(rot3),
+                    "eps_free": m.permittivity_free().map(rot3),
+                    "c_e_pa": m.stiffness_constant_e().map(rot6),
+                    "c_d_pa": m.stiffness_constant_d().map(rot6),
+                    "e_c_m2": e_rot,
+                    "d_c_n": d_rot,
                 }),
             );
         }
 
         if let Some(pe) = &m.photoelastic {
-            out.insert("photoelastic".into(), json!({ "wavelength_m": pe.wavelength, "p_voigt": pe.matrix }));
+            let p_mat =
+                if euler != [0.0; 3] { pe.rotate_voigt(&femcore::material::rotation(euler)) } else { pe.matrix };
+            out.insert("photoelastic".into(), json!({ "wavelength_m": pe.wavelength, "p_voigt": p_mat }));
         }
         if let Some(eo) = &m.electro_optic {
-            let ce_voigt = m.elastic.as_ref().map(|e| femcore::material::coupled::solver_to_voigt_m6(&e.c));
+            let ce_voigt = m.elastic.as_ref().map(|e| e.c);
             let d_mat = m.piezoelectric.as_ref().and_then(|p| p.strain_charge(ce_voigt.as_ref()).ok());
             out.insert(
                 "electro_optic".into(),
@@ -397,7 +451,9 @@ impl Engine {
             );
         }
         if let Some(ve) = &m.viscoelastic {
-            out.insert("viscoelastic".into(), json!({ "eta_pa_s": ve.matrix, "cryo_qm_floor": ve.cryo_qm_floor }));
+            let eta_mat =
+                if euler != [0.0; 3] { femcore::material::rotate_m6_textbook(&ve.matrix, euler) } else { ve.matrix };
+            out.insert("viscoelastic".into(), json!({ "eta_pa_s": eta_mat, "cryo_qm_floor": ve.cryo_qm_floor }));
         }
 
         // Superconducting BCS evaluation if [superconducting] is present

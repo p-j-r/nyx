@@ -11,7 +11,7 @@ use crate::theme;
 use crate::state::*;
 use eframe::egui::{self, Color32, DragValue, RichText, Ui};
 use nyx_engine::facade::geom::model::{FeatureList, Model};
-use nyx_engine::facade::physics::{Applies, MaterialAssign, ProblemSpec};
+use nyx_engine::facade::physics::{Applies, MaterialAssign, ProblemSpec, PropKind};
 use nyx_engine::SweepLayer;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -480,7 +480,7 @@ impl App {
                     };
                     egui::ComboBox::from_id_salt(format!("mat_{key}")).height(320.0).selected_text(shown).show_ui(ui, |ui| {
                         if ui.selectable_label(matches!(cur, Some(MaterialAssign::Props(_))), "numbers").clicked() && !matches!(cur, Some(MaterialAssign::Props(_))) {
-                            let map: BTreeMap<String, f64> = props.iter().map(|p| (p.name.clone(), p.default.unwrap_or_else(|| crate::examples::typical(&p.name)))).collect();
+                            let map: BTreeMap<String, f64> = props.iter().filter(|p| p.kind != PropKind::Matrix3x6).map(|p| (p.name.clone(), p.default.unwrap_or_else(|| crate::examples::typical(&p.name)))).collect();
                             spec.materials.insert(key.clone(), MaterialAssign::Props(map));
                         }
                         ui.separator();
@@ -524,6 +524,9 @@ impl App {
                         let mut edited = false;
                         egui::Grid::new(format!("props_{key}")).num_columns(3).show(ui, |ui| {
                             for p in &props {
+                                if p.kind == PropKind::Matrix3x6 {
+                                    continue;
+                                }
                                 let mut v = map.get(&p.name).copied().unwrap_or_else(|| p.default.unwrap_or_else(|| crate::examples::typical(&p.name)));
                                 ui.label(&p.label);
                                 if num_id(ui, ("mat_prop", key, &p.name), &mut v).changed() {

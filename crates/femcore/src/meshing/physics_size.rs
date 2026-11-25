@@ -17,7 +17,7 @@
 //! of this module measure them on a closed form. They are not a guarantee for geometry that varies faster than the wave (`Size` rules
 //! and curvature stay with `meshing::geometry_floor`; combine the two by intersecting their metrics).
 
-use crate::material::M6;
+use crate::material::{M3, M6};
 use crate::mesh::SimplexMesh;
 use super::sizing::Sizing;
 use crate::adapt::metric::{isotropic, sym_eig, Sym};
@@ -50,39 +50,98 @@ impl PhysicsSizing {
     }
 }
 
-/// Slowest and fastest plane-wave speed of a medium with stiffness `c` (solver Voigt order xx, yy, zz, xy, yz, xz; engineering shear) and
-/// density `rho`: square roots of the extreme eigenvalues of the Christoffel matrix `B(n)^T C B(n) / rho` over 400 directions `n`
-/// spread evenly on the sphere (a Fibonacci lattice; the sampled minimum is at most a fraction of a percent above the true one).
-pub fn wave_speed_range(c: &M6, rho: f64) -> (f64, f64) {
+#[inline]
+fn strain_op(q: [f64; 3], v: [f64; 3]) -> [f64; 6] {
+    [
+        q[0] * v[0],
+        q[1] * v[1],
+        q[2] * v[2],
+        q[1] * v[0] + q[0] * v[1],
+        q[2] * v[1] + q[1] * v[2],
+        q[2] * v[0] + q[0] * v[2],
+    ]
+}
+
+struct ChristoffelEval {
+    g: M3,
+    g_pz: [f64; 3],
+    eps_q: f64,
+}
+
+fn christoffel_matrix(
+    q: [f64; 3],
+    c: &M6,
+    piezo: Option<(&[[f64; 6]; 3], &M3)>,
+    rho: f64,
+) -> ChristoffelEval {
+    let cols: [[f64; 6]; 3] = [
+        strain_op(q, [1.0, 0.0, 0.0]),
+        strain_op(q, [0.0, 1.0, 0.0]),
+        strain_op(q, [0.0, 0.0, 1.0]),
+    ];
+    let mut g_pz = [0.0; 3];
+    let mut eps_q = 0.0;
+    if let Some((e, eps)) = piezo {
+        for a in 0..3 {
+            let mut acc = 0.0;
+            for i in 0..3 {
+                for j in 0..6 {
+                    acc += q[i] * e[i][j] * cols[a][j];
+                }
+            }
+            g_pz[a] = acc;
+        }
+        for i in 0..3 {
+            for j in 0..3 {
+                eps_q += q[i] * eps[i][j] * q[j];
+            }
+        }
+    }
+    let mut g = [[0.0; 3]; 3];
+    for a in 0..3 {
+        for bb in 0..3 {
+            let mut s = 0.0;
+            for p in 0..6 {
+                for r in 0..6 {
+                    s += cols[a][p] * c[p][r] * cols[bb][r];
+                }
+            }
+            if eps_q > 1e-300 {
+                s += g_pz[a] * g_pz[bb] / eps_q;
+            }
+            g[a][bb] = s / rho;
+        }
+    }
+    ChristoffelEval { g, g_pz, eps_q }
+}
+
+fn wave_speed_range_opt(c: &M6, piezo: Option<(&[[f64; 6]; 3], &M3)>, rho: f64) -> (f64, f64) {
     const N: usize = 400;
     let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
     let (mut lo, mut hi) = (f64::INFINITY, 0.0f64);
     for i in 0..N {
         let z = 1.0 - 2.0 * (i as f64 + 0.5) / N as f64;
         let r = (1.0 - z * z).sqrt();
-        let n = [r * (golden * i as f64).cos(), r * (golden * i as f64).sin(), z];
-        // strain of a displacement amplitude v for a plane wave along n
-        let b = |v: [f64; 3]| -> [f64; 6] {
-            [n[0] * v[0], n[1] * v[1], n[2] * v[2], n[1] * v[0] + n[0] * v[1], n[2] * v[1] + n[1] * v[2], n[2] * v[0] + n[0] * v[2]]
-        };
-        let cols: Vec<[f64; 6]> = (0..3).map(|k| b(std::array::from_fn(|j| (j == k) as u8 as f64))).collect();
-        let mut g = [[0.0; 3]; 3];
-        for a in 0..3 {
-            for bb in 0..3 {
-                let mut s = 0.0;
-                for p in 0..6 {
-                    for q in 0..6 {
-                        s += cols[a][p] * c[p][q] * cols[bb][q];
-                    }
-                }
-                g[a][bb] = s / rho;
-            }
-        }
+        let q = [r * (golden * i as f64).cos(), r * (golden * i as f64).sin(), z];
+        let ChristoffelEval { g, .. } = christoffel_matrix(q, c, piezo, rho);
         let (ev, _) = sym_eig::<3>(&g);
         lo = lo.min(ev[2].max(0.0));
         hi = hi.max(ev[0]);
     }
     (lo.sqrt(), hi.sqrt())
+}
+
+/// Slowest and fastest plane-wave speed of a medium with stiffness `c` (solver Voigt order xx, yy, zz, xy, yz, xz; engineering shear) and
+/// density `rho`: square roots of the extreme eigenvalues of the Christoffel matrix `B(n)^T C B(n) / rho` over 400 directions `n`
+/// spread evenly on the sphere (a Fibonacci lattice; the sampled minimum is at most a fraction of a percent above the true one).
+pub fn wave_speed_range(c: &M6, rho: f64) -> (f64, f64) {
+    wave_speed_range_opt(c, None, rho)
+}
+
+/// Slowest and fastest quasistatically stiffened piezoelectric plane-wave speeds `(v_min, v_max)` for short-circuit stiffness `c`
+/// (solver Voigt order), coupling `e` (solver Voigt columns), absolute permittivity `eps_abs` (F/m), and density `rho`.
+pub fn piezo_wave_speed_range(c: &M6, e: &[[f64; 6]; 3], eps_abs: &M3, rho: f64) -> (f64, f64) {
+    wave_speed_range_opt(c, Some((e, eps_abs)), rho)
 }
 
 // ---- from a neutral `Sizing` (what a physics reports) to element sizes ----
@@ -207,6 +266,26 @@ pub struct BackwardWaveCheck {
 /// to `outward_normal`) to detect antiparallel backward-wave branches `(k . n_hat)(v_g . n_hat) < 0`
 /// and compute the stabilizing M-PML tangential damping ratio (`1.25 * p_min`).
 pub fn backward_wave_mpml_ratio(c: &M6, rho: f64, outward_normal: [f64; 3]) -> BackwardWaveCheck {
+    backward_wave_mpml_ratio_opt(c, None, rho, outward_normal)
+}
+
+/// Piezoelectrically stiffened Christoffel backward-wave check for M-PML stabilization.
+pub fn piezo_backward_wave_mpml_ratio(
+    c: &M6,
+    e: &[[f64; 6]; 3],
+    eps_abs: &M3,
+    rho: f64,
+    outward_normal: [f64; 3],
+) -> BackwardWaveCheck {
+    backward_wave_mpml_ratio_opt(c, Some((e, eps_abs)), rho, outward_normal)
+}
+
+fn backward_wave_mpml_ratio_opt(
+    c: &M6,
+    piezo: Option<(&[[f64; 6]; 3], &M3)>,
+    rho: f64,
+    outward_normal: [f64; 3],
+) -> BackwardWaveCheck {
     let n_norm = (outward_normal[0] * outward_normal[0]
         + outward_normal[1] * outward_normal[1]
         + outward_normal[2] * outward_normal[2])
@@ -244,33 +323,7 @@ pub fn backward_wave_mpml_ratio(c: &M6, rho: f64, outward_normal: [f64; 3]) -> B
         if q_dot_n <= 1e-6 {
             return;
         }
-        let b_op = |v: [f64; 3]| -> [f64; 6] {
-            [
-                q[0] * v[0],
-                q[1] * v[1],
-                q[2] * v[2],
-                q[1] * v[0] + q[0] * v[1],
-                q[2] * v[1] + q[1] * v[2],
-                q[2] * v[0] + q[0] * v[2],
-            ]
-        };
-        let cols: [[f64; 6]; 3] = [
-            b_op([1.0, 0.0, 0.0]),
-            b_op([0.0, 1.0, 0.0]),
-            b_op([0.0, 0.0, 1.0]),
-        ];
-        let mut g = [[0.0; 3]; 3];
-        for a in 0..3 {
-            for bb in 0..3 {
-                let mut s = 0.0;
-                for p_idx in 0..6 {
-                    for q_idx in 0..6 {
-                        s += cols[a][p_idx] * c[p_idx][q_idx] * cols[bb][q_idx];
-                    }
-                }
-                g[a][bb] = s / rho;
-            }
-        }
+        let ChristoffelEval { g, g_pz, eps_q } = christoffel_matrix(q, c, piezo, rho);
         let (ev, vecs) = sym_eig::<3>(&g);
         for m in 0..3 {
             if ev[m] <= 1e-30 {
@@ -278,22 +331,42 @@ pub fn backward_wave_mpml_ratio(c: &M6, rho: f64, outward_normal: [f64; 3]) -> B
             }
             let vp = ev[m].sqrt();
             let p = [vecs[0][m], vecs[1][m], vecs[2][m]];
-            let eps = b_op(p);
+            let s_vec = strain_op(q, p);
             let mut sig = [0.0; 6];
             for r_idx in 0..6 {
                 let mut acc = 0.0;
                 for c_idx in 0..6 {
-                    acc += c[r_idx][c_idx] * eps[c_idx];
+                    acc += c[r_idx][c_idx] * s_vec[c_idx];
                 }
                 sig[r_idx] = acc;
             }
-            // Exact Hellmann-Feynman group velocity `v_{g,i} = ((B(e_i) p) . (C B(q) p)) / (rho v_p)`
+            let mut d_vec = [0.0; 3];
+            if let (Some((e, eps)), true) = (piezo, eps_q > 1e-300) {
+                let phi0 = (g_pz[0] * p[0] + g_pz[1] * p[1] + g_pz[2] * p[2]) / eps_q;
+                for r_idx in 0..6 {
+                    for i in 0..3 {
+                        sig[r_idx] += e[i][r_idx] * q[i] * phi0;
+                    }
+                }
+                for i in 0..3 {
+                    let mut e_s = 0.0;
+                    for r_idx in 0..6 {
+                        e_s += e[i][r_idx] * s_vec[r_idx];
+                    }
+                    let mut eps_q_i = 0.0;
+                    for j in 0..3 {
+                        eps_q_i += eps[i][j] * q[j];
+                    }
+                    d_vec[i] = phi0 * (e_s - eps_q_i * phi0);
+                }
+            }
+            // Exact Hellmann-Feynman piezoelectric group velocity `v_{g,i} = ((B(e_i) p) . T + phi0 D_i) / (rho v_p)`
             // Solver Voigt order: 0=xx, 1=yy, 2=zz, 3=xy, 4=yz, 5=xz
             let inv_rvp = 1.0 / (rho * vp);
             let vg = [
-                (sig[0] * p[0] + sig[3] * p[1] + sig[5] * p[2]) * inv_rvp,
-                (sig[3] * p[0] + sig[1] * p[1] + sig[4] * p[2]) * inv_rvp,
-                (sig[5] * p[0] + sig[4] * p[1] + sig[2] * p[2]) * inv_rvp,
+                (sig[0] * p[0] + sig[3] * p[1] + sig[5] * p[2] + d_vec[0]) * inv_rvp,
+                (sig[3] * p[0] + sig[1] * p[1] + sig[4] * p[2] + d_vec[1]) * inv_rvp,
+                (sig[5] * p[0] + sig[4] * p[1] + sig[2] * p[2] + d_vec[2]) * inv_rvp,
             ];
             let vg_norm = (vg[0] * vg[0] + vg[1] * vg[1] + vg[2] * vg[2]).sqrt();
             if vg_norm <= 1e-30 {
@@ -423,5 +496,89 @@ mod tests {
         let ln_chk = backward_wave_mpml_ratio(&c_ln_ycut, 4640.0, [0.0, 0.0, 1.0]);
         assert!(ln_chk.has_backward_wave, "128Y-X LiNbO3 must exhibit backward wave: {ln_chk:?}");
         assert!(ln_chk.recommended_mpml_ratio > 0.01);
+    }
+
+    #[test]
+    fn piezo_christoffel_stiffening_and_group_velocity_match_fd() {
+        use crate::material::{piezo_e_global, stiffness_global, tensor_global, coupled::EPSILON_0, Stiffness, Tensor};
+        // Wurtzite AlN parameters (solver Voigt)
+        let aln_c = stiffness_global(
+            &Stiffness::Hexagonal { c11: 410e9, c12: 149e9, c13: 99e9, c33: 389e9, c44: 125e9 },
+            [0.0, 0.0, 0.0],
+        );
+        let e_tb = [
+            [0.0, 0.0, 0.0, 0.0, -0.48, 0.0],
+            [0.0, 0.0, 0.0, -0.48, 0.0, 0.0],
+            [-0.58, -0.58, 1.55, 0.0, 0.0, 0.0],
+        ];
+        let e_sol = piezo_e_global(&e_tb, [0.0, 0.0, 0.0]);
+        let eps_r = tensor_global(&Tensor::Diagonal { x: 9.21, y: 9.21, z: 10.12 }, [0.0, 0.0, 0.0]);
+        let mut eps_abs = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                eps_abs[i][j] = EPSILON_0 * eps_r[i][j];
+            }
+        }
+        let rho = 3260.0;
+        let (v0_lo, v0_hi) = wave_speed_range(&aln_c, rho);
+        let (vp_lo, vp_hi) = piezo_wave_speed_range(&aln_c, &e_sol, &eps_abs, rho);
+        assert!(vp_hi > v0_hi, "piezo stiffening increases max phase velocity: {vp_hi} vs {v0_hi}");
+        assert!(vp_lo >= v0_lo - 1e-9);
+        // Analytical longitudinal z-axis stiffened velocity: sqrt((c33 + e33^2 / eps33) / rho)
+        let vz_exact = ((389e9 + 1.55 * 1.55 / (EPSILON_0 * 10.12)) / rho).sqrt();
+        assert!((vp_hi - vz_exact).abs() / vz_exact < 3e-3, "vp_hi={vp_hi} vs vz_exact={vz_exact}");
+        let ChristoffelEval { g: gz, .. } = christoffel_matrix([0.0, 0.0, 1.0], &aln_c, Some((&e_sol, &eps_abs)), rho);
+        let (evz, _) = sym_eig::<3>(&gz);
+        assert!((evz[0].sqrt() - vz_exact).abs() / vz_exact < 1e-12);
+
+        // Compare Hellmann-Feynman piezo group velocity along tilted k against central finite difference
+        let k0 = [0.48_f64, 0.36, 0.80]; // norm^2 = 1.00
+        let knorm = (k0[0] * k0[0] + k0[1] * k0[1] + k0[2] * k0[2]).sqrt();
+        let q = [k0[0] / knorm, k0[1] / knorm, k0[2] / knorm];
+        let ChristoffelEval { g, g_pz, eps_q } = christoffel_matrix(q, &aln_c, Some((&e_sol, &eps_abs)), rho);
+        let (ev, vecs) = sym_eig::<3>(&g);
+        let vp = ev[0].sqrt();
+        let p = [vecs[0][0], vecs[1][0], vecs[2][0]];
+        let s_vec = strain_op(q, p);
+        let phi0 = (g_pz[0] * p[0] + g_pz[1] * p[1] + g_pz[2] * p[2]) / eps_q;
+        let mut sig = [0.0; 6];
+        for r in 0..6 {
+            for c in 0..6 {
+                sig[r] += aln_c[r][c] * s_vec[c];
+            }
+            for i in 0..3 {
+                sig[r] += e_sol[i][r] * q[i] * phi0;
+            }
+        }
+        let mut d_vec = [0.0; 3];
+        for i in 0..3 {
+            let e_s: f64 = (0..6).map(|r| e_sol[i][r] * s_vec[r]).sum();
+            let eps_qi: f64 = (0..3).map(|j| eps_abs[i][j] * q[j]).sum();
+            d_vec[i] = phi0 * (e_s - eps_qi * phi0);
+        }
+        let vg_hf = [
+            (sig[0] * p[0] + sig[3] * p[1] + sig[5] * p[2] + d_vec[0]) / (rho * vp),
+            (sig[3] * p[0] + sig[1] * p[1] + sig[4] * p[2] + d_vec[1]) / (rho * vp),
+            (sig[5] * p[0] + sig[4] * p[1] + sig[2] * p[2] + d_vec[2]) / (rho * vp),
+        ];
+        let h = 1e-6;
+        for axis in 0..3 {
+            let mut kp = q;
+            let mut km = q;
+            kp[axis] += h;
+            km[axis] -= h;
+            let eval_omega = |kv: [f64; 3]| -> f64 {
+                let kmag = (kv[0] * kv[0] + kv[1] * kv[1] + kv[2] * kv[2]).sqrt();
+                let uq = [kv[0] / kmag, kv[1] / kmag, kv[2] / kmag];
+                let ChristoffelEval { g: gk, .. } = christoffel_matrix(uq, &aln_c, Some((&e_sol, &eps_abs)), rho);
+                let (evk, _) = sym_eig::<3>(&gk);
+                kmag * evk[0].sqrt()
+            };
+            let vg_fd = (eval_omega(kp) - eval_omega(km)) / (2.0 * h);
+            assert!((vg_hf[axis] - vg_fd).abs() / vp < 1e-7, "axis {axis}: {} vs {vg_fd}", vg_hf[axis]);
+        }
+        // Check piezo backward-wave M-PML helper is callable cleanly
+        let chk = piezo_backward_wave_mpml_ratio(&aln_c, &e_sol, &eps_abs, rho, [0.0, 0.0, 1.0]);
+        assert!(chk.min_projection.is_finite());
     }
 }

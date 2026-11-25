@@ -35,6 +35,8 @@ pub mod dense;
 pub mod direct;
 pub mod driver;
 pub mod eps;
+pub mod equilibrate;
+pub mod prom;
 pub mod expm;
 pub mod faer_glue;
 pub mod fieldsplit;

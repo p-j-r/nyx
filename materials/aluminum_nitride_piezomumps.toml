@@ -39,7 +39,7 @@ form = "strain_charge"
 unit = "pC/N"
 d31 = -2.0
 d33 = 4.5
-d15 = 3.6
+d15 = -3.6
 source = { cite = "APPROXIMATE c-axis textured sputtered AlN piezoelectric strain-charge coefficients in MEMSCAP PiezoMUMPs Design Handbook Rev. 1.3 (d31 ~ -2.0 pC/N, d33 ~ 4.5 pC/N)", url = "https://www.memscap.com/products/mumps/piezomumps" }
 
 [optical]

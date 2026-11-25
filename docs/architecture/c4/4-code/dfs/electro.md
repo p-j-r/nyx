@@ -5,30 +5,30 @@ C4 level 4 (code) of the component **Electrostatics kernel** (`dfs.electro`) in 
 > Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md)  
-**Size:** 3 files, 3451 lines.
+**Size:** 3 files, 3979 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-dfs/src/ac_loss.rs` | 438 |  |
-| `crates/nyx-dfs/src/electro.rs` | 1488 |  |
-| `crates/nyx-dfs/src/planar_bem.rs` | 1525 |  |
+| `crates/nyx-dfs/src/electro.rs` | 2010 |  |
+| `crates/nyx-dfs/src/planar_bem.rs` | 1531 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::electro, adapt::estimate, adapt::estimate3, fem, fields, linalg::amg_elastic, linalg::csr::assembly, linalg::driver +8 | AmgOptions, CellFields, CellPermittivity, Coo, DEFAULT_EPS_FLOOR, DEFAULT_QUARTER_POINT_XI, DirectSolver, ElectroEstimatorOptions, EquilibratedFluxResult, LinearSolver +20 |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, result | CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Scalar, Solution, SolveResult, TlsMeta, cell_fields_of |
-| [Shared helpers](./common.md) | common | cell_gradient, components, minmax, norm_of, plane_tensors |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::electro, adapt::estimate, adapt::estimate3, fem, fem_mixed, fields, linalg::amg_elastic, linalg::csr::assembly +10 | AmgOptions, CellFields, CellPermittivity, Coo, DEFAULT_EPS_FLOOR, DEFAULT_QUARTER_POINT_XI, DirectSolver, ElectroEstimatorOptions, EquilibratedFluxResult, LagrangeSpace +23 |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, result | CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult, TlsMeta +3 |
+| [Shared helpers](./common.md) | common | assemble_boundary_load_mixed, assemble_farfield_robin_mixed, assemble_ie_outer_robin_mixed, assemble_laplace_ie_mixed, assemble_source_mixed, cell_gradient, cell_tensor_mixed, cell_values_mixed, check_boundary_labels_mixed, classify_ie_outer_facets_mixed +10 |
 | [Typed problem](./problem.md) | problem | BcKind, Problem |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
-| [Physics adapter](./adapter.md) | electro, planar_bem | EPS0, ElectroAssembly, LayeredStack, assemble_electrostatics, electrostatics_fields, layered_greens_function, solve_electrostatics, solve_planar_bem +1 |
+| [Physics adapter](./adapter.md) | electro, planar_bem | EPS0, ElectroAssembly, LayeredStack, assemble_electrostatics, electrostatics_fields, layered_greens_function, solve_electrostatics, solve_electrostatics_mixed +2 |
 
 ## Class diagram
 
@@ -74,6 +74,7 @@ classDiagram
         +solve_potential(mesh, spec, asm) Result
         +electrostatics_fields(mesh, order, v) tuple
         +solve_electrostatics(mesh, spec) Result
+        +solve_electrostatics_mixed(mesh, spec) Result
         +EPS0 const
     }
   }
@@ -110,23 +111,24 @@ classDiagram
 | fn | `assemble_cond_loss_matrix` | `ac_loss.rs:78` | `pub fn assemble_cond_loss_matrix( mesh: &Discretisation, spec: &Problem, freq_hz: Option<f64>, ) -> Result<(Option<Csr>, f64), String>` —  Evaluates the per-cell real permittivity tensor `eps_r(c)`, effective loss conductivity tensor |
 | fn | `compute_ac_loss` | `ac_loss.rs:200` | `pub fn compute_ac_loss( mesh: &Discretisation, spec: &Problem, freq_hz: Option<f64>, k: &Csr, free: &[usize], v_all: &[Vec<f64>], base_maxwell_matrix_f: &[Vec<f64>], ) -> Result<AcLossResult, String>` —  Computes AC terminal conductance `G_ij(omega)`, positive 2nd-order capacitance shift `Delta C_ij^(2)`, |
 | fn | `solve_electrostatics_with_ac_loss` | `ac_loss.rs:360` | `pub fn solve_electrostatics_with_ac_loss( mesh: &Discretisation, spec: &Problem, freq_hz: Option<f64>, ) -> Result<(SolveResult, AcLossResult), String>` —  Runs `solve_electrostatics` and evaluates the AC quasi-static conductance matrix `G_ij(omega)`, |
-| const | `EPS0` | `electro.rs:21` | `f64` |
-| struct | `ElectroAssembly` | `electro.rs:28` | fields: `k`, `f`, `fixed`, `vals`, `volt`, `has_open` —  Stage 1 of electrostatics: the stiffness matrix, the load and the Dirichlet dofs. |
-| fn | `assemble_laplace_curved_3d` | `electro.rs:69` | `pub(crate) fn assemble_laplace_curved_3d(mesh: &Discretisation, order: usize, coeff: &[f64]) -> Result<Csr, String>` |
-| fn | `assemble_laplace_tensor_curved_3d` | `electro.rs:131` | `pub(crate) fn assemble_laplace_tensor_curved_3d(mesh: &Discretisation, order: usize, kt: &[M3]) -> Result<Csr, String>` |
-| fn | `enrich_quarter_point_mesh` | `electro.rs:205` | `pub fn enrich_quarter_point_mesh(mesh: &Discretisation, spec: &Problem) -> Option<(Discretisation, usize, usize)>` —  Enriches a 3D mesh for P2 Barsoum quarter-point singularity capture (`singular_edges = "quarter_point"`) |
-| fn | `prepare_electro_mesh` | `electro.rs:249` | `pub fn prepare_electro_mesh(mesh: &Discretisation, spec: &Problem) -> (Option<(Discretisation, usize, usize)>, bool)` —  Prepares the working discretisation for electrostatics: |
-| fn | `assemble_electrostatics` | `electro.rs:531` | `pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String>` |
-| fn | `solve_potential` | `electro.rs:539` | `pub fn solve_potential( mesh: &Discretisation, spec: &Problem, asm: &ElectroAssembly, ) -> Result<(Vec<f64>, Option<String>), String>` —  Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one |
-| fn | `electrostatics_fields` | `electro.rs:550` | `pub fn electrostatics_fields(mesh: &Discretisation, order: usize, v: &[f64]) -> (Vec<Field>, CellFields)` —  Stage 3: the fields `V` and `E` (the flat names `\|E\|`, `Ex`, `Ez` come from `Solution::flat_fields`) and the same without averaging over |
-| fn | `solve_electrostatics` | `electro.rs:993` | `pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| const | `EPS0` | `electro.rs:29` | `f64` |
+| struct | `ElectroAssembly` | `electro.rs:36` | fields: `k`, `f`, `fixed`, `vals`, `volt`, `has_open` —  Stage 1 of electrostatics: the stiffness matrix, the load and the Dirichlet dofs. |
+| fn | `assemble_laplace_curved_3d` | `electro.rs:77` | `pub(crate) fn assemble_laplace_curved_3d(mesh: &Discretisation, order: usize, coeff: &[f64]) -> Result<Csr, String>` |
+| fn | `assemble_laplace_tensor_curved_3d` | `electro.rs:139` | `pub(crate) fn assemble_laplace_tensor_curved_3d(mesh: &Discretisation, order: usize, kt: &[M3]) -> Result<Csr, String>` |
+| fn | `enrich_quarter_point_mesh` | `electro.rs:213` | `pub fn enrich_quarter_point_mesh(mesh: &Discretisation, spec: &Problem) -> Option<(Discretisation, usize, usize)>` —  Enriches a 3D mesh for P2 Barsoum quarter-point singularity capture (`singular_edges = "quarter_point"`) |
+| fn | `prepare_electro_mesh` | `electro.rs:257` | `pub fn prepare_electro_mesh(mesh: &Discretisation, spec: &Problem) -> (Option<(Discretisation, usize, usize)>, bool)` —  Prepares the working discretisation for electrostatics: |
+| fn | `assemble_electrostatics` | `electro.rs:594` | `pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String>` |
+| fn | `solve_potential` | `electro.rs:602` | `pub fn solve_potential( mesh: &Discretisation, spec: &Problem, asm: &ElectroAssembly, ) -> Result<(Vec<f64>, Option<String>), String>` —  Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one |
+| fn | `electrostatics_fields` | `electro.rs:613` | `pub fn electrostatics_fields(mesh: &Discretisation, order: usize, v: &[f64]) -> (Vec<Field>, CellFields)` —  Stage 3: the fields `V` and `E` (the flat names `\|E\|`, `Ex`, `Ez` come from `Solution::flat_fields`) and the same without averaging over |
+| fn | `solve_electrostatics` | `electro.rs:1056` | `pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| fn | `solve_electrostatics_mixed` | `electro.rs:1581` | `pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves electrostatics natively on a mixed mesh (`Tri`/`Quad` in 2D, `Tet`/`Prism`/`Hex` in 3D) |
 | struct | `LayeredStack` | `planar_bem.rs:33` | fields: `eps_top`, `eps_sub`, `eps_bot`, `t_sub`, `grounded_backplane` —  Three-layer planar dielectric stack around a conductor sheet plane `z = z_sheet`. |
 | fn | `layered_greens_function` | `planar_bem.rs:102` | `pub fn layered_greens_function(rho: f64, stack: &LayeredStack) -> f64` —  Evaluates the exact layered-dielectric reflection image Green's function `G(rho)` on `z = z' = z_sheet` |
 | fn | `extrapolate_spd_log_space` | `planar_bem.rs:428` | `pub fn extrapolate_spd_log_space(c0: &[Vec<f64>], c1: &[Vec<f64>], w1: f64) -> Result<Vec<Vec<f64>>, String>` —  Applies log-space SPD Richardson extrapolation (`r = 2`, `w_1 = 2.0`) to coarse (`c0`) and |
 | fn | `has_thick_sheet_or_trench_geometry` | `planar_bem.rs:535` | `pub fn has_thick_sheet_or_trench_geometry(mesh: &Discretisation, spec: &Problem) -> bool` —  Detects whether `mesh` or `spec` represents a 3D resolved finite-thickness conductor sheet |
 | fn | `can_use_planar_bem` | `planar_bem.rs:602` | `pub fn can_use_planar_bem(mesh: &Discretisation, spec: &Problem) -> bool` —  Checks whether `mesh` and `spec` represent a planar sheet capacitance problem suitable for |
 | fn | `solve_planar_bem_with_stack` | `planar_bem.rs:1325` | `pub fn solve_planar_bem_with_stack( mesh: &Discretisation, spec: &Problem, stack_override: Option<LayeredStack>, ) -> Result<SolveResult, String>` —  Solves a multi-terminal planar sheet capacitance problem with an explicit [`LayeredStack`]. |
-| fn | `solve_planar_bem` | `planar_bem.rs:1522` | `pub fn solve_planar_bem(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a multi-terminal planar sheet capacitance problem by auto-detecting the layered stack |
+| fn | `solve_planar_bem` | `planar_bem.rs:1528` | `pub fn solve_planar_bem(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a multi-terminal planar sheet capacitance problem by auto-detecting the layered stack |
 | fn | `LayeredStack::eps_eff` | `planar_bem.rs:48` | `pub fn eps_eff(&self) -> f64` —  Effective half-space relative permittivity `eps_eff = (eps_1 + eps_2) / 2`. |
 | fn | `LayeredStack::k21` | `planar_bem.rs:53` | `pub fn k21(&self) -> f64` —  Reflection coefficient `k_21 = (eps_2 - eps_1) / (eps_2 + eps_1)`. |
 | fn | `LayeredStack::k23` | `planar_bem.rs:58` | `pub fn k23(&self) -> f64` —  Reflection coefficient `k_23 = -1` for a grounded backplane, or `(eps_2 - eps_3) / (eps_2 + eps_3)`. |

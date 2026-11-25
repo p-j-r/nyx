@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 > The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 1 file, 106 lines.
+**Size:** 1 file, 107 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/lib.rs` | 106 |  |
+| `crates/nyx-engine/src/lib.rs` | 107 |  |
 
 ## What it uses
 
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 | [container `analysis` (nyx-analysis)](../../3-components/analysis.md) | crate root |  |
 | [container `dfs` (nyx-dfs)](../../3-components/dfs.md) | crate root | Dfs |
 | [container `ems` (nyx-ems)](../../3-components/ems.md) | crate root | Ems |
-| [container `femcore` (femcore)](../../3-components/femcore.md) | fields, mesh, mesh::view, meshing::geomdrive, progress | Display, Progress, SimplexMesh, ViewMesh |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | fields, mesh, mesh::view, meshing::geomdrive, meshing::request, progress | Display, PmlModeRequest, Progress, SimplexMesh, ViewMesh |
 | [container `geom` (geom)](../../3-components/geom.md) | crate root |  |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, error, physics, registry | Error, Physics, Registry |
 | [container `sms` (nyx-sms)](../../3-components/sms.md) | crate root | Sms |
@@ -28,17 +28,17 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 | [Commands](./commands.md) | commands, engine | Access, CommandDesc, Engine |
 | [Job runner and queue](./jobs.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, QueueOpts, Submit +1 |
 | [Meshing seam](./meshing.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
-| [Project](./project.md) | project | MeshSettings, Project, SweepLayer |
+| [Project](./project.md) | crate root, project | MeshSettings, PmlModeRequest, Project, SweepLayer |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
 | [app: Scripts and batch](../app/headless.md) | crate root | Done, Scalar |
-| [app: Inspector tabs](../app/inspector.md) | crate root | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap +23 |
+| [app: Inspector tabs](../app/inspector.md) | crate root | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap +24 |
 | [app: Shell and dashboard](../app/shell.md) | crate root | Active, Artifact, Done, Entry, ExportOptions, FeatureList, Filter, Inspection +35 |
 | [app: Viewport](../app/viewport.md) | crate root | Display, ViewMesh |
-| [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, MaterialAssign, ModeAnalysis +9 |
+| [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, MaterialAssign, ModeAnalysis +10 |
 | [Commands](./commands.md) | crate root | physics_for, registry |
 | [Job runner and queue](./jobs.md) | crate root | physics_for, registry |
 | [Meshing seam](./meshing.md) | crate root | physics_for |

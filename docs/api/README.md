@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:beeeb69cdd3f46d7f08513ce570c99c0` · 113 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:eb174910eca9b2d0ee4ff3d9ba229175` · 113 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|

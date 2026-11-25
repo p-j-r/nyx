@@ -25,16 +25,19 @@ C4 level 4 (code) of the component **cQED result payloads** (`physics.cqed`) in 
 |---|---|---|
 | [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | cqed | CapacitanceMatrixData, InductanceMatrixData, TlsMeta |
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | cqed | CircuitRom, DrivenPortData, ModeEnergyRow, RomPort, TlsMeta |
+| [analysis: Piezo resonator analysis](../analysis/piezo.md) | cqed | DrivenPortData |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | cqed | CapacitanceMatrixData, ElectroAmrData, TlsMeta |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | cqed | InductanceMatrixData |
 | [dfs: Typed problem](../dfs/problem.md) | cqed | TlsInterfaces |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | cqed | DrivenPortData |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | cqed | CircuitRom, ModeEnergyRow, RomPort, TlsMeta |
 | [ems: Typed problem](../ems/problem.md) | cqed | TlsInterfaces |
+| [engine: Analyses](../engine/analyse.md) | cqed | CapacitanceMatrixData, CircuitRom |
 | [engine: Job runner and queue](../engine/jobs.md) | cqed | CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, TlsMeta |
 | [engine: Meshing seam](../engine/meshing.md) | cqed | AdaptPassRecord, CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, TlsMeta |
 | [Problem envelope](./envelope.md) | cqed | TlsInterfaceSpec, TlsInterfaces |
 | [Physics trait and registry](./trait.md) | cqed | AdaptPassRecord, CAPACITANCE_KEY, CIRCUIT_ROM_KEY, CapacitanceMatrixData, CircuitRom, DRIVEN_PORT_KEY, DrivenPortData, ELECTRO_AMR_KEY +9 |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | cqed | DrivenPortData |
 
 ## Class diagram
 

@@ -1,29 +1,29 @@
-components: 111, lines of Rust in components: 162529, classes drawn: 877, public items listed: 3836
+components: 114, lines of Rust in components: 208735, classes drawn: 965, public items listed: 4441
 
 container-level references found in the source (from->to, number of references):
-  analysis->femcore 67
-  analysis->physics 55
+  analysis->femcore 71
+  analysis->physics 59
   app->connect 10
-  app->engine 195
+  app->engine 201
   app->script 12
-  dfs->femcore 105
-  dfs->physics 46
-  ems->femcore 261
-  ems->physics 70
-  engine->analysis 24
+  dfs->femcore 174
+  dfs->physics 58
+  ems->femcore 470
+  ems->physics 85
+  engine->analysis 26
   engine->dfs 1
   engine->ems 1
-  engine->femcore 147
-  engine->geom 51
-  engine->physics 122
+  engine->femcore 173
+  engine->geom 58
+  engine->physics 125
   engine->sms 1
   engine->storage 3
   engine->store 18
-  femcore->geom 114
-  physics->femcore 29
+  femcore->geom 133
+  physics->femcore 44
   script->engine 10
-  sms->femcore 147
-  sms->physics 44
+  sms->femcore 473
+  sms->physics 75
 
 references in the source that the DSL container relationships do not declare:
   none

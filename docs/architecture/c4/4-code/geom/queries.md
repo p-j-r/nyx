@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 > Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data.
 
 **Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md)  
-**Size:** 5 files, 2319 lines.
+**Size:** 5 files, 2999 lines.
 
 ## Files
 
@@ -15,15 +15,15 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 | `crates/geom/src/labels.rs` | 254 | `LabelMap`: the compiled, deterministic mapping between names and the integer labels the solvers consume. Domain label = region (1-based in overlay order, pins honoured and checked); boundary label = one per facet (ordered by provenance,... |
 | `crates/geom/src/query.rs` | 405 | Exact queries on an evaluated 2D model: measures, curve evaluation with first and second derivatives, curvature radii, chord / facet deviation, edge discretisation by deviation and size, midpoint projection (where a quadratic element put... |
 | `crates/geom/src/select.rs` | 1145 | Selectors: small serialisable rules that resolve against an evaluated complex to typed entity sets (regions, facets, vertices). The text form (`name(core.top) \| interface(Si, BOX)`) parses to the serde form and prints back deterministica... |
-| `crates/geom/src/sim.rs` | 246 | Simulation operations as *data*: absorbing-layer regions, mesh size rules, periodic face pairs (verified congruent), and the projection oracle. geom describes which entities and how; femcore decides what a condition means and applies it. |
+| `crates/geom/src/sim.rs` | 926 | Simulation operations as *data*: absorbing-layer regions, mesh size rules, periodic face pairs (verified congruent), and the projection oracle. geom describes which entities and how; femcore decides what a condition means and applies it. |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [Evaluation](./evaluation.md) | eval, scene | Evaluated, axis_perm |
-| [Feature list](./featurelist.md) | error, expr, model | Axis, Expr, GeomError, GeomResult, Op, RegionKind |
-| [2D kernel](./kernel2d.md) | complex, curve | Complex, Curve, FaceGeom, curve_kind |
+| [Evaluation](./evaluation.md) | eval, scene | Evaluated, Node, PmlInfo, RegionX, axis_perm |
+| [Feature list](./featurelist.md) | error, expr, model | Axis, Expr, GeomError, GeomResult, Op, PmlCoordKind, PmlGrowMode, PmlRole, RegionKind |
+| [2D kernel](./kernel2d.md) | complex, curve, prim | Body, Complex, Curve, Edge, Face, FaceGeom, Region, curve_kind |
 | [Math helpers](./math.md) | math | Aabb, V2 |
 
 ## Used by
@@ -31,7 +31,7 @@ C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in
 | Component | Modules | Items |
 |---|---|---|
 | [engine: Geometry operations](../engine/geometry.md) | select | Selector |
-| [engine: Meshing seam](../engine/meshing.md) | labels, select | EntityKind, EntitySet, LabelMap, Selector |
+| [engine: Meshing seam](../engine/meshing.md) | labels, select, sim | EntityKind, EntitySet, LabelMap, PmlRegion, Selector |
 | [femcore: Fixtures and test kit](../femcore/fixtures.md) | select | Selector |
 | [femcore: Meshing facade](../femcore/meshing.md) | labels, query, select | DiscretizeOpts, EntityKind, LabelMap, Selector |
 | [femcore: 3D meshing](../femcore/meshing3d.md) | labels, query, select, sim | DiscretizeOpts, EntityKind, LabelMap, PeriodicPair |
@@ -134,7 +134,7 @@ classDiagram
         +edge_eval(e, t) V3
         +edge_tangent(e, t) V3
         +edge_curvature(e, t) f64
-        +more_19_methods()
+        +more_20_methods()
     }
     class fns_labels_rs {
         <<module labels.rs>>
@@ -236,6 +236,8 @@ classDiagram
         +thickness f64
         +layers f64
         +grading f64
+        +coord PmlCoordKind
+        +more_7_fields
     }
     class SizeRule {
         <<struct>>
@@ -364,17 +366,18 @@ classDiagram
 | fn | `Evaluated::resolve` | `select.rs:993` | `pub fn resolve(&self, sel: &Selector) -> GeomResult<Resolved>` —  Resolves a selector to an entity set plus warnings (an empty result is a warning, not an error). |
 | fn | `Evaluated::resolve_inner` | `select.rs:997` | `pub(crate) fn resolve_inner(&self, sel: &Selector, no_id: bool) -> GeomResult<Resolved>` |
 | fn | `Evaluated::suggest` | `select.rs:1008` | `pub fn suggest(&self, picked: &EntitySet) -> Vec<Selector>` —  Selectors, simplest first, that each resolve to exactly `picked`; empty if none does. |
-| struct | `PmlRegion` | `sim.rs:11` | fields: `region`, `parent`, `window`, `sides`, `thickness`, `layers`, `grading` |
-| struct | `SizeRule` | `sim.rs:24` | fields: `feature`, `entities`, `h`, `max_dev`, `min_layers` |
-| struct | `PeriodicPair` | `sim.rs:33` | fields: `feature`, `a`, `b`, `translation`, `checked_congruent` |
-| enum | `EntityRef` | `sim.rs:42` | variants: `Region`, `Face`, `Edge`, `Vertex` |
-| struct | `SimData` | `sim.rs:50` | fields: `pml`, `size`, `periodic` |
-| struct | `Oracle` | `sim.rs:195` |  |
-| fn | `Evaluated::pml_regions` | `sim.rs:57` | `pub fn pml_regions(&self) -> &[PmlRegion]` |
-| fn | `Evaluated::size_rules` | `sim.rs:60` | `pub fn size_rules(&self) -> &[SizeRule]` |
-| fn | `Evaluated::periodic_pairs` | `sim.rs:63` | `pub fn periodic_pairs(&self) -> &[PeriodicPair]` |
-| fn | `Evaluated::compute_sim` | `sim.rs:67` | `pub(crate) fn compute_sim(&mut self) -> GeomResult<()>` |
-| fn | `Evaluated::oracle` | `sim.rs:190` | `pub fn oracle(&self) -> Oracle<'_>` —  Projection oracle: closest point on an exact entity (shaped to be wrapped by femcore's `Geometry2::project`). |
-| fn | `Oracle::project` | `sim.rs:201` | `pub fn project(&self, p: V3, e: EntityRef) -> Option<V3>` —  Closest point of the entity to `p`; `None` for an unknown id or an entity kind the model does not have. |
+| struct | `PmlRegion` | `sim.rs:13` | fields: `region`, `parent`, `window`, `sides`, `thickness`, `layers`, `grading`, `coord`, `mode`, `center`, `axis`, `r_in`, ... |
+| struct | `SizeRule` | `sim.rs:34` | fields: `feature`, `entities`, `h`, `max_dev`, `min_layers` |
+| struct | `PeriodicPair` | `sim.rs:43` | fields: `feature`, `a`, `b`, `translation`, `checked_congruent` |
+| enum | `EntityRef` | `sim.rs:52` | variants: `Region`, `Face`, `Edge`, `Vertex` |
+| struct | `SimData` | `sim.rs:60` | fields: `pml`, `size`, `periodic` |
+| struct | `Oracle` | `sim.rs:867` |  |
+| fn | `Evaluated::pml_regions` | `sim.rs:67` | `pub fn pml_regions(&self) -> &[PmlRegion]` |
+| fn | `Evaluated::size_rules` | `sim.rs:70` | `pub fn size_rules(&self) -> &[SizeRule]` |
+| fn | `Evaluated::periodic_pairs` | `sim.rs:73` | `pub fn periodic_pairs(&self) -> &[PeriodicPair]` |
+| fn | `Evaluated::compute_sim` | `sim.rs:77` | `pub(crate) fn compute_sim(&mut self) -> GeomResult<()>` |
+| fn | `Evaluated::oracle` | `sim.rs:210` | `pub fn oracle(&self) -> Oracle<'_>` —  Projection oracle: closest point on an exact entity (shaped to be wrapped by femcore's `Geometry2::project`). |
+| fn | `Evaluated::validate_pml_ray_invariance` | `sim.rs:632` | `pub fn validate_pml_ray_invariance(&self) -> GeomResult<()>` —  Validates Teixeira-Chew / Collino-Monk analytic-continuation ray invariance (`d_u eps == 0`) |
+| fn | `Oracle::project` | `sim.rs:873` | `pub fn project(&self, p: V3, e: EntityRef) -> Option<V3>` —  Closest point of the entity to `p`; `None` for an unknown id or an entity kind the model does not have. |
 
 Trait implementations in this component: `Selector: Display`

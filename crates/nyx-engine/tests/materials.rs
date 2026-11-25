@@ -164,3 +164,19 @@ fn user_workspace_materials_overlay_bundled_library_without_hiding_it() {
     assert_eq!(custom.description.as_deref(), Some("User workspace overlay material"));
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+#[test]
+fn evaluate_material_rotates_piezoelectric_tensors_by_bunge_euler_angles() {
+    let e = Engine::new();
+    let v0 = e.evaluate_material("aluminum_nitride", None, None, None, None, None, None, None).unwrap();
+    let vr =
+        e.evaluate_material("aluminum_nitride", None, None, None, None, None, None, Some([0.0, 90.0, 0.0])).unwrap();
+    // 90 deg rotation around X maps crystal Z (index 2) -> global -Y (index 1).
+    let ce0_33 = v0["piezoelectric"]["c_e_pa"][2][2].as_f64().unwrap();
+    let cer_22 = vr["piezoelectric"]["c_e_pa"][1][1].as_f64().unwrap();
+    assert!((ce0_33 - cer_22).abs() / ce0_33 < 1e-12, "rotated C^E mismatch: {ce0_33} vs {cer_22}");
+
+    let e0_33 = v0["piezoelectric"]["e_c_m2"][2][2].as_f64().unwrap();
+    let er_22 = vr["piezoelectric"]["e_c_m2"][1][1].as_f64().unwrap();
+    assert!((er_22 + e0_33).abs() < 1e-12, "expected rotated e_22 = -e_33 ({e0_33}), got {er_22}");
+}

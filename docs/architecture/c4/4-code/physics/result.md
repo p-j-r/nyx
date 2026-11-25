@@ -5,20 +5,21 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 > SolveResult as plain serialisable data, and the frame a result states for the analysis of its vector fields.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 56](../../../adr/0056-polarization-analysis-is-a-function-of-a-result.md)  
-**Size:** 2 files, 290 lines.
+**Size:** 2 files, 795 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-physics/src/frame.rs` | 113 |  |
-| `crates/nyx-physics/src/result.rs` | 177 |  |
+| `crates/nyx-physics/src/result.rs` | 682 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt, fields | CellField, CellFields, PlotFields |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt, fem_mixed, fields, mesh, mesh::cells, mesh::mixed | CellField, CellFields, CellType, LagrangeSpace, MixedDiscretisation, MixedLagrangeDofMap, PlotFields, SimplexMesh, cell_corner_ref_coords, cell_local_quad_faces +1 |
+| [Physics trait and registry](./trait.md) | crate root, error | Error, Mesh, discretise |
 
 ## Used by
 
@@ -28,15 +29,17 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | result | SolveResult |
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | result | CellField, Solution, SolveResult |
 | [analysis: Mode figures](../analysis/figures.md) | frame, result | FieldFrame, Scalar, Solution, SolveResult |
+| [analysis: Piezo resonator analysis](../analysis/piezo.md) | result | SolveResult |
 | [analysis: Field samples](../analysis/samples.md) | frame, result | CellField, FieldFrame, Solution, SolveResult |
-| [dfs: Electrostatics kernel](../dfs/electro.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
-| [dfs: Heat kernel](../dfs/heat.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
-| [dfs: Magnetostatics kernel](../dfs/magneto.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
-| [ems: Axisymmetric kernel](../ems/axisym.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
-| [ems: 3D cavity kernel](../ems/cavity.md) | frame, result | Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_of |
-| [ems: Driven frequency-domain and PROM](../ems/driven.md) | frame, result | Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_of |
-| [ems: Mode kernel](../ems/modes.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
-| [ems: Complex-mode kernel](../ems/modescx.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
+| [dfs: Shared helpers](../dfs/common.md) | result | MixedToSimplexProjector |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [dfs: Heat kernel](../dfs/heat.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Axisymmetric kernel](../ems/axisym.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: 3D cavity kernel](../ems/cavity.md) | frame, result | Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | frame, result | Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Mode kernel](../ems/modes.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Complex-mode kernel](../ems/modescx.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Optical mode sets](../ems/optical.md) | frame | FieldFrame |
 | [engine: Analyses](../engine/analyse.md) | result | Scalar, SolveResult |
 | [engine: Commands](../engine/commands.md) | result | Solution, SolveResult |
@@ -47,12 +50,13 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [cQED result payloads](./cqed.md) | result | Scalar, SolveResult |
 | [Problem envelope](./envelope.md) | result | SolveResult |
 | [Test support](./testsupport.md) | result | Scalar, SolveResult |
-| [Physics trait and registry](./trait.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, Scalar, Solution, SolveResult, cell_fields_back +1 |
-| [sms: Cross-section study kernel](../sms/crosssection.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
-| [sms: Floquet kernel](../sms/floquet.md) | result | Scalar, Solution, SolveResult, cell_fields_of |
-| [sms: Low-reflecting boundary](../sms/lrb.md) | result | Scalar, Solution, SolveResult, cell_fields_of |
-| [sms: Absorbing-layer kernel](../sms/pml.md) | result | Scalar, Solution, SolveResult, cell_fields_of |
-| [sms: Solid kernel](../sms/solid.md) | result | Field, Scalar, Solution, SolveResult, cell_fields_of |
+| [Physics trait and registry](./trait.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult +2 |
+| [sms: Cross-section study kernel](../sms/crosssection.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Floquet kernel](../sms/floquet.md) | result | MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Low-reflecting boundary](../sms/lrb.md) | result | MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | frame, result | CellField, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | result | MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Solid kernel](../sms/solid.md) | result | CellField, Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 
 ## Class diagram
 
@@ -127,6 +131,18 @@ classDiagram
         +more_1_fields
         +scalar(name) Option~f64~
     }
+    class MixedToSimplexProjector {
+        <<struct>>
+        +new(mixed, simplex) Result
+        +from_mesh(mesh, mixed) Result
+        +is_pure_simplex() bool
+        +n_simplex_cells() usize
+        +parent_cell(sc) usize
+        +sub_simplex_ref_points(mixed, sc, target_order) Vecf64
+        +project_lagrange_blocks(mixed, dof_map, u_blocks, ncomp, target_order) Vec~f64~
+        +project_scalar_field(mixed, dof_map, name, unit, u_mixed, target_order) Field
+        +more_4_methods()
+    }
     class fns_result_rs {
         <<module result.rs>>
         +cell_fields_of(cf) Vec~CellField~
@@ -157,6 +173,7 @@ classDiagram
 | struct | `SolveResult` | `result.rs:62` | fields: `physics`, `study`, `order`, `dim`, `dofs`, `seconds`, `solutions`, `scalars`, `log` |
 | fn | `cell_fields_of` | `result.rs:141` | `pub fn cell_fields_of(cf: &femcore::fields::CellFields) -> Vec<CellField>` —  The per-cell fields of a kernel (`femcore::fields::CellFields`) as plain serialisable data. |
 | fn | `cell_fields_back` | `result.rs:155` | `pub fn cell_fields_back(order: usize, fields: &[CellField]) -> femcore::fields::CellFields` —  The inverse of `cell_fields_of`, for code that still reads `CellFields` (the window until phase 7, the analysis until phase 5). |
+| struct | `MixedToSimplexProjector` | `result.rs:238` |  Stage-3 projector mapping native [`MixedDiscretisation`] vertex, edge, and per-cell fields onto |
 | fn | `Solution::field` | `result.rs:51` | `pub fn field(&self, name: &str) -> Option<&Field>` |
 | fn | `Solution::flat` | `result.rs:56` | `pub fn flat(&self, name: &str) -> Option<Vec<f64>>` —  The values of a field by its flat name (`V`, `\|E\|`, `Ex`; see `flat_fields`). |
 | fn | `SolveResult::scalar` | `result.rs:79` | `pub fn scalar(&self, name: &str) -> Option<f64>` —  The first numeric scalar whose name starts with `name`. |
@@ -164,5 +181,17 @@ classDiagram
 | fn | `Field::vector` | `result.rs:94` | `pub fn vector(name: impl Into<String>, unit: impl Into<String>, names: &[&str], comps: &[Vec<f64>]) -> Field` —  A vector field from one array per component (`comps[j][dof]`), stored interleaved by dof. |
 | fn | `Field::component` | `result.rs:112` | `pub fn component(&self, j: usize) -> Vec<f64>` —  The array of component `j` of a vector field (the whole array for a scalar). |
 | fn | `Solution::flat_fields` | `result.rs:121` | `pub fn flat_fields(&self) -> Vec<(String, String, Vec<f64>)>` —  The fields in the flat form the window and the golden files use: a scalar keeps its name; a vector `E` with components `x`, `z` |
+| fn | `MixedToSimplexProjector::new` | `result.rs:258` | `pub fn new(mixed: &MixedDiscretisation, simplex: &SimplexMesh) -> Result<Self, Error>` —  Builds a Stage-3 projector from `mixed` (`discretise_mixed(mesh)`) onto `simplex` (`discretise(mesh)`). |
+| fn | `MixedToSimplexProjector::from_mesh` | `result.rs:391` | `pub fn from_mesh(mesh: &crate::Mesh, mixed: &MixedDiscretisation) -> Result<(SimplexMesh, Self), Error>` —  Convenience constructor building both `SimplexMesh` and `MixedToSimplexProjector` from `mesh`. |
+| fn | `MixedToSimplexProjector::is_pure_simplex` | `result.rs:399` | `pub fn is_pure_simplex(&self) -> bool` —  Whether the underlying mesh is pure-simplex with 1-to-1 identity cell correspondence. |
+| fn | `MixedToSimplexProjector::n_simplex_cells` | `result.rs:405` | `pub fn n_simplex_cells(&self) -> usize` —  Number of cells in the target `SimplexMesh`. |
+| fn | `MixedToSimplexProjector::parent_cell` | `result.rs:411` | `pub fn parent_cell(&self, sc: usize) -> usize` —  Parent cell index in `MixedDiscretisation` of `SimplexMesh` cell `sc`. |
+| fn | `MixedToSimplexProjector::sub_simplex_ref_points` | `result.rs:417` | `pub fn sub_simplex_ref_points(&self, mixed: &MixedDiscretisation, sc: usize, target_order: usize) -> Vec<[f64` —  Reference coordinates inside parent cell `parent_cell(sc)` for all `nloc(target_order)` nodes of `sc` |
+| fn | `MixedToSimplexProjector::project_lagrange_blocks` | `result.rs:439` | `pub fn project_lagrange_blocks( &self, mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, u_blocks: &[f64], ncomp: usize, target_order: usize, ) -> Vec<f64>` —  Projects `ncomp` stacked scalar DOF blocks (`u_blocks[comp * dof_map.n_dofs + dof]`) computed on |
+| fn | `MixedToSimplexProjector::project_scalar_field` | `result.rs:505` | `pub fn project_scalar_field( &self, mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, name: impl Into<String>, unit: impl Into<String>, u_mixed: &[f64], target_order: usize, ) -> Field` —  Projects a scalar `MixedLagrangeDofMap` vector onto a [`Field`] over `SimplexMesh` (`target_order`). |
+| fn | `MixedToSimplexProjector::project_vector_field` | `result.rs:519` | `pub fn project_vector_field( &self, mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, name: impl Into<String>, unit: impl Into<String>, comp_names: &[&str], u_blocks: &[f64], target_order: usize, ) -> Field` —  Projects `ncomp` stacked scalar component blocks onto an interleaved vector [`Field`] over `SimplexMesh`. |
+| fn | `MixedToSimplexProjector::project_cell_nodal_values` | `result.rs:538` | `pub fn project_cell_nodal_values( &self, mixed: &MixedDiscretisation, space: LagrangeSpace, mixed_vals: &[f64], mixed_cell_offsets: &[usize], target_order: usize, ) -> Vec<f64>` —  Projects discontinuous per-cell nodal values (`mixed_vals[mixed_cell_offsets[mc] + a]`, evaluated at |
+| fn | `MixedToSimplexProjector::project_cell_field` | `result.rs:569` | `pub fn project_cell_field( &self, mixed: &MixedDiscretisation, space: LagrangeSpace, name: impl Into<String>, unit: impl Into<String>, re_mixed: &[f64], im_mixed: &[f64], mixed_cell_offsets: &[usize], target_order: usize, ) -> CellField` —  Projects real or complex per-cell nodal arrays from `MixedDiscretisation` into a `SimplexMesh`-indexed [`CellField`]. |
+| fn | `MixedToSimplexProjector::sample_simplex_cell_nodes` | `result.rs:594` | `pub fn sample_simplex_cell_nodes<T, F>( &self, mixed: &MixedDiscretisation, target_order: usize, mut eval_fn: F, ) -> Vec<T>` —  Evaluates `eval_fn(parent_mc, &xi_ref)` directly at every local node of every sub-simplex `sc` |
 
 Trait implementations in this component: `SolveResult: PlotFields`

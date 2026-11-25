@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 > The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 5 files, 4079 lines.
+**Size:** 5 files, 4177 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/app.rs` | 3362 |  |
-| `crates/app/src/feedback.rs` | 221 |  |
+| `crates/app/src/app.rs` | 3453 |  |
+| `crates/app/src/feedback.rs` | 228 |  |
 | `crates/app/src/main.rs` | 157 |  |
 | `crates/app/src/spans.rs` | 42 |  |
 | `crates/app/src/state.rs` | 297 |  |
@@ -22,7 +22,7 @@ C4 level 4 (code) of the component **Window** (`app.window`) in the container **
 | Target | Modules | Items |
 |---|---|---|
 | [container `connect` (nyx-connect)](../../3-components/connect.md) | config, env, server | Env, HostInfo, Status, agent_instructions, connect, disconnect, find_server, list, plain_path, snippet |
-| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, preview, process, project, queue, shared_queue +2 | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MaterialAssign, MeshSettings, MeshedModel +16 |
+| [container `engine` (nyx-engine)](../../3-components/engine.md) | crate root, engine, meshing, preview, process, project, queue, shared_queue +2 | Cancelled, Display, Domain, Engine, Failed, FeatureList, LabelResolver, MaterialAssign, MeshSettings, MeshedModel +17 |
 | [container `script` (nyx-script)](../../3-components/script.md) | crate root, host | Limits, Options, check, find_worker, mcp_dir, run |
 | [Scripts and batch](./headless.md) | pyscript | spawn |
 | [Inspector tabs](./inspector.md) | geomui | State |
@@ -122,6 +122,8 @@ classDiagram
         +problem Option~String~
         +size SizeView
         +generation u64
+        +slow_limit Option~f64~
+        ~due_is_none() bool
         +reset()
     }
     class fns_feedback_rs {
@@ -285,23 +287,24 @@ classDiagram
 | fn | `App::refresh_connect` | `app.rs:1258` | `pub(crate) fn refresh_connect(&mut self)` —  Re-reads what Claude Code's and Claude Desktop's config files say about nyx. |
 | fn | `App::connect_menu` | `app.rs:1267` | `pub(crate) fn connect_menu(&mut self, ui: &mut egui::Ui)` —  The Connect menu: one row per Claude app with a Connect/Disconnect button, so the AI interface (`nyx-mcp`) |
 | fn | `App::region_paint` | `app.rs:1479` | `pub fn region_paint(&self, view: &nyx_engine::facade::ViewMesh) -> crate::regions::Paint` —  The colour plan of the model on show (`regions.rs`): the regions of a 2D mesh keyed by material or by their own name (Settings: Colour regions |
-| fn | `App::viewport_ui` | `app.rs:1521` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
-| fn | `App::set_condition_on` | `app.rs:1616` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
-| fn | `App::set_problem` | `app.rs:1626` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
+| fn | `App::viewport_ui` | `app.rs:1539` | `pub fn viewport_ui(&mut self, ui: &mut egui::Ui)` |
+| fn | `App::set_condition_on` | `app.rs:1634` | `pub fn set_condition_on(&mut self, i: usize, on: &str)` —  Sets the selector of condition `i` of the active physics (an edit of the problem through `set_problem`). |
+| fn | `App::set_problem` | `app.rs:1644` | `pub fn set_problem(&mut self, physics: &str, spec: &nyx_engine::facade::physics::ProblemSpec)` —  Replaces the problem of a physics by `spec` (the Physics and Study tabs edit a copy and hand it back here). |
 | const | `REST` | `feedback.rs:18` | `Duration` —  An edit rests this long before a trial mesh is made of it. |
 | const | `SLOW` | `feedback.rs:20` | `f64` —  A trial mesh that takes longer than this (seconds) turns the automatic preview off: the rule of plan question 2 (about 100 ms). |
 | enum | `SizeView` | `feedback.rs:24` | variants: `None`, `Pending`, `Ready`, `Refused`, `Slow` —  What the size line shows. |
-| struct | `Feedback` | `feedback.rs:39` | fields: `problem`, `size`, `generation` —  The state of the feedback for the edits in the Geometry tab. |
-| fn | `size_line` | `feedback.rs:187` | `pub fn size_line(p: &SizePreview) -> String` —  "About 2,442 cells, 2D". |
-| fn | `cost_line` | `feedback.rs:192` | `pub fn cost_line(p: &SizePreview) -> String` —  What a solve of that size costs on this machine, from its own history, or why there is no number. |
-| fn | `Feedback::reset` | `feedback.rs:55` | `pub fn reset(&mut self)` —  A project was adopted (loaded, new, an example): the edits are the project's own, ask again. |
-| fn | `App::edits_changed` | `feedback.rs:62` | `pub fn edits_changed(&mut self, ctx: &egui::Context)` —  The edits of the Geometry tab changed (or were seen for the first time): check them at once, and ask for a trial mesh once they rest. |
-| fn | `App::feedback_tick` | `feedback.rs:81` | `pub fn feedback_tick(&mut self, ctx: &egui::Context)` —  Called every frame the Geometry tab is drawn: the first look at a project's edits, and the trial mesh when an edit has rested. |
-| fn | `App::start_size_preview` | `feedback.rs:95` | `pub fn start_size_preview(&mut self)` —  Starts the trial mesh of the edits on its own thread (also what the "Estimate size" button does after a slow one). |
-| fn | `App::take_size` | `feedback.rs:114` | `pub fn take_size(&mut self, generation: u64, out: Result<SizePreview, String>)` —  An answer of a trial mesh came back. |
-| fn | `App::start_polarization` | `feedback.rs:129` | `pub fn start_polarization(&mut self, physics: &str)` —  The polarization of the result that was just taken, computed beside the frame and handed back through the window's channel. |
-| fn | `App::take_polarization` | `feedback.rs:140` | `pub fn take_polarization(&mut self, physics: &str, result: &std::sync::Arc<nyx_engine::facade::physics::SolveResult>, analysis: Result<nyx_engine::analysis::ModeAnalysis, String>)` —  The analysis arrived: it belongs to the result view that holds the very result it was made from, if that is still on screen. |
-| fn | `App::feedback_lines` | `feedback.rs:149` | `pub fn feedback_lines(&mut self, ui: &mut Ui)` —  The problem line and the size line above the Build mesh button. |
+| struct | `Feedback` | `feedback.rs:39` | fields: `problem`, `size`, `generation`, `slow_limit` —  The state of the feedback for the edits in the Geometry tab. |
+| fn | `size_line` | `feedback.rs:194` | `pub fn size_line(p: &SizePreview) -> String` —  "About 2,442 cells, 2D". |
+| fn | `cost_line` | `feedback.rs:199` | `pub fn cost_line(p: &SizePreview) -> String` —  What a solve of that size costs on this machine, from its own history, or why there is no number. |
+| fn | `Feedback::due_is_none` | `feedback.rs:57` | `pub(crate) fn due_is_none(&self) -> bool` |
+| fn | `Feedback::reset` | `feedback.rs:62` | `pub fn reset(&mut self)` —  A project was adopted (loaded, new, an example): the edits are the project's own, ask again. |
+| fn | `App::edits_changed` | `feedback.rs:69` | `pub fn edits_changed(&mut self, ctx: &egui::Context)` —  The edits of the Geometry tab changed (or were seen for the first time): check them at once, and ask for a trial mesh once they rest. |
+| fn | `App::feedback_tick` | `feedback.rs:88` | `pub fn feedback_tick(&mut self, ctx: &egui::Context)` —  Called every frame the Geometry tab is drawn: the first look at a project's edits, and the trial mesh when an edit has rested. |
+| fn | `App::start_size_preview` | `feedback.rs:102` | `pub fn start_size_preview(&mut self)` —  Starts the trial mesh of the edits on its own thread (also what the "Estimate size" button does after a slow one). |
+| fn | `App::take_size` | `feedback.rs:121` | `pub fn take_size(&mut self, generation: u64, out: Result<SizePreview, String>)` —  An answer of a trial mesh came back. |
+| fn | `App::start_polarization` | `feedback.rs:136` | `pub fn start_polarization(&mut self, physics: &str)` —  The polarization of the result that was just taken, computed beside the frame and handed back through the window's channel. |
+| fn | `App::take_polarization` | `feedback.rs:147` | `pub fn take_polarization(&mut self, physics: &str, result: &std::sync::Arc<nyx_engine::facade::physics::SolveResult>, analysis: Result<nyx_engine::analysis::ModeAnalysis, String>)` —  The analysis arrived: it belongs to the result view that holds the very result it was made from, if that is still on screen. |
+| fn | `App::feedback_lines` | `feedback.rs:156` | `pub fn feedback_lines(&mut self, ui: &mut Ui)` —  The problem line and the size line above the Build mesh button. |
 | fn | `main` | `main.rs:44` | `fn main() -> eframe::Result` |
 | fn | `window_icon` | `main.rs:152` | `fn window_icon() -> Option<eframe::egui::IconData>` —  The nyx mark as the icon of the window (title bar, taskbar, Alt+Tab): the same picture as the top bar, scaled once with a good filter. |
 | fn | `span` | `spans.rs:21` | `pub fn span<T>(name: &'static str, f: impl FnOnce() -> T) -> T` —  Runs `f` and, when the frame log is on, adds `name` with the milliseconds it took to this frame's spans (the same name twice in a frame adds up). |

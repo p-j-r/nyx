@@ -197,7 +197,7 @@ pub struct Anisotropy {
     /// Imaginary part magnitude of relative permittivity (microwave/optical dielectric loss in crystal frame).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permittivity_im: Option<Tensor>,
-    /// Phonon/structural viscosity tensor eta in Pa*s (solver Voigt order in crystal frame).
+    /// Phonon/structural viscosity tensor eta in Pa*s (textbook Voigt order in crystal frame).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viscosity: Option<M6>,
     /// Piezoelectric stress-charge coupling e_iJ in C/m^2 (textbook Voigt in crystal frame).
@@ -256,9 +256,7 @@ const VP: [(usize, usize); 6] = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]
 /// position in the solver's Voigt order (xx, yy, zz, xy, yz, xz) of each standard Voigt component (xx, yy, zz, yz, xz, xy)
 const TO_SOLVER: [usize; 6] = [0, 1, 2, 4, 5, 3];
 
-/// Rotates a stiffness given in standard Voigt order and returns it in the solver's Voigt order.
-fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
-    // full fourth-order tensor
+fn rotate_voigt_raw(c: &M6, r: &M3, to_solver: bool) -> M6 {
     let mut t = [[[[0.0; 3]; 3]; 3]; 3];
     for (i, &(a, b)) in VP.iter().enumerate() {
         for (j, &(cc, d)) in VP.iter().enumerate() {
@@ -292,11 +290,18 @@ fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
     }
     let mut out = [[0.0; 6]; 6];
     for (i, &(a, b)) in VP.iter().enumerate() {
+        let oi = if to_solver { TO_SOLVER[i] } else { i };
         for (j, &(cc, d)) in VP.iter().enumerate() {
-            out[TO_SOLVER[i]][TO_SOLVER[j]] = rot[a][b][cc][d];
+            let oj = if to_solver { TO_SOLVER[j] } else { j };
+            out[oi][oj] = rot[a][b][cc][d];
         }
     }
     out
+}
+
+/// Rotates a stiffness given in standard Voigt order and returns it in the solver's Voigt order.
+fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
+    rotate_voigt_raw(c, r, true)
 }
 
 /// Stiffness in the global frame (solver Voigt order).
@@ -304,10 +309,31 @@ pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6 {
     rotate_stiffness(&s.voigt(), &rotation(euler_deg))
 }
 
-/// Rotates a symmetric `6x6` fourth-order tensor in solver Voigt order `(xx, yy, zz, xy, yz, xz)`
-/// from crystal frame to global frame by Bunge Z-X-Z Euler angles (degrees).
+/// Rotates a symmetric `6x6` fourth-order tensor given in textbook Voigt order `(xx, yy, zz, yz, xz, xy)`
+/// from crystal frame to global frame by Bunge Z-X-Z Euler angles (degrees), returning solver Voigt order `(xx, yy, zz, xy, yz, xz)`.
 pub fn rotate_m6_global(m: &M6, euler_deg: [f64; 3]) -> M6 {
     rotate_stiffness(m, &rotation(euler_deg))
+}
+
+/// Rotates a symmetric `6x6` fourth-order tensor given in textbook Voigt order `(xx, yy, zz, yz, xz, xy)`
+/// from crystal frame to global frame by Bunge Z-X-Z Euler angles (degrees), preserving textbook Voigt order.
+pub fn rotate_m6_textbook(m: &M6, euler_deg: [f64; 3]) -> M6 {
+    rotate_voigt_raw(m, &rotation(euler_deg), false)
+}
+
+/// Rotates a `3x6` piezoelectric stress-charge coupling matrix `e_iJ` (`C/m^2`) from the crystal frame
+/// (textbook Voigt columns `xx, yy, zz, yz, xz, xy`) into the global frame in solver Voigt column order
+/// `(xx, yy, zz, xy, yz, xz)`.
+pub fn piezo_e_global(e_textbook: &[[f64; 6]; 3], euler_deg: [f64; 3]) -> [[f64; 6]; 3] {
+    let pz = Piezoelectric { source: Vec::new(), form: PiezoForm::StressCharge, matrix: *e_textbook };
+    let rot_textbook = pz.rotate(&rotation(euler_deg));
+    let mut out = [[0.0; 6]; 3];
+    for row in 0..3 {
+        for (j, &s) in TO_SOLVER.iter().enumerate() {
+            out[row][s] = rot_textbook[row][j];
+        }
+    }
+    out
 }
 
 /// Isotropic stiffness (solver Voigt order).
@@ -422,5 +448,28 @@ mod tests {
     fn tensor_rotation_swaps_axes() {
         let t = tensor_global(&Tensor::Diagonal { x: 1.0, y: 2.0, z: 3.0 }, [90.0, 0.0, 0.0]);
         assert!((t[0][0] - 2.0).abs() < 1e-14 && (t[1][1] - 1.0).abs() < 1e-14 && (t[2][2] - 3.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn piezo_e_global_maps_voigt_and_preserves_symmetry() {
+        // Wurtzite 6mm (AlN): textbook e31=-0.58, e32=-0.58, e33=1.55, e24=-0.48 (yz), e15=-0.48 (xz)
+        let e_tb = [
+            [0.0, 0.0, 0.0, 0.0, -0.48, 0.0],
+            [0.0, 0.0, 0.0, -0.48, 0.0, 0.0],
+            [-0.58, -0.58, 1.55, 0.0, 0.0, 0.0],
+        ];
+        let e0 = piezo_e_global(&e_tb, [0.0, 0.0, 0.0]);
+        // Solver Voigt cols: (xx, yy, zz, xy, yz, xz) => e15 at [0][5], e24 at [1][4]
+        assert!((e0[0][5] - (-0.48)).abs() < 1e-15);
+        assert!((e0[1][4] - (-0.48)).abs() < 1e-15);
+        assert!((e0[2][0] - (-0.58)).abs() < 1e-15);
+        assert!((e0[2][2] - 1.55).abs() < 1e-15);
+        // Hexagonal 6mm is invariant under arbitrary rotation about z
+        let e_rot = piezo_e_global(&e_tb, [37.5, 0.0, 0.0]);
+        for i in 0..3 {
+            for j in 0..6 {
+                assert!((e0[i][j] - e_rot[i][j]).abs() < 1e-14, "{i}{j}: {} vs {}", e0[i][j], e_rot[i][j]);
+            }
+        }
     }
 }

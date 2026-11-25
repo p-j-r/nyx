@@ -333,8 +333,8 @@ pub fn chain_key(targets: &[String]) -> String {
     t.join(",")
 }
 
-/// Calibration chain key aware of `ems:driven` `(solver_backend, order)` profiles (`FR-33`),
-/// keeping non-`ems:driven` targets identical to [`chain_key`] so existing cavity/static history stays intact.
+/// Calibration chain key aware of `ems:driven`, `sms:driven`, and coupled `sms:piezo` `(solver_backend, order)` profiles (`FR-33`),
+/// keeping pure-elastic `sms` and non-driven `ems` targets identical to [`chain_key`] so existing calibration history stays intact.
 pub fn chain_key_for_project(project: &crate::project::Project, targets: &[String]) -> String {
     let mut tokens: Vec<String> = targets
         .iter()
@@ -351,6 +351,30 @@ pub fn chain_key_for_project(project: &crate::project::Project, targets: &[Strin
                         .unwrap_or("auto");
                     let order = spec.order.clamp(1, 2);
                     return format!("ems:driven:{solver}:p{order}");
+                }
+                if spec.physics == "sms" {
+                    let order = spec.order.clamp(1, 2);
+                    if spec.study.kind == "driven" {
+                        let solver = spec
+                            .study
+                            .params
+                            .get("solver")
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or("auto");
+                        return format!("sms:driven:{solver}:p{order}");
+                    }
+                    let piezo_param = spec.params.get("piezoelectric").and_then(|v| v.as_str()).unwrap_or("auto");
+                    let has_elec_bc = spec.bcs.iter().any(|bc| {
+                        matches!(
+                            bc.kind.as_str(),
+                            "ground" | "potential" | "surface_charge" | "floating_potential" | "conductor" | "terminal"
+                        )
+                    });
+                    if piezo_param == "on" || (piezo_param != "off" && has_elec_bc) {
+                        return format!("sms:piezo:p{order}");
+                    }
                 }
             }
             t.clone()

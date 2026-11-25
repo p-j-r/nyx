@@ -39,10 +39,11 @@ use femcore::fem::{geometry, CurvedTet};
 use femcore::fem_mixed::IsoparametricCell;
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::ams::{assemble_shifted_curl_curl, AmsFgmresOptions, AmsFgmresSolver, AmsP2Topology};
-use femcore::linalg::blr::{BlrOptions, ShiftedBlrLu};
 use femcore::linalg::csr::{c, CCsr, Coo, RCsr, C};
-use femcore::linalg::direct::{FactorBackend, ShiftedSolver};
-use femcore::linalg::driver::{thin_svd_c64, DirectSolver};
+use femcore::linalg::equilibrate::{ruiz_symmetric_terms, scale_symmetric, scale_vec, RuizTerm, DEFAULT_RUIZ_PASSES};
+use femcore::linalg::prom::{
+    run_greedy_prom_sweep, s_to_z_and_y, ImageProm, PromLinearSolver, PromOperator, SparseDrivenSolver,
+};
 use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
 use nyx_physics::{
     cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution,
@@ -53,11 +54,6 @@ use std::f64::consts::PI;
 use std::time::Instant;
 
 type C3 = [[C; 3]; 3];
-
-#[inline]
-fn dot_real(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(&x, &y)| x * y).sum()
-}
 
 /// Equivalence classes of vertices under Floquet-periodic boundaries.
 fn vertex_keys(mesh: &Discretisation, matches: &[femcore::periodic::Match]) -> Vec<u32> {
@@ -179,6 +175,58 @@ pub enum DrivenAmsTopology {
     P2(AmsP2Topology),
 }
 
+fn equilibrate_driven_system(
+    nred: usize,
+    f0: f64,
+    k_tot_red: &CCsr,
+    c_tot_red: &CCsr,
+    m_tot_red: &CCsr,
+    lumped_ports: &[AssembledLumpedPort],
+    waveports: &[AssembledWavePort],
+) -> (Vec<f64>, Vec<CCsr>, Vec<DrivenPortEntry>) {
+    let omega_mid = 2.0 * PI * f0;
+    let k0_mid = (omega_mid / C0).max(1.0);
+    let k0_mid2 = k0_mid * k0_mid;
+    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
+
+    let mut ruiz_terms = vec![
+        RuizTerm::Complex(k_tot_red, 1.0),
+        RuizTerm::Complex(c_tot_red, k0_mid),
+        RuizTerm::Complex(m_tot_red, k0_mid2),
+    ];
+    for (w_idx, wp) in waveports.iter().enumerate() {
+        if wp.w_red.nnz() > 0 {
+            ruiz_terms.push(RuizTerm::Real(&wp.w_red, wp_betas_mid[w_idx]));
+        }
+    }
+    let d_ruiz = ruiz_symmetric_terms(nred, &ruiz_terms, DEFAULT_RUIZ_PASSES);
+
+    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
+    terms_hat.push(scale_symmetric(k_tot_red, &d_ruiz));
+    terms_hat.push(scale_symmetric(c_tot_red, &d_ruiz));
+    terms_hat.push(scale_symmetric(m_tot_red, &d_ruiz));
+    for wp in waveports {
+        terms_hat.push(scale_symmetric(&wp.w_red.to_complex(), &d_ruiz));
+    }
+
+    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
+    for lp in lumped_ports {
+        ports.push(DrivenPortEntry {
+            name: lp.bc.name.clone(),
+            kind: DrivenPortKind::Lumped { z0: lp.bc.z0 },
+            b_hat: scale_vec(&lp.b_red, &d_ruiz),
+        });
+    }
+    for (wave_index, wp) in waveports.iter().enumerate() {
+        ports.push(DrivenPortEntry {
+            name: wp.bc.name.clone(),
+            kind: DrivenPortKind::Wave { wave_index },
+            b_hat: scale_vec(&wp.b_red, &d_ruiz),
+        });
+    }
+    (d_ruiz, terms_hat, ports)
+}
+
 /// Stage 1 of the 3D driven frequency-domain solver: Nedelec numbering, PEC/periodic reduction,
 /// Ruiz-equilibrated affine system matrices $(\hat{\mathbf{K}}_{\text{tot}}, \hat{\mathbf{C}}_{\text{tot}}, \hat{\mathbf{M}}_{\text{tot}}, \hat{\mathbf{W}}_w)$,
 /// and assembled lumped/waveguide ports.
@@ -268,6 +316,37 @@ impl DrivenAssembly {
             }
         }
         out
+    }
+}
+
+impl PromOperator for DrivenAssembly {
+    fn n_dofs(&self) -> usize {
+        self.nred
+    }
+
+    fn n_ports(&self) -> usize {
+        self.ports.len()
+    }
+
+    fn terms_hat(&self) -> &[CCsr] {
+        &self.terms_hat
+    }
+
+    fn term_coeffs(&self, omega: f64) -> Vec<(C, C, C)> {
+        DrivenAssembly::term_coeffs(self, omega)
+    }
+
+    fn d_ruiz(&self) -> &[f64] {
+        &self.d_ruiz
+    }
+
+    fn port_b_hat(&self, port: usize) -> Vec<C> {
+        self.ports[port].b_hat.iter().map(|&b| c(b, 0.0)).collect()
+    }
+
+    fn port_gamma(&self, port: usize, omega: f64) -> (C, C, C) {
+        let (_, g0, g1, g2) = self.ports[port].excitation_coeffs(omega, &self.waveports);
+        (g0, g1, g2)
     }
 }
 
@@ -448,83 +527,8 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     };
 
     // Compute iterative symmetric Ruiz diagonal equilibration at midband omega_mid
-    let omega_mid = 2.0 * PI * f0;
-    let k0_mid = (omega_mid / C0).max(1.0);
-    let k0_mid2 = k0_mid * k0_mid;
-    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
-
-    let mut d_ruiz = vec![1.0_f64; nred];
-    for _ in 0..8 {
-        let mut rmax = vec![0.0_f64; nred];
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let mut m_val = 0.0_f64;
-            let (ck, vk) = k_tot_red.row(i);
-            for (&j, &v) in ck.iter().zip(vk) {
-                m_val = m_val.max(di * v.norm() * d_ruiz[j as usize]);
-            }
-            if c_tot_red.nnz() > 0 {
-                let (cc, vc) = c_tot_red.row(i);
-                for (&j, &v) in cc.iter().zip(vc) {
-                    m_val = m_val.max(di * k0_mid * v.norm() * d_ruiz[j as usize]);
-                }
-            }
-            let (cm, vm) = m_tot_red.row(i);
-            for (&j, &v) in cm.iter().zip(vm) {
-                m_val = m_val.max(di * k0_mid2 * v.norm() * d_ruiz[j as usize]);
-            }
-            for (w_idx, wp) in waveports.iter().enumerate() {
-                if wp.w_red.nnz() > 0 {
-                    let bw = wp_betas_mid[w_idx];
-                    let (cw, vw) = wp.w_red.row(i);
-                    for (&j, &v) in cw.iter().zip(vw) {
-                        m_val = m_val.max(di * bw * v.abs() * d_ruiz[j as usize]);
-                    }
-                }
-            }
-            rmax[i] = m_val;
-        }
-        for i in 0..nred {
-            if rmax[i] > 1e-300 {
-                d_ruiz[i] = (d_ruiz[i] / rmax[i].sqrt()).clamp(1e-14, 1e14);
-            }
-        }
-    }
-
-    let scale_sym_c = |mat: &CCsr| -> CCsr {
-        if mat.nnz() == 0 {
-            return CCsr::zeros(nred, nred);
-        }
-        let mut out = mat.clone();
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let range = out.row_range(i);
-            let cols: Vec<u32> = out.indices()[range.clone()].to_vec();
-            let vals = &mut out.values_mut()[range];
-            for (v, &col) in vals.iter_mut().zip(&cols) {
-                *v *= di * d_ruiz[col as usize];
-            }
-        }
-        out
-    };
-
-    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
-    terms_hat.push(scale_sym_c(&k_tot_red));
-    terms_hat.push(scale_sym_c(&c_tot_red));
-    terms_hat.push(scale_sym_c(&m_tot_red));
-    for wp in &waveports {
-        terms_hat.push(scale_sym_c(&wp.w_red.to_complex()));
-    }
-
-    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
-    for lp in &lumped_ports {
-        let b_hat: Vec<f64> = lp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: lp.bc.name.clone(), kind: DrivenPortKind::Lumped { z0: lp.bc.z0 }, b_hat });
-    }
-    for (wave_index, wp) in waveports.iter().enumerate() {
-        let b_hat: Vec<f64> = wp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: wp.bc.name.clone(), kind: DrivenPortKind::Wave { wave_index }, b_hat });
-    }
+    let (d_ruiz, terms_hat, ports) =
+        equilibrate_driven_system(nred, f0, &k_tot_red, &c_tot_red, &m_tot_red, &lumped_ports, &waveports);
 
     let ams_data = if solver == "ams_fgmres" && problem.periodic.is_empty() {
         let nv = mesh.n_points();
@@ -742,162 +746,10 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     })
 }
 
-/// Two-pass Modified Gram-Schmidt $l_2$-orthonormalization of `cand` into `basis`.
-fn append_l2_orthonormal(basis: &mut Vec<Vec<f64>>, cand: &[f64]) -> bool {
-    let norm0 = dot_real(cand, cand).sqrt();
-    if norm0 <= 1e-30 {
-        return false;
-    }
-    let mut v = cand.to_vec();
-    for _pass in 0..2 {
-        for q in basis.iter() {
-            let proj = dot_real(&v, q);
-            for (vi, &qi) in v.iter_mut().zip(q) {
-                *vi -= proj * qi;
-            }
-        }
-    }
-    let norm = dot_real(&v, &v).sqrt();
-    if norm <= 1e-12 * norm0 {
-        return false;
-    }
-    let inv = 1.0 / norm;
-    for vi in &mut v {
-        *vi *= inv;
-    }
-    basis.push(v);
-    true
-}
-
-/// Solves an $r \times r$ complex dense linear system $A X = B$ for $P$ right-hand sides (`b_cols[q]` of length $r$)
-/// using Gaussian elimination with partial pivoting.
-fn solve_dense_complex_multi(a_mat: &[C], b_cols: &[Vec<C>], r: usize) -> Option<Vec<Vec<C>>> {
-    let p = b_cols.len();
-    if r == 0 {
-        return Some(vec![Vec::new(); p]);
-    }
-    let mut a = a_mat.to_vec();
-    let mut rhs = vec![c(0.0, 0.0); r * p];
-    for q in 0..p {
-        for i in 0..r {
-            rhs[i * p + q] = b_cols[q][i];
-        }
-    }
-
-    for k in 0..r {
-        let mut piv_row = k;
-        let mut piv_max = a[k * r + k].norm();
-        for i in (k + 1)..r {
-            let val = a[i * r + k].norm();
-            if val > piv_max {
-                piv_max = val;
-                piv_row = i;
-            }
-        }
-        if piv_max <= 1e-300 {
-            return None;
-        }
-        if piv_row != k {
-            for j in k..r {
-                a.swap(k * r + j, piv_row * r + j);
-            }
-            for q in 0..p {
-                rhs.swap(k * p + q, piv_row * p + q);
-            }
-        }
-        let inv_piv = c(1.0, 0.0) / a[k * r + k];
-        for i in (k + 1)..r {
-            let factor = a[i * r + k] * inv_piv;
-            if factor.re == 0.0 && factor.im == 0.0 {
-                continue;
-            }
-            for j in (k + 1)..r {
-                let akj = a[k * r + j];
-                a[i * r + j] -= factor * akj;
-            }
-            for q in 0..p {
-                let rkq = rhs[k * p + q];
-                rhs[i * p + q] -= factor * rkq;
-            }
-        }
-    }
-
-    let mut x_cols = vec![vec![c(0.0, 0.0); r]; p];
-    for i in (0..r).rev() {
-        let inv_diag = c(1.0, 0.0) / a[i * r + i];
-        for q in 0..p {
-            let mut sum = rhs[i * p + q];
-            for j in (i + 1)..r {
-                sum -= a[i * r + j] * x_cols[q][j];
-            }
-            x_cols[q][i] = sum * inv_diag;
-        }
-    }
-    Some(x_cols)
-}
-
-/// Converts a $P \times P$ scattering matrix $\mathbf{S}$ and reference impedances $Z_{0,p}$ into
-/// impedance $\mathbf{Z} = \mathbf{Z}_0^{1/2}(\mathbf{I} + \mathbf{S})(\mathbf{I} - \mathbf{S})^{-1}\mathbf{Z}_0^{1/2}$
-/// and admittance $\mathbf{Y} = \mathbf{Z}_0^{-1/2}(\mathbf{I} - \mathbf{S})(\mathbf{I} + \mathbf{S})^{-1}\mathbf{Z}_0^{-1/2}$.
-fn s_to_z_and_y(s_mat: &[Vec<C>], z0_ports: &[f64]) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) {
-    let p = s_mat.len();
-    let sqrt_z0: Vec<f64> = z0_ports.iter().map(|&z| z.max(1e-30).sqrt()).collect();
-    let inv_sqrt_z0: Vec<f64> = sqrt_z0.iter().map(|&sz| 1.0 / sz).collect();
-
-    // Form V_mat = Z_0^{1/2} (I + S) and I_mat = Z_0^{-1/2} (I - S)
-    // Since V = Z * I_mat => Z^T = (I_mat^T)^{-1} V^T, and I_mat = Y * V => Y^T = (V^T)^{-1} I_mat^T
-    let mut v_t = vec![c(0.0, 0.0); p * p];
-    let mut i_t = vec![c(0.0, 0.0); p * p];
-    let mut v_cols_t = vec![vec![c(0.0, 0.0); p]; p];
-    let mut i_cols_t = vec![vec![c(0.0, 0.0); p]; p];
-
-    for r in 0..p {
-        for col in 0..p {
-            let delta = if r == col { c(1.0, 0.0) } else { c(0.0, 0.0) };
-            let v_rc = (delta + s_mat[r][col]) * sqrt_z0[r];
-            let i_rc = (delta - s_mat[r][col]) * inv_sqrt_z0[r];
-            // Transpose: entry (col, r)
-            v_t[col * p + r] = v_rc;
-            i_t[col * p + r] = i_rc;
-            v_cols_t[r][col] = v_rc;
-            i_cols_t[r][col] = i_rc;
-        }
-    }
-    // Slight diagonal regularization only if singular
-    let solve_with_reg = |mat_t: &[C], rhs_cols_t: &[Vec<C>]| -> Vec<Vec<C>> {
-        if let Some(sol) = solve_dense_complex_multi(mat_t, rhs_cols_t, p) {
-            return sol;
-        }
-        let mut reg = mat_t.to_vec();
-        for d in 0..p {
-            reg[d * p + d] += c(1e-14, 0.0);
-        }
-        solve_dense_complex_multi(&reg, rhs_cols_t, p).unwrap_or_else(|| vec![vec![c(0.0, 0.0); p]; p])
-    };
-
-    let z_rows = solve_with_reg(&i_t, &v_cols_t);
-    let y_rows = solve_with_reg(&v_t, &i_cols_t);
-
-    let mut s_out = vec![vec![[0.0; 2]; p]; p];
-    let mut z_out = vec![vec![[0.0; 2]; p]; p];
-    let mut y_out = vec![vec![[0.0; 2]; p]; p];
-    for r in 0..p {
-        for col in 0..p {
-            s_out[r][col] = [s_mat[r][col].re, s_mat[r][col].im];
-            z_out[r][col] = [z_rows[r][col].re, z_rows[r][col].im];
-            y_out[r][col] = [y_rows[r][col].re, y_rows[r][col].im];
-        }
-    }
-    (s_out, z_out, y_out)
-}
-
 /// Unified linear solver backend for 3D driven frequency-domain solves (FR-33).
 enum DrivenLinearSolver {
-    /// Sparse direct solver (`auto`, `direct`, `lblt` via `DirectSolver<C>` -> `SymLblt` / `LuColamd`).
-    Direct { solver: Box<DirectSolver<C>>, requested: String },
-    /// Nested-dissection Block Low-Rank multifrontal LU (`blr` via `ShiftedBlrLu<C>`) with cached `BlrSymbolic`
-    /// and deterministic iterative refinement.
-    Blr { solver: Box<ShiftedBlrLu<C>>, a_cur: CCsr, opts: BlrOptions },
+    /// Sparse direct / LBLT / BLR multifrontal LU via shared `femcore::linalg::prom::SparseDrivenSolver`.
+    Sparse(Box<SparseDrivenSolver>),
     /// Auxiliary-space Maxwell (`Ams<C>` / `AmsP2<C>`) preconditioned deterministic FGMRES (`ams_fgmres`)
     /// on the unscaled complex curl-curl operator (`order == 1` and `order == 2`).
     AmsFgmres { solver: Box<AmsFgmresSolver<C>>, d_ruiz: Vec<f64>, symbolic_count: usize },
@@ -918,45 +770,9 @@ fn unscale_sym_c(mat: &CCsr, d_ruiz: &[f64]) -> CCsr {
     out
 }
 
-fn format_backend(b: FactorBackend) -> &'static str {
-    match b {
-        FactorBackend::None => "None",
-        FactorBackend::CholeskyAmd => "CholeskyAmd",
-        FactorBackend::CholeskyNd => "CholeskyNd",
-        FactorBackend::LbltAmd => "LbltAmd",
-        FactorBackend::LbltNd => "LbltNd",
-        FactorBackend::LuColamd => "LuColamd",
-        FactorBackend::LuAmd => "LuAmd",
-        FactorBackend::LuNd => "LuNd",
-        FactorBackend::BlrNd => "BlrNd",
-    }
-}
-
 impl DrivenLinearSolver {
     fn build_or_update(slot: &mut Option<Self>, asm: &DrivenAssembly, omega: f64, a_mat: &CCsr) -> Result<(), String> {
         match asm.solver.as_str() {
-            "blr" => match slot.as_mut() {
-                Some(Self::Blr { solver, a_cur, .. }) => {
-                    // Reuse cached `BlrSymbolic` across PROM anchors / HDM frequencies; `replace_matrices` drops
-                    // previous numeric factors before cloning `a_mat` so peak RAM never holds two shifts.
-                    *a_cur = CCsr::zeros(0, 0);
-                    solver.replace_matrices(a_mat, None).map_err(|e| format!("BLR matrix update failed: {e}"))?;
-                    femcore::par::on_factor_pool(|| solver.set_shift(c(0.0, 0.0)))
-                        .map_err(|e| format!("BLR numeric factorisation failed: {e}"))?;
-                    *a_cur = a_mat.clone();
-                    Ok(())
-                }
-                _ => {
-                    *slot = None;
-                    let opts = BlrOptions { tol: asm.blr_tol, ..BlrOptions::default() };
-                    let mut blr = ShiftedBlrLu::new(a_mat, None, &opts)
-                        .map_err(|e| format!("BLR symbolic analysis failed: {e}"))?;
-                    femcore::par::on_factor_pool(|| blr.set_shift(c(0.0, 0.0)))
-                        .map_err(|e| format!("BLR numeric factorisation failed: {e}"))?;
-                    *slot = Some(Self::Blr { solver: Box::new(blr), a_cur: a_mat.clone(), opts });
-                    Ok(())
-                }
-            },
             "ams_fgmres" => {
                 let Some(ref ams_topo) = asm.ams_data else {
                     return Err(
@@ -1027,63 +843,36 @@ impl DrivenLinearSolver {
                     }
                 }
             }
-            _ => {
-                // "auto", "direct", "lblt"
-                match slot.as_mut() {
-                    Some(Self::Direct { solver, .. }) => solver.update_matrix(a_mat),
-                    _ => {
-                        *slot = Some(Self::Direct {
-                            solver: Box::new(DirectSolver::new(a_mat, false)?),
-                            requested: asm.solver.clone(),
-                        });
-                        Ok(())
-                    }
+            _ => match slot.as_mut() {
+                Some(Self::Sparse(sp)) => sp.update_matrix(a_mat),
+                _ => {
+                    *slot = None;
+                    let mut sp = SparseDrivenSolver::new(&asm.solver, asm.blr_tol);
+                    sp.update_matrix(a_mat)?;
+                    *slot = Some(Self::Sparse(Box::new(sp)));
+                    Ok(())
                 }
-            }
+            },
         }
     }
 
     fn symbolic_count(&self) -> usize {
         match self {
-            Self::Direct { solver, .. } => solver.stats().symbolic_count,
-            Self::Blr { solver, .. } => solver.stats().symbolic_count,
+            Self::Sparse(sp) => sp.symbolic_count(),
             Self::AmsFgmres { symbolic_count, .. } => *symbolic_count,
         }
     }
 
     fn backend_name(&self) -> String {
         match self {
-            Self::Direct { solver, requested } => {
-                let b = format_backend(solver.stats().backend);
-                if requested == "lblt"
-                    && !matches!(solver.stats().backend, FactorBackend::LbltNd | FactorBackend::LbltAmd)
-                {
-                    format!("{b} (fallback from lblt)")
-                } else {
-                    b.to_string()
-                }
-            }
-            Self::Blr { solver, .. } => format_backend(solver.stats().backend).to_string(),
+            Self::Sparse(sp) => sp.backend_name(),
             Self::AmsFgmres { .. } => "AmsFgmres".to_string(),
         }
     }
 
     fn solve_many(&self, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String> {
         match self {
-            Self::Direct { solver, .. } => Ok(solver.solve_many(rhs_cols)),
-            Self::Blr { solver, a_cur, opts } => {
-                if opts.tol <= 0.0 {
-                    return Ok(solver.solve_many(rhs_cols));
-                }
-                let n = solver.dim();
-                let mut out = Vec::with_capacity(rhs_cols.len());
-                for b in rhs_cols {
-                    let mut x = vec![c(0.0, 0.0); n];
-                    solver.solve_refined(a_cur, b, &mut x, 4, 1e-11);
-                    out.push(x);
-                }
-                Ok(out)
-            }
+            Self::Sparse(sp) => sp.solve_many(rhs_cols),
             Self::AmsFgmres { solver, d_ruiz, .. } => {
                 let rhs_unscaled: Vec<Vec<C>> =
                     rhs_cols.iter().map(|b_hat| b_hat.iter().zip(d_ruiz).map(|(&bi, &di)| bi / di).collect()).collect();
@@ -1104,308 +893,19 @@ impl DrivenLinearSolver {
     }
 }
 
-/// Real Hermite Tangential Galerkin PROM with isometric QR image-space basis $\mathbf{U}$ for exact
-/// microsecond full-space residual certification across all sweep frequencies.
-struct DrivenProm<'a> {
+struct EmsPromSolver<'a> {
     asm: &'a DrivenAssembly,
-    /// Orthonormal real basis columns $\mathbf{q}_i \in \mathbb{R}^{n_{\text{red}}}$ (`r` columns).
-    q_cols: Vec<Vec<f64>>,
-    /// Reduced operator matrices $\mathbf{A}_{m,r} = \mathbf{Q}^T \hat{\mathbf{A}}_m \mathbf{Q}$ (`M` matrices, each `r x r` row-major).
-    a_r: Vec<Vec<C>>,
-    /// Reduced port vectors $\mathbf{B}_r = \mathbf{Q}^T \hat{\mathbf{B}}$ (`r x P`, indexed as `b_r[i][q]`).
-    b_r: Vec<Vec<f64>>,
-    /// Orthonormal image-space basis $\mathbf{U} = [\mathbf{u}_0, \dots, \mathbf{u}_{s-1}] \in \mathbb{R}^{n_{\text{red}} \times s}$.
-    u_cols: Vec<Vec<f64>>,
-    /// Coordinates of port vectors $\hat{\mathbf{b}}_q$ in $\mathbf{U}$: `u_b[q]` has length `s`.
-    u_b: Vec<Vec<f64>>,
-    /// Squared norms $\|\hat{\mathbf{b}}_q\|_2^2$.
-    b_norm2: Vec<f64>,
-    /// Coordinates of image vectors $\hat{\mathbf{A}}_m \mathbf{q}_i$ in $\mathbf{U}$: `u_aq[m][i]` has length `s`.
-    u_aq: Vec<Vec<Vec<C>>>,
+    slot: Option<DrivenLinearSolver>,
 }
 
-impl<'a> DrivenProm<'a> {
-    fn new(asm: &'a DrivenAssembly) -> Self {
-        let m_terms = asm.terms_hat.len();
-        let p_ports = asm.ports.len();
-        let mut u_cols: Vec<Vec<f64>> = Vec::new();
-        for port in &asm.ports {
-            append_l2_orthonormal(&mut u_cols, &port.b_hat);
-        }
-        let s = u_cols.len();
-        let mut u_b = Vec::with_capacity(p_ports);
-        let mut b_norm2 = Vec::with_capacity(p_ports);
-        for port in &asm.ports {
-            b_norm2.push(dot_real(&port.b_hat, &port.b_hat));
-            let coords: Vec<f64> = u_cols.iter().map(|u| dot_real(u, &port.b_hat)).collect();
-            debug_assert_eq!(coords.len(), s);
-            u_b.push(coords);
-        }
-        Self {
-            asm,
-            q_cols: Vec::new(),
-            a_r: vec![Vec::new(); m_terms],
-            b_r: Vec::new(),
-            u_cols,
-            u_b,
-            b_norm2,
-            u_aq: vec![Vec::new(); m_terms],
-        }
+impl PromLinearSolver for EmsPromSolver<'_> {
+    fn update_and_solve(&mut self, omega: f64, a_mat: &CCsr, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String> {
+        DrivenLinearSolver::build_or_update(&mut self.slot, self.asm, omega, a_mat)?;
+        self.slot.as_ref().unwrap().solve_many(rhs_cols)
     }
 
-    fn dim(&self) -> usize {
-        self.q_cols.len()
-    }
-
-    /// Appends a real candidate vector to $\mathbf{Q}$ (if not already in the span) and updates
-    /// $\mathbf{A}_{m,r}$, $\mathbf{B}_r$, and the isometric image-space coordinates in $\mathbf{U}$.
-    fn add_real_vector(&mut self, cand: &[f64]) -> bool {
-        if !append_l2_orthonormal(&mut self.q_cols, cand) {
-            return false;
-        }
-        let r_old = self.q_cols.len() - 1;
-        let r_new = r_old + 1;
-        let q_new = &self.q_cols[r_old];
-        let m_terms = self.asm.terms_hat.len();
-        let nred = self.asm.nred;
-
-        // 1. Update B_r = Q^T B_hat
-        let b_row: Vec<f64> = self.asm.ports.iter().map(|p| dot_real(q_new, &p.b_hat)).collect();
-        self.b_r.push(b_row);
-
-        // 2. Compute images y_m = A_m q_new, update A_{m,r} and image basis U
-        let q_new_c: Vec<C> = q_new.iter().map(|&x| c(x, 0.0)).collect();
-        for m in 0..m_terms {
-            let ym = if self.asm.terms_hat[m].nnz() > 0 {
-                self.asm.terms_hat[m].matvec(&q_new_c)
-            } else {
-                vec![c(0.0, 0.0); nred]
-            };
-
-            // Grow A_{m,r} from (r_old x r_old) to (r_new x r_new)
-            let mut grown = vec![c(0.0, 0.0); r_new * r_new];
-            for i in 0..r_old {
-                for j in 0..r_old {
-                    grown[i * r_new + j] = self.a_r[m][i * r_old + j];
-                }
-            }
-            for i in 0..r_new {
-                let qi = &self.q_cols[i];
-                let mut dot_val = c(0.0, 0.0);
-                for (&qik, &ymk) in qi.iter().zip(&ym) {
-                    dot_val += ymk * qik;
-                }
-                // Since A_m is complex symmetric (A_m^T = A_m) and Q is real, A_{m,r} is complex symmetric
-                grown[i * r_new + r_old] = dot_val;
-                grown[r_old * r_new + i] = dot_val;
-            }
-            self.a_r[m] = grown;
-
-            // Expand image basis U with Re(ym) and Im(ym)
-            let re_y: Vec<f64> = ym.iter().map(|z| z.re).collect();
-            let im_y: Vec<f64> = ym.iter().map(|z| z.im).collect();
-            append_l2_orthonormal(&mut self.u_cols, &re_y);
-            append_l2_orthonormal(&mut self.u_cols, &im_y);
-
-            let s_now = self.u_cols.len();
-            let mut coords = Vec::with_capacity(s_now);
-            for u in &self.u_cols {
-                let mut d_re = 0.0;
-                let mut d_im = 0.0;
-                for (k, &uk) in u.iter().enumerate() {
-                    d_re += uk * ym[k].re;
-                    d_im += uk * ym[k].im;
-                }
-                coords.push(c(d_re, d_im));
-            }
-            self.u_aq[m].push(coords);
-        }
-
-        // Pad earlier u_b and u_aq vectors with zeros up to the current image-space dimension s_now
-        let s_now = self.u_cols.len();
-        for ub in &mut self.u_b {
-            ub.resize(s_now, 0.0);
-        }
-        for m in 0..m_terms {
-            for col in &mut self.u_aq[m] {
-                col.resize(s_now, c(0.0, 0.0));
-            }
-        }
-        true
-    }
-
-    /// Splits a complex snapshot vector `z` into `Re(z)` and `Im(z)` (after phase rotation to align its dominant part)
-    /// and appends both to $\mathbf{Q}$.
-    fn add_complex_snapshot(&mut self, z: &[C]) {
-        let big = z.iter().copied().fold(c(0.0, 0.0), |m, v| if v.norm_sqr() > m.norm_sqr() { v } else { m });
-        if big.norm_sqr() <= 1e-300 {
-            return;
-        }
-        let rot = big.conj() / big.norm();
-        let re_v: Vec<f64> = z.iter().map(|&v| (v * rot).re).collect();
-        let im_v: Vec<f64> = z.iter().map(|&v| (v * rot).im).collect();
-        self.add_real_vector(&re_v);
-        self.add_real_vector(&im_v);
-    }
-
-    /// Performs one full HDM numeric factorization at angular frequency `omega_a` (rad/s), reusing the
-    /// cached symbolic LU analysis, normalizes each of the `3P` Hermite snapshots (`Y`, `Y'`, `Y''`) directly
-    /// to unit $L_2$ norm, compresses the anchor block via complex thin SVD (`s_k >= 1e-6 * s_0`), and adds
-    /// the surviving left singular vectors to $\mathbf{Q}$.
-    fn add_hermite_anchor(&mut self, omega_a: f64, solver: &mut Option<DrivenLinearSolver>) -> Result<(), String> {
-        let a_mat = self.asm.assemble_matrix_at(omega_a);
-        DrivenLinearSolver::build_or_update(solver, self.asm, omega_a, &a_mat)?;
-        let s_ref = solver.as_ref().unwrap();
-        let p_ports = self.asm.ports.len();
-        let nred = self.asm.nred;
-
-        let mut rhs_0 = Vec::with_capacity(p_ports);
-        let mut gammas = Vec::with_capacity(p_ports);
-        for port in &self.asm.ports {
-            let (_, g0, g1, g2) = port.excitation_coeffs(omega_a, &self.asm.waveports);
-            gammas.push((g0, g1, g2));
-            rhs_0.push(port.b_hat.iter().map(|&b| g0 * b).collect::<Vec<C>>());
-        }
-
-        // 1. Value solve: A(omega_a) Y = RHS(omega_a)
-        let y0_cols = s_ref.solve_many(&rhs_0)?;
-
-        // 2. First derivative solve on the SAME factorization:
-        //    A(omega_a) Y' = RHS'(omega_a) - A'(omega_a) Y
-        let mut rhs_1 = Vec::with_capacity(p_ports);
-        for q in 0..p_ports {
-            let a1_y0 = self.asm.apply_matrix_deriv(omega_a, 1, &y0_cols[q]);
-            let g1 = gammas[q].1;
-            let b_hat = &self.asm.ports[q].b_hat;
-            let col: Vec<C> = (0..nred).map(|i| g1 * b_hat[i] - a1_y0[i]).collect();
-            rhs_1.push(col);
-        }
-        let y1_cols = s_ref.solve_many(&rhs_1)?;
-
-        // 3. Second derivative solve on the SAME factorization:
-        //    A(omega_a) Y'' = RHS''(omega_a) - 2 A'(omega_a) Y' - A''(omega_a) Y
-        let mut rhs_2 = Vec::with_capacity(p_ports);
-        for q in 0..p_ports {
-            let a1_y1 = self.asm.apply_matrix_deriv(omega_a, 1, &y1_cols[q]);
-            let a2_y0 = self.asm.apply_matrix_deriv(omega_a, 2, &y0_cols[q]);
-            let g2 = gammas[q].2;
-            let b_hat = &self.asm.ports[q].b_hat;
-            let col: Vec<C> = (0..nred).map(|i| g2 * b_hat[i] - c(2.0, 0.0) * a1_y1[i] - a2_y0[i]).collect();
-            rhs_2.push(col);
-        }
-        let y2_cols = s_ref.solve_many(&rhs_2)?;
-
-        // Normalize every Y, Y', Y'' snapshot directly to unit L2 norm (bandwidth-independent),
-        // then compress the 3P complex block via thin SVD keeping s_k >= 1e-6 * s_0.
-        let mut anchor_cols: Vec<Vec<C>> = Vec::with_capacity(3 * p_ports);
-        for col in y0_cols.iter().chain(y1_cols.iter()).chain(y2_cols.iter()) {
-            let nrm = col.iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
-            if nrm > 0.0 && nrm.is_finite() {
-                let inv = 1.0 / nrm;
-                anchor_cols.push(col.iter().map(|&v| v * inv).collect());
-            }
-        }
-        if !anchor_cols.is_empty() {
-            let (s_vals, u_cols) = thin_svd_c64(&anchor_cols)?;
-            if let Some(&s0) = s_vals.first() {
-                if s0 > 0.0 {
-                    let cutoff = 1e-6 * s0;
-                    for (&sk, uk) in s_vals.iter().zip(&u_cols) {
-                        if sk >= cutoff {
-                            self.add_complex_snapshot(uk);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Solves the $r \times r$ reduced system at `omega` (rad/s) for all $P$ ports and returns
-    /// `(x_r_cols, exact_relative_residual)`.
-    fn solve_reduced_and_residual(&self, omega: f64) -> Option<(Vec<Vec<C>>, f64)> {
-        let r = self.dim();
-        let p_ports = self.asm.ports.len();
-        let m_terms = self.asm.terms_hat.len();
-        let coeffs = self.asm.term_coeffs(omega);
-
-        let mut t_r = vec![c(0.0, 0.0); r * r];
-        for m in 0..m_terms {
-            let alpha = coeffs[m].0;
-            if alpha.re == 0.0 && alpha.im == 0.0 {
-                continue;
-            }
-            let am = &self.a_r[m];
-            for idx in 0..(r * r) {
-                t_r[idx] += alpha * am[idx];
-            }
-        }
-
-        let mut gammas = Vec::with_capacity(p_ports);
-        let mut rhs_r = Vec::with_capacity(p_ports);
-        for q in 0..p_ports {
-            let (_, g0, _, _) = self.asm.ports[q].excitation_coeffs(omega, &self.asm.waveports);
-            gammas.push(g0);
-            let col: Vec<C> = (0..r).map(|i| g0 * self.b_r[i][q]).collect();
-            rhs_r.push(col);
-        }
-
-        let xr_cols = solve_dense_complex_multi(&t_r, &rhs_r, r)?;
-
-        // Compute exact full-space relative residual in the isometric image basis U (dim s)
-        let s = self.u_cols.len();
-        let mut res_num2 = 0.0;
-        let mut res_den2 = 0.0;
-        let mut r_vec = vec![c(0.0, 0.0); s];
-
-        for q in 0..p_ports {
-            let g0 = gammas[q];
-            res_den2 += g0.norm_sqr() * self.b_norm2[q];
-            for (k, &ub_k) in self.u_b[q].iter().enumerate() {
-                r_vec[k] = -g0 * ub_k;
-            }
-            let xrq = &xr_cols[q];
-            for m in 0..m_terms {
-                let alpha = coeffs[m].0;
-                if alpha.re == 0.0 && alpha.im == 0.0 {
-                    continue;
-                }
-                let u_aq_m = &self.u_aq[m];
-                for i in 0..r {
-                    let weight = alpha * xrq[i];
-                    if weight.re == 0.0 && weight.im == 0.0 {
-                        continue;
-                    }
-                    let col_u = &u_aq_m[i];
-                    for k in 0..s {
-                        r_vec[k] += weight * col_u[k];
-                    }
-                }
-            }
-            for &rv in &r_vec {
-                res_num2 += rv.norm_sqr();
-            }
-        }
-
-        let rel_res = (res_num2 / res_den2.max(1e-300)).sqrt();
-        Some((xr_cols, rel_res))
-    }
-
-    /// Reconstructs the unscaled reduced-DOF physical electric field vector $\mathbf{x} = \mathbf{D} \mathbf{Q} \mathbf{x}_r$.
-    fn reconstruct_unscaled(&self, xr: &[C]) -> Vec<C> {
-        let nred = self.asm.nred;
-        let mut y = vec![c(0.0, 0.0); nred];
-        for (i, &c_val) in xr.iter().enumerate() {
-            let qi = &self.q_cols[i];
-            for k in 0..nred {
-                y[k] += c_val * qi[k];
-            }
-        }
-        for (yk, &dk) in y.iter_mut().zip(&self.asm.d_ruiz) {
-            *yk *= dk;
-        }
-        y
+    fn solve_same_factor(&self, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String> {
+        self.slot.as_ref().unwrap().solve_many(rhs_cols)
     }
 }
 
@@ -1535,34 +1035,6 @@ fn compute_driven_pml_metrics(asm: &DrivenAssembly, freq_hz: f64, x_red: &[C]) -
     (p_pml_w, layer_fraction)
 }
 
-/// Partitions `freqs_hz` into `[start..end)` sub-bands with `f_end / f_start <= 3.0` (`~2.5x` per band when `f_max / f_min > 3.0`).
-#[allow(clippy::single_range_in_vec_init)]
-fn partition_prom_subbands(freqs_hz: &[f64]) -> Vec<std::ops::Range<usize>> {
-    let n = freqs_hz.len();
-    if n == 0 {
-        return Vec::new();
-    }
-    if freqs_hz[n - 1] <= 3.0 * freqs_hz[0] {
-        return vec![0..n];
-    }
-    let mut bands = Vec::new();
-    let mut start = 0usize;
-    while start < n {
-        let f_cap = 2.5 * freqs_hz[start];
-        let mut end = start + 1;
-        while end < n && freqs_hz[end] <= f_cap {
-            end += 1;
-        }
-        // Absorb trailing sliver if remaining span is <= 1.2x so the final sub-band is never degenerate.
-        if end < n && freqs_hz[n - 1] <= 3.0 * freqs_hz[start] {
-            end = n;
-        }
-        bands.push(start..end);
-        start = end;
-    }
-    bands
-}
-
 struct DrivenSweepCoreOut {
     driven_data: DrivenPortData,
     symbolic_count: usize,
@@ -1594,8 +1066,8 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
     let mut y_matrix = Vec::with_capacity(n_points);
 
     let mut hdm_solves = 0usize;
-    let mut symbolic_count = 0usize;
-    let mut backend_name = "None".to_string();
+    let symbolic_count;
+    let backend_name;
     let mut rom_dim = 0usize;
     let mut anchor_freqs_hz = Vec::new();
     let mut max_residual = 0.0_f64;
@@ -1604,190 +1076,85 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
     let mut rep_x_red: Vec<C> = vec![c(0.0, 0.0); asm.nred];
 
     if let Some(tol) = asm.prom_tol {
-        let bands = partition_prom_subbands(&freqs_hz);
-        let n_bands = bands.len().max(1);
-        let total_max_solves = asm.max_hdm_solves.max(1);
-        let mut solver: Option<DrivenLinearSolver> = None;
+        let mut solver = EmsPromSolver { asm, slot: None };
         let mut min_s_metric = f64::INFINITY;
         const SWEEP_CHUNK: usize = 32;
-
-        for (bi, band) in bands.iter().enumerate() {
-            let b_freqs = &freqs_hz[band.clone()];
-            let b_omegas = &omegas[band.clone()];
-            let nb_pts = b_freqs.len();
-            let remaining = total_max_solves.saturating_sub(hdm_solves).max(1);
-            let bands_left = (n_bands - bi).max(1);
-            let max_solves_band =
-                if n_bands == 1 { total_max_solves } else { (remaining.div_ceil(bands_left)).max(3.min(remaining)) };
-
-            let mut prom = DrivenProm::new(asm);
-            let mut band_solves = 0usize;
-
-            let mut base_indices: Vec<usize> =
-                if nb_pts == 1 || (b_freqs[nb_pts - 1] - b_freqs[0]).abs() <= 1e-12 * b_freqs[0] {
-                    vec![0]
-                } else if nb_pts == 2 {
-                    vec![0, 1]
-                } else {
-                    vec![0, (nb_pts - 1) / 2, nb_pts - 1]
-                };
-            base_indices.dedup();
-
-            let mut initial_anchors: Vec<(Option<usize>, f64)> =
-                base_indices.iter().map(|&idx| (Some(idx), b_freqs[idx])).collect();
-            for &sf in &asm.seed_freqs_hz {
-                if n_bands > 1 && (sf < b_freqs[0] - 1e-9 || sf > b_freqs[nb_pts - 1] + 1e-9) {
-                    continue;
-                }
-                let mut best_k = 0usize;
-                let mut best_diff = f64::INFINITY;
-                for (k, &fk) in b_freqs.iter().enumerate() {
-                    let diff = (fk - sf).abs();
-                    if diff < best_diff {
-                        best_diff = diff;
-                        best_k = k;
-                    }
-                }
-                if best_diff <= 1e-9 * sf.max(1.0) {
-                    if !initial_anchors.iter().any(|&(oi, _)| oi == Some(best_k)) {
-                        initial_anchors.push((Some(best_k), b_freqs[best_k]));
-                    }
-                } else if !initial_anchors.iter().any(|&(_, f)| (f - sf).abs() <= 1e-9 * sf.max(1.0)) {
-                    initial_anchors.push((None, sf));
-                }
-            }
-
-            let mut anchor_indices: Vec<usize> = Vec::new();
-            for (opt_idx, f_anchor) in initial_anchors.into_iter().take(max_solves_band) {
-                femcore::progress::check()?;
-                prom.add_hermite_anchor(2.0 * PI * f_anchor, &mut solver)?;
-                band_solves += 1;
-                hdm_solves += 1;
-                anchor_freqs_hz.push(f_anchor);
-                if let Some(idx) = opt_idx {
-                    anchor_indices.push(idx);
-                }
-            }
-
-            let mut xr_band: Vec<Vec<Vec<C>>>;
-            let band_worst_res;
-            loop {
-                femcore::progress::check()?;
-                let t_sweep = Instant::now();
-                let dim_now = prom.dim();
-                let prom_ref = &prom;
-                let sweep_chunks = femcore::par::map_chunks(b_omegas, SWEEP_CHUNK, |chunk| {
+        let summary = run_greedy_prom_sweep(
+            asm,
+            &mut solver,
+            &freqs_hz,
+            tol,
+            asm.max_hdm_solves,
+            asm.strict_prom_tol,
+            &asm.seed_freqs_hz,
+            |band, b_omegas, prom: &ImageProm<'_, DrivenAssembly>, xr_band| {
+                let nb_pts = b_omegas.len();
+                let t_post = Instant::now();
+                let indices: Vec<usize> = (0..nb_pts).collect();
+                let b_dim = prom.dim();
+                let post_chunks = femcore::par::map_chunks(&indices, SWEEP_CHUNK, |chunk| {
                     chunk
                         .iter()
-                        .map(|&w| match prom_ref.solve_reduced_and_residual(w) {
-                            Some(pair) => pair,
-                            None => (vec![vec![c(0.0, 0.0); dim_now]; p_ports], f64::INFINITY),
+                        .map(|&k| {
+                            let w = b_omegas[k];
+                            let xr_k = &xr_band[k];
+                            let mut z_wave_k = Vec::with_capacity(p_ports);
+                            let mut z_circ_k = Vec::with_capacity(p_ports);
+                            let mut z0_pairs_k = Vec::with_capacity(p_ports);
+                            for port in &asm.ports {
+                                let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm.waveports);
+                                let z_circ_p = port.circuit_z0(z_wave_p, &asm.waveports);
+                                z_wave_k.push(z_wave_p);
+                                z_circ_k.push(z_circ_p);
+                                z0_pairs_k.push([z_circ_p, 0.0]);
+                            }
+                            let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
+                            for p in 0..p_ports {
+                                let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
+                                for q in 0..p_ports {
+                                    let mut v_pq = c(0.0, 0.0);
+                                    for i in 0..b_dim {
+                                        v_pq += xr_k[q][i] * prom.b_r_drive[i][p];
+                                    }
+                                    let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
+                                    s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
+                                }
+                            }
+                            let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
+                            let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
+                            (z0_pairs_k, s_out, z_out, y_out, metric)
                         })
                         .collect::<Vec<_>>()
                 });
-                xr_band = Vec::with_capacity(nb_pts);
-                let mut worst_res = 0.0_f64;
-                let mut worst_cand_res = -1.0_f64;
-                let mut worst_cand_idx = None;
-                for (k, (xr_k, res_k)) in sweep_chunks.into_iter().flatten().enumerate() {
-                    if res_k > worst_res {
-                        worst_res = res_k;
+                let mut band_best_local = None;
+                for (k_loc, (z0_pairs_k, s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate()
+                {
+                    if metric < min_s_metric {
+                        min_s_metric = metric;
+                        rep_freq_idx = band.start + k_loc;
+                        band_best_local = Some(k_loc);
                     }
-                    if !anchor_indices.contains(&k) && res_k > worst_cand_res {
-                        worst_cand_res = res_k;
-                        worst_cand_idx = Some(k);
-                    }
-                    xr_band.push(xr_k);
+                    z0_ohm.push(z0_pairs_k);
+                    s_matrix.push(s_out);
+                    z_matrix.push(z_out);
+                    y_matrix.push(y_out);
                 }
-                rom_sweep_seconds += t_sweep.elapsed().as_secs_f64();
-
-                if worst_res <= tol || band_solves >= max_solves_band || hdm_solves >= total_max_solves {
-                    band_worst_res = worst_res;
-                    break;
+                if let Some(kl) = band_best_local {
+                    rep_x_red = prom.reconstruct_unscaled(&xr_band[kl][0]);
                 }
-                let Some(next_idx) = worst_cand_idx else {
-                    band_worst_res = worst_res;
-                    break;
-                };
-                anchor_indices.push(next_idx);
-                prom.add_hermite_anchor(b_omegas[next_idx], &mut solver)?;
-                band_solves += 1;
-                hdm_solves += 1;
-                anchor_freqs_hz.push(b_freqs[next_idx]);
-            }
-
-            max_residual = max_residual.max(band_worst_res);
-            rom_dim += prom.dim();
-
-            if bi + 1 == n_bands {
-                symbolic_count = solver.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
-                backend_name = solver.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
-                // FR-33: Drop sparse factor buffers immediately after anchor solves finish, before post-sweep & 3D CellFields.
-                drop(solver.take());
-            }
-
-            let t_post = Instant::now();
-            let indices: Vec<usize> = (0..nb_pts).collect();
-            let prom_ref = &prom;
-            let xr_ref = &xr_band;
-            let b_dim = prom.dim();
-            let post_chunks = femcore::par::map_chunks(&indices, SWEEP_CHUNK, |chunk| {
-                chunk
-                    .iter()
-                    .map(|&k| {
-                        let w = b_omegas[k];
-                        let xr_k = &xr_ref[k];
-                        let mut z_wave_k = Vec::with_capacity(p_ports);
-                        let mut z_circ_k = Vec::with_capacity(p_ports);
-                        let mut z0_pairs_k = Vec::with_capacity(p_ports);
-                        for port in &asm.ports {
-                            let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm.waveports);
-                            let z_circ_p = port.circuit_z0(z_wave_p, &asm.waveports);
-                            z_wave_k.push(z_wave_p);
-                            z_circ_k.push(z_circ_p);
-                            z0_pairs_k.push([z_circ_p, 0.0]);
-                        }
-                        let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
-                        for p in 0..p_ports {
-                            let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
-                            for q in 0..p_ports {
-                                let mut v_pq = c(0.0, 0.0);
-                                for i in 0..b_dim {
-                                    v_pq += xr_k[q][i] * prom_ref.b_r[i][p];
-                                }
-                                let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
-                                s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
-                            }
-                        }
-                        let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
-                        let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
-                        (z0_pairs_k, s_out, z_out, y_out, metric)
-                    })
-                    .collect::<Vec<_>>()
-            });
-            let mut band_best_local = None;
-            for (k_loc, (z0_pairs_k, s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate() {
-                if metric < min_s_metric {
-                    min_s_metric = metric;
-                    rep_freq_idx = band.start + k_loc;
-                    band_best_local = Some(k_loc);
-                }
-                z0_ohm.push(z0_pairs_k);
-                s_matrix.push(s_out);
-                z_matrix.push(z_out);
-                y_matrix.push(y_out);
-            }
-            if let Some(kl) = band_best_local {
-                rep_x_red = prom.reconstruct_unscaled(&xr_band[kl][0]);
-            }
-            rom_sweep_seconds += t_post.elapsed().as_secs_f64();
-        }
-
-        if asm.strict_prom_tol && max_residual > tol {
-            return Err(format!(
-                "PROM did not converge to prom_tol = {tol:.3e} within max_hdm_solves = {total_max_solves} (max_prom_residual = {max_residual:.3e})"
-            ));
-        }
+                rom_sweep_seconds += t_post.elapsed().as_secs_f64();
+                Ok(())
+            },
+        )?;
+        symbolic_count = solver.slot.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
+        backend_name = solver.slot.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
+        // FR-33: Drop sparse factor buffers immediately after anchor solves finish, before post-sweep & 3D CellFields.
+        drop(solver.slot.take());
+        hdm_solves = summary.hdm_solves;
+        rom_dim = summary.rom_dim;
+        anchor_freqs_hz = summary.anchor_freqs_hz;
+        max_residual = summary.max_residual;
+        rom_sweep_seconds += summary.rom_sweep_seconds;
     } else {
         // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic factorization across all frequencies
         let mut solver: Option<DrivenLinearSolver> = None;
@@ -2257,83 +1624,8 @@ pub fn assemble_emw_driven_mixed(
         (CCsr::zeros(0, 0), CCsr::zeros(0, 0), RCsr::zeros(0, 0), RCsr::zeros(0, 0))
     };
 
-    let omega_mid = 2.0 * PI * f0;
-    let k0_mid = (omega_mid / C0).max(1.0);
-    let k0_mid2 = k0_mid * k0_mid;
-    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
-
-    let mut d_ruiz = vec![1.0_f64; nred];
-    for _ in 0..8 {
-        let mut rmax = vec![0.0_f64; nred];
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let mut m_val = 0.0_f64;
-            let (ck, vk) = k_tot_red.row(i);
-            for (&j, &v) in ck.iter().zip(vk) {
-                m_val = m_val.max(di * v.norm() * d_ruiz[j as usize]);
-            }
-            if c_tot_red.nnz() > 0 {
-                let (cc, vc) = c_tot_red.row(i);
-                for (&j, &v) in cc.iter().zip(vc) {
-                    m_val = m_val.max(di * k0_mid * v.norm() * d_ruiz[j as usize]);
-                }
-            }
-            let (cm, vm) = m_tot_red.row(i);
-            for (&j, &v) in cm.iter().zip(vm) {
-                m_val = m_val.max(di * k0_mid2 * v.norm() * d_ruiz[j as usize]);
-            }
-            for (w_idx, wp) in waveports.iter().enumerate() {
-                if wp.w_red.nnz() > 0 {
-                    let bw = wp_betas_mid[w_idx];
-                    let (cw, vw) = wp.w_red.row(i);
-                    for (&j, &v) in cw.iter().zip(vw) {
-                        m_val = m_val.max(di * bw * v.abs() * d_ruiz[j as usize]);
-                    }
-                }
-            }
-            rmax[i] = m_val;
-        }
-        for i in 0..nred {
-            if rmax[i] > 1e-300 {
-                d_ruiz[i] = (d_ruiz[i] / rmax[i].sqrt()).clamp(1e-14, 1e14);
-            }
-        }
-    }
-
-    let scale_sym_c = |mat: &CCsr| -> CCsr {
-        if mat.nnz() == 0 {
-            return CCsr::zeros(nred, nred);
-        }
-        let mut out = mat.clone();
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let range = out.row_range(i);
-            let cols: Vec<u32> = out.indices()[range.clone()].to_vec();
-            let vals = &mut out.values_mut()[range];
-            for (v, &col) in vals.iter_mut().zip(&cols) {
-                *v *= di * d_ruiz[col as usize];
-            }
-        }
-        out
-    };
-
-    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
-    terms_hat.push(scale_sym_c(&k_tot_red));
-    terms_hat.push(scale_sym_c(&c_tot_red));
-    terms_hat.push(scale_sym_c(&m_tot_red));
-    for wp in &waveports {
-        terms_hat.push(scale_sym_c(&wp.w_red.to_complex()));
-    }
-
-    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
-    for lp in &lumped_ports {
-        let b_hat: Vec<f64> = lp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: lp.bc.name.clone(), kind: DrivenPortKind::Lumped { z0: lp.bc.z0 }, b_hat });
-    }
-    for (wave_index, wp) in waveports.iter().enumerate() {
-        let b_hat: Vec<f64> = wp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: wp.bc.name.clone(), kind: DrivenPortKind::Wave { wave_index }, b_hat });
-    }
+    let (d_ruiz, terms_hat, ports) =
+        equilibrate_driven_system(nred, f0, &k_tot_red, &c_tot_red, &m_tot_red, &lumped_ports, &waveports);
 
     let ams_data = if solver == "ams_fgmres" && problem.periodic.is_empty() {
         if !fixed_verts.iter().any(|&v| v) && nv > 0 {

@@ -5,22 +5,22 @@ C4 level 4 (code) of the component **Material specification** (`femcore.material
 > TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, Zimmermann BCS superconducting conductivity, provenance and the library loader.
 
 **Decisions:** [ADR 29](../../../adr/0029-material-files-are-toml-with-explicit-units.md), [ADR 30](../../../adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md), [ADR 34](../../../adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md), [ADR 35](../../../adr/0035-material-provenance-oscillator-models-and-the-checked-library.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
-**Size:** 13 files, 10051 lines.
+**Size:** 13 files, 10179 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/material/bcs.rs` | 1027 |  |
-| `crates/femcore/src/material/coupled.rs` | 1787 |  |
+| `crates/femcore/src/material/coupled.rs` | 1800 |  |
 | `crates/femcore/src/material/elastic.rs` | 784 |  |
 | `crates/femcore/src/material/import.rs` | 1406 |  |
-| `crates/femcore/src/material/mod.rs` | 427 |  |
+| `crates/femcore/src/material/mod.rs` | 476 |  |
 | `crates/femcore/src/material/optics.rs` | 1264 |  |
 | `crates/femcore/src/material/reader.rs` | 277 |  |
 | `crates/femcore/src/material/schema.rs` | 489 |  |
 | `crates/femcore/src/material/source.rs` | 136 |  |
-| `crates/femcore/src/material/spec.rs` | 1241 |  |
+| `crates/femcore/src/material/spec.rs` | 1307 |  |
 | `crates/femcore/src/material/state_t.rs` | 747 |  |
 | `crates/femcore/src/material/tensor.rs` | 171 |  |
 | `crates/femcore/src/material/units.rs` | 295 |  |
@@ -34,28 +34,31 @@ Nothing outside the component (the standard library and external crates are not 
 | Component | Modules | Items |
 |---|---|---|
 | [dfs: Physics adapter](../dfs/adapter.md) | material::spec | Library |
-| [dfs: Shared helpers](../dfs/common.md) | material | M3 |
+| [dfs: Shared helpers](../dfs/common.md) | material | Anisotropy, M3, Tensor |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | material | M3 |
 | [dfs: Heat kernel](../dfs/heat.md) | material | M3 |
 | [dfs: Typed problem](../dfs/problem.md) | material, material::bcs | FilmModel, bcs_surface_impedance |
 | [ems: Physics adapter](../ems/adapter.md) | material, material::spec | Library, tensor_global |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | material | tensor_global |
+| [ems: Native mixed-cell EM](../ems/mixed.md) | material | M3 |
 | [ems: Typed problem](../ems/problem.md) | material, material::bcs | FilmModel, bcs_surface_impedance, rotate_tensor, rotation |
 | [engine: Commands](../engine/commands.md) | material, material::spec | Anisotropy, Library |
 | [engine: Job runner and queue](../engine/jobs.md) | material::spec | Library |
-| [engine: Materials](../engine/materials.md) | material, material::bcs, material::coupled, material::import, material::spec | EV_TO_J, FilmModel, ImportFormat, ImportOptions, Library, MaterialSpec, REMOTE_CATALOG, Superconducting +6 |
-| [engine: Meshing seam](../engine/meshing.md) | material::spec | Library |
+| [engine: Materials](../engine/materials.md) | material, material::bcs, material::coupled, material::import, material::spec | EV_TO_J, FilmModel, ImportFormat, ImportOptions, Library, M3, M6, MaterialSpec +12 |
+| [engine: Meshing seam](../engine/meshing.md) | material, material::spec | Library, M6, isotropic_stiffness, rotate_m6_global |
 | [engine: Results files](../engine/resultsIO.md) | material::spec | Library |
 | [Error estimators](./estimators.md) | material | M3 |
 | [Finite-element basics](./fem.md) | material | Anisotropy, M3, M6 |
-| [Meshing facade](./meshing.md) | material | M6 |
+| [Meshing facade](./meshing.md) | material | M3, M6 |
 | [Frame and sections](./section.md) | material | M3, M6 |
 | [physics: Problem envelope](../physics/envelope.md) | material, material::coupled, material::elastic, material::spec, material::tensor | Class, InterfaceLayer, Library, M3, Requirement, Tensor, TensorProp, iso_tensor +1 |
 | [physics: Physics trait and registry](../physics/trait.md) | material::spec | Library |
-| [sms: Physics adapter](../sms/adapter.md) | material, material::spec | Library, isotropic_stiffness, stiffness_global |
-| [sms: Axisymmetric kernel](../sms/axisym.md) | material | M6 |
+| [sms: Physics adapter](../sms/adapter.md) | material, material::coupled, material::spec | EPSILON_0, Library, isotropic_stiffness, piezo_e_global, stiffness_global, tensor_global |
+| [sms: Axisymmetric kernel](../sms/axisym.md) | material | M3, M6 |
 | [sms: Cross-section study kernel](../sms/crosssection.md) | material | M6 |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | material | M6 |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | material, material::coupled | EPSILON_0, M3, M6 |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | material, material::coupled | EPSILON_0, M3, M6, isotropic_stiffness, piezo_e_global, stiffness_global, tensor_global |
 | [sms: Solid kernel](../sms/solid.md) | material | M3, M6 |
 | [sms: Waveguide kernel](../sms/waveguide.md) | material | M6 |
 
@@ -336,12 +339,12 @@ classDiagram
         +rotate_tensor(t, r) M3
         +stiffness_global(s, euler_deg) M6
         +rotate_m6_global(m, euler_deg) M6
+        +rotate_m6_textbook(m, euler_deg) M6
+        +piezo_e_global(e_textbook, euler_deg) slice
         +isotropic_stiffness(e, nu) M6
         +tensor_global(t, euler_deg) M3
         +iso_tensor(v) M3
-        +is_positive_definite(c) bool
-        +sapphire() tuple
-        +more_1_functions()
+        +more_3_functions()
         +M3 type
         +M6 type
     }
@@ -705,14 +708,16 @@ classDiagram
 | fn | `rotation` | `material/mod.rs:211` | `pub fn rotation(euler_deg: [f64; 3]) -> M3` |
 | fn | `euler_from_rotation` | `material/mod.rs:226` | `pub fn euler_from_rotation(m: &M3) -> [f64` —  Bunge angles (degrees) of a rotation matrix whose columns are the crystal axes in the global |
 | fn | `rotate_tensor` | `material/mod.rs:250` | `pub fn rotate_tensor(t: &M3, r: &M3) -> M3` |
-| fn | `stiffness_global` | `material/mod.rs:303` | `pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6` —  Stiffness in the global frame (solver Voigt order). |
-| fn | `rotate_m6_global` | `material/mod.rs:309` | `pub fn rotate_m6_global(m: &M6, euler_deg: [f64; 3]) -> M6` —  Rotates a symmetric `6x6` fourth-order tensor in solver Voigt order `(xx, yy, zz, xy, yz, xz)` |
-| fn | `isotropic_stiffness` | `material/mod.rs:314` | `pub fn isotropic_stiffness(e: f64, nu: f64) -> M6` —  Isotropic stiffness (solver Voigt order). |
-| fn | `tensor_global` | `material/mod.rs:328` | `pub fn tensor_global(t: &Tensor, euler_deg: [f64; 3]) -> M3` |
-| fn | `iso_tensor` | `material/mod.rs:332` | `pub fn iso_tensor(v: f64) -> M3` |
-| fn | `is_positive_definite` | `material/mod.rs:337` | `pub fn is_positive_definite(c: &M6) -> bool` —  Positive definiteness check by Cholesky on the 6x6 matrix. |
-| fn | `sapphire` | `material/mod.rs:359` | `pub fn sapphire() -> (Stiffness, Tensor, Tensor, Tensor, f64)` —  Typical room-temperature crystal data for the material library (GPa converted to Pa). |
-| fn | `silicon` | `material/mod.rs:369` | `pub fn silicon() -> Stiffness` |
+| fn | `stiffness_global` | `material/mod.rs:308` | `pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6` —  Stiffness in the global frame (solver Voigt order). |
+| fn | `rotate_m6_global` | `material/mod.rs:314` | `pub fn rotate_m6_global(m: &M6, euler_deg: [f64; 3]) -> M6` —  Rotates a symmetric `6x6` fourth-order tensor given in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` |
+| fn | `rotate_m6_textbook` | `material/mod.rs:320` | `pub fn rotate_m6_textbook(m: &M6, euler_deg: [f64; 3]) -> M6` —  Rotates a symmetric `6x6` fourth-order tensor given in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` |
+| fn | `piezo_e_global` | `material/mod.rs:327` | `pub fn piezo_e_global(e_textbook: &[[f64; 6]; 3], euler_deg: [f64; 3]) -> [[f64` —  Rotates a `3x6` piezoelectric stress-charge coupling matrix `e_iJ` (`C/m^2`) from the crystal frame |
+| fn | `isotropic_stiffness` | `material/mod.rs:340` | `pub fn isotropic_stiffness(e: f64, nu: f64) -> M6` —  Isotropic stiffness (solver Voigt order). |
+| fn | `tensor_global` | `material/mod.rs:354` | `pub fn tensor_global(t: &Tensor, euler_deg: [f64; 3]) -> M3` |
+| fn | `iso_tensor` | `material/mod.rs:358` | `pub fn iso_tensor(v: f64) -> M3` |
+| fn | `is_positive_definite` | `material/mod.rs:363` | `pub fn is_positive_definite(c: &M6) -> bool` —  Positive definiteness check by Cholesky on the 6x6 matrix. |
+| fn | `sapphire` | `material/mod.rs:385` | `pub fn sapphire() -> (Stiffness, Tensor, Tensor, Tensor, f64)` —  Typical room-temperature crystal data for the material library (GPa converted to Pa). |
+| fn | `silicon` | `material/mod.rs:395` | `pub fn silicon() -> Stiffness` |
 | fn | `Stiffness::name` | `material/mod.rs:59` | `pub fn name(&self) -> &'static str` |
 | fn | `Stiffness::constants_mut` | `material/mod.rs:133` | `pub fn constants_mut(&mut self) -> Vec<(&'static str, &mut f64)>` —  The constants as `(label, value)` for editing. |
 | fn | `Tensor::name` | `material/mod.rs:166` | `pub fn name(&self) -> &'static str` |
@@ -769,46 +774,46 @@ classDiagram
 | fn | `Source::text` | `material/source.rs:20` | `pub fn text(cite: &str) -> Source` |
 | fn | `Source::is_verified` | `material/source.rs:25` | `pub fn is_verified(&self) -> bool` —  True if the entry has a verification date. |
 | fn | `Source::flags_uncertainty` | `material/source.rs:30` | `pub fn flags_uncertainty(&self) -> bool` —  True if the citation text itself flags the data as unchecked. |
-| const | `FORMAT` | `material/spec.rs:28` | `i64` —  Current primary version of the material file format (`format = 2`). |
-| const | `FORMAT_V1` | `material/spec.rs:30` | `i64` —  Legacy v1 file format version still supported read-only via dual reader. |
-| struct | `Thermal` | `material/spec.rs:37` | fields: `source`, `conductivity`, `specific_heat`, `expansion`, `conductivity_t`, `specific_heat_t`, `expansion_t`, `contraction` |
-| struct | `Electrical` | `material/spec.rs:61` | fields: `source`, `permittivity`, `permeability`, `conductivity`, `loss_tangent` |
-| struct | `MaterialSpec` | `material/spec.rs:76` | fields: `format`, `name`, `description`, `source`, `notes`, `density`, `kind`, `point_group`, `crystal_setting`, `reference_temperature`, `residual_stress`, `elastic`, ... |
-| const | `TOP_KEYS` | `material/spec.rs:145` | `&[&str]` |
-| const | `TOP_KEYS_V1` | `material/spec.rs:174` | `&[&str]` |
-| const | `ELASTIC_KEYS` | `material/spec.rs:189` | `&[&str]` |
-| const | `THERMAL_KEYS` | `material/spec.rs:190` | `&[&str]` |
-| const | `ELECTRICAL_KEYS` | `material/spec.rs:207` | `&[&str]` |
-| struct | `Library` | `material/spec.rs:893` |  A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case. |
-| fn | `merge_over` | `material/spec.rs:1164` | `pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table` —  `over` laid over `base`: |
-| struct | `Keys` | `material/spec.rs:1204` | fields: `top`, `top_v1`, `elastic`, `thermal`, `electrical`, `dielectric`, `superconducting`, `piezoelectric`, `photoelastic`, `electro_optic`, `viscoelastic`, `interfaces`, ... —  The keys each table of a material file accepts (the contract test compares them with the JSON Schema). |
-| fn | `keys` | `material/spec.rs:1222` | `pub fn keys() -> Keys` |
-| fn | `MaterialSpec::from_toml_named` | `material/spec.rs:254` | `pub fn from_toml_named(text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from TOML text. `fallback_name` is used when the file has no `name`. |
-| fn | `MaterialSpec::from_table` | `material/spec.rs:265` | `pub fn from_table(table: &toml::Table, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from a parsed table (already merged with its base if it had `extends`). |
-| fn | `MaterialSpec::from_toml` | `material/spec.rs:485` | `pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError>` |
-| fn | `MaterialSpec::load` | `material/spec.rs:490` | `pub fn load(path: &Path) -> Result<MaterialSpec, MaterialError>` —  Reads a file; the file name (without `.toml`) is the name if the file has none. |
-| fn | `MaterialSpec::to_toml` | `material/spec.rs:502` | `pub fn to_toml(&self) -> String` —  The material as TOML text in `format = 2` (comments of an original file are not kept). |
-| fn | `MaterialSpec::permittivity_clamped` | `material/spec.rs:617` | `pub fn permittivity_clamped(&self) -> Option<M3>` —  Clamped (constant-strain) static/microwave relative permittivity `eps^S` in the crystal frame. |
-| fn | `MaterialSpec::permittivity_free` | `material/spec.rs:637` | `pub fn permittivity_free(&self) -> Option<M3>` —  Free (constant-stress) static/microwave relative permittivity `eps^T` in the crystal frame. |
-| fn | `MaterialSpec::stiffness_constant_e` | `material/spec.rs:658` | `pub fn stiffness_constant_e(&self) -> Option<M6>` —  Short-circuit (constant-electric-field) stiffness `C^E` in solver Voigt order (`Pa`). |
-| fn | `MaterialSpec::stiffness_constant_d` | `material/spec.rs:663` | `pub fn stiffness_constant_d(&self) -> Option<M6>` —  Open-circuit (constant-displacement) stiffness `C^D = C^E + e^T (eps^S)^-1 e` in solver Voigt order (`Pa`). |
-| fn | `MaterialSpec::complex_microwave_permittivity` | `material/spec.rs:683` | `pub fn complex_microwave_permittivity( &self, freq_hz: Option<f64>, temp_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, euler_deg: [f64; 3], ) -> Option<(M3, M3)>` —  Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where |
-| fn | `MaterialSpec::thermal_conductivity_at` | `material/spec.rs:728` | `pub fn thermal_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k`, defaulting to reference temperature. |
-| fn | `MaterialSpec::specific_heat_at` | `material/spec.rs:736` | `pub fn specific_heat_at(&self, temp_k: Option<f64>) -> Option<f64>` —  Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k`, defaulting to reference temperature. |
-| fn | `MaterialSpec::thermal_expansion_at` | `material/spec.rs:744` | `pub fn thermal_expansion_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k`, defaulting to reference temperature. |
-| fn | `MaterialSpec::surface_impedance_at` | `material/spec.rs:752` | `pub fn surface_impedance_at( &self, freq_hz: f64, temp_k: f64, thickness: Option<f64>, film_model: Option<FilmModel>, ) -> Result<BcsEval, MaterialError>` —  Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted. |
-| fn | `MaterialSpec::anisotropy` | `material/spec.rs:774` | `pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy` —  The material in the `Anisotropy` form placed with Bunge angles in degrees. |
-| fn | `MaterialSpec::legacy_scalars` | `material/spec.rs:823` | `pub fn legacy_scalars(&self) -> BTreeMap<String, f64>` —  Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic). |
-| fn | `MaterialSpec::optical_permittivity` | `material/spec.rs:871` | `pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles. |
-| fn | `Library::load_dir` | `material/spec.rs:911` | `pub fn load_dir(dir: &Path) -> Result<Library, Vec<MaterialError>>` —  Loads every `*.toml` file of the folder (not its subfolders). All files with problems are reported together. |
-| fn | `Library::read` | `material/spec.rs:967` | `pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder, |
-| fn | `Library::with_texts` | `material/spec.rs:973` | `pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>>` —  A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material |
-| fn | `Library::read_table` | `material/spec.rs:994` | `pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError>` —  `read`, with the table after `extends` was resolved. |
-| fn | `Library::get` | `material/spec.rs:1013` | `pub fn get(&self, name: &str) -> Option<&MaterialSpec>` |
-| fn | `Library::require` | `material/spec.rs:1018` | `pub fn require(&self, name: &str) -> Result<&MaterialSpec, MaterialError>` —  Like `get`, with an error that lists the available names. |
-| fn | `Library::names` | `material/spec.rs:1026` | `pub fn names(&self) -> Vec<String>` |
-| fn | `Library::len` | `material/spec.rs:1030` | `pub fn len(&self) -> usize` |
-| fn | `Library::is_empty` | `material/spec.rs:1034` | `pub fn is_empty(&self) -> bool` |
+| const | `FORMAT` | `material/spec.rs:27` | `i64` —  Current primary version of the material file format (`format = 2`). |
+| const | `FORMAT_V1` | `material/spec.rs:29` | `i64` —  Legacy v1 file format version still supported read-only via dual reader. |
+| struct | `Thermal` | `material/spec.rs:36` | fields: `source`, `conductivity`, `specific_heat`, `expansion`, `conductivity_t`, `specific_heat_t`, `expansion_t`, `contraction` |
+| struct | `Electrical` | `material/spec.rs:60` | fields: `source`, `permittivity`, `permeability`, `conductivity`, `loss_tangent` |
+| struct | `MaterialSpec` | `material/spec.rs:75` | fields: `format`, `name`, `description`, `source`, `notes`, `density`, `kind`, `point_group`, `crystal_setting`, `reference_temperature`, `residual_stress`, `elastic`, ... |
+| const | `TOP_KEYS` | `material/spec.rs:144` | `&[&str]` |
+| const | `TOP_KEYS_V1` | `material/spec.rs:173` | `&[&str]` |
+| const | `ELASTIC_KEYS` | `material/spec.rs:188` | `&[&str]` |
+| const | `THERMAL_KEYS` | `material/spec.rs:189` | `&[&str]` |
+| const | `ELECTRICAL_KEYS` | `material/spec.rs:206` | `&[&str]` |
+| struct | `Library` | `material/spec.rs:914` |  A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case. |
+| fn | `merge_over` | `material/spec.rs:1194` | `pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table` —  `over` laid over `base`: |
+| struct | `Keys` | `material/spec.rs:1234` | fields: `top`, `top_v1`, `elastic`, `thermal`, `electrical`, `dielectric`, `superconducting`, `piezoelectric`, `photoelastic`, `electro_optic`, `viscoelastic`, `interfaces`, ... —  The keys each table of a material file accepts (the contract test compares them with the JSON Schema). |
+| fn | `keys` | `material/spec.rs:1252` | `pub fn keys() -> Keys` |
+| fn | `MaterialSpec::from_toml_named` | `material/spec.rs:253` | `pub fn from_toml_named(text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from TOML text. `fallback_name` is used when the file has no `name`. |
+| fn | `MaterialSpec::from_table` | `material/spec.rs:264` | `pub fn from_table(table: &toml::Table, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from a parsed table (already merged with its base if it had `extends`). |
+| fn | `MaterialSpec::from_toml` | `material/spec.rs:510` | `pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError>` |
+| fn | `MaterialSpec::load` | `material/spec.rs:515` | `pub fn load(path: &Path) -> Result<MaterialSpec, MaterialError>` —  Reads a file; the file name (without `.toml`) is the name if the file has none. |
+| fn | `MaterialSpec::to_toml` | `material/spec.rs:527` | `pub fn to_toml(&self) -> String` —  The material as TOML text in `format = 2` (comments of an original file are not kept). |
+| fn | `MaterialSpec::permittivity_clamped` | `material/spec.rs:642` | `pub fn permittivity_clamped(&self) -> Option<M3>` —  Clamped (constant-strain) static/microwave relative permittivity `eps^S` in the crystal frame. |
+| fn | `MaterialSpec::permittivity_free` | `material/spec.rs:661` | `pub fn permittivity_free(&self) -> Option<M3>` —  Free (constant-stress) static/microwave relative permittivity `eps^T` in the crystal frame. |
+| fn | `MaterialSpec::stiffness_constant_e` | `material/spec.rs:681` | `pub fn stiffness_constant_e(&self) -> Option<M6>` —  Short-circuit (constant-electric-field) stiffness `C^E` in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` (`Pa`). |
+| fn | `MaterialSpec::stiffness_constant_d` | `material/spec.rs:686` | `pub fn stiffness_constant_d(&self) -> Option<M6>` —  Open-circuit (constant-displacement) stiffness `C^D = C^E + e^T (eps^S)^-1 e` in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` (`Pa`). |
+| fn | `MaterialSpec::complex_microwave_permittivity` | `material/spec.rs:705` | `pub fn complex_microwave_permittivity( &self, freq_hz: Option<f64>, temp_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, euler_deg: [f64; 3], ) -> Option<(M3, M3)>` —  Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where |
+| fn | `MaterialSpec::thermal_conductivity_at` | `material/spec.rs:750` | `pub fn thermal_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k`, defaulting to reference temperature. |
+| fn | `MaterialSpec::specific_heat_at` | `material/spec.rs:758` | `pub fn specific_heat_at(&self, temp_k: Option<f64>) -> Option<f64>` —  Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k`, defaulting to reference temperature. |
+| fn | `MaterialSpec::thermal_expansion_at` | `material/spec.rs:766` | `pub fn thermal_expansion_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k`, defaulting to reference temperature. |
+| fn | `MaterialSpec::surface_impedance_at` | `material/spec.rs:774` | `pub fn surface_impedance_at( &self, freq_hz: f64, temp_k: f64, thickness: Option<f64>, film_model: Option<FilmModel>, ) -> Result<BcsEval, MaterialError>` —  Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted. |
+| fn | `MaterialSpec::anisotropy` | `material/spec.rs:796` | `pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy` —  The material in the `Anisotropy` form placed with Bunge angles in degrees. |
+| fn | `MaterialSpec::legacy_scalars` | `material/spec.rs:845` | `pub fn legacy_scalars(&self) -> BTreeMap<String, f64>` —  Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic). |
+| fn | `MaterialSpec::optical_permittivity` | `material/spec.rs:892` | `pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles. |
+| fn | `Library::load_dir` | `material/spec.rs:932` | `pub fn load_dir(dir: &Path) -> Result<Library, Vec<MaterialError>>` —  Loads every `*.toml` file of the folder (not its subfolders). All files with problems are reported together. |
+| fn | `Library::read` | `material/spec.rs:988` | `pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder, |
+| fn | `Library::with_texts` | `material/spec.rs:994` | `pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>>` —  A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material |
+| fn | `Library::read_table` | `material/spec.rs:1015` | `pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError>` —  `read`, with the table after `extends` was resolved. |
+| fn | `Library::get` | `material/spec.rs:1034` | `pub fn get(&self, name: &str) -> Option<&MaterialSpec>` |
+| fn | `Library::require` | `material/spec.rs:1039` | `pub fn require(&self, name: &str) -> Result<&MaterialSpec, MaterialError>` —  Like `get`, with an error that lists the available names. |
+| fn | `Library::names` | `material/spec.rs:1047` | `pub fn names(&self) -> Vec<String>` |
+| fn | `Library::len` | `material/spec.rs:1051` | `pub fn len(&self) -> usize` |
+| fn | `Library::is_empty` | `material/spec.rs:1055` | `pub fn is_empty(&self) -> bool` |
 | enum | `MaterialKind` | `material/state_t.rs:15` | variants: `Crystalline`, `Polycrystalline`, `Amorphous`, `Superconductor`, `Semiconductor`, `Dielectric`, `Metal`, `Polymer`, `Fluid` —  Macroscopic structural classification of a material. |
 | enum | `CrystalSetting` | `material/state_t.rs:60` | variants: `Ieee1987`, `Ire1949` —  Crystal axis frame convention for trigonal/orthorhombic/piezoelectric tensors. |
 | enum | `PointGroup` | `material/state_t.rs:87` | variants: `C1`, `Ci`, `C2`, `Cs`, `C2h`, `D2`, `C2v`, `D2h`, `C4`, `S4`, `C4h`, `D4`, ... —  All 32 Hermann–Mauguin crystallographic point groups plus isotropic and transverse-isotropic continuous groups. |

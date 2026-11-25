@@ -3,7 +3,7 @@ trait = component "Physics trait and registry" "The Physics trait (everything th
     properties {
         "adr" "25"
         "code" "crates/nyx-physics/src: error.rs, lib.rs, physics.rs, registry.rs"
-        "lines" "330"
+        "lines" "339"
         "codeDiagram" "4-code/physics/trait.md"
     }
 }
@@ -11,7 +11,7 @@ envelope = component "Problem envelope" "The one shape every physics is given (P
     properties {
         "adr" "25, 41, 63"
         "code" "crates/nyx-physics/src: decode.rs, spec.rs, validate.rs"
-        "lines" "1346"
+        "lines" "1452"
         "codeDiagram" "4-code/physics/envelope.md"
     }
 }
@@ -19,7 +19,7 @@ descriptors = component "Descriptors and schemas" "What a physics tells nyx abou
     properties {
         "adr" "25"
         "code" "crates/nyx-physics/src: desc.rs, schema.rs"
-        "lines" "380"
+        "lines" "414"
         "codeDiagram" "4-code/physics/descriptors.md"
     }
 }
@@ -27,7 +27,7 @@ result = component "Result and frame" "SolveResult as plain serialisable data, a
     properties {
         "adr" "25, 56"
         "code" "crates/nyx-physics/src: frame.rs, result.rs"
-        "lines" "290"
+        "lines" "795"
         "codeDiagram" "4-code/physics/result.md"
     }
 }
