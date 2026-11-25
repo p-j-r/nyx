@@ -1228,3 +1228,95 @@ fn piezo_descriptor_smoke_validates() {
     });
     validate_spec(&Sms, &spec).unwrap();
 }
+
+#[test]
+fn piezo_3d_static_iterative_schur_matches_direct_and_rejects_unsupported() {
+    use femcore::props::{LinearSolver, Periodic};
+
+    let an = aln_aniso([0.0, 0.0, 0.0]);
+    let raw = hex_block(1.0e-3, 1.0e-3, 0.25e-3, 6, 6, 4);
+    let tet = discretise(&raw).unwrap();
+
+    // 1. Fixed potential drive: compare LinearSolver::Iterative vs Direct
+    let mut p_dir = Problem::new(Study::Static, 1);
+    p_dir.solver = LinearSolver::Direct;
+    p_dir.materials.aniso.insert(1, an.clone());
+    p_dir.bcs = vec![
+        Bc { labels: vec![3], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } },
+        Bc { labels: vec![3], kind: BcKind::Ground },
+        Bc { labels: vec![4], kind: BcKind::Potential(5.0) },
+    ];
+    let mut p_iter = p_dir.clone();
+    p_iter.solver = LinearSolver::Iterative;
+
+    let res_dir = solve(&tet, &p_dir);
+    let res_iter = solve(&tet, &p_iter);
+    assert!(
+        res_iter.log.iter().any(|l| l.contains("Schur-AMG Right-FGMRES")),
+        "expected Schur-AMG Right-FGMRES log entry, got {:?}",
+        res_iter.log
+    );
+
+    let u_dir = num_scalar(&res_dir, "max |u| (m)");
+    let u_iter = num_scalar(&res_iter, "max |u| (m)");
+    assert!((u_dir - u_iter).abs() / u_dir.abs().max(1e-30) < 1e-8, "u_dir={u_dir} vs u_iter={u_iter}");
+    let q_dir = num_scalar(&res_dir, "charge 2 (C)");
+    let q_iter = num_scalar(&res_iter, "charge 2 (C)");
+    assert!((q_dir - q_iter).abs() / q_dir.abs().max(1e-30) < 1e-8, "q_dir={q_dir} vs q_iter={q_iter}");
+    let pmax_dir = num_scalar(&res_dir, "max phi (V)");
+    let pmax_iter = num_scalar(&res_iter, "max phi (V)");
+    assert!((pmax_dir - pmax_iter).abs() < 1e-9);
+
+    // 2. Floating potential hub DOF on Iterative vs Direct
+    let mut p_hub_dir = Problem::new(Study::Static, 1);
+    p_hub_dir.solver = LinearSolver::Direct;
+    p_hub_dir.materials.aniso.insert(1, an.clone());
+    p_hub_dir.bcs = vec![
+        Bc { labels: vec![3], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } },
+        Bc { labels: vec![3], kind: BcKind::Ground },
+        Bc { labels: vec![4], kind: BcKind::FloatingPotential { charge: 2.0e-12 } },
+        Bc { labels: vec![4], kind: BcKind::Load([0.0, 0.0, 5e6]) },
+    ];
+    let mut p_hub_iter = p_hub_dir.clone();
+    p_hub_iter.solver = LinearSolver::Iterative;
+    let r_hub_dir = solve(&tet, &p_hub_dir);
+    let r_hub_iter = solve(&tet, &p_hub_iter);
+    let phi_hub_dir = num_scalar(&r_hub_dir, "V 2 (V)");
+    let phi_hub_iter = num_scalar(&r_hub_iter, "V 2 (V)");
+    assert!(
+        (phi_hub_dir - phi_hub_iter).abs() / phi_hub_dir.abs().max(1e-12) < 1e-8,
+        "floating potential mismatch: {phi_hub_dir} vs {phi_hub_iter}"
+    );
+    let u_hub_dir = num_scalar(&r_hub_dir, "max |u| (m)");
+    let u_hub_iter = num_scalar(&r_hub_iter, "max |u| (m)");
+    assert!((u_hub_dir - u_hub_iter).abs() / u_hub_dir.abs().max(1e-30) < 1e-8);
+
+    // 3. Reject LinearSolver::Iterative on mixed Hex, infinite_element, 2D simplex, and 3D periodic
+    let mix = discretise_mixed(&raw).unwrap();
+    let err_mixed = nyx_sms::piezo::solve_piezo_mixed(&raw, &mix, &p_iter).unwrap_err();
+    assert!(err_mixed.contains("mixed-cell"), "unexpected mixed error: {err_mixed}");
+
+    let mut p_ie = p_iter.clone();
+    p_ie.infinite_elements
+        .insert(1, InfiniteElement { pml: Pml { z: PmlDir::Plus, ..Pml::default() }, ..Default::default() });
+    let err_ie = try_solve(&tet, &p_ie).unwrap_err();
+    assert!(err_ie.contains("infinite elements"), "unexpected IE error: {err_ie}");
+
+    let raw_2d = quad_rect(1.0e-3, 0.25e-3, 4, 2);
+    let tri_2d = discretise(&raw_2d).unwrap();
+    let mut p_2d = Problem::new(Study::Static, 1);
+    p_2d.solver = LinearSolver::Iterative;
+    p_2d.materials.aniso.insert(1, an);
+    p_2d.bcs = vec![
+        Bc { labels: vec![2], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } },
+        Bc { labels: vec![2], kind: BcKind::Ground },
+        Bc { labels: vec![3], kind: BcKind::Potential(1.0) },
+    ];
+    let err_2d = try_solve(&tri_2d, &p_2d).unwrap_err();
+    assert!(err_2d.contains("3D simplex"), "unexpected 2D error: {err_2d}");
+
+    let mut p_per = p_iter.clone();
+    p_per.periodic.push(Periodic { source: vec![1], dest: vec![6], phase: 0.0 });
+    let err_per = nyx_sms::piezo::solve_piezo(&tet, &p_per).unwrap_err();
+    assert!(err_per.contains("periodic"), "unexpected periodic error: {err_per}");
+}

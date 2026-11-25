@@ -17,22 +17,25 @@ use crate::piezo_mat::{
 use crate::pml::{real_quad_norm, ResolvedPmlDomains};
 use crate::problem::{Plane, Problem};
 use crate::solid::{lap, von_mises};
-use femcore::fem::{geometry, shape, shape_gradients, RefElement};
+use femcore::fem::{geometry, shape, shape_gradients, AmgSystem, RefElement};
 use femcore::fem_mixed::{
     lagrange_ref_nodes, lagrange_shape_into, quad_rule_mixed, IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap,
 };
 use femcore::fields::{node_average, CellFields};
+use femcore::linalg::amg_elastic::AmgOptions;
 use femcore::linalg::csr::{c, CCsr, Csr, RCsr, C};
 use femcore::linalg::direct::{Definiteness, FactorBackend, ShiftedFactorization, ShiftedSolver};
 use femcore::linalg::driver::{cancel_point, catching_cancel, DirectSolver};
 use femcore::linalg::eps::{krylov_schur, EpsOptions, EpsReason, Which};
 use femcore::linalg::equilibrate::{ruiz_symmetric, scale_symmetric, scale_vec};
 use femcore::linalg::faer_glue::FaerScalar;
-use femcore::linalg::linop::LinearOperator;
+use femcore::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
+use femcore::linalg::linop::{LinearOperator, Preconditioner};
 use femcore::linalg::scalar::{Scalar as LinalgScalar, C64};
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::mesh::SimplexMesh;
 use femcore::progress;
+use femcore::props::LinearSolver;
 use femcore::section::{component_names, stress_name};
 use nyx_physics::{
     cell_fields_of, CellField, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
@@ -1296,6 +1299,137 @@ pub(crate) fn push_eigen_mode_fields_mixed(
     (fields, cell_fields)
 }
 
+/// Builds SPD `M_phi = K_pp + diag_add` from negated `-K_pp` (`k_pp_neg`).
+fn negate_add_diag_csr(k_pp_neg: &RCsr, diag_add: &[f64]) -> RCsr {
+    let n = k_pp_neg.nrows();
+    let mut indptr = Vec::with_capacity(n + 1);
+    indptr.push(0);
+    let mut indices = Vec::with_capacity(k_pp_neg.nnz() + n);
+    let mut values = Vec::with_capacity(k_pp_neg.nnz() + n);
+    for (r, &add) in diag_add.iter().enumerate().take(n) {
+        let (cols, vals) = k_pp_neg.row(r);
+        let mut inserted = false;
+        for (&col_u32, &val) in cols.iter().zip(vals) {
+            let col = col_u32 as usize;
+            if !inserted && col == r {
+                indices.push(col);
+                values.push(-val + add);
+                inserted = true;
+            } else {
+                if !inserted && col > r && add != 0.0 {
+                    indices.push(r);
+                    values.push(add);
+                    inserted = true;
+                }
+                indices.push(col);
+                values.push(-val);
+            }
+        }
+        if !inserted && add != 0.0 {
+            indices.push(r);
+            values.push(add);
+        }
+        indptr.push(indices.len());
+    }
+    RCsr::from_raw(n, k_pp_neg.ncols(), indptr, indices, values)
+}
+
+/// Builds 1-hop SPD Schur approximation `M_phi = K_pp + diag(sum_k K_{pu,ik}^2 / K_{uu,kk})`
+/// along with reduced `(K_{u phi}, M_phi, diag_add)`.
+fn build_m_phi_with_coupling(k_red: &RCsr, n_u_red: usize, n_phi_red: usize) -> (RCsr, RCsr, Vec<f64>) {
+    let n_tot_red = n_u_red + n_phi_red;
+    let k_up_red = crate::piezo_asm::sub_csr(k_red, 0, n_u_red, n_u_red, n_tot_red);
+    let k_pu_red = crate::piezo_asm::sub_csr(k_red, n_u_red, n_tot_red, 0, n_u_red);
+    let k_pp_neg = crate::piezo_asm::sub_csr(k_red, n_u_red, n_tot_red, n_u_red, n_tot_red);
+
+    let mut diag_uu = vec![0.0; n_u_red];
+    for (r, d_slot) in diag_uu.iter_mut().enumerate() {
+        let (cols, vals) = k_red.row(r);
+        for (&col_u32, &val) in cols.iter().zip(vals) {
+            let col = col_u32 as usize;
+            if col == r {
+                *d_slot = val;
+                break;
+            }
+            if col > r {
+                break;
+            }
+        }
+    }
+
+    let mut diag_add = vec![0.0; n_phi_red];
+    for (p, add_slot) in diag_add.iter_mut().enumerate() {
+        let (cols, vals) = k_pu_red.row(p);
+        let mut sum = 0.0;
+        for (&col_u32, &val) in cols.iter().zip(vals) {
+            let d_kk = diag_uu[col_u32 as usize];
+            if d_kk > 0.0 {
+                sum += (val * val) / d_kk;
+            }
+        }
+        *add_slot = sum;
+    }
+
+    let m_phi_red = negate_add_diag_csr(&k_pp_neg, &diag_add);
+    (k_up_red, m_phi_red, diag_add)
+}
+
+enum PhiPc {
+    Direct(Box<DirectSolver<f64>>),
+    Amg(Box<AmgSystem>),
+}
+
+impl PhiPc {
+    fn solve_neg(&self, r_p: &[f64]) -> Vec<f64> {
+        let neg_rp: Vec<f64> = r_p.iter().map(|&v| -v).collect();
+        match self {
+            PhiPc::Direct(ds) => ds.solve(&neg_rp),
+            PhiPc::Amg(sys) => sys.precondition_free(&neg_rp),
+        }
+    }
+}
+
+/// Block upper-triangular Schur preconditioner for equilibrated static piezoelectricity
+/// (`K = [[K_uu, K_{u phi}], [K_{phi u}, -K_{phi phi}]]`, `P = [[K_uu, K_{u phi}], [0, -M_phi]]`).
+struct PiezoSchurPc<'a> {
+    n_u_red: usize,
+    n_phi_red: usize,
+    k_up_red: RCsr,
+    sys_u: AmgSystem,
+    phi_pc: PhiPc,
+    d_scale: &'a [f64],
+}
+
+impl Preconditioner<f64> for PiezoSchurPc<'_> {
+    fn apply(&self, r_hat: &[f64], z_hat: &mut [f64]) {
+        cancel_point();
+        let n_u = self.n_u_red;
+        let n_p = self.n_phi_red;
+        let mut r_u = vec![0.0; n_u];
+        let mut r_p = vec![0.0; n_p];
+        for i in 0..n_u {
+            r_u[i] = r_hat[i] / self.d_scale[i];
+        }
+        for p in 0..n_p {
+            r_p[p] = r_hat[n_u + p] / self.d_scale[n_u + p];
+        }
+        let z_p = self.phi_pc.solve_neg(&r_p);
+        let mut ku_zp = vec![0.0; n_u];
+        self.k_up_red.spmv(&z_p, &mut ku_zp);
+        let mut rhs_u = vec![0.0; n_u];
+        for i in 0..n_u {
+            rhs_u[i] = r_u[i] - ku_zp[i];
+        }
+        let z_u = self.sys_u.precondition_free(&rhs_u);
+        for i in 0..n_u {
+            z_hat[i] = z_u[i] / self.d_scale[i];
+        }
+        for p in 0..n_p {
+            z_hat[n_u + p] = z_p[p] / self.d_scale[n_u + p];
+        }
+    }
+}
+
 fn solve_static_equilibrated(asm: &PiezoStaticAssembly) -> Result<(Vec<f64>, FactorBackend), String> {
     let n_u_red = asm.constraints.n_u_red;
     if asm.k_red.nrows() == 0 {
@@ -1308,6 +1442,172 @@ fn solve_static_equilibrated(asm: &PiezoStaticAssembly) -> Result<(Vec<f64>, Fac
     let g_real: Vec<f64> = asm.constraints.g_all.iter().map(|z| z.re).collect();
     let x_full = asm.constraints.red_all.expand_with(&x_red, &g_real);
     Ok((x_full, solver.stats().backend))
+}
+
+/// Solves a 3D simplex static coupled system with Right-FGMRES + [`PiezoSchurPc`].
+/// Returns `Ok(None)` when `spec.solver == LinearSolver::Auto` should fall back to direct
+/// (non-convergence or AMG setup issue), always propagating cancellation.
+fn solve_static_iterative(
+    mesh: &SimplexMesh,
+    spec: &Problem,
+    asm: &PiezoStaticAssembly,
+) -> Result<Option<(Vec<f64>, String)>, String> {
+    solve_static_iterative_with_phi_threshold(mesh, spec, asm, 50_000)
+}
+
+fn solve_static_iterative_with_phi_threshold(
+    mesh: &SimplexMesh,
+    spec: &Problem,
+    asm: &PiezoStaticAssembly,
+    phi_amg_threshold: usize,
+) -> Result<Option<(Vec<f64>, String)>, String> {
+    let n_u_red = asm.constraints.n_u_red;
+    let n_phi_red = asm.constraints.n_phi_red;
+    let n_tot_red = asm.k_red.nrows();
+    if n_tot_red == 0 || n_u_red == 0 || n_phi_red == 0 {
+        return Ok(None);
+    }
+
+    let n1 = asm.constraints.n1;
+    let n_mech = asm.constraints.n_mech;
+    let n_tot = asm.constraints.n_tot;
+    let fixed_u_full: Vec<usize> = (0..n_mech).filter(|&i| asm.constraints.red_u.index_of[i] == usize::MAX).collect();
+    let free_u_expected: Vec<usize> =
+        (0..n_mech).filter(|&i| asm.constraints.red_u.index_of[i] != usize::MAX).collect();
+    if asm.constraints.red_u.roots != free_u_expected {
+        if spec.solver == LinearSolver::Auto {
+            return Ok(None);
+        }
+        return Err("iterative coupled piezoelectric solver requires uncoupled mechanical DOF ordering".into());
+    }
+    let k_uu_full = crate::piezo_asm::sub_csr(&asm.k_full, 0, n_mech, 0, n_mech);
+    let sys_u = match AmgSystem::new(mesh, spec.order, 3, &k_uu_full, &fixed_u_full) {
+        Ok(sys) => sys,
+        Err(e) if e == femcore::progress::CANCELLED => return Err(e),
+        Err(e) => {
+            if spec.solver == LinearSolver::Auto {
+                return Ok(None);
+            }
+            return Err(format!("iterative displacement AMG setup failed: {e}"));
+        }
+    };
+
+    let (k_up_red, m_phi_red, diag_add_red) = build_m_phi_with_coupling(&asm.k_red, n_u_red, n_phi_red);
+    let has_hubs = (n_mech..n_tot).any(|g| {
+        let r = asm.constraints.red_all.index_of[g];
+        r != usize::MAX && asm.constraints.red_all.roots[r] != g
+    });
+    let (phi_pc, phi_desc) = if !has_hubs && n_phi_red > phi_amg_threshold {
+        let fixed_p_full: Vec<usize> = (n_mech..n_tot)
+            .filter(|&g| asm.constraints.red_all.index_of[g] == usize::MAX)
+            .map(|g| g - n_mech)
+            .collect();
+        let free_p_expected: Vec<usize> = (n_mech..n_tot)
+            .filter(|&g| asm.constraints.red_all.index_of[g] != usize::MAX)
+            .map(|g| g - n_mech)
+            .collect();
+        let can_amg = free_p_expected.len() == n_phi_red
+            && (0..n_phi_red).all(|p| free_p_expected[p] == asm.constraints.red_all.roots[n_u_red + p] - n_mech);
+        if can_amg {
+            let mut diag_add_full = vec![0.0; n1];
+            for (p_red, &add) in diag_add_red.iter().enumerate() {
+                let g = asm.constraints.red_all.roots[n_u_red + p_red] - n_mech;
+                diag_add_full[g] = add;
+            }
+            let k_pp_full_neg = crate::piezo_asm::sub_csr(&asm.k_full, n_mech, n_tot, n_mech, n_tot);
+            let m_phi_full = negate_add_diag_csr(&k_pp_full_neg, &diag_add_full);
+            match AmgSystem::new_with(
+                mesh,
+                spec.order,
+                1,
+                &m_phi_full,
+                &fixed_p_full,
+                AmgOptions { line_smooth: true, ..Default::default() },
+            ) {
+                Ok(sys_p) => (PhiPc::Amg(Box::new(sys_p)), "phi=AMG"),
+                Err(e) if e == femcore::progress::CANCELLED => return Err(e),
+                _ => (PhiPc::Direct(Box::new(DirectSolver::new(&m_phi_red, true)?)), "phi=direct-SPD"),
+            }
+        } else {
+            (PhiPc::Direct(Box::new(DirectSolver::new(&m_phi_red, true)?)), "phi=direct-SPD")
+        }
+    } else {
+        (PhiPc::Direct(Box::new(DirectSolver::new(&m_phi_red, true)?)), "phi=direct-SPD")
+    };
+
+    let (k_hat, rhs_hat, d_scale) = equilibrate_real(&asm.k_red, &asm.rhs_red, n_u_red);
+    let rhs_norm = rhs_hat.iter().map(|&v| v * v).sum::<f64>().sqrt();
+    if rhs_norm == 0.0 {
+        let g_real: Vec<f64> = asm.constraints.g_all.iter().map(|z| z.re).collect();
+        let x_full = asm.constraints.red_all.expand_with(&vec![0.0; n_tot_red], &g_real);
+        return Ok(Some((x_full, format!("Schur-AMG Right-FGMRES (0 iterations, {phi_desc})"))));
+    }
+
+    let pc = PiezoSchurPc { n_u_red, n_phi_red, k_up_red, sys_u, phi_pc, d_scale: &d_scale };
+    let opts = GmresOptions {
+        tol: Tolerances { rtol: 1e-10, atol: 1e-30, dtol: 1e4, max_it: 400 },
+        restart: 50,
+        side: PcSide::Right,
+        orthog: Orthogonalization::ClassicalGramSchmidtIfNeeded,
+        flexible: true,
+        initial_guess_nonzero: false,
+        record_history: false,
+    };
+    let mut gmres = Gmres::<f64>::new(opts);
+    let mut x_hat = vec![0.0; n_tot_red];
+    let info = catching_cancel(|| gmres.solve(&k_hat, &pc, &rhs_hat, &mut x_hat))?;
+
+    let mut kx = vec![0.0; n_tot_red];
+    k_hat.spmv(&x_hat, &mut kx);
+    let r_norm = kx.iter().zip(&rhs_hat).map(|(&a, &b)| (a - b).powi(2)).sum::<f64>().sqrt();
+    let rel_res = r_norm / rhs_norm.max(1e-300);
+    if !info.reason.is_converged() || !rel_res.is_finite() || rel_res > 1e-8 {
+        if spec.solver == LinearSolver::Auto {
+            return Ok(None);
+        }
+        return Err(format!(
+            "iterative coupled piezoelectric solver did not converge ({:?}, {} iterations, rel_res {:.2e}); choose solver = \"direct\"",
+            info.reason, info.iterations, rel_res
+        ));
+    }
+
+    let x_red = unscale_solution(&x_hat, &d_scale);
+    let g_real: Vec<f64> = asm.constraints.g_all.iter().map(|z| z.re).collect();
+    let x_full = asm.constraints.red_all.expand_with(&x_red, &g_real);
+    Ok(Some((
+        x_full,
+        format!("Schur-AMG Right-FGMRES ({} iterations, rel_res {:.2e}, {phi_desc})", info.iterations, rel_res),
+    )))
+}
+
+fn solve_static_simplex(
+    mesh: &SimplexMesh,
+    spec: &Problem,
+    asm: &PiezoStaticAssembly,
+) -> Result<(Vec<f64>, String), String> {
+    if mesh.dim != 3 || !spec.periodic.is_empty() {
+        if spec.solver == LinearSolver::Iterative {
+            return Err(
+                "iterative Schur-AMG solver is only available for 3D simplex meshes without periodic boundaries; choose solver = \"direct\" or \"auto\""
+                    .into(),
+            );
+        }
+        let (x_full, backend) = solve_static_equilibrated(asm)?;
+        return Ok((x_full, format!("backend {backend:?}")));
+    }
+    let want_iter = spec.solver == LinearSolver::Iterative
+        || (spec.solver == LinearSolver::Auto && asm.constraints.n_tot > 120_000);
+    if want_iter {
+        if let Some((x_full, desc)) = solve_static_iterative(mesh, spec, asm)? {
+            return Ok((x_full, desc));
+        }
+    }
+    let (x_full, backend) = solve_static_equilibrated(asm)?;
+    if want_iter {
+        Ok((x_full, format!("backend {backend:?} (iterative fallback)")))
+    } else {
+        Ok((x_full, format!("backend {backend:?}")))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1473,9 +1773,9 @@ pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
                 assemble_piezo_static_simplex(mesh, spec)?
             };
             lap(&mut tl, "assembly (piezo static)");
-            let (x_full, backend) = {
+            let (x_full, solver_desc) = {
                 let _s = progress::stage("coupled piezoelectric linear solve");
-                solve_static_equilibrated(&asm)?
+                solve_static_simplex(mesh, spec, &asm)?
             };
             lap(&mut tl, "linear solve");
             let u_c: Vec<C> = x_full[..asm.constraints.n_mech].iter().map(|&v| c(v, 0.0)).collect();
@@ -1506,13 +1806,13 @@ pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
             push_static_charge_and_energy_scalars(&asm, &x_full, &mut scalars, ue, ud);
             let mut log = asm.diagnostics.clone();
             log.push(format!(
-                "coupled piezoelectric static: {} dofs -> {} reduced (u={}, phi={}), {} gauge pin(s), backend {:?}",
+                "coupled piezoelectric static: {} dofs -> {} reduced (u={}, phi={}), {} gauge pin(s), {}",
                 asm.constraints.n_tot,
                 asm.constraints.red_all.n_reduced(),
                 asm.constraints.n_u_red,
                 asm.constraints.n_phi_red,
                 asm.constraints.gauge_pins.len(),
-                backend
+                solver_desc
             ));
             Ok(SolveResult {
                 order: order as u8,
@@ -1556,6 +1856,12 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
 
     match &spec.study {
         crate::problem::Study::Static => {
+            if spec.solver == LinearSolver::Iterative {
+                return Err(
+                    "iterative Schur-AMG solver does not support mixed-cell meshes or infinite elements; choose solver = \"direct\" or \"auto\""
+                        .into(),
+                );
+            }
             let asm = {
                 let _s = progress::stage("coupled piezoelectric static assembly (mixed)");
                 assemble_piezo_static_mixed(mixed, &dof_map, spec)?
@@ -1627,5 +1933,95 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
             Ok(build_eigen_result(order, d, &asm, &solved, t0, &energy_fn, &fields_fn))
         }
         _ => Err(format!("piezoelectric solver does not handle study '{}'", spec.study.kind())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::problem::{Bc, BcKind};
+    use femcore::mesh::cells::{CellMesh, CellType};
+
+    #[test]
+    fn piezo_schur_pc_phi_amg_matches_direct() {
+        let mut cm = CellMesh::<3>::new();
+        let (nx, ny, nz) = (4, 4, 4);
+        let vid = |i: usize, j: usize, k: usize| ((k * (ny + 1) + j) * (nx + 1) + i) as u32;
+        for k in 0..=nz {
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    cm.points.push([
+                        1e-3 * i as f64 / nx as f64,
+                        1e-3 * j as f64 / ny as f64,
+                        0.5e-3 * k as f64 / nz as f64,
+                    ]);
+                }
+            }
+        }
+        for k in 0..nz {
+            for j in 0..ny {
+                for i in 0..nx {
+                    cm.push_cell(
+                        CellType::Hex,
+                        &[
+                            vid(i, j, k),
+                            vid(i + 1, j, k),
+                            vid(i + 1, j + 1, k),
+                            vid(i, j + 1, k),
+                            vid(i, j, k + 1),
+                            vid(i + 1, j, k + 1),
+                            vid(i + 1, j + 1, k + 1),
+                            vid(i, j + 1, k + 1),
+                        ],
+                        1,
+                    );
+                }
+            }
+        }
+        for j in 0..ny {
+            for i in 0..nx {
+                cm.push_facet(&[vid(i, j, 0), vid(i + 1, j, 0), vid(i + 1, j + 1, 0), vid(i, j + 1, 0)], 1);
+                cm.push_facet(&[vid(i, j, nz), vid(i + 1, j, nz), vid(i + 1, j + 1, nz), vid(i, j + 1, nz)], 2);
+            }
+        }
+        let tet = nyx_physics::discretise(&femcore::mesh::Mesh::D3(cm)).unwrap();
+        let mut spec = Problem::new(crate::problem::Study::Static, 1);
+        spec.solver = LinearSolver::Iterative;
+        spec.materials.set(1, "E", 300e9);
+        spec.materials.set(1, "nu", 0.25);
+        spec.materials.set(1, "eps_r", 9.0);
+        spec.materials.aniso.insert(
+            1,
+            femcore::material::Anisotropy {
+                piezo_e: Some([
+                    [0.0, 0.0, 0.0, 0.0, -0.48, 0.0],
+                    [0.0, 0.0, 0.0, -0.48, 0.0, 0.0],
+                    [-0.58, -0.58, 1.55, 0.0, 0.0, 0.0],
+                ]),
+                ..Default::default()
+            },
+        );
+        spec.bcs = vec![
+            Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } },
+            Bc { labels: vec![1], kind: BcKind::Ground },
+            Bc { labels: vec![2], kind: BcKind::Potential(3.0) },
+        ];
+        let asm = assemble_piezo_static_simplex(&tet, &spec).unwrap();
+        let (x_dir, _) = solve_static_equilibrated(&asm).unwrap();
+        let (x_amg, desc) = solve_static_iterative_with_phi_threshold(&tet, &spec, &asm, 10).unwrap().unwrap();
+        assert!(desc.contains("phi=AMG"), "expected phi=AMG path, got {desc}");
+        let max_u_diff = x_dir[..asm.constraints.n_mech]
+            .iter()
+            .zip(&x_amg[..asm.constraints.n_mech])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        let u_scale = x_dir[..asm.constraints.n_mech].iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(1e-30);
+        assert!(max_u_diff / u_scale < 1e-7, "max_u_diff={max_u_diff} scale={u_scale}");
+        let max_p_diff = x_dir[asm.constraints.n_mech..]
+            .iter()
+            .zip(&x_amg[asm.constraints.n_mech..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(max_p_diff < 1e-8, "max_p_diff={max_p_diff}");
     }
 }
