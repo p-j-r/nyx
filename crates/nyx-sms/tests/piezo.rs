@@ -1007,7 +1007,16 @@ fn air_inactive_and_thick_conductor_domain_behave_cleanly() {
         Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } },
         Bc { labels: vec![2], kind: BcKind::Ground },
         Bc { labels: vec![3], kind: BcKind::Potential(0.0) }, // air outer shield at ground
-        Bc { labels: vec![2], kind: BcKind::Conductor { role: ConductorRole::Fixed, value: 5.0, charge: 0.0 } },
+        Bc {
+            labels: vec![2],
+            kind: BcKind::Conductor {
+                role: ConductorRole::Fixed,
+                value: 5.0,
+                charge: 0.0,
+                name: String::new(),
+                z0_ohm: 50.0,
+            },
+        },
     ];
     let r = solve(&mesh, &p);
     let phi = r.solutions[0].flat("phi").unwrap();
@@ -1129,21 +1138,42 @@ fn determinism_and_electrical_conflict_validation_negative_tests() {
 
     // 7. Conflicting conductor definitions + conductor overlapping PML/IE
     let mut p_cond_conf = p.clone();
-    p_cond_conf
-        .bcs
-        .push(Bc { labels: vec![1], kind: BcKind::Conductor { role: ConductorRole::Ground, value: 0.0, charge: 0.0 } });
-    p_cond_conf
-        .bcs
-        .push(Bc { labels: vec![1], kind: BcKind::Conductor { role: ConductorRole::Fixed, value: 2.0, charge: 0.0 } });
+    p_cond_conf.bcs.push(Bc {
+        labels: vec![1],
+        kind: BcKind::Conductor {
+            role: ConductorRole::Ground,
+            value: 0.0,
+            charge: 0.0,
+            name: String::new(),
+            z0_ohm: 50.0,
+        },
+    });
+    p_cond_conf.bcs.push(Bc {
+        labels: vec![1],
+        kind: BcKind::Conductor {
+            role: ConductorRole::Fixed,
+            value: 2.0,
+            charge: 0.0,
+            name: String::new(),
+            z0_ohm: 50.0,
+        },
+    });
     assert!(try_solve(&mesh, &p_cond_conf).is_err());
 
     let mut p_cond_pml = Problem::new(Study::Eigenfrequency { n_modes: 1, f_search: 1e6 }, 2);
     p_cond_pml.materials.aniso.insert(1, an.clone());
     p_cond_pml.materials.default.insert("rho".into(), 3260.0);
     p_cond_pml.materials.pml.insert(1, Pml::default());
-    p_cond_pml
-        .bcs
-        .push(Bc { labels: vec![1], kind: BcKind::Conductor { role: ConductorRole::Ground, value: 0.0, charge: 0.0 } });
+    p_cond_pml.bcs.push(Bc {
+        labels: vec![1],
+        kind: BcKind::Conductor {
+            role: ConductorRole::Ground,
+            value: 0.0,
+            charge: 0.0,
+            name: String::new(),
+            z0_ohm: 50.0,
+        },
+    });
     assert!(try_solve(&mesh, &p_cond_pml).is_err());
 
     // 8. Electrical BC on outer face of conductor with NO adjacent active dielectric cells -> Error
@@ -1156,7 +1186,16 @@ fn determinism_and_electrical_conflict_validation_negative_tests() {
     p_dead.bcs = vec![
         Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true, false, true], values: [0.0; 3] } },
         Bc { labels: vec![2], kind: BcKind::Ground },
-        Bc { labels: vec![2], kind: BcKind::Conductor { role: ConductorRole::Floating, value: 0.0, charge: 0.0 } },
+        Bc {
+            labels: vec![2],
+            kind: BcKind::Conductor {
+                role: ConductorRole::Floating,
+                value: 0.0,
+                charge: 0.0,
+                name: String::new(),
+                z0_ohm: 50.0,
+            },
+        },
         Bc { labels: vec![3], kind: BcKind::SurfaceCharge(1e-6) },
     ];
     assert!(try_solve(&stacked, &p_dead).is_err());

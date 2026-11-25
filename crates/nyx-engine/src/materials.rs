@@ -162,6 +162,39 @@ pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
     use nyx_physics::ParamKind;
     let studies = p.studies();
     let sd = studies.iter().find(|s| s.kind == spec.study.kind)?;
+    if spec.study.kind == "driven" {
+        if let Some(arr) = spec.study.params.get("freqs_hz").and_then(Value::as_array) {
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            let mut count = 0usize;
+            for v in arr {
+                if let Some(f) = v.as_f64().filter(|&x| x > 0.0 && x.is_finite()) {
+                    lo = lo.min(f);
+                    hi = hi.max(f);
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                return Some(0.5 * (lo + hi));
+            }
+        }
+        let param_num = |name: &str| -> Option<f64> {
+            spec.study
+                .params
+                .get(name)
+                .and_then(Value::as_f64)
+                .or_else(|| {
+                    sd.params.iter().find(|d| d.name == name).and_then(|d| match d.kind {
+                        ParamKind::Number { default, .. } => Some(default),
+                        _ => None,
+                    })
+                })
+                .filter(|&f| f > 0.0 && f.is_finite())
+        };
+        if let (Some(f_min), Some(f_max)) = (param_num("f_min"), param_num("f_max")) {
+            return Some(0.5 * (f_min + f_max));
+        }
+    }
     if let Some(d) = sd.params.iter().find(|d| d.unit == "Hz") {
         let f = spec.study.params.get(&d.name).and_then(Value::as_f64).or(match d.kind {
             ParamKind::Number { default, .. } => Some(default),

@@ -549,7 +549,8 @@ fn explicit_protected_facet_labels(spec: &Problem) -> BTreeSet<i32> {
             | BcKind::Ground
             | BcKind::Potential(_)
             | BcKind::SurfaceCharge(_)
-            | BcKind::FloatingPotential { .. } => {
+            | BcKind::FloatingPotential { .. }
+            | BcKind::Terminal { .. } => {
                 out.extend(bc.labels.iter().copied());
             }
             BcKind::Load(_) | BcKind::Conductor { .. } => {}

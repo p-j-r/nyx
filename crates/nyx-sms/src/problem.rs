@@ -32,13 +32,15 @@ pub enum PiezoMode {
 /// Electrical role of a domain-level metallic `conductor` condition.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ConductorRole {
-    /// Equipotential electrode whose potential floats with net free charge `charge` (0 C in eigenfrequency).
+    /// Equipotential electrode whose potential floats with net free charge `charge` (0 C in eigenfrequency/driven).
     #[default]
     Floating,
     /// Grounded electrode (`phi = 0 V`).
     Ground,
     /// Fixed-potential electrode (`phi = value`, static only when `value != 0`).
     Fixed,
+    /// Multi-port frequency-domain terminal electrode (`driven` study, port voltage excitation).
+    Terminal,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,7 +49,7 @@ pub enum BcKind {
     Fixed { fixed: [bool; 3], values: [f64; 3] },
     /// boundary load (force per area), in wafer axes
     Load([f64; 3]),
-    /// absorbing traction for outgoing pressure and shear waves (eigenfrequency studies: complex frequencies, Q)
+    /// absorbing traction for outgoing pressure and shear waves (eigenfrequency/driven studies: complex frequencies, Q, damping)
     LowReflecting,
     /// Grounded electrical boundary (`phi = 0 V`)
     Ground,
@@ -55,10 +57,12 @@ pub enum BcKind {
     Potential(f64),
     /// Surface free charge density (`sigma_s` in `C/m^2`, static only when non-zero)
     SurfaceCharge(f64),
-    /// Equipotential floating electrode boundary with prescribed net charge `charge` (C, 0 in eigenfrequency)
+    /// Equipotential floating electrode boundary with prescribed net charge `charge` (C, 0 in eigenfrequency/driven)
     FloatingPotential { charge: f64 },
+    /// Frequency-domain electrical port terminal (`driven` study)
+    Terminal { name: String, z0_ohm: f64 },
     /// Domain-level equipotential metallic body (skipped in electrical `K_{phi phi}` assembly)
-    Conductor { role: ConductorRole, value: f64, charge: f64 },
+    Conductor { role: ConductorRole, value: f64, charge: f64, name: String, z0_ohm: f64 },
 }
 
 impl BcKind {
@@ -71,6 +75,7 @@ impl BcKind {
             BcKind::Potential(_) => "Electric potential",
             BcKind::SurfaceCharge(_) => "Surface charge",
             BcKind::FloatingPotential { .. } => "Floating potential",
+            BcKind::Terminal { .. } => "Terminal",
             BcKind::Conductor { .. } => "Conductor",
         }
     }
@@ -83,6 +88,7 @@ impl BcKind {
                 | BcKind::Potential(_)
                 | BcKind::SurfaceCharge(_)
                 | BcKind::FloatingPotential { .. }
+                | BcKind::Terminal { .. }
                 | BcKind::Conductor { .. }
         )
     }
@@ -160,6 +166,9 @@ pub struct ThermalExpansion {
     pub t_ref: f64,
 }
 
+/// Allowed values for `Study::Driven` `solver`.
+pub const DRIVEN_SOLVER_CHOICES: [&str; 4] = ["auto", "direct", "lblt", "blr"];
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Study {
     Static,
@@ -180,6 +189,19 @@ pub enum Study {
         f_search: f64,
         wavevector: f64,
     },
+    /// Driven frequency-domain piezoelectric multi-port admittance/impedance/scattering sweep.
+    Driven {
+        f_min: f64,
+        f_max: f64,
+        n_points: usize,
+        freqs_hz: Option<Vec<f64>>,
+        prom_tol: Option<f64>,
+        max_hdm_solves: usize,
+        strict_prom_tol: bool,
+        seed_freqs_hz: Vec<f64>,
+        solver: String,
+        blr_tol: f64,
+    },
 }
 
 impl Study {
@@ -190,12 +212,35 @@ impl Study {
             Study::Eigenfrequency { .. } => "eigenfrequency",
             Study::AxisymmetricEigenfrequency { .. } => "axisymmetric_eigenfrequency",
             Study::Modes { .. } => "modes",
+            Study::Driven { .. } => "driven",
         }
     }
 
     /// Whether the study finds eigenfrequencies (`Eigenfrequency`, `AxisymmetricEigenfrequency` or `Modes`).
     pub fn is_eigen(&self) -> bool {
         matches!(self, Study::Eigenfrequency { .. } | Study::AxisymmetricEigenfrequency { .. } | Study::Modes { .. })
+    }
+
+    /// Whether this study is a frequency-domain harmonic driven sweep.
+    pub fn is_driven(&self) -> bool {
+        matches!(self, Study::Driven { .. })
+    }
+
+    /// Reference frequency (Hz) used when evaluating frequency-dependent dielectric loss.
+    pub fn reference_freq(&self) -> f64 {
+        match *self {
+            Study::Static => 0.0,
+            Study::Eigenfrequency { f_search, .. }
+            | Study::AxisymmetricEigenfrequency { f_search, .. }
+            | Study::Modes { f_search, .. } => f_search,
+            Study::Driven { f_min, f_max, ref freqs_hz, .. } => {
+                if let Some(fs) = freqs_hz.as_ref().filter(|v| !v.is_empty()) {
+                    0.5 * (fs[0] + fs[fs.len() - 1])
+                } else {
+                    0.5 * (f_min + f_max)
+                }
+            }
+        }
     }
 }
 
@@ -272,7 +317,7 @@ impl Problem {
         match self.piezoelectric {
             PiezoMode::Off => false,
             PiezoMode::On => true,
-            PiezoMode::Auto => self.has_electrical_bcs(),
+            PiezoMode::Auto => self.has_electrical_bcs() || self.study.is_driven(),
         }
     }
 
@@ -302,7 +347,8 @@ impl Problem {
                 BcKind::Load(f) => f.to_vec(),
                 BcKind::LowReflecting | BcKind::Ground => vec![],
                 BcKind::Potential(v) | BcKind::SurfaceCharge(v) | BcKind::FloatingPotential { charge: v } => vec![*v],
-                BcKind::Conductor { value, charge, .. } => vec![*value, *charge],
+                BcKind::Terminal { z0_ohm, .. } => vec![*z0_ohm],
+                BcKind::Conductor { value, charge, z0_ohm, .. } => vec![*value, *charge, *z0_ohm],
             };
             if vals.iter().any(|v| !v.is_finite()) {
                 return Err(format!(
@@ -324,6 +370,17 @@ impl Problem {
         if let Study::Modes { wavevector, .. } = &self.study {
             if !wavevector.is_finite() {
                 return Err("the study's longitudinal wavevector is NaN or infinite".into());
+            }
+        }
+        if let Study::Driven { f_min, f_max, freqs_hz, prom_tol, seed_freqs_hz, blr_tol, .. } = &self.study {
+            let bad_scalar = !f_min.is_finite()
+                || !f_max.is_finite()
+                || !blr_tol.is_finite()
+                || prom_tol.is_some_and(|t| !t.is_finite())
+                || freqs_hz.as_ref().is_some_and(|fs| fs.iter().any(|x| !x.is_finite()))
+                || seed_freqs_hz.iter().any(|x| !x.is_finite());
+            if bad_scalar {
+                return Err("the driven study parameters contain a NaN or infinite number".into());
             }
         }
         if !self.thickness.is_finite() {
@@ -367,11 +424,11 @@ impl Problem {
 }
 
 impl Problem {
-    /// Rejects `infinite_element` domains on dynamic eigenfrequency studies.
+    /// Rejects `infinite_element` domains on dynamic eigenfrequency or driven studies.
     pub fn check_study_open_domains(&self) -> Result<(), Error> {
-        if self.study.is_eigen() && !self.infinite_elements.is_empty() {
+        if (self.study.is_eigen() || self.study.is_driven()) && !self.infinite_elements.is_empty() {
             return Err(Error::invalid(
-                "an infinite_element domain is for the static study only (real coordinate stretching reflects propagating waves): use 'pml' for eigenfrequency studies",
+                "an infinite_element domain is for the static study only (real coordinate stretching reflects propagating waves): use 'pml' for eigenfrequency or driven studies",
             ));
         }
         Ok(())
@@ -379,36 +436,76 @@ impl Problem {
 
     /// Validates electrical/piezoelectric settings and boundary/domain conflicts.
     pub fn check_electrical(&self) -> Result<(), Error> {
-        if self.piezoelectric == PiezoMode::Off && self.has_electrical_bcs() {
+        if self.piezoelectric == PiezoMode::Off && (self.has_electrical_bcs() || self.study.is_driven()) {
             return Err(Error::invalid(
-                "electrical boundary conditions ('ground', 'potential', 'surface_charge', 'floating_potential', 'conductor') cannot be used when piezoelectric = 'off'",
+                "electrical boundary conditions ('ground', 'potential', 'surface_charge', 'floating_potential', 'terminal', 'conductor') and 'driven' studies cannot be used when piezoelectric = 'off'",
             ));
         }
         let eigen = self.study.is_eigen();
-        let mut seen_conductors: BTreeMap<i32, (ConductorRole, f64, f64)> = BTreeMap::new();
+        let driven = self.study.is_driven();
+        let dynamic = eigen || driven;
+        let mut seen_conductors: BTreeMap<i32, (ConductorRole, f64, f64, String, f64)> = BTreeMap::new();
+        let mut seen_terminals: Vec<String> = Vec::new();
         for bc in &self.bcs {
             match &bc.kind {
-                BcKind::Potential(v) if eigen && *v != 0.0 => {
+                BcKind::Potential(v) if dynamic && *v != 0.0 => {
                     return Err(Error::invalid(
-                        "an eigenfrequency study takes zero electrical sources only: fixed potential must be 0 V (or use 'ground')",
+                        "a dynamic (eigenfrequency or driven) study takes zero bias sources on 'potential': fixed potential must be 0 V (or use 'ground')",
                     ));
                 }
-                BcKind::SurfaceCharge(q) if eigen && *q != 0.0 => {
+                BcKind::SurfaceCharge(q) if dynamic && *q != 0.0 => {
                     return Err(Error::invalid(
                         "a non-zero surface_charge boundary condition belongs to the static study",
                     ));
                 }
-                BcKind::FloatingPotential { charge } if eigen && *charge != 0.0 => {
+                BcKind::FloatingPotential { charge } if dynamic && *charge != 0.0 => {
                     return Err(Error::invalid(
                         "a floating_potential with non-zero charge belongs to the static study",
                     ));
                 }
-                BcKind::Conductor { role, value, charge } => {
-                    if eigen {
+                BcKind::Terminal { name, z0_ohm } => {
+                    if !driven {
+                        return Err(Error::invalid(format!(
+                            "terminal '{name}' belongs to the driven study, not to '{}'",
+                            self.study.kind()
+                        )));
+                    }
+                    if name.trim().is_empty() {
+                        return Err(Error::invalid("terminal requires a non-empty 'name'"));
+                    }
+                    if !(z0_ohm.is_finite() && *z0_ohm > 0.0) {
+                        return Err(Error::invalid(format!("terminal '{name}': Z_0 must be positive (got {z0_ohm})")));
+                    }
+                    if seen_terminals.iter().any(|t| t == name) {
+                        return Err(Error::invalid(format!("duplicate terminal name '{name}'")));
+                    }
+                    seen_terminals.push(name.clone());
+                }
+                BcKind::Conductor { role, value, charge, name, z0_ohm } => {
+                    if *role == ConductorRole::Terminal {
+                        if !driven {
+                            return Err(Error::invalid(format!(
+                                "conductor role = 'terminal' ('{name}') belongs to the driven study, not to '{}'",
+                                self.study.kind()
+                            )));
+                        }
+                        if name.trim().is_empty() {
+                            return Err(Error::invalid("conductor with role = 'terminal' requires a non-empty 'name'"));
+                        }
+                        if !(z0_ohm.is_finite() && *z0_ohm > 0.0) {
+                            return Err(Error::invalid(format!(
+                                "conductor terminal '{name}': Z_0 must be positive (got {z0_ohm})"
+                            )));
+                        }
+                        if seen_terminals.iter().any(|t| t == name) {
+                            return Err(Error::invalid(format!("duplicate terminal name '{name}'")));
+                        }
+                        seen_terminals.push(name.clone());
+                    } else if dynamic {
                         match role {
                             ConductorRole::Fixed if *value != 0.0 => {
                                 return Err(Error::invalid(
-                                    "an eigenfrequency study takes zero electrical sources only: conductor fixed potential must be 0 V",
+                                    "a dynamic (eigenfrequency or driven) study takes zero bias sources: conductor fixed potential must be 0 V",
                                 ));
                             }
                             ConductorRole::Floating if *charge != 0.0 => {
@@ -430,20 +527,37 @@ impl Problem {
                                 "domain {dom} cannot be both an equipotential 'conductor' and an 'infinite_element'"
                             )));
                         }
-                        if let Some(&(r0, v0, c0)) = seen_conductors.get(&dom) {
-                            let same = r0 == *role && (v0 - value).abs() <= 1e-12 && (c0 - charge).abs() <= 1e-12;
+                        if let Some((r0, v0, c0, n0, z0)) = seen_conductors.get(&dom) {
+                            let same = *r0 == *role
+                                && (v0 - value).abs() <= 1e-12
+                                && (c0 - charge).abs() <= 1e-12
+                                && n0 == name
+                                && (z0 - z0_ohm).abs() <= 1e-12;
                             if !same {
                                 return Err(Error::invalid(format!(
                                     "conflicting 'conductor' conditions assigned to domain {dom}"
                                 )));
                             }
                         } else {
-                            seen_conductors.insert(dom, (*role, *value, *charge));
+                            seen_conductors.insert(dom, (*role, *value, *charge, name.clone(), *z0_ohm));
                         }
                     }
                 }
+                BcKind::Load(_) if driven => {
+                    return Err(Error::invalid("a boundary load belongs to the static study, not to 'driven'"));
+                }
+                BcKind::Fixed { fixed, values } if driven && (0..3).any(|k| fixed[k] && values[k] != 0.0) => {
+                    return Err(Error::invalid(
+                        "the driven study takes zero mechanical constraints only: fixed displacement must be 0",
+                    ));
+                }
                 _ => {}
             }
+        }
+        if driven && seen_terminals.is_empty() {
+            return Err(Error::invalid(
+                "driven study requires at least one 'terminal' boundary condition or 'conductor' with role = 'terminal'",
+            ));
         }
         Ok(())
     }
@@ -480,6 +594,7 @@ impl Problem {
                 | BcKind::Potential(_)
                 | BcKind::SurfaceCharge(_)
                 | BcKind::FloatingPotential { .. }
+                | BcKind::Terminal { .. }
                 | BcKind::Conductor { .. } => {}
             }
         }
@@ -545,6 +660,7 @@ impl Problem {
                 | BcKind::Potential(_)
                 | BcKind::SurfaceCharge(_)
                 | BcKind::FloatingPotential { .. }
+                | BcKind::Terminal { .. }
                 | BcKind::Conductor { .. } => {}
             }
         }
@@ -637,9 +753,80 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             f_search: sp.number("f_search"),
             wavevector: sp.number("wavevector"),
         },
+        "driven" => {
+            let freqs_hz = sp.optional_numbers("freqs_hz");
+            let (f_min, f_max, n_points) = if let Some(ref fs) = freqs_hz {
+                for &f in fs {
+                    if !(f > 0.0 && f.is_finite()) {
+                        return Err(Error::invalid(format!(
+                            "driven study requires all entries of 'freqs_hz' to be positive finite numbers (got {f})"
+                        )));
+                    }
+                }
+                if fs.windows(2).any(|w| w[1] < w[0]) {
+                    return Err(Error::invalid("driven study requires 'freqs_hz' to be monotonically ascending"));
+                }
+                (fs[0], fs[fs.len() - 1], fs.len())
+            } else {
+                if !sp.has("f_min") || !sp.has("f_max") {
+                    return Err(Error::invalid(
+                        "driven study requires either non-empty 'freqs_hz' or both 'f_min' and 'f_max'",
+                    ));
+                }
+                let f_min = sp.number("f_min");
+                let f_max = sp.number("f_max");
+                if !(f_min > 0.0 && f_max >= f_min) {
+                    return Err(Error::invalid(format!(
+                        "driven study requires 0 < f_min <= f_max (got f_min = {f_min}, f_max = {f_max})"
+                    )));
+                }
+                let n_points = sp.integer("n_points").max(1) as usize;
+                (f_min, f_max, n_points)
+            };
+            let prom_tol = sp.optional_number("prom_tol").filter(|&t| t > 0.0);
+            let max_hdm_raw = sp.integer("max_hdm_solves");
+            if !(1..=64).contains(&max_hdm_raw) {
+                return Err(Error::invalid(format!(
+                    "driven study requires 1 <= max_hdm_solves <= 64 (got {max_hdm_raw})"
+                )));
+            }
+            let max_hdm_solves = max_hdm_raw as usize;
+            let strict_prom_tol = sp.boolean("strict_prom_tol");
+            let seed_freqs_hz = sp.numbers("seed_freqs_hz");
+            for &sf in &seed_freqs_hz {
+                if !(sf > 0.0 && sf.is_finite()) {
+                    return Err(Error::invalid(format!(
+                        "driven study requires all entries of 'seed_freqs_hz' to be positive finite numbers (got {sf})"
+                    )));
+                }
+            }
+            let solver = sp.text("solver");
+            if !DRIVEN_SOLVER_CHOICES.contains(&solver.as_str()) {
+                return Err(Error::invalid(format!(
+                    "driven study: unknown solver '{solver}' (expected one of {DRIVEN_SOLVER_CHOICES:?})"
+                )));
+            }
+            let blr_tol = sp.number("blr_tol");
+            if !blr_tol.is_finite() || blr_tol < 0.0 {
+                return Err(Error::invalid(format!("driven study requires finite blr_tol >= 0 (got {blr_tol})")));
+            }
+            Study::Driven {
+                f_min,
+                f_max,
+                n_points,
+                freqs_hz,
+                prom_tol,
+                max_hdm_solves,
+                strict_prom_tol,
+                seed_freqs_hz,
+                solver,
+                blr_tol,
+            }
+        }
         other => return Err(Error::Unsupported(format!("sms has no study '{other}'"))),
     };
     let eigen = study.is_eigen();
+    let driven = study.is_driven();
     let params = sms.params();
     let pp = Params::new(&spec.params, &params);
     let plane = if pp.text("plane") == "stress" { Plane::Stress } else { Plane::Strain };
@@ -662,21 +849,27 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     }
     inactive.sort_unstable();
     inactive.dedup();
-    let mut materials = materials_by_label(spec, ctx, &sms.properties())?;
+    let f_ref = study.reference_freq();
+    let mut ctx_eff = Ctx::new(ctx.resolver);
+    ctx_eff.library = ctx.library.clone();
+    ctx_eff.wavelength = ctx.wavelength;
+    ctx_eff.frequency = ctx.frequency.or_else(|| (f_ref > 0.0 && f_ref.is_finite()).then_some(f_ref));
+    ctx_eff.temperature = ctx.temperature;
+    ctx_eff.inputs = ctx.inputs.clone();
+    ctx_eff.progress = ctx.progress.clone();
+    let mut materials = materials_by_label(spec, &ctx_eff, &sms.properties())?;
     let kinds = sms.bc_kinds();
     let mut bcs = vec![];
     let mut periodic = vec![];
     let mut infinite_elements = BTreeMap::new();
-    for r in resolve_conditions(&spec.bcs, &kinds, ctx)? {
+    for r in resolve_conditions(&spec.bcs, &kinds, &ctx_eff)? {
         let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
         let p = Params::new(&r.params, &d.params);
-        let only_eigen = |what: &str| -> Result<(), Error> {
-            if eigen {
+        let only_dynamic = |what: &str| -> Result<(), Error> {
+            if eigen || driven {
                 Ok(())
             } else {
-                Err(Error::invalid(format!(
-                    "{what} is used with the eigenfrequency study (it gives complex frequencies and Q)"
-                )))
+                Err(Error::invalid(format!("{what} is used with eigenfrequency or driven studies, not static")))
             }
         };
         match r.kind.as_str() {
@@ -692,18 +885,18 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 bcs.push(Bc { labels: r.labels, kind: BcKind::Fixed { fixed, values } });
             }
             "load" => {
-                if eigen {
+                if eigen || driven {
                     return Err(Error::invalid("a boundary load belongs to the static study"));
                 }
                 let t = p.vector("traction");
                 bcs.push(Bc { labels: r.labels, kind: BcKind::Load([t[0], t[1], t[2]]) });
             }
             "low_reflecting" => {
-                only_eigen("a low-reflecting boundary")?;
+                only_dynamic("a low-reflecting boundary")?;
                 bcs.push(Bc { labels: r.labels, kind: BcKind::LowReflecting });
             }
             "pml" => {
-                only_eigen("a perfectly matched layer")?;
+                only_dynamic("a perfectly matched layer")?;
                 let (coord, bounds) = decode_coord_and_bounds(&p, "condition 'pml'")?;
                 let profile = match p.text("profile").as_str() {
                     "rational" => PmlProfile::Rational { curvature: p.number("curvature") },
@@ -735,9 +928,9 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
             }
             "infinite_element" => {
-                if eigen {
+                if eigen || driven {
                     return Err(Error::invalid(
-                        "an infinite_element domain is for the static study only (real coordinate stretching reflects propagating waves): use 'pml' for eigenfrequency studies",
+                        "an infinite_element domain is for the static study only (real coordinate stretching reflects propagating waves): use 'pml' for eigenfrequency or driven studies",
                     ));
                 }
                 let (coord, bounds) = decode_coord_and_bounds(&p, "condition 'infinite_element'")?;
@@ -768,8 +961,8 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
             }
             "periodic" => {
-                only_eigen("a Floquet-periodic pair")?;
-                let dest = ctx.resolver.boundaries(&p.text("dest"))?;
+                only_dynamic("a Floquet-periodic pair")?;
+                let dest = ctx_eff.resolver.boundaries(&p.text("dest"))?;
                 if dest.is_empty() {
                     return Err(Error::invalid(format!(
                         "periodic pair: destination '{}' selects nothing",
@@ -784,15 +977,28 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             "floating_potential" => {
                 bcs.push(Bc { labels: r.labels, kind: BcKind::FloatingPotential { charge: p.number("charge") } })
             }
+            "terminal" => {
+                bcs.push(Bc {
+                    labels: r.labels,
+                    kind: BcKind::Terminal { name: p.text("name"), z0_ohm: p.number("Z_0") },
+                });
+            }
             "conductor" => {
                 let role = match p.text("role").as_str() {
                     "ground" => ConductorRole::Ground,
                     "fixed" => ConductorRole::Fixed,
+                    "terminal" => ConductorRole::Terminal,
                     _ => ConductorRole::Floating,
                 };
                 bcs.push(Bc {
                     labels: r.labels,
-                    kind: BcKind::Conductor { role, value: p.number("value"), charge: p.number("charge") },
+                    kind: BcKind::Conductor {
+                        role,
+                        value: p.number("value"),
+                        charge: p.number("charge"),
+                        name: p.text("name"),
+                        z0_ohm: p.number("Z_0"),
+                    },
                 });
             }
             other => return Err(Error::Unsupported(format!("sms has no condition '{other}'"))),

@@ -2595,6 +2595,7 @@ fn solve_variant_mixed(
                 ..Default::default()
             })
         }
+        Study::Driven { .. } => Err("driven study requires piezoelectric coupling".into()),
     }
 }
 
@@ -2725,6 +2726,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
                 ..Default::default()
             })
         }
+        Study::Driven { .. } => Err("driven study requires piezoelectric coupling".into()),
     }
 }
 

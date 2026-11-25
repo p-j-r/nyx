@@ -1070,7 +1070,7 @@ fn static_fields_mixed(
     (fields, cell_fields, umax, vmax, max_e)
 }
 
-fn push_eigen_mode_fields_simplex(
+pub(crate) fn push_eigen_mode_fields_simplex(
     mesh: &SimplexMesh,
     order: usize,
     d: usize,
@@ -1138,7 +1138,7 @@ fn push_eigen_mode_fields_simplex(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push_eigen_mode_fields_mixed(
+pub(crate) fn push_eigen_mode_fields_mixed(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     proj: &MixedToSimplexProjector,

@@ -49,6 +49,14 @@ pub struct ElectrodeInfo {
     pub root_dof: Option<usize>,
 }
 
+/// Driven multi-port terminal electrode (`BcKind::Terminal` or `ConductorRole::Terminal`).
+#[derive(Clone, Debug)]
+pub struct PiezoTerminal {
+    pub name: String,
+    pub z0_ohm: f64,
+    pub dofs: Vec<usize>,
+}
+
 /// Complete reduced constraints, block sizes, and electrode metadata for a coupled solve.
 #[derive(Clone, Debug)]
 pub struct PiezoConstraints {
@@ -65,6 +73,8 @@ pub struct PiezoConstraints {
     pub gauge_pins: Vec<usize>,
     pub electrodes: Vec<ElectrodeInfo>,
     pub conductor_domains: Vec<i32>,
+    pub terminals: Vec<PiezoTerminal>,
+    pub terminal_lifts: Vec<Vec<C>>,
 }
 
 /// Assembled static coupled piezoelectric problem (real arithmetic).
@@ -261,6 +271,8 @@ fn build_piezo_constraints(
     let mut electrodes = Vec::new();
     let mut floating_roots_check: Vec<(usize, usize, f64, String)> = Vec::new();
     let mut fixed_phi_map: BTreeMap<usize, f64> = BTreeMap::new();
+    let mut terminals: Vec<PiezoTerminal> = Vec::new();
+    let mut non_term_dirichlet: BTreeSet<usize> = BTreeSet::new();
 
     for (bc_index, bc) in spec.bcs.iter().enumerate() {
         match &bc.kind {
@@ -274,6 +286,7 @@ fn build_piezo_constraints(
                 }
                 for &dof in &bd {
                     elec_anchored[dof] = true;
+                    non_term_dirichlet.insert(dof);
                     fixed_vals.push((n_mech + dof, c(0.0, 0.0)));
                     fixed_phi_map.entry(dof).or_insert(0.0);
                 }
@@ -297,6 +310,7 @@ fn build_piezo_constraints(
                 }
                 for &dof in &bd {
                     elec_anchored[dof] = true;
+                    non_term_dirichlet.insert(dof);
                     fixed_vals.push((n_mech + dof, c(*v, 0.0)));
                     fixed_phi_map.entry(dof).or_insert(*v);
                 }
@@ -347,12 +361,33 @@ fn build_piezo_constraints(
                     });
                 }
             }
-            BcKind::Conductor { role, value, charge } => {
+            BcKind::Terminal { name, z0_ohm } => {
+                let bd = get_boundary_dofs(&bc.labels);
+                if bd.is_empty() {
+                    return Err(format!(
+                        "electrical terminal '{name}' on boundaries {:?} matched zero nodes",
+                        bc.labels
+                    ));
+                }
+                if bd.iter().all(|&dof| !has_dielectric_cell[dof]) {
+                    return Err(format!(
+                        "electrical terminal '{name}' on boundaries {:?} has no adjacent active dielectric cells",
+                        bc.labels
+                    ));
+                }
+                for &dof in &bd {
+                    elec_anchored[dof] = true;
+                    fixed_phi_map.entry(dof).or_insert(0.0);
+                }
+                terminals.push(PiezoTerminal { name: name.clone(), z0_ohm: *z0_ohm, dofs: bd });
+            }
+            BcKind::Conductor { role, value, charge, name, z0_ohm } => {
                 let cd = get_conductor_dofs(&bc.labels);
                 match role {
                     ConductorRole::Ground => {
                         for &dof in &cd {
                             elec_anchored[dof] = true;
+                            non_term_dirichlet.insert(dof);
                             fixed_vals.push((n_mech + dof, c(0.0, 0.0)));
                             fixed_phi_map.entry(dof).or_insert(0.0);
                         }
@@ -369,6 +404,7 @@ fn build_piezo_constraints(
                     ConductorRole::Fixed => {
                         for &dof in &cd {
                             elec_anchored[dof] = true;
+                            non_term_dirichlet.insert(dof);
                             fixed_vals.push((n_mech + dof, c(*value, 0.0)));
                             fixed_phi_map.entry(dof).or_insert(*value);
                         }
@@ -381,6 +417,19 @@ fn build_piezo_constraints(
                             is_floating: false,
                             root_dof: None,
                         });
+                    }
+                    ConductorRole::Terminal => {
+                        if cd.is_empty() {
+                            return Err(format!(
+                                "conductor terminal '{name}' on domain(s) {:?} matched zero nodes",
+                                bc.labels
+                            ));
+                        }
+                        for &dof in &cd {
+                            elec_anchored[dof] = true;
+                            fixed_phi_map.entry(dof).or_insert(0.0);
+                        }
+                        terminals.push(PiezoTerminal { name: name.clone(), z0_ohm: *z0_ohm, dofs: cd });
                     }
                     ConductorRole::Floating => {
                         if let Some(&root) = cd.first() {
@@ -414,11 +463,26 @@ fn build_piezo_constraints(
         }
     }
 
-    // Floating electrodes cannot overlap explicit fixed/grounded potentials (checked before gauge pinning)
+    // Terminals cannot overlap fixed/grounded potentials or each other (would short-circuit port voltage excitation).
+    let mut term_owner: BTreeMap<usize, &str> = BTreeMap::new();
+    for term in &terminals {
+        for &dof in &term.dofs {
+            if non_term_dirichlet.contains(&dof) {
+                return Err(format!("terminal '{}' overlaps a fixed/grounded potential", term.name));
+            }
+            if let Some(prev) = term_owner.insert(dof, term.name.as_str()) {
+                if prev != term.name {
+                    return Err(format!("terminal '{}' overlaps terminal '{prev}'", term.name));
+                }
+            }
+        }
+    }
+
+    // Floating electrodes cannot overlap explicit fixed/grounded potentials or terminals (checked before gauge pinning)
     let explicit_fixed_phi = fixed_phi_map.clone();
     for el in &electrodes {
         if el.is_floating && el.dofs.iter().any(|dof| explicit_fixed_phi.contains_key(dof)) {
-            return Err(format!("floating electrode '{}' overlaps a fixed/grounded potential", el.label));
+            return Err(format!("floating electrode '{}' overlaps a fixed/grounded potential or terminal", el.label));
         }
     }
 
@@ -474,8 +538,39 @@ fn build_piezo_constraints(
         }
     }
 
-    let (red_all, g_all) = Reduction::try_build_with_values(n_tot, &relations, &fixed_vals)?;
+    let mut all_fixed_vals = fixed_vals.clone();
+    for term in &terminals {
+        for &dof in &term.dofs {
+            all_fixed_vals.push((n_mech + dof, c(0.0, 0.0)));
+        }
+    }
+    let (red_all, g_all) = Reduction::try_build_with_values(n_tot, &relations, &all_fixed_vals)?;
     let (red_u, _) = Reduction::try_build_with_values(n_mech, &mech_rels, &mech_fixed)?;
+
+    let mut terminal_lifts = Vec::with_capacity(terminals.len());
+    if !terminals.is_empty() {
+        if spec.periodic.is_empty() {
+            for term in &terminals {
+                let mut g = vec![c(0.0, 0.0); n_tot];
+                for &dof in &term.dofs {
+                    g[n_mech + dof] = c(1.0, 0.0);
+                }
+                terminal_lifts.push(g);
+            }
+        } else {
+            for (q_idx, _) in terminals.iter().enumerate() {
+                let mut port_fixed = fixed_vals.clone();
+                for (ti, term) in terminals.iter().enumerate() {
+                    let val = if ti == q_idx { c(1.0, 0.0) } else { c(0.0, 0.0) };
+                    for &dof in &term.dofs {
+                        port_fixed.push((n_mech + dof, val));
+                    }
+                }
+                let (_, g_port) = Reduction::try_build_with_values(n_tot, &relations, &port_fixed)?;
+                terminal_lifts.push(g_port);
+            }
+        }
+    }
 
     for (_, root, charge, name) in &floating_roots_check {
         if red_all.index_of[n_mech + root] == usize::MAX
@@ -508,6 +603,8 @@ fn build_piezo_constraints(
         gauge_pins,
         electrodes,
         conductor_domains,
+        terminals,
+        terminal_lifts,
     })
 }
 
@@ -2420,4 +2517,270 @@ fn _touch_eval(_: impl Fn()) {
     let _ = phase_factor;
     let _ = quad_rule;
     let _ = shape;
+}
+
+/// Unreduced full complex operators for Stage 1 of the coupled piezoelectric driven frequency solver.
+pub(crate) struct PiezoDrivenFull {
+    pub constraints: PiezoConstraints,
+    pub k_full: CCsr,
+    pub m_uu_full: CCsr,
+    pub c_uu_full: Option<CCsr>,
+    pub resolved_pml: ResolvedPmlDomains,
+    pub m1_phys_all: Option<RCsr>,
+    pub m1_phys_pml: Option<RCsr>,
+    pub is_complex: bool,
+    pub has_pml: bool,
+    pub has_damping: bool,
+    pub has_interior: bool,
+    pub diagnostics: Vec<String>,
+}
+
+/// Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` on [`SimplexMesh`].
+pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoDrivenFull, String> {
+    let f_ref = spec.study.reference_freq();
+    check_labels_simplex(mesh, spec)?;
+
+    let d = mesh.dim;
+    let order = spec.order;
+    let n1 = mesh.n_dofs(order);
+    let thk = if d == 2 { spec.thickness } else { 1.0 };
+
+    let (_by_dom, mats) = resolve_piezo_mats_simplex(mesh, spec, true)?;
+    let rho: Vec<f64> = mats.iter().map(|m| m.rho).collect();
+    let resolved_pml = ResolvedPmlDomains::from_simplex(mesh, spec, false, f_ref)?;
+    let any_pml = !resolved_pml.domains.is_empty();
+    let lrb_labels: Vec<i32> = spec
+        .bcs
+        .iter()
+        .filter(|b| matches!(b.kind, BcKind::LowReflecting))
+        .flat_map(|b| b.labels.iter().copied())
+        .collect();
+    let has_visc = mats.iter().any(|m| m.mech_active && m.eta.iter().flatten().any(|&v| v != 0.0));
+    let has_damping = has_visc || !lrb_labels.is_empty();
+    let has_dielectric_loss = mats.iter().any(|m| m.elec_active && m.eps_im.iter().flatten().any(|&v| v.abs() > 0.0));
+    let has_periodic = !spec.periodic.is_empty();
+    let is_complex = any_pml || has_dielectric_loss || has_damping || has_periodic;
+
+    let mech_untouched = untouched_dofs(mesh, order, d, &spec.inactive);
+    let outer_clamped =
+        if any_pml { outer_clamped_dofs_simplex(mesh, order, spec, &resolved_pml, false, 0.0) } else { Vec::new() };
+
+    let mut periodic_rels = Vec::new();
+    for p in &spec.periodic {
+        let mt = match_vertices(mesh, p)?;
+        periodic_rels.extend(nodal_relations(mesh, order, d + 1, &mt, p.phase)?);
+    }
+
+    let get_cell = |ci: usize, out: &mut Vec<usize>| {
+        mesh.cell_dofs(ci, order, out);
+    };
+    let get_bd = |labels: &[i32]| boundary_dofs(mesh, labels, order);
+    let get_cd = |labels: &[i32]| collect_conductor_domain_dofs_simplex(mesh, order, labels);
+    let constraints = build_piezo_constraints(
+        d,
+        n1,
+        spec,
+        &mesh.cell_labels,
+        &get_cell,
+        &get_bd,
+        &get_cd,
+        mech_untouched,
+        outer_clamped,
+        Vec::new(),
+        periodic_rels,
+    )?;
+
+    if constraints.n_u_red == 0 && constraints.n_phi_red == 0 {
+        return Err("driven study has no free degrees of freedom after constraints".into());
+    }
+
+    let k_full = if any_pml || has_dielectric_loss {
+        assemble_piezo_complex_simplex(mesh, &mats, order, spec.plane, spec.thickness, &resolved_pml)
+    } else {
+        assemble_piezo_real_simplex(mesh, &mats, order, spec.plane, spec.thickness).to_complex()
+    };
+
+    let m_uu_full = if any_pml {
+        assemble_pml_mass_simplex(mesh, &rho, order, spec.thickness, &resolved_pml)
+    } else {
+        let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
+        let m1 = assemble_mass(mesh, order, &rho_t);
+        let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
+        RCsr::block_diag(&blocks).to_complex()
+    };
+
+    let c_uu_full = if has_damping {
+        let mut c_uu_r = RCsr::zeros(constraints.n_mech, constraints.n_mech);
+        if has_visc {
+            let eta_wafer: Vec<_> = mats.iter().map(|m| m.eta).collect();
+            let cv = crate::solid::assemble_solid(mesh, &eta_wafer, order, spec.plane, spec.thickness);
+            c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cv);
+        }
+        if !lrb_labels.is_empty() {
+            let c6_arr: Vec<_> = mats.iter().map(|m| m.c6).collect();
+            let cl = damping_matrix(mesh, &c6_arr, &rho, &lrb_labels, order, d);
+            let cl_sc = if d == 2 { thk } else { 1.0 };
+            c_uu_r = RCsr::axpby(1.0, &c_uu_r, cl_sc, &cl);
+        }
+        Some(c_uu_r.to_complex())
+    } else {
+        None
+    };
+
+    let pml_cells: Vec<bool> = (0..mesh.n_cells()).map(|ci| resolved_pml.contains(mesh.cell_labels[ci])).collect();
+    let has_interior = pml_cells.iter().zip(&rho).any(|(&p, &r)| !p && r > 0.0);
+    let (m1_phys_all, m1_phys_pml) = if any_pml {
+        let rho_all_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
+        let rho_pml_t: Vec<f64> = rho.iter().zip(&pml_cells).map(|(&r, &p)| if p { r * thk } else { 0.0 }).collect();
+        (Some(assemble_mass(mesh, order, &rho_all_t)), Some(assemble_mass(mesh, order, &rho_pml_t)))
+    } else {
+        (None, None)
+    };
+
+    let diagnostics = resolved_pml.diagnostics.clone();
+    Ok(PiezoDrivenFull {
+        constraints,
+        k_full,
+        m_uu_full,
+        c_uu_full,
+        resolved_pml,
+        m1_phys_all,
+        m1_phys_pml,
+        is_complex,
+        has_pml: any_pml,
+        has_damping,
+        has_interior,
+        diagnostics,
+    })
+}
+
+/// Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` natively on [`MixedDiscretisation`].
+pub(crate) fn assemble_piezo_driven_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    spec: &Problem,
+) -> Result<PiezoDrivenFull, String> {
+    let f_ref = spec.study.reference_freq();
+    mixed_check_boundary_labels(mixed, &spec.bcs)?;
+
+    let d = mixed.dim;
+    let n1 = dof_map.n_dofs;
+    let thk = if d == 2 { spec.thickness } else { 1.0 };
+
+    let (_by_dom, mats) = resolve_piezo_mats_mixed(mixed, spec, true)?;
+    let rho: Vec<f64> = mats.iter().map(|m| m.rho).collect();
+    let resolved_pml = ResolvedPmlDomains::from_mixed(mixed, spec, false, f_ref)?;
+    let any_pml = !resolved_pml.domains.is_empty();
+    let lrb_labels: Vec<i32> = spec
+        .bcs
+        .iter()
+        .filter(|b| matches!(b.kind, BcKind::LowReflecting))
+        .flat_map(|b| b.labels.iter().copied())
+        .collect();
+    let has_visc = mats.iter().any(|m| m.mech_active && m.eta.iter().flatten().any(|&v| v != 0.0));
+    let has_damping = has_visc || !lrb_labels.is_empty();
+    let has_dielectric_loss = mats.iter().any(|m| m.elec_active && m.eps_im.iter().flatten().any(|&v| v.abs() > 0.0));
+    let has_periodic = !spec.periodic.is_empty();
+    let is_complex = any_pml || has_dielectric_loss || has_damping || has_periodic;
+
+    let mech_untouched = mixed_untouched_dofs(mixed, dof_map, d, &spec.inactive);
+    let outer_clamped =
+        if any_pml { outer_clamped_dofs_mixed(mixed, dof_map, spec, &resolved_pml, false, 0.0) } else { Vec::new() };
+
+    let mut periodic_rels = Vec::new();
+    for p in &spec.periodic {
+        periodic_rels.extend(mixed_nodal_relations(mixed, dof_map, d + 1, p)?);
+    }
+
+    let get_cell = |ci: usize, out: &mut Vec<usize>| {
+        out.clear();
+        out.extend_from_slice(dof_map.cell_dofs(ci));
+    };
+    let get_bd = |labels: &[i32]| dof_map.boundary_dofs(mixed, labels);
+    let get_cd = |labels: &[i32]| collect_conductor_domain_dofs_mixed(mixed, dof_map, labels);
+    let constraints = build_piezo_constraints(
+        d,
+        n1,
+        spec,
+        &mixed.cell_labels,
+        &get_cell,
+        &get_bd,
+        &get_cd,
+        mech_untouched,
+        outer_clamped,
+        Vec::new(),
+        periodic_rels,
+    )?;
+
+    if constraints.n_u_red == 0 && constraints.n_phi_red == 0 {
+        return Err("driven study has no free degrees of freedom after constraints".into());
+    }
+
+    let k_full = if any_pml || has_dielectric_loss {
+        assemble_piezo_complex_mixed(mixed, dof_map, &mats, spec.plane, spec.thickness, &resolved_pml)
+    } else {
+        assemble_piezo_real_mixed(
+            mixed,
+            dof_map,
+            &mats,
+            spec.plane,
+            spec.thickness,
+            &ResolvedIeDomains::default(),
+            &spec.inactive,
+            &constraints.conductor_domains,
+        )
+        .to_complex()
+    };
+
+    let m_uu_full = if any_pml {
+        assemble_pml_mass_mixed(mixed, dof_map, &rho, spec.thickness, &resolved_pml)
+    } else {
+        let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
+        let m1 = assemble_mass_mixed(mixed, dof_map, &rho_t);
+        let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
+        RCsr::block_diag(&blocks).to_complex()
+    };
+
+    let c_uu_full = if has_damping {
+        let mut c_uu_r = RCsr::zeros(constraints.n_mech, constraints.n_mech);
+        if has_visc {
+            let eta_wafer: Vec<_> = mats.iter().map(|m| m.eta).collect();
+            let cv = crate::solid::assemble_solid_mixed(mixed, dof_map, &eta_wafer, spec.plane, spec.thickness);
+            c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cv);
+        }
+        if !lrb_labels.is_empty() {
+            let c6_arr: Vec<_> = mats.iter().map(|m| m.c6).collect();
+            let cl = damping_matrix_mixed(mixed, dof_map, &c6_arr, &rho, &lrb_labels, d, thk);
+            c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cl);
+        }
+        Some(c_uu_r.to_complex())
+    } else {
+        None
+    };
+
+    let pml_cells: Vec<bool> = (0..mixed.n_cells()).map(|ci| resolved_pml.contains(mixed.cell_labels[ci])).collect();
+    let has_interior = pml_cells.iter().zip(&rho).any(|(&p, &r)| !p && r > 0.0);
+    let (m1_phys_all, m1_phys_pml) = if any_pml {
+        let rho_all_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
+        let rho_pml_t: Vec<f64> = rho.iter().zip(&pml_cells).map(|(&r, &p)| if p { r * thk } else { 0.0 }).collect();
+        (Some(assemble_mass_mixed(mixed, dof_map, &rho_all_t)), Some(assemble_mass_mixed(mixed, dof_map, &rho_pml_t)))
+    } else {
+        (None, None)
+    };
+
+    let diagnostics = resolved_pml.diagnostics.clone();
+    Ok(PiezoDrivenFull {
+        constraints,
+        k_full,
+        m_uu_full,
+        c_uu_full,
+        resolved_pml,
+        m1_phys_all,
+        m1_phys_pml,
+        is_complex,
+        has_pml: any_pml,
+        has_damping,
+        has_interior,
+        diagnostics,
+    })
 }
