@@ -353,3 +353,41 @@ fn author_process_and_cryogenic_variants_reflect_published_differences() {
     assert!(lib.get("copper_4k").unwrap().legacy_scalars()["k"] > 600.0);
     assert!(lib.get("niobium_sc").unwrap().notes.as_deref().unwrap_or("").contains("Tc ="));
 }
+
+#[test]
+fn piezo_inheritance_thermodynamic_consistency_and_piezomumps_d15() {
+    let lib = library();
+
+    // 1. lithium_niobate_4k overrides eps_clamped cleanly without inheriting room-temp eps_free
+    let lno4k = lib.get("lithium_niobate_4k").unwrap();
+    assert!(lno4k.dielectric.as_ref().unwrap().eps_free.is_none());
+    let ec = lno4k.dielectric.as_ref().unwrap().eps_clamped.as_ref().unwrap().matrix();
+    assert!((ec[0][0] - 44.3).abs() < 1e-12 && (ec[2][2] - 26.5).abs() < 1e-12);
+
+    // 2. PiezoMUMPs d15 has canonical negative sign (-3.6 pC/N)
+    let mumps = lib.get("aluminum_nitride_piezomumps").unwrap();
+    let pz = mumps.piezoelectric.as_ref().unwrap();
+    assert!((pz.matrix[0][4] + 3.6e-12).abs() < 1e-16, "expected d15 = -3.6e-12, got {}", pz.matrix[0][4]);
+
+    // 3. Inconsistent eps_free vs eps_clamped + d e^T / eps_0 (> 5%) is rejected on load
+    let bad = r#"
+format = 2
+name = "bad_piezo"
+source = { cite = "synthetic test" }
+[elastic]
+class = "isotropic"
+E = "300 GPa"
+nu = 0.25
+source = { cite = "synthetic test" }
+[dielectric]
+eps_clamped = 10.0
+eps_free = 25.0
+source = { cite = "synthetic test" }
+[piezoelectric]
+form = "stress_charge"
+e33 = "1.5 C/m^2"
+source = { cite = "synthetic test" }
+"#;
+    let err = MaterialSpec::from_toml(bad).unwrap_err();
+    assert!(err.message.contains("thermodynamic"), "unexpected error: {err}");
+}

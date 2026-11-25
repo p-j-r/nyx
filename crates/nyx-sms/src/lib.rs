@@ -380,6 +380,7 @@ impl Physics for Sms {
             PropDesc::new("alpha", "Thermal expansion", "1/K", Tensor, &["static"], Some(0.0)),
             PropDesc::new("eps_r", "Relative permittivity (clamped)", "", Tensor, &[], Some(1.0)),
             PropDesc::new("eta", "Mechanical viscosity", "Pa*s", Scalar, &["eigenfrequency"], Some(0.0)),
+            PropDesc::new("piezo_e", "Piezoelectric stress-charge tensor", "C/m^2", Matrix3x6, &[], None),
         ]
     }
 

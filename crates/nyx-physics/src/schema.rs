@@ -104,6 +104,13 @@ pub fn physics_schema(p: &dyn Physics) -> Value {
                     }
                 ]
             }),
+            PropKind::Matrix3x6 => json!({
+                "description": desc,
+                "type": "array",
+                "items": { "type": "array", "items": { "type": "number" }, "minItems": 6, "maxItems": 6 },
+                "minItems": 3,
+                "maxItems": 3
+            }),
             _ => json!({ "type": "number", "description": desc }),
         };
         props.insert(d.name.clone(), prop_schema);
@@ -116,7 +123,32 @@ pub fn physics_schema(p: &dyn Physics) -> Value {
             "physics": { "const": p.id() },
             "order": { "type": "integer", "minimum": 1, "maximum": 9 },
             "study": { "oneOf": studies },
-            "materials": { "type": "object", "additionalProperties": { "oneOf": [ { "type": "string", "description": "a material by name" }, { "type": "object", "properties": props, "additionalProperties": false } ] }, "description": "material by region name" },
+            "materials": {
+                "type": "object",
+                "additionalProperties": {
+                    "oneOf": [
+                        { "type": "string", "description": "a material by name" },
+                        { "type": "object", "properties": props, "additionalProperties": false },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "material": { "type": "string", "description": "a material by name" },
+                                "euler_deg": {
+                                    "type": "array",
+                                    "items": { "type": "number" },
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "description": "Bunge Z-X-Z Euler angles in degrees"
+                                }
+                            },
+                            "required": ["material", "euler_deg"],
+                            "additionalProperties": false,
+                            "description": "an oriented material by name and Bunge Euler angles"
+                        }
+                    ]
+                },
+                "description": "material by region name"
+            },
             "bcs": { "type": "array", "items": { "oneOf": bcs } },
             "params": params_schema(&p.params()),
         },

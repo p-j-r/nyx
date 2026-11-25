@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// A material property value given inline: a scalar, three diagonal components `[xx, yy, zz]`, six symmetric components `[xx, yy, zz, xy, xz, yz]`, or a symmetric 3x3 tensor.
+/// A material property value given inline: a scalar, three diagonal components `[xx, yy, zz]`, six symmetric components `[xx, yy, zz, xy, xz, yz]`, a symmetric 3x3 tensor, or a 3x6 coupling matrix.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropValue {
@@ -18,6 +18,7 @@ pub enum PropValue {
     Diag([f64; 3]),
     Sym6([f64; 6]),
     Matrix([[f64; 3]; 3]),
+    Matrix3x6([[f64; 6]; 3]),
 }
 
 /// What the material of a region is.

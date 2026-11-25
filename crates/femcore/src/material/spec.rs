@@ -436,6 +436,32 @@ impl MaterialSpec {
             }
         }
 
+        if let (Some(el), Some(pz), Some(dl)) = (&elastic, &piezoelectric, &dielectric) {
+            if let (Some(ec_p), Some(ef_p)) = (&dl.eps_clamped, &dl.eps_free) {
+                let ec = ec_p.matrix();
+                let ef = ef_p.matrix();
+                let (_, ef_pred, _, _) = resolve_piezo_legendre_duals(&el.c, pz, Some(&ec), None)
+                    .map_err(|msg| s.err("dielectric", msg))?;
+                let mut diff_sq = 0.0;
+                let mut norm_sq = 0.0;
+                for i in 0..3 {
+                    for j in 0..3 {
+                        diff_sq += (ef[i][j] - ef_pred[i][j]).powi(2);
+                        norm_sq += ef[i][j].powi(2);
+                    }
+                }
+                let rel = diff_sq.sqrt() / norm_sq.sqrt().max(1e-30);
+                if rel > 0.05 {
+                    return Err(s.err(
+                        "dielectric",
+                        format!(
+                            "thermodynamic inconsistency: ||eps_free - (eps_clamped + d e^T / eps_0)||_F / ||eps_free||_F = {rel:.4} > 0.05"
+                        ),
+                    ));
+                }
+            }
+        }
+
         let optical = match s.sub("optical")? {
             None => None,
             Some(mut o) => {
@@ -1093,6 +1119,15 @@ fn merge_subtable(section: &str, base: &toml::Table, over: &toml::Table) -> toml
 
     if section == "elastic" && over.keys().any(|k| is_elastic_rep_key(k)) {
         r.retain(|k, _| !is_elastic_rep_key(k) && k != "unit" && k != "compliance_unit");
+    }
+
+    if section == "dielectric" {
+        let rep_keys = ["eps_clamped", "eps_free", "eps_r"];
+        if over.keys().any(|k| rep_keys.contains(&k.as_str())) {
+            for k in rep_keys {
+                r.remove(k);
+            }
+        }
     }
 
     if section == "optical" || section.starts_with("optical.") {

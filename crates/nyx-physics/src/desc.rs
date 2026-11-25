@@ -174,6 +174,8 @@ pub enum PropKind {
     Scalar,
     /// a symmetric tensor: one value, three principal values or six entries (phase 6)
     Tensor,
+    /// a 3x6 coupling matrix (e.g. piezoelectric stress-charge tensor e_iJ)
+    Matrix3x6,
     /// a model evaluated at the study wavelength (Sellmeier, tabulated, ...; phase 6)
     Dispersive,
 }

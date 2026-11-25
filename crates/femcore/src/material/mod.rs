@@ -256,9 +256,7 @@ const VP: [(usize, usize); 6] = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]
 /// position in the solver's Voigt order (xx, yy, zz, xy, yz, xz) of each standard Voigt component (xx, yy, zz, yz, xz, xy)
 const TO_SOLVER: [usize; 6] = [0, 1, 2, 4, 5, 3];
 
-/// Rotates a stiffness given in standard Voigt order and returns it in the solver's Voigt order.
-fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
-    // full fourth-order tensor
+fn rotate_voigt_raw(c: &M6, r: &M3, to_solver: bool) -> M6 {
     let mut t = [[[[0.0; 3]; 3]; 3]; 3];
     for (i, &(a, b)) in VP.iter().enumerate() {
         for (j, &(cc, d)) in VP.iter().enumerate() {
@@ -292,11 +290,18 @@ fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
     }
     let mut out = [[0.0; 6]; 6];
     for (i, &(a, b)) in VP.iter().enumerate() {
+        let oi = if to_solver { TO_SOLVER[i] } else { i };
         for (j, &(cc, d)) in VP.iter().enumerate() {
-            out[TO_SOLVER[i]][TO_SOLVER[j]] = rot[a][b][cc][d];
+            let oj = if to_solver { TO_SOLVER[j] } else { j };
+            out[oi][oj] = rot[a][b][cc][d];
         }
     }
     out
+}
+
+/// Rotates a stiffness given in standard Voigt order and returns it in the solver's Voigt order.
+fn rotate_stiffness(c: &M6, r: &M3) -> M6 {
+    rotate_voigt_raw(c, r, true)
 }
 
 /// Stiffness in the global frame (solver Voigt order).
@@ -308,6 +313,12 @@ pub fn stiffness_global(s: &Stiffness, euler_deg: [f64; 3]) -> M6 {
 /// from crystal frame to global frame by Bunge Z-X-Z Euler angles (degrees), returning solver Voigt order `(xx, yy, zz, xy, yz, xz)`.
 pub fn rotate_m6_global(m: &M6, euler_deg: [f64; 3]) -> M6 {
     rotate_stiffness(m, &rotation(euler_deg))
+}
+
+/// Rotates a symmetric `6x6` fourth-order tensor given in textbook Voigt order `(xx, yy, zz, yz, xz, xy)`
+/// from crystal frame to global frame by Bunge Z-X-Z Euler angles (degrees), preserving textbook Voigt order.
+pub fn rotate_m6_textbook(m: &M6, euler_deg: [f64; 3]) -> M6 {
+    rotate_voigt_raw(m, &rotation(euler_deg), false)
 }
 
 /// Rotates a `3x6` piezoelectric stress-charge coupling matrix `e_iJ` (`C/m^2`) from the crystal frame

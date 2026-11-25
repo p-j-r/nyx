@@ -398,24 +398,45 @@ impl Engine {
             );
         }
 
-        // Piezoelectric Legendre duals (eps^S, eps^T, C^E, C^D)
+        // Piezoelectric Legendre duals (eps^S, eps^T, C^E, C^D) rotated into the wafer frame
         if let Some(pz) = &m.piezoelectric {
+            use femcore::material::{rotate_m6_textbook, rotate_tensor, rotation, PiezoForm, Piezoelectric};
             let ce_voigt = m.elastic.as_ref().map(|e| e.c);
+            let rot = rotation(euler);
+            let rotated = euler != [0.0; 3];
+            let rot3 = |t: femcore::material::M3| if rotated { rotate_tensor(&t, &rot) } else { t };
+            let rot6 = |c: femcore::material::M6| if rotated { rotate_m6_textbook(&c, euler) } else { c };
+            let e_rot = pz.stress_charge(ce_voigt.as_ref()).ok().map(|e| {
+                if rotated {
+                    Piezoelectric { source: Vec::new(), form: PiezoForm::StressCharge, matrix: e }.rotate(&rot)
+                } else {
+                    e
+                }
+            });
+            let d_rot = pz.strain_charge(ce_voigt.as_ref()).ok().map(|d| {
+                if rotated {
+                    Piezoelectric { source: Vec::new(), form: PiezoForm::StrainCharge, matrix: d }.rotate(&rot)
+                } else {
+                    d
+                }
+            });
             out.insert(
                 "piezoelectric".into(),
                 json!({
-                    "eps_clamped": m.permittivity_clamped(),
-                    "eps_free": m.permittivity_free(),
-                    "c_e_pa": m.stiffness_constant_e(),
-                    "c_d_pa": m.stiffness_constant_d(),
-                    "e_c_m2": pz.stress_charge(ce_voigt.as_ref()).ok(),
-                    "d_c_n": pz.strain_charge(ce_voigt.as_ref()).ok(),
+                    "eps_clamped": m.permittivity_clamped().map(rot3),
+                    "eps_free": m.permittivity_free().map(rot3),
+                    "c_e_pa": m.stiffness_constant_e().map(rot6),
+                    "c_d_pa": m.stiffness_constant_d().map(rot6),
+                    "e_c_m2": e_rot,
+                    "d_c_n": d_rot,
                 }),
             );
         }
 
         if let Some(pe) = &m.photoelastic {
-            out.insert("photoelastic".into(), json!({ "wavelength_m": pe.wavelength, "p_voigt": pe.matrix }));
+            let p_mat =
+                if euler != [0.0; 3] { pe.rotate_voigt(&femcore::material::rotation(euler)) } else { pe.matrix };
+            out.insert("photoelastic".into(), json!({ "wavelength_m": pe.wavelength, "p_voigt": p_mat }));
         }
         if let Some(eo) = &m.electro_optic {
             let ce_voigt = m.elastic.as_ref().map(|e| e.c);
@@ -430,7 +451,9 @@ impl Engine {
             );
         }
         if let Some(ve) = &m.viscoelastic {
-            out.insert("viscoelastic".into(), json!({ "eta_pa_s": ve.matrix, "cryo_qm_floor": ve.cryo_qm_floor }));
+            let eta_mat =
+                if euler != [0.0; 3] { femcore::material::rotate_m6_textbook(&ve.matrix, euler) } else { ve.matrix };
+            out.insert("viscoelastic".into(), json!({ "eta_pa_s": eta_mat, "cryo_qm_floor": ve.cryo_qm_floor }));
         }
 
         // Superconducting BCS evaluation if [superconducting] is present

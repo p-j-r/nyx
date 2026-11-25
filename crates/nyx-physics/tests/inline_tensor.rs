@@ -40,6 +40,7 @@ impl Physics for TensorMock {
             PropDesc::new("eps_r", "Permittivity", "", PropKind::Tensor, &["modes"], Some(1.0)),
             PropDesc::new("k", "Thermal conductivity", "W/(m K)", PropKind::Tensor, &[], None),
             PropDesc::new("alpha", "Thermal expansion", "1/K", PropKind::Tensor, &[], Some(0.0)),
+            PropDesc::new("piezo_e", "Piezoelectric coupling", "C/m^2", PropKind::Matrix3x6, &[], None),
         ]
     }
     fn params(&self) -> Vec<ParamDesc> {
@@ -270,4 +271,39 @@ fn physics_schema_allows_scalar_diag_and_matrix_for_tensor_properties_only() {
     assert_eq!(eps_one_of[1]["minItems"], json!(3));
     assert_eq!(eps_one_of[2]["minItems"], json!(6));
     assert_eq!(eps_one_of[3]["items"]["minItems"], json!(3));
+    assert_eq!(mat_props["piezo_e"]["minItems"], json!(3));
+    assert_eq!(mat_props["piezo_e"]["items"]["minItems"], json!(6));
+    let mat_one_of = schema["properties"]["materials"]["additionalProperties"]["oneOf"].as_array().unwrap();
+    assert_eq!(mat_one_of.len(), 3);
+    assert_eq!(mat_one_of[2]["required"], json!(["material", "euler_deg"]));
+}
+
+#[test]
+fn inline_piezo_e_matrix3x6_validates_decodes_and_rejects_scalar() {
+    let e_mat =
+        [[0.0, 0.0, 0.0, 0.0, -0.48, 0.0], [0.0, 0.0, 0.0, -0.48, 0.0, 0.0], [-0.58, -0.58, 1.55, 0.0, 0.0, 0.0]];
+    let spec: ProblemSpec = serde_json::from_value(json!({
+        "physics": "tst",
+        "order": 2,
+        "study": { "kind": "modes", "params": { "freq": 2e9 } },
+        "materials": {
+            "core": { "E": 330e9, "eps_r": 9.5, "piezo_e": e_mat }
+        }
+    }))
+    .unwrap();
+    validate_spec(&TensorMock, &spec).unwrap();
+    let ctx = Ctx::new(&OneDomain);
+    let decoded = materials_by_label(&spec, &ctx, &TensorMock.properties()).unwrap();
+    assert_eq!(decoded.aniso[&1].piezo_e, Some(e_mat));
+
+    // Scalar/Props or 3x3 for piezo_e must fail
+    let mut bad_scalar = base_spec();
+    bad_scalar.materials.insert("core".into(), MaterialAssign::Props([("piezo_e".into(), 1.55)].into()));
+    assert!(validate_spec(&TensorMock, &bad_scalar).is_err());
+
+    let mut bad_mat = base_spec();
+    bad_mat
+        .materials
+        .insert("core".into(), MaterialAssign::PropsTensor([("eps_r".into(), PropValue::Matrix3x6(e_mat))].into()));
+    assert!(validate_spec(&TensorMock, &bad_mat).is_err());
 }

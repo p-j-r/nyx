@@ -169,8 +169,13 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
         match assign {
             MaterialAssign::Props(map) => {
                 for (name, v) in map {
-                    if find_prop_kind(name).is_none() {
+                    let Some(prop_kind) = find_prop_kind(name) else {
                         return Err(Error::invalid(format!("region '{region}': unknown property '{name}'")));
+                    };
+                    if prop_kind == PropKind::Matrix3x6 {
+                        return Err(Error::invalid(format!(
+                            "region '{region}': property '{name}' must be a 3x6 matrix, not a scalar number"
+                        )));
                     }
                     if !v.is_finite() {
                         return Err(Error::invalid(format!(
@@ -210,6 +215,11 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                     };
                     match v {
                         PropValue::Scalar(s) => {
+                            if prop_kind == PropKind::Matrix3x6 {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' must be a 3x6 matrix, not a scalar number"
+                                )));
+                            }
                             if !s.is_finite() {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' is not a finite number"
@@ -342,6 +352,27 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                                 } else {
                                     set_inline_tensor(&mut m, region, &labels, name, tensor)?;
                                 }
+                            }
+                        }
+                        PropValue::Matrix3x6(mat) => {
+                            if prop_kind != PropKind::Matrix3x6 {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' cannot use a 3x6 matrix"
+                                )));
+                            }
+                            if mat.iter().flatten().any(|x| !x.is_finite()) {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': property '{name}' has a non-finite 3x6 matrix component"
+                                )));
+                            }
+                            if name == "piezo_e" {
+                                for &l in &labels {
+                                    m.aniso.entry(l).or_default().piezo_e = Some(*mat);
+                                }
+                            } else {
+                                return Err(Error::invalid(format!(
+                                    "region '{region}': unsupported 3x6 property '{name}'"
+                                )));
                             }
                         }
                     }
@@ -483,6 +514,7 @@ fn prop_value_to_m3(v: &PropValue) -> femcore::material::M3 {
         PropValue::Diag([x, y, z]) => [[*x, 0.0, 0.0], [0.0, *y, 0.0], [0.0, 0.0, *z]],
         PropValue::Sym6([xx, yy, zz, xy, xz, yz]) => [[*xx, *xy, *xz], [*xy, *yy, *yz], [*xz, *yz, *zz]],
         PropValue::Matrix(mat) => symmetrize_m3(mat),
+        PropValue::Matrix3x6(_) => [[0.0; 3]; 3],
     }
 }
 
