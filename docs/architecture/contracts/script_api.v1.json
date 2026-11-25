@@ -49,13 +49,22 @@
   "limits": {
     "calls": 20000,
     "depth": 100,
+    "max_timeout_seconds": 86400,
     "memory_bytes": 268435456,
     "output_bytes": 1048576,
     "seconds": 30.0,
-    "seconds_counts": "script time only; the time the engine takes to answer a command is not counted"
+    "seconds_counts": "script time only; the time the engine takes to answer a command is not counted",
+    "timeout_validation": "non-finite, negative, or Duration-overflowing seconds/timeout_s values return a structured validation error; finite values are clamped to max_timeout_seconds"
+  },
+  "network": {
+    "refused_commands": [
+      "fetch_material",
+      "search_remote_materials(live=true)"
+    ],
+    "rule": "outbound network access is denied during sandboxed script execution (RuntimeError)"
   },
   "object": "nyx",
-  "output": "print() lines, up to the output limit",
+  "output": "print() lines, truncated at a UTF-8 char boundary so total bytes stay within output_bytes",
   "path_guard": {
     "arguments": [
       "path",

@@ -554,15 +554,19 @@ impl Engine {
                 Ok(json!({ "paused": false }))
             }
             "queue_wait" => {
-                let t =
-                    args.get("timeout_s").and_then(Value::as_f64).filter(|t| *t >= 0.0 && t.is_finite()).ok_or_else(
-                        || {
-                            Error::invalid(
-                            "`timeout_s` is required: seconds to wait at most (a tool call must not block for ever)",
+                let t = args
+                    .get("timeout_s")
+                    .and_then(Value::as_f64)
+                    .filter(|t| *t >= 0.0 && t.is_finite())
+                    .ok_or_else(|| {
+                        Error::invalid(
+                            "`timeout_s` is required: finite seconds to wait at most (a tool call must not block for ever)",
                         )
-                        },
-                    )?;
-                self.wait_timeout(id()?, Duration::from_secs_f64(t))
+                    })?;
+                let dur = Duration::try_from_secs_f64(t)
+                    .map(|d| d.min(Duration::from_secs(86_400)))
+                    .map_err(|_| Error::invalid("`timeout_s` overflows Duration"))?;
+                self.wait_timeout(id()?, dur)
             }
             other => Err(Error::invalid(format!("no command '{other}'"))),
         }

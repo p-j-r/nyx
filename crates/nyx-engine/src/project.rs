@@ -13,6 +13,12 @@ use serde::{Deserialize, Serialize};
 fn is_auto_pml_mode(m: &PmlModeRequest) -> bool {
     *m == PmlModeRequest::Auto
 }
+fn default_true() -> bool {
+    true
+}
+fn is_true(b: &bool) -> bool {
+    *b
+}
 
 /// One layer of a model swept along y into a 3D mesh (the 2D cross-section is extruded with `n` cells across `thickness`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -91,8 +97,8 @@ pub struct MeshSettings {
     /// 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_steiner_multiplier: Option<usize>,
-    /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles (default `false`)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles (default `true`)
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub strict_mesh: bool,
     /// 3D sheet stack (`sheet3d`): edge singularity enrichment (`"none"` or `"quarter_point"`); `None` uses study defaults
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,7 +132,7 @@ impl Default for MeshSettings {
             max_z_slabs: None,
             z_growth_ratio: None,
             max_steiner_multiplier: None,
-            strict_mesh: false,
+            strict_mesh: true,
             singular_edges: None,
             quarter_point_xi: None,
             corner_grading: false,

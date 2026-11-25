@@ -259,9 +259,9 @@ impl Engine {
     /// The library a solve sees: the folder's materials and the project's own, which may extend them.
     pub fn library(&self) -> Result<Arc<Library>, Error> {
         if self.project.materials.is_empty() {
-            return Ok(self.base_library.clone());
+            return Ok(self.base_library().clone());
         }
-        let lib = self.base_library.with_texts(&self.project.materials).map_err(|errs| {
+        let lib = self.base_library().with_texts(&self.project.materials).map_err(|errs| {
             Error::invalid(format!(
                 "the materials of the project do not read: {}",
                 errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")
@@ -272,7 +272,7 @@ impl Engine {
 
     /// Replaces the folder library (tests, or a front-end that lets the person pick another folder).
     pub fn set_base_library(&mut self, library: Library) {
-        self.base_library = Arc::new(library);
+        self.set_base_library_arc(Arc::new(library));
     }
 
     pub fn list_materials(&self) -> Result<Value, Error> {
@@ -597,7 +597,7 @@ impl Engine {
         let mut texts = self.project.materials.clone();
         texts.insert(name.to_string(), toml_text.to_string());
         let lib = self
-            .base_library
+            .base_library()
             .with_texts(&texts)
             .map_err(|errs| Error::invalid(errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")))?;
         let m = lib.get(name).expect("just added");

@@ -25,7 +25,7 @@ Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_ce
 | `points_per_wavelength` | number or null | no |  | points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2 |
 | `quarter_point_xi` | number or null | no |  | 3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25 |
 | `singular_edges` | text or null: `none`, `quarter_point`, `null` | no |  | 3D sheet stack: edge singularity enrichment on zero-thickness conductor rims ("none" or "quarter_point"); null uses study defaults |
-| `strict_mesh` | true or false | no |  | fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false |
+| `strict_mesh` | true or false | no |  | fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default true |
 | `structured_pml` | true or false or null | no |  | legacy boolean alias for pml_mode (true -> "structured", false -> "inline") |
 | `sweep` | list of object or null | no |  | layers to sweep a 2D cross-section or 3D geometry model along y |
 | `sweep[].domain_offset` | integer | no |  | added to the domain numbers of the layer's cells |

@@ -1120,7 +1120,7 @@ pub fn sweep_model_3d(
                 lo: [ov_bb.lo[0], ov_bb.lo[1]],
                 hi: [ov_bb.hi[0], ov_bb.hi[1]],
                 max_steiner_multiplier: None,
-                strict_mesh: false,
+                strict_mesh: true,
                 max_cells: None,
             },
             &|cen| {
@@ -1286,7 +1286,7 @@ pub fn sweep_model_3d(
                 lo: [xs[0], zs[0]],
                 hi: [*xs.last().unwrap(), *zs.last().unwrap()],
                 max_steiner_multiplier: None,
-                strict_mesh: false,
+                strict_mesh: true,
                 max_cells: None,
             },
             &locate_grid,

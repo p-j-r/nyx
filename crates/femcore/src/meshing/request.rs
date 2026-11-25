@@ -64,6 +64,12 @@ fn relax() -> f64 {
 fn headroom() -> f64 {
     1.5
 }
+fn default_true() -> bool {
+    true
+}
+fn is_true(b: &bool) -> bool {
+    *b
+}
 
 /// The waves of a study, as the physics reports them (`Sizing`) and how finely they are resolved.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -123,7 +129,7 @@ pub struct MeshRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_steiner_multiplier: Option<usize>,
     /// fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub strict_mesh: bool,
     /// 3D sheet mesher: edge singularity enrichment (`"none"` or `"quarter_point"`); absent: disabled
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -153,7 +159,7 @@ impl Default for MeshRequest {
             max_z_slabs: None,
             z_growth_ratio: None,
             max_steiner_multiplier: None,
-            strict_mesh: false,
+            strict_mesh: true,
             singular_edges: None,
             quarter_point_xi: None,
             corner_grading: false,
@@ -693,7 +699,7 @@ pub fn request_schema() -> Value {
     props.insert("max_z_slabs".into(), json!({ "type": ["integer", "null"], "minimum": 1, "description": "3D sheet mesher: maximum total number of horizontal z-slabs across active stack layers" }));
     props.insert("z_growth_ratio".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "3D sheet mesher: geometric growth ratio for z-slab thickness away from sheet planes (default 1.35)" }));
     props.insert("max_steiner_multiplier".into(), json!({ "type": ["integer", "null"], "minimum": 0, "description": "2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial vertices" }));
-    props.insert("strict_mesh".into(), json!({ "type": "boolean", "default": false, "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles" }));
+    props.insert("strict_mesh".into(), json!({ "type": "boolean", "default": true, "description": "fail meshing if 2D Ruppert refinement terminates early or drops unhealed collinear sliver triangles" }));
     props.insert("singular_edges".into(), json!({ "type": ["string", "null"], "enum": ["none", "quarter_point", null], "description": "3D sheet mesher: edge singularity enrichment ('none' or 'quarter_point')" }));
     props.insert("quarter_point_xi".into(), json!({ "type": ["number", "null"], "minimum": 0.25, "maximum": 0.5, "description": "3D sheet mesher: Barsoum quarter-point mid-edge parameter in [0.25, 0.50] (default 0.25)" }));
     props.insert("corner_grading".into(), json!({ "type": "boolean", "default": false, "description": "3D sheet mesher: radical corner grading toward sharp 2D sheet corners" }));

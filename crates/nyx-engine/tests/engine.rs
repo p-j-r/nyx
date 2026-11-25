@@ -496,3 +496,46 @@ fn every_geometry_operation_has_an_add_command_and_every_command_has_a_schema() 
         }
     }
 }
+
+#[test]
+fn base_library_changes_invalidate_problem_key_and_set_project_clears_checks() {
+    let mut e = Engine::new();
+    let bar = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/04_thermal_bar.nyx.json");
+    call(&mut e, "project_open", json!({ "path": bar.to_str().unwrap() }));
+    call(&mut e, "set_material", json!({ "physics": "dfs", "region": "plate", "material": "silicon" }));
+    call(&mut e, "solve_run", json!({ "physics": "dfs" }));
+    assert!(!e.is_stale("dfs"));
+    let k1 = e.problem_key("dfs").unwrap();
+
+    // Mutating base_library TOML content must invalidate problem_key and mark cached results stale
+    let lib_dir = temp("base-lib-change");
+    std::fs::write(
+        lib_dir.join("silicon.toml"),
+        "format = 1\nname = \"silicon\"\n[thermal]\nconductivity = \"999 W/(m*K)\"\n",
+    )
+    .unwrap();
+    let new_lib = femcore::material::Library::load_dir(&lib_dir).unwrap();
+    e.set_base_library(new_lib);
+    let k2 = e.problem_key("dfs").unwrap();
+    assert_ne!(k1, k2, "changing base_library TOMLs must change Engine::problem_key");
+    assert!(e.is_stale("dfs"), "changing base_library TOMLs must mark result stale");
+
+    // Replacing project via set_project must clear cached convergence checks (`self.checks`)
+    let mut c = Engine::new();
+    let cant = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/02_cantilever.nyx.json");
+    call(&mut c, "project_open", json!({ "path": cant.to_str().unwrap() }));
+    let saved_proj = c.project().clone();
+    call(&mut c, "solve_run", json!({}));
+    call(&mut c, "convergence_check", json!({ "physics": "sms", "factor": 0.6, "tolerance": 0.5 }));
+    assert_eq!(c.validated("sms").state, nyx_engine::validated::Validation::Checked);
+
+    // Calling set_project with the exact same Project clears cached checks; re-solving starts exploratory again
+    c.set_project(saved_proj);
+    call(&mut c, "solve_run", json!({}));
+    assert_eq!(
+        c.validated("sms").state,
+        nyx_engine::validated::Validation::Exploratory,
+        "set_project must clear self.checks"
+    );
+    let _ = std::fs::remove_dir_all(&lib_dir);
+}

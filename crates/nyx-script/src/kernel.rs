@@ -36,9 +36,27 @@ pub const POLLABLE: &[&str] = &["solve_run", "convergence_check", "job_wait", "q
 /// How often the host asks the engine whether a job has finished.
 const POLL: Duration = Duration::from_millis(20);
 
+/// Maximum duration accepted for script execution or job waits (24 hours), preventing host `Duration`/`Instant` panics.
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(86_400);
+
+fn parse_timeout_secs(t: f64, field: &str) -> Result<Duration, String> {
+    if !t.is_finite() || t < 0.0 {
+        return Err(format!("`{field}` must be a finite non-negative number of seconds, got {t}"));
+    }
+    let d = Duration::try_from_secs_f64(t)
+        .map_err(|e| format!("`{field}` ({t} s) overflows Duration: {e}"))?;
+    Ok(d.min(MAX_TIMEOUT))
+}
+
 /// Commands that discard the project or a part of it.
 pub fn is_destructive(name: &str) -> bool {
     matches!(name, "project_new" | "project_load" | "project_open" | "store_open") || name.starts_with("remove_")
+}
+
+/// Commands that trigger outbound network requests (denied during sandboxed script execution).
+pub fn is_network_command(name: &str, args: &Value) -> bool {
+    name == "fetch_material"
+        || (name == "search_remote_materials" && args.get("live").and_then(Value::as_bool) == Some(true))
 }
 
 /// What a script that is not finished is waiting for.
@@ -117,13 +135,14 @@ fn session_suspension_cap(limits: &Limits) -> usize {
     limits.calls.saturating_mul(16).max(200_000)
 }
 
-fn repl_config(engine: &Engine, limits: &Limits) -> ReplConfig {
+fn repl_config(engine: &Engine, limits: &Limits) -> Result<ReplConfig, String> {
+    let max_feed = parse_timeout_secs(limits.seconds, "limits.seconds")?;
     let rl = ResourceLimits::default()
-        .max_feed_duration(Duration::from_secs_f64(limits.seconds))
+        .max_feed_duration(max_feed)
         .max_memory(limits.memory_bytes)
         .max_recursion_depth(limits.depth)
         .max_suspensions(session_suspension_cap(limits));
-    ReplConfig {
+    Ok(ReplConfig {
         script_name: "script".to_string(),
         limits: Some(rl),
         type_check: true,
@@ -131,7 +150,7 @@ fn repl_config(engine: &Engine, limits: &Limits) -> ReplConfig {
         print_flush_interval: Some(Duration::ZERO),
         os_policy: os_policy(),
         ..ReplConfig::default()
-    }
+    })
 }
 
 /// The `nyx` module a script sees: one function per command of the catalog, `call`, and `aio` with the pollable commands as async functions.
@@ -209,11 +228,19 @@ fn start_poll(engine: &mut Engine, cmd: &str, a: &Value) -> Result<Option<Poll>,
         }
         "job_wait" | "queue_wait" => {
             let Some(job) = a.get("id").and_then(Value::as_u64) else { return Ok(None) }; // the engine says what is wrong with the arguments
-            let timeout = match a.get("timeout_s").and_then(Value::as_f64) {
-                Some(t) if t >= 0.0 && t.is_finite() => Some(Duration::from_secs_f64(t)),
-                Some(_) => return Ok(None),
-                None if cmd == "queue_wait" => return Ok(None),
-                None => None,
+            let timeout = match a.get("timeout_s") {
+                None | Some(Value::Null) => {
+                    if cmd == "queue_wait" {
+                        return Ok(None);
+                    }
+                    None
+                }
+                Some(v) => {
+                    let Some(t) = v.as_f64() else {
+                        return Err("`timeout_s` must be a finite non-negative number of seconds".to_string());
+                    };
+                    Some(parse_timeout_secs(t, "timeout_s")?)
+                }
             };
             Ok(Some(mk(job, timeout)))
         }
@@ -265,8 +292,15 @@ macro_rules! printer {
         let cap = $k.limits.output_bytes;
         on_print_sync(move |_stream, text| {
             let mut o = sink.lock().unwrap();
-            if o.len() < cap {
-                o.push_str(text);
+            let rem = cap.saturating_sub(o.len());
+            if rem > 0 {
+                let mut end = text.len().min(rem);
+                while end > 0 && !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                if end > 0 {
+                    o.push_str(&text[..end]);
+                }
             }
         })
     }};
@@ -275,6 +309,8 @@ macro_rules! printer {
 impl Kernel {
     /// A kernel for `engine`'s catalog. No process is started until the first script.
     pub fn new(engine: &Engine, limits: Limits, opts: Options) -> Result<Kernel, String> {
+        let feed_timeout = parse_timeout_secs(limits.seconds, "limits.seconds")?;
+        let repl = repl_config(engine, &limits)?;
         let worker = opts.worker.clone().or_else(find_worker).ok_or_else(|| {
             "the script worker program `nyx-script-worker` was not found next to this program (build it with `cargo build --release -p nyx-script`, or name it in NYX_SCRIPT_WORKER)".to_string()
         })?;
@@ -285,9 +321,8 @@ impl Kernel {
         cfg.max_processes = 2;
         cfg.max_checkouts_per_worker = Some(1);
         // a hang the sandbox's own limits cannot see (the time between two commands, counted without the engine's answers)
-        cfg.request_timeout = Some(Duration::from_secs_f64(limits.seconds + 10.0));
+        cfg.request_timeout = Some(feed_timeout.saturating_add(Duration::from_secs(10)));
         let pool = rt.block_on(Pool::new(cfg)).map_err(|e| explain(e, &limits))?;
-        let repl = repl_config(engine, &limits);
         Ok(Kernel {
             rt: Arc::new(rt),
             pool,
@@ -644,6 +679,10 @@ impl Kernel {
         };
         if !self.allow_destructive && is_destructive(&cmd) {
             let e = format!("{cmd} discards the project or a part of it: it is refused unless script_run is called with allow_destructive true");
+            return self.value_or_future(is_aio, call_id, Err(e));
+        }
+        if is_network_command(&cmd, &a) {
+            let e = format!("{cmd}: outbound network access is refused in sandboxed script execution");
             return self.value_or_future(is_aio, call_id, Err(e));
         }
         match start_poll(engine, &cmd, &a) {

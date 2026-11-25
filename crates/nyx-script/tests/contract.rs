@@ -5,7 +5,7 @@
 //! do that only together with a line in `docs/architecture/contracts/VERSIONS.md`.
 
 use nyx_engine::path_guard::PATH_ARGS;
-use nyx_script::kernel::POLLABLE;
+use nyx_script::kernel::{MAX_TIMEOUT, POLLABLE};
 use nyx_script::trace::{CONDS, FORMULA_ARGS, FUNCS_1, FUNCS_2};
 use nyx_script::Limits;
 use serde_json::{json, Value};
@@ -20,18 +20,24 @@ fn current() -> Value {
         "object": "nyx",
         "calls": ["nyx.<command>(name=value, ...)", "nyx.call(name, **args)", "nyx.call(name, {...})", "nyx.<command>({...})"],
         "value": "the last expression of the script, as JSON",
-        "output": "print() lines, up to the output limit",
+        "output": "print() lines, truncated at a UTF-8 char boundary so total bytes stay within output_bytes",
         "engine_error": "RuntimeError('<command>: <message>'), catchable",
         "static_check": "names and required-ness of commands and arguments, against the stub of nyx api stubs; value types are not checked",
         "limits": {
             "seconds": l.seconds,
+            "max_timeout_seconds": MAX_TIMEOUT.as_secs(),
             "memory_bytes": l.memory_bytes,
             "depth": l.depth,
             "calls": l.calls,
             "output_bytes": l.output_bytes,
             "seconds_counts": "script time only; the time the engine takes to answer a command is not counted",
+            "timeout_validation": "non-finite, negative, or Duration-overflowing seconds/timeout_s values return a structured validation error; finite values are clamped to max_timeout_seconds",
         },
         "path_guard": { "arguments": PATH_ARGS, "root": "the workspace given to the run, else the folder of the script; relative paths are taken from it" },
+        "network": {
+            "refused_commands": ["fetch_material", "search_remote_materials(live=true)"],
+            "rule": "outbound network access is denied during sandboxed script execution (RuntimeError)",
+        },
         "determinism": { "clock": "refused (RuntimeError)", "random": "seed 0", "sleep": "returns at once" },
         "files": "open, pathlib and os raise PermissionError",
         "run_record": { "artifact_kind": "script", "file": "script-<blake3, 32 hex digits>.nys" },

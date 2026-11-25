@@ -876,5 +876,75 @@ fn write_results_with_save_fields_false_omits_mesh_and_fields_and_reads_cleanly(
     assert_eq!(summary.cells, mesh.n_cells());
     assert_eq!(summary.results[0].1.scalars, orig.scalars);
 
+    // `open_results` also succeeds cleanly when `!fields_saved` (re-meshing project and restoring scalars/eigenvalues/logs)
+    let mut reopened = Engine::new();
+    let opened = reopened.call("open_results", &json!({ "path": path.to_str().unwrap() })).unwrap();
+    assert_eq!(opened["results"][0]["physics"], "ems");
+    let (loaded_res, stale) = reopened.result("ems").unwrap();
+    assert!(!stale);
+    assert_eq!(loaded_res.scalars, orig.scalars);
+    assert_eq!(loaded_res.solutions.len(), orig.solutions.len());
+
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn results_h5_is_byte_deterministic_and_guards_forged_n_solutions() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": example("04_thermal_bar") })).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    let mesh = e.model().unwrap().solver_mesh();
+    let results: Vec<(String, std::sync::Arc<nyx_physics::SolveResult>)> = e
+        .project()
+        .physics
+        .iter()
+        .filter_map(|s| e.result(&s.physics).map(|(r, _)| (s.physics.clone(), r.clone())))
+        .collect();
+    let refs: Vec<(String, &nyx_physics::SolveResult)> = results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
+
+    let p1 = tmp("det-1.h5");
+    let p2 = tmp("det-2.h5");
+    nyx_engine::h5io::write_results(&p1, e.project(), &mesh, &refs).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    nyx_engine::h5io::write_results(&p2, e.project(), &mesh, &refs).unwrap();
+
+    let b1 = std::fs::read(&p1).unwrap();
+    let b2 = std::fs::read(&p2).unwrap();
+    assert_eq!(b1, b2, "results.h5 must be byte-deterministic across repeated writes");
+    let raw = File::open_streaming(&p1).unwrap();
+    let attrs = raw.root().attrs().unwrap();
+    assert!(!attrs.contains_key("created_utc"), "created_utc must not be written into deterministic results.h5");
+    let _ = std::fs::remove_file(&p1);
+    let _ = std::fs::remove_file(&p2);
+
+    // Forged huge `n_solutions` attribute with `!fields_saved` must be rejected by read budget before Vec::with_capacity OOM
+    let forged = tmp("forged-n-sols.h5");
+    let mut fb = FileBuilder::new();
+    fb.set_attr("writer", AttrValue::VarLenString("serial".into()));
+    fb.set_attr("processes", AttrValue::I64(1));
+    fb.set_attr("format", AttrValue::VarLenString("nyx-results".into()));
+    fb.set_attr("version", AttrValue::I32(4));
+    fb.set_attr("fields_saved", AttrValue::I64(0));
+    let proj = nyx_engine::Project::new("forged", 2).to_json();
+    fb.create_dataset("project").with_u8_data(proj.as_bytes()).with_shape(&[proj.len() as u64]);
+    let mut root = fb.create_group("results");
+    let mut g = root.create_group("ems");
+    g.set_attr("physics", AttrValue::VarLenString("ems".into()));
+    g.set_attr("study", AttrValue::VarLenString("modes".into()));
+    g.set_attr("order", AttrValue::I64(2));
+    g.set_attr("dim", AttrValue::I64(2));
+    g.set_attr("dofs", AttrValue::I64(10));
+    g.set_attr("seconds", AttrValue::F64(0.1));
+    g.set_attr("n_solutions", AttrValue::I64(1_000_000_000));
+    g.create_dataset("scalars").with_u8_data(b"[]").with_shape(&[2]);
+    g.create_dataset("log").with_u8_data(b"[]").with_shape(&[2]);
+    root.add_group(g.finish());
+    fb.add_group(root.finish());
+    fb.write(&forged).unwrap();
+
+    let err = nyx_engine::h5io::read_results_with_budget(&forged, ReadBudgetConfig::default())
+        .err()
+        .expect("forged n_solutions=1e9 must be rejected");
+    assert!(err.contains("exceeds read budget") || err.contains("n_solutions"), "{err}");
+    let _ = std::fs::remove_file(&forged);
 }

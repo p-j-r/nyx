@@ -89,7 +89,7 @@ pub(crate) fn read_and_mesh(
             return Err(Error::Cancelled);
         }
         let mut scratch = Engine::with(registry.clone(), mesher.clone());
-        scratch.base_library = library.clone();
+        scratch.set_base_library_arc(library.clone());
         scratch.set_project(project.clone());
         let sizing = scratch.sizing();
         let model = {
@@ -97,40 +97,40 @@ pub(crate) fn read_and_mesh(
             let _stage = femcore::progress::stage("meshing the project of the file again");
             std::sync::Arc::new(mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?)
         };
-        let made = model.solver_mesh();
-        let s = &stored.mesh;
-        let model = if made.dim != s.dim
-            || made.points != s.points
-            || made.cells != s.cells
-            || made.cell_labels != s.cell_labels
-            || made.facets != s.facets
-            || made.facet_labels != s.facet_labels
-            || made.edge_node_list() != s.edge_node_list()
-            || made.qp_edge_list() != s.qp_edge_list()
-        {
-            if stored.fields_saved
-                && s.n_cells() > 0
-                && crate::amr::project_has_electro_amr(&project)
-                && made.dim == s.dim
-            {
-                std::sync::Arc::new(
-                    crate::meshing::MeshedModel::new(
-                        stored.mesh,
-                        model.evaluated().clone(),
-                        model.labels().clone(),
-                        project.mesh.sweep.is_some(),
-                    )?
-                    .with_amr_adapted(),
-                )
-            } else {
-                return Err(Error::invalid(format!(
-                    "{path}: the project of this file meshes to something else than the mesh stored in it ({} cells made, {} stored); it was written by another version of nyx, so its results cannot be shown on the geometry",
-                    made.n_cells(),
-                    s.n_cells()
-                )));
-            }
-        } else {
+        let model = if !stored.fields_saved {
             model
+        } else {
+            let made = model.solver_mesh();
+            let s = &stored.mesh;
+            if made.dim != s.dim
+                || made.points != s.points
+                || made.cells != s.cells
+                || made.cell_labels != s.cell_labels
+                || made.facets != s.facets
+                || made.facet_labels != s.facet_labels
+                || made.edge_node_list() != s.edge_node_list()
+                || made.qp_edge_list() != s.qp_edge_list()
+            {
+                if s.n_cells() > 0 && crate::amr::project_has_electro_amr(&project) && made.dim == s.dim {
+                    std::sync::Arc::new(
+                        crate::meshing::MeshedModel::new(
+                            stored.mesh,
+                            model.evaluated().clone(),
+                            model.labels().clone(),
+                            project.mesh.sweep.is_some(),
+                        )?
+                        .with_amr_adapted(),
+                    )
+                } else {
+                    return Err(Error::invalid(format!(
+                        "{path}: the project of this file meshes to something else than the mesh stored in it ({} cells made, {} stored); it was written by another version of nyx, so its results cannot be shown on the geometry",
+                        made.n_cells(),
+                        s.n_cells()
+                    )));
+                }
+            } else {
+                model
+            }
         };
         Ok(crate::jobs::Opened { project, model, results: stored.results, path: path.to_string() })
     }

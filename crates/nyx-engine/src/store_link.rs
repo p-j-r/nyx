@@ -404,4 +404,68 @@ mod tests {
         assert!(native_card.summary.starts_with("3D, "), "{}", native_card.summary);
         assert!(!native_card.summary.contains("swept"));
     }
+
+    #[test]
+    fn record_with_options_records_script_nys_and_xdmf_consistently() {
+        let ws = std::env::temp_dir().join(format!("nyx-store-link-art-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&ws);
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let mut p = Project::new("ArtTest", 2);
+        p.mesh.h = 0.25;
+        let (mut link, _) = (super::StoreLink::create(&ws, &p, "ai").unwrap(), ());
+        link.script = Some(("demo.nys".into(), "nyx.project_info()".into()));
+        let mesh = femcore::mesh::SimplexMesh::new(
+            2,
+            vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+            vec![0, 1, 2],
+            vec![1],
+            vec![0, 1, 1, 2, 2, 0],
+            vec![1, 1, 1],
+        );
+        let res = nyx_physics::SolveResult {
+            physics: "dfs".into(),
+            study: "electrostatic".into(),
+            order: 1,
+            dim: 2,
+            dofs: 3,
+            seconds: 0.01,
+            solutions: vec![nyx_physics::Solution { label: "s0".into(), value: Some(1.0), ..Default::default() }],
+            scalars: vec![],
+            log: vec!["ok".into()],
+        };
+
+        let r_full = link
+            .record_with_options(
+                &p,
+                super::RunOutcome::Solved(std::slice::from_ref(&res)),
+                0.01,
+                &["log".into()],
+                Some(&mesh),
+                true,
+                &[],
+            )
+            .unwrap();
+        assert!(r_full.artifacts.iter().any(|a| a.kind == "script" && a.path.ends_with(".nys")));
+        if cfg!(feature = "hdf5") {
+            assert!(r_full.artifacts.iter().any(|a| a.path.ends_with("/results.xdmf")));
+            assert!(r_full.artifacts.iter().any(|a| a.path.ends_with("/results.h5")));
+        }
+
+        let r_light = link
+            .record_with_options(
+                &p,
+                super::RunOutcome::Solved(std::slice::from_ref(&res)),
+                0.01,
+                &["log".into()],
+                Some(&mesh),
+                false,
+                &[],
+            )
+            .unwrap();
+        assert!(r_light.artifacts.iter().any(|a| a.kind == "script" && a.path.ends_with(".nys")));
+        assert!(!r_light.artifacts.iter().any(|a| a.path.ends_with("/results.xdmf")));
+
+        let _ = std::fs::remove_dir_all(&ws);
+    }
 }

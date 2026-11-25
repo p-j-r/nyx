@@ -1001,7 +1001,7 @@ impl ConvergenceJob {
 
     fn scratch(&self, p: Project) -> Engine {
         let mut e = Engine::with(self.registry.clone(), self.mesher.clone());
-        e.base_library = self.library.clone();
+        e.set_base_library_arc(self.library.clone());
         e.set_project(p);
         e
     }
@@ -1124,7 +1124,7 @@ impl Engine {
         ConvergenceJob {
             registry: self.registry.clone(),
             mesher: self.mesher.clone(),
-            library: self.base_library.clone(),
+            library: self.base_library().clone(),
             project: self.project.clone(),
             reuse: None,
             history: self.history.clone(),

@@ -106,66 +106,141 @@ pub fn resolve_remote_url(format: &str, target: &str) -> Result<String, Error> {
     resolve_url(fmt, target).map_err(|e| Error::invalid(e.to_string()))
 }
 
-/// Downloads a UTF-8 text payload over HTTPS using system `curl` (`--max-time 20`, 5 MiB cap).
+const WINDOWS_RESERVED_NAMES: &[&str] = &[
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2",
+    "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+const RAW_GITHUB_PREFIXES: &[&str] = &["/polyanskiy/refractiveindex.info-database/", "/bjornsturmberg/NumBAT/"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidatedUrl {
+    url: String,
+    host: String,
+}
+
+/// Validates that `url` is a clean `https://` URL targeting an allowlisted remote material host (no userinfo, custom port, backslash, or path traversal).
+fn validate_remote_url(url: &str) -> Result<ValidatedUrl, Error> {
+    let u = url.trim();
+    if u.is_empty() || u.chars().any(|c| c.is_ascii_control() || c.is_ascii_whitespace()) {
+        return Err(Error::invalid(format!(
+            "invalid remote URL '{u}': empty or contains whitespace/control characters"
+        )));
+    }
+    let Some(rest) = u.strip_prefix("https://") else {
+        return Err(Error::invalid(format!("only https:// URLs may be downloaded, got '{u}'")));
+    };
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..auth_end];
+    let suffix = &rest[auth_end..];
+    if authority.is_empty()
+        || authority.contains('@')
+        || authority.contains('\\')
+        || authority.contains(':')
+        || authority.ends_with('.')
+        || suffix.starts_with('#')
+    {
+        return Err(Error::invalid(format!("invalid or unsafe URL authority in '{u}'")));
+    }
+    let host = authority.to_ascii_lowercase();
+    let allowed_host = matches!(
+        host.as_str(),
+        "api.materialsproject.org"
+            | "aflowlib.org"
+            | "aflow.org"
+            | "aflowlib.duke.edu"
+            | "refractiveindex.info"
+            | "raw.githubusercontent.com"
+    );
+    if !allowed_host {
+        return Err(Error::invalid(format!("remote URL host '{host}' is not on the HTTPS allowlist")));
+    }
+    if host == "raw.githubusercontent.com" {
+        let path = suffix.split(['?', '#']).next().unwrap_or("");
+        let lower_path = path.to_ascii_lowercase();
+        if path.contains('\\')
+            || path.split('/').any(|seg| seg == ".." || seg == ".")
+            || lower_path.contains("%2e")
+            || lower_path.contains("%2f")
+            || lower_path.contains("%5c")
+            || !RAW_GITHUB_PREFIXES.iter().any(|p| path.starts_with(p))
+        {
+            return Err(Error::invalid(format!(
+                "raw.githubusercontent.com URL path '{path}' is not pinned to a curated material repository"
+            )));
+        }
+    }
+    Ok(ValidatedUrl { url: u.to_string(), host })
+}
+
+fn build_curl_args(url: &str, with_stdin_config: bool) -> Vec<String> {
+    let mut args = vec![
+        "--fail".to_string(),
+        "--silent".to_string(),
+        "--show-error".to_string(),
+        "--proto".to_string(),
+        "=https".to_string(),
+        "--max-redirs".to_string(),
+        "0".to_string(),
+        "--max-time".to_string(),
+        "20".to_string(),
+        "--max-filesize".to_string(),
+        "5242880".to_string(),
+    ];
+    if with_stdin_config {
+        args.push("--config".to_string());
+        args.push("-".to_string());
+    }
+    args.push("--".to_string());
+    args.push(url.to_string());
+    args
+}
+
+/// Downloads a UTF-8 text payload over HTTPS using system `curl` (`--proto =https --max-redirs 0 --max-time 20`, 5 MiB cap).
 pub fn fetch_url_text(url: &str) -> Result<String, Error> {
     fetch_url_text_with_api_key(url, None)
 }
 
-/// Downloads a UTF-8 text payload over HTTPS using system `curl` (`--max-time 20`, 5 MiB cap),
-/// passing an optional `X-API-KEY` header via `curl --config -` on stdin so the key never appears in `argv` or logs.
+/// Downloads a UTF-8 text payload over HTTPS using system `curl` (`--proto =https --max-redirs 0 --max-time 20`, 5 MiB cap),
+/// passing an optional `X-API-KEY` header (only for `api.materialsproject.org`) via `curl --config -` on stdin so the key never appears in `argv` or logs.
 pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<String, Error> {
     use std::io::Write;
     use std::process::Stdio;
-    let u = url.trim();
-    if !u.starts_with("https://") {
-        return Err(Error::invalid(format!("only https:// URLs may be downloaded, got '{u}'")));
-    }
+    let parsed = validate_remote_url(url)?;
+    let u = parsed.url.as_str();
     let bin = if cfg!(windows) { "curl.exe" } else { "curl" };
     let key_clean = api_key.map(str::trim).filter(|s| !s.is_empty());
-    let out = if let Some(k) = key_clean {
+    if let Some(k) = key_clean {
+        if parsed.host != "api.materialsproject.org" {
+            return Err(Error::invalid(format!(
+                "API key header X-API-KEY may only be sent to api.materialsproject.org, not '{}'",
+                parsed.host
+            )));
+        }
         if k.contains(['\r', '\n']) {
             return Err(Error::invalid("API key must not contain newline characters"));
         }
-        let mut child = Command::new(bin)
-            .args([
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--location",
-                "--max-time",
-                "20",
-                "--max-filesize",
-                "5242880",
-                "--config",
-                "-",
-                u,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                Error::invalid(format!(
-                    "could not run {bin} to download '{u}': {e} (download the file manually and use `nyx material import`)"
-                ))
-            })?;
+    }
+    let args = build_curl_args(u, key_clean.is_some());
+    let mut cmd = Command::new(bin);
+    cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if key_clean.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
+    let mut child = cmd.spawn().map_err(|e| {
+        Error::invalid(format!(
+            "could not run {bin} to download '{u}': {e} (download the file manually and use `nyx material import`)"
+        ))
+    })?;
+    if let Some(k) = key_clean {
         if let Some(mut stdin) = child.stdin.take() {
             let escaped = k.replace('\\', "\\\\").replace('"', "\\\"");
             let _ = writeln!(stdin, "header = \"X-API-KEY: {escaped}\"");
         }
-        child
-            .wait_with_output()
-            .map_err(|e| Error::invalid(format!("could not wait on {bin} while downloading '{u}': {e}")))?
-    } else {
-        Command::new(bin)
-            .args(["--fail", "--silent", "--show-error", "--location", "--max-time", "20", "--max-filesize", "5242880", u])
-            .output()
-            .map_err(|e| {
-                Error::invalid(format!(
-                    "could not run {bin} to download '{u}': {e} (download the file manually and use `nyx material import`)"
-                ))
-            })?
-    };
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| Error::invalid(format!("could not wait on {bin} while downloading '{u}': {e}")))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let msg = stderr.trim();
@@ -185,8 +260,15 @@ pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<S
 
 fn validate_material_name(name: &str) -> Result<&str, Error> {
     let n = name.trim();
-    if n.is_empty() || n.contains(['/', '\\', '*', ',']) || n.contains("..") {
-        return Err(Error::invalid("a material name must be plain text without '/', '\\', '*', ',' or '..'"));
+    if n.is_empty() || n.len() > 64 || !n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return Err(Error::invalid(
+            "a material name must be 1..=64 ASCII characters [A-Za-z0-9_-]+ (no ':', path separators, or '..')",
+        ));
+    }
+    if WINDOWS_RESERVED_NAMES.contains(&n.to_ascii_lowercase().as_str()) {
+        return Err(Error::invalid(format!(
+            "'{n}' is a reserved Windows device name and cannot be used as a material name"
+        )));
     }
     Ok(n)
 }
@@ -336,6 +418,11 @@ impl Engine {
         folder: Option<&Path>,
         api_key: Option<&str>,
     ) -> Result<Value, Error> {
+        if self.path_root().is_some() {
+            return Err(Error::invalid(
+                "fetch_material is refused in sandboxed script mode (path_root is set); use `import_material` instead",
+            ));
+        }
         let src = source.trim();
         let tgt_opt = target.map(str::trim).filter(|s| !s.is_empty());
 
@@ -373,18 +460,31 @@ impl Engine {
         let final_name =
             validate_material_name(name.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(&default_name))?.to_string();
         let env_mp_key = std::env::var("MP_API_KEY").ok();
-        let effective_key = api_key
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .or_else(|| (fmt == ImportFormat::MaterialsProject).then_some(env_mp_key.as_deref()).flatten());
-        let url = if fmt == ImportFormat::MaterialsProject && !resolved_target.starts_with("https://") {
+        let api_key_clean = api_key.map(str::trim).filter(|s| !s.is_empty());
+        let env_key_clean = env_mp_key.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let any_key_present = api_key_clean.is_some() || env_key_clean.is_some();
+        let target_is_url = resolved_target.contains("://");
+        if target_is_url {
+            if fmt == ImportFormat::MaterialsProject {
+                return Err(Error::invalid(
+                    "arbitrary URL targets are not allowed for source 'mp'; provide a Materials Project id such as 'mp-149'",
+                ));
+            }
+            if any_key_present {
+                return Err(Error::invalid(
+                    "arbitrary URL targets are refused when an API key (`api_key` or `MP_API_KEY`) is present",
+                ));
+            }
+        }
+        let effective_key = if fmt == ImportFormat::MaterialsProject { api_key_clean.or(env_key_clean) } else { None };
+        let url = if fmt == ImportFormat::MaterialsProject {
             if effective_key.is_none() {
                 return Err(Error::invalid(
                     "Materials Project live download requires an API key (`api_key` argument, `--api-key` CLI flag, or `MP_API_KEY` environment variable)",
                 ));
             }
             let mp_id = resolved_target.trim();
-            if !mp_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            if mp_id.is_empty() || !mp_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
                 return Err(Error::invalid(format!("invalid Materials Project id '{mp_id}'")));
             }
             format!(
@@ -393,15 +493,16 @@ impl Engine {
         } else {
             resolve_url(fmt, &resolved_target).map_err(|e| Error::invalid(e.to_string()))?
         };
-        let raw = fetch_url_text_with_api_key(&url, effective_key)?;
+        let validated = validate_remote_url(&url)?;
+        let raw = fetch_url_text_with_api_key(&validated.url, effective_key)?;
         let opts = ImportOptions {
             name: &final_name,
             description: resolved_desc,
             extends: resolved_extends,
-            source_url: Some(&url),
+            source_url: Some(&validated.url),
         };
         let toml_text = import_to_toml(fmt, &raw, &opts).map_err(|e| Error::invalid(e.to_string()))?;
-        let mut extra = vec![("format", json!(fmt.id())), ("fetched_url", json!(url))];
+        let mut extra = vec![("format", json!(fmt.id())), ("fetched_url", json!(validated.url))];
         if let Some(id) = preset_id {
             extra.push(("preset", json!(id)));
         }
@@ -417,6 +518,11 @@ impl Engine {
         live: bool,
         api_key: Option<&str>,
     ) -> Result<Value, Error> {
+        if live && self.path_root().is_some() {
+            return Err(Error::invalid(
+                "search_remote_materials with live=true is refused in sandboxed script mode (path_root is set)",
+            ));
+        }
         let q = query.trim();
         let q_low = q.to_ascii_lowercase();
         let dom_filter = domain.map(str::trim).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("all"));
@@ -533,5 +639,87 @@ impl Engine {
             "live_matches": live_matches,
             "live_warnings": live_warnings,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowlist_rejects_untrusted_hosts_and_unsafe_urls() {
+        assert!(validate_remote_url("https://api.materialsproject.org/materials/summary/?material_ids=mp-149").is_ok());
+        assert!(validate_remote_url("https://aflowlib.org/API/aflux/?species(Si)").is_ok());
+        assert!(validate_remote_url("https://aflow.org/API/aflux/?species(Si)").is_ok());
+        assert!(validate_remote_url("https://aflowlib.duke.edu/search/API/?species(Si)").is_ok());
+        assert!(validate_remote_url("https://refractiveindex.info/data/main/Si/nk/Green-2008.yml").is_ok());
+        assert!(validate_remote_url(
+            "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/main/database/data/main/Si/nk/Green-2008.yml"
+        )
+        .is_ok());
+        assert!(validate_remote_url(
+            "https://raw.githubusercontent.com/bjornsturmberg/NumBAT/master/backend/material_data/Si_2021_Poulton.json"
+        )
+        .is_ok());
+
+        for bad in [
+            "http://api.materialsproject.org/materials/summary/",
+            "https://evil.example/steal",
+            "https://127.0.0.1/admin",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://api.materialsproject.org@evil.example/",
+            "https://api.materialsproject.org:8443/materials/summary/",
+            "https://api.materialsproject.org\\@evil.example/",
+            "https://raw.githubusercontent.com/evil/repo/main/payload.yml",
+            "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/../../evil/repo/secret.yml",
+            "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/%2e%2e/secret.yml",
+        ] {
+            assert!(validate_remote_url(bad).is_err(), "expected rejection for {bad}");
+        }
+    }
+
+    #[test]
+    fn curl_args_disable_redirects_and_force_https() {
+        let args = build_curl_args("https://aflow.org/API/aflux/?species(Si)", false);
+        assert!(!args.iter().any(|a| a == "--location" || a == "-L"), "{args:?}");
+        assert!(args.windows(2).any(|w| w == ["--proto", "=https"]), "{args:?}");
+        assert!(args.windows(2).any(|w| w == ["--max-redirs", "0"]), "{args:?}");
+
+        let mp_args = build_curl_args("https://api.materialsproject.org/materials/summary/", true);
+        assert!(mp_args.windows(2).any(|w| w == ["--max-redirs", "0"]), "{mp_args:?}");
+        assert!(mp_args.windows(2).any(|w| w == ["--config", "-"]), "{mp_args:?}");
+    }
+
+    #[test]
+    fn api_key_is_never_sent_to_non_mp_hosts() {
+        let err = fetch_url_text_with_api_key("https://aflow.org/API/aflux/?species(Si)", Some("secret-token"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("api.materialsproject.org"), "{err}");
+    }
+
+    #[test]
+    fn validate_material_name_rejects_reserved_windows_names_and_punctuation() {
+        assert_eq!(validate_material_name("silicon_4k-custom").unwrap(), "silicon_4k-custom");
+        for bad in [
+            "",
+            "foo:bar",
+            "foo/bar",
+            "foo\\bar",
+            "..",
+            "a.b",
+            "con",
+            "CON",
+            "Prn",
+            "aux",
+            "NUL",
+            "com1",
+            "COM9",
+            "lpt1",
+            "LPT9",
+            &"a".repeat(65),
+        ] {
+            assert!(validate_material_name(bad).is_err(), "expected rejection for {bad:?}");
+        }
     }
 }

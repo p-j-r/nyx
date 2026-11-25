@@ -180,3 +180,125 @@ fn evaluate_material_rotates_piezoelectric_tensors_by_bunge_euler_angles() {
     let er_22 = vr["piezoelectric"]["e_c_m2"][1][1].as_f64().unwrap();
     assert!((er_22 + e0_33).abs() < 1e-12, "expected rotated e_22 = -e_33 ({e0_33}), got {er_22}");
 }
+
+#[test]
+fn mp_ssrf_with_env_key_probe() {
+    if std::env::var_os("NYX_TEST_MP_SSRF_PROBE").is_none() {
+        return;
+    }
+    let mut e = Engine::new();
+    let err_mp = e
+        .fetch_material_with_key("mp", Some("https://evil.example/"), Some("bad_mp"), None, None, false, None, None)
+        .unwrap_err()
+        .to_string();
+    assert!(err_mp.contains("arbitrary URL targets are not allowed"), "{err_mp}");
+
+    let err_rii_env = e
+        .fetch_material_with_key(
+            "rii",
+            Some("https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/main/database/data/main/Si/nk/Green-2008.yml"),
+            Some("si_env"),
+            None,
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err_rii_env.contains("MP_API_KEY"), "{err_rii_env}");
+}
+
+#[test]
+fn material_fetch_blocks_ssrf_exfiltration_script_network_and_windows_reserved_names() {
+    let mut e = Engine::new();
+    let rii = "REFERENCES: \"Synthetic test\"\nDATA:\n  - type: formula 1\n    wavelength_range: 1.0 2.0\n    coefficients: 0 10.6684293 0.301516485 0.0030434748 1.13475115\n";
+
+    // Reserved Windows device names & colons rejected across import and fetch
+    for bad in ["CON", "con", "NUL", "PRN", "AUX", "COM1", "LPT9", "foo:bar", "../escape"] {
+        let err = e.import_material(bad, "rii", rii, None, None, false, None).unwrap_err().to_string();
+        assert!(err.contains("reserved") || err.contains("[A-Za-z0-9_-]+"), "{bad}: {err}");
+        let err = e
+            .fetch_material("rii", Some("main/Si/Salzberg"), Some(bad), None, None, false, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("reserved") || err.contains("[A-Za-z0-9_-]+"), "{bad}: {err}");
+    }
+
+    // Arbitrary URL rejected for `source = "mp"` or when `api_key` is present, and host allowlist enforced
+    let err = e
+        .fetch_material_with_key(
+            "mp",
+            Some("https://evil.example/"),
+            Some("evil_mp"),
+            None,
+            None,
+            false,
+            None,
+            Some("k"),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("arbitrary URL"), "{err}");
+
+    let err = e
+        .fetch_material_with_key(
+            "rii",
+            Some("https://evil.example/si.yml"),
+            Some("evil_rii"),
+            None,
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("allowlist"), "{err}");
+
+    let err = e
+        .fetch_material_with_key(
+            "rii",
+            Some("https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/main/database/data/main/Si/nk/Green-2008.yml"),
+            Some("si_keyed"),
+            None,
+            None,
+            false,
+            None,
+            Some("secret-key"),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("API key"), "{err}");
+
+    // Subprocess probe with MP_API_KEY set in env
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "mp_ssrf_with_env_key_probe", "--nocapture"])
+        .env("NYX_TEST_MP_SSRF_PROBE", "1")
+        .env("MP_API_KEY", "secret-mp-env-key")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "MP_API_KEY SSRF probe failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Sandboxed script mode (`path_root` set) denies outbound network commands while offline catalog search still works
+    let root = std::env::temp_dir().join(format!("nyx-mat-fetch-sandbox-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    e.set_path_root(Some(&root)).unwrap();
+
+    let err_fetch = e.call("fetch_material", &json!({ "source": "si_green_2008" })).unwrap_err().to_string();
+    assert!(err_fetch.contains("sandboxed") || err_fetch.contains("path_root"), "{err_fetch}");
+
+    let err_live = e.call("search_remote_materials", &json!({ "query": "Si", "live": true })).unwrap_err().to_string();
+    assert!(err_live.contains("sandboxed") || err_live.contains("path_root"), "{err_live}");
+
+    let offline = e.call("search_remote_materials", &json!({ "query": "si_green", "live": false })).unwrap();
+    assert!(!offline["catalog_matches"].as_array().unwrap().is_empty());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
