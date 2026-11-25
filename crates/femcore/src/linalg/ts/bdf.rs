@@ -173,12 +173,12 @@ impl<T: FaerScalar> IterationMatrix<T> {
                 self.refactor(c)?;
             }
             d.copy_from_slice(rhs);
-            self.fac.solve_block_in_place(d, 1);
+            self.fac.solve_block_in_place(d, 1)?;
             return Ok(());
         }
         // modified fixed-point iteration with the stale factorisation
         d.copy_from_slice(rhs);
-        self.fac.solve_block_in_place(d, 1);
+        self.fac.solve_block_in_place(d, 1)?;
         let (mut res, mut tmp) = (vec![T::ZERO; n], vec![T::ZERO; n]);
         for _ in 0..MAX_REFINE {
             k.spmv(d, &mut res);
@@ -186,7 +186,7 @@ impl<T: FaerScalar> IterationMatrix<T> {
             for i in 0..n {
                 res[i] = rhs[i] - res[i] - tmp[i].scale(1.0 / c);
             }
-            self.fac.solve_block_in_place(&mut res, 1);
+            self.fac.solve_block_in_place(&mut res, 1)?;
             // the stale factor solves (K + M/c₀): the correction is (K + M/c₀)⁻¹ r
             let size = scaled_rms(&res, scale_ref, rtol, atol);
             for i in 0..n {
@@ -199,7 +199,7 @@ impl<T: FaerScalar> IterationMatrix<T> {
         // did not converge: factorise at the current c and solve exactly
         self.refactor(c)?;
         d.copy_from_slice(rhs);
-        self.fac.solve_block_in_place(d, 1);
+        self.fac.solve_block_in_place(d, 1)?;
         Ok(())
     }
 }
@@ -262,7 +262,7 @@ pub fn bdf_solve<T: FaerScalar>(
     for i in 0..n {
         ydot0[i] = f[i] - tmp[i];
     }
-    mfac.solve_block_in_place(&mut ydot0, 1);
+    mfac.solve_block_in_place(&mut ydot0, 1)?;
 
     // first step
     let mut h = match (opts.fixed_step, opts.first_step) {
@@ -278,7 +278,7 @@ pub fn bdf_solve<T: FaerScalar>(
             stats.forcing_evals += 1;
             k.spmv(&y1, &mut tmp);
             let mut ydot1: Vec<T> = f.iter().zip(&tmp).map(|(&a, &b)| a - b).collect();
-            mfac.solve_block_in_place(&mut ydot1, 1);
+            mfac.solve_block_in_place(&mut ydot1, 1)?;
             let diff: Vec<T> = ydot1.iter().zip(&ydot0).map(|(&a, &b)| a - b).collect();
             let d2 = scaled_rms(&diff, &scale0, opts.rtol, opts.atol) / h0;
             let h1 = if d1.max(d2) <= 1e-15 { (h0 * 1e-3).max(1e-6) } else { (0.01 / d1.max(d2)).sqrt() };

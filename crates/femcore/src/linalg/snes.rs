@@ -235,7 +235,7 @@ pub fn newton<T: FaerScalar>(
         for (di, fi) in d.iter_mut().zip(&fx) {
             *di = -*fi;
         }
-        fac.as_ref().unwrap().solve_block_in_place(&mut d, 1);
+        fac.as_ref().ok_or(SolverError::NotFactored)?.solve_block_in_place(&mut d, 1)?;
         if d.iter().any(|v| !v.is_finite()) {
             reason = Some(Reason::DivergedLinearSolve);
             break;

@@ -684,8 +684,8 @@ fn pml_dir(s: &str) -> PmlDir {
 }
 
 fn decode_coord_and_bounds(p: &Params, what: &str) -> Result<(PmlCoord, Option<([f64; 3], [f64; 3])>), Error> {
-    let blo = p.optional_numbers("bounds_lo");
-    let bhi = p.optional_numbers("bounds_hi");
+    let blo = p.optional_numbers("bounds_lo")?;
+    let bhi = p.optional_numbers("bounds_hi")?;
     let bounds = match (blo, bhi) {
         (None, None) => None,
         (Some(lo), Some(hi)) => {
@@ -709,24 +709,24 @@ fn decode_coord_and_bounds(p: &Params, what: &str) -> Result<(PmlCoord, Option<(
         }
     };
 
-    let c_vec = p.vector("center");
+    let c_vec = p.vector("center")?;
     let center = [c_vec[0], c_vec[1], c_vec[2]];
-    let a_vec = p.vector("axis");
+    let a_vec = p.vector("axis")?;
     let axis = [a_vec[0], a_vec[1], a_vec[2]];
-    let r_in = p.number("r_in");
-    let thickness = p.number("thickness");
+    let r_in = p.number("r_in")?;
+    let thickness = p.number("thickness")?;
 
-    let coord = match p.text("coord").as_str() {
+    let coord = match p.text("coord")?.as_str() {
         "cartesian" => PmlCoord::Cartesian,
         "cylindrical" => PmlCoord::Cylindrical {
             center,
             axis,
             r_in,
             r_thickness: thickness,
-            radial_on: p.boolean("radial_on"),
-            axial: pml_dir(&p.text("axial")),
-            z_in: p.number("z_in"),
-            z_thickness: p.number("z_thickness"),
+            radial_on: p.boolean("radial_on")?,
+            axial: pml_dir(&p.text("axial")?),
+            z_in: p.number("z_in")?,
+            z_thickness: p.number("z_thickness")?,
         },
         "spherical" => PmlCoord::Spherical { center, r_in, thickness },
         other => return Err(Error::invalid(format!("{what}: unsupported coordinate system '{other}'"))),
@@ -748,20 +748,20 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let study = match sd.kind.as_str() {
         "static" => Study::Static,
         "eigenfrequency" => {
-            Study::Eigenfrequency { n_modes: sp.integer("n_modes").max(0) as usize, f_search: sp.number("f_search") }
+            Study::Eigenfrequency { n_modes: sp.integer("n_modes")?.max(0) as usize, f_search: sp.number("f_search")? }
         }
         "axisymmetric_eigenfrequency" => Study::AxisymmetricEigenfrequency {
-            n_modes: sp.integer("n_modes").max(0) as usize,
-            f_search: sp.number("f_search"),
-            azimuthal_order: sp.integer("azimuthal_order"),
+            n_modes: sp.integer("n_modes")?.max(0) as usize,
+            f_search: sp.number("f_search")?,
+            azimuthal_order: sp.integer("azimuthal_order")?,
         },
         "modes" => Study::Modes {
-            n_modes: sp.integer("n_modes").max(0) as usize,
-            f_search: sp.number("f_search"),
-            wavevector: sp.number("wavevector"),
+            n_modes: sp.integer("n_modes")?.max(0) as usize,
+            f_search: sp.number("f_search")?,
+            wavevector: sp.number("wavevector")?,
         },
         "driven" => {
-            let freqs_hz = sp.optional_numbers("freqs_hz");
+            let freqs_hz = sp.optional_numbers("freqs_hz")?;
             let (f_min, f_max, n_points) = if let Some(ref fs) = freqs_hz {
                 for &f in fs {
                     if !(f > 0.0 && f.is_finite()) {
@@ -780,26 +780,26 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         "driven study requires either non-empty 'freqs_hz' or both 'f_min' and 'f_max'",
                     ));
                 }
-                let f_min = sp.number("f_min");
-                let f_max = sp.number("f_max");
+                let f_min = sp.number("f_min")?;
+                let f_max = sp.number("f_max")?;
                 if !(f_min > 0.0 && f_max >= f_min) {
                     return Err(Error::invalid(format!(
                         "driven study requires 0 < f_min <= f_max (got f_min = {f_min}, f_max = {f_max})"
                     )));
                 }
-                let n_points = sp.integer("n_points").max(1) as usize;
+                let n_points = sp.integer("n_points")?.max(1) as usize;
                 (f_min, f_max, n_points)
             };
-            let prom_tol = sp.optional_number("prom_tol").filter(|&t| t > 0.0);
-            let max_hdm_raw = sp.integer("max_hdm_solves");
+            let prom_tol = sp.optional_number("prom_tol")?.filter(|&t| t > 0.0);
+            let max_hdm_raw = sp.integer("max_hdm_solves")?;
             if !(1..=64).contains(&max_hdm_raw) {
                 return Err(Error::invalid(format!(
                     "driven study requires 1 <= max_hdm_solves <= 64 (got {max_hdm_raw})"
                 )));
             }
             let max_hdm_solves = max_hdm_raw as usize;
-            let strict_prom_tol = sp.boolean("strict_prom_tol");
-            let seed_freqs_hz = sp.numbers("seed_freqs_hz");
+            let strict_prom_tol = sp.boolean("strict_prom_tol")?;
+            let seed_freqs_hz = sp.numbers("seed_freqs_hz")?;
             for &sf in &seed_freqs_hz {
                 if !(sf > 0.0 && sf.is_finite()) {
                     return Err(Error::invalid(format!(
@@ -807,13 +807,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     )));
                 }
             }
-            let solver = sp.text("solver");
+            let solver = sp.text("solver")?;
             if !DRIVEN_SOLVER_CHOICES.contains(&solver.as_str()) {
                 return Err(Error::invalid(format!(
                     "driven study: unknown solver '{solver}' (expected one of {DRIVEN_SOLVER_CHOICES:?})"
                 )));
             }
-            let blr_tol = sp.number("blr_tol");
+            let blr_tol = sp.number("blr_tol")?;
             if !blr_tol.is_finite() || blr_tol < 0.0 {
                 return Err(Error::invalid(format!("driven study requires finite blr_tol >= 0 (got {blr_tol})")));
             }
@@ -836,22 +836,22 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let driven = study.is_driven();
     let params = sms.params();
     let pp = Params::new(&spec.params, &params);
-    let plane = if pp.text("plane") == "stress" { Plane::Stress } else { Plane::Strain };
-    let thermal = match pp.text("thermal").as_str() {
+    let plane = if pp.text("plane")? == "stress" { Plane::Stress } else { Plane::Strain };
+    let thermal = match pp.text("thermal")?.as_str() {
         "uniform" => Some(ThermalExpansion {
-            source: ThermalSource::Uniform(pp.number("temperature")),
-            t_ref: pp.number("t_ref"),
+            source: ThermalSource::Uniform(pp.number("temperature")?),
+            t_ref: pp.number("t_ref")?,
         }),
         "imported" => {
             let t = ctx.inputs.get("temperature").ok_or_else(|| {
                 Error::invalid("thermal expansion 'imported' needs a temperature exported by another physics (dfs.T), none was given")
             })?;
-            Some(ThermalExpansion { source: ThermalSource::Imported(t.clone()), t_ref: pp.number("t_ref") })
+            Some(ThermalExpansion { source: ThermalSource::Imported(t.clone()), t_ref: pp.number("t_ref")? })
         }
         _ => None,
     };
     let mut inactive = vec![];
-    for region in pp.names("inactive") {
+    for region in pp.names("inactive")? {
         inactive.extend(ctx.resolver.domains(&region)?);
     }
     inactive.sort_unstable();
@@ -870,7 +870,10 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let mut periodic = vec![];
     let mut infinite_elements = BTreeMap::new();
     for r in resolve_conditions(&spec.bcs, &kinds, &ctx_eff)? {
-        let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
+        let d = kinds
+            .iter()
+            .find(|k| k.kind == r.kind)
+            .ok_or_else(|| Error::Unsupported(format!("sms has no condition '{}'", r.kind)))?;
         let p = Params::new(&r.params, &d.params);
         let only_dynamic = |what: &str| -> Result<(), Error> {
             if eigen || driven {
@@ -886,7 +889,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 for (k, name) in ["ux", "uy", "uz"].iter().enumerate() {
                     if p.has(name) {
                         fixed[k] = true;
-                        values[k] = p.number(name);
+                        values[k] = p.number(name)?;
                     }
                 }
                 bcs.push(Bc { labels: r.labels, kind: BcKind::Fixed { fixed, values } });
@@ -895,7 +898,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 if eigen || driven {
                     return Err(Error::invalid("a boundary load belongs to the static study"));
                 }
-                let t = p.vector("traction");
+                let t = p.vector("traction")?;
                 bcs.push(Bc { labels: r.labels, kind: BcKind::Load([t[0], t[1], t[2]]) });
             }
             "low_reflecting" => {
@@ -905,30 +908,30 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             "pml" => {
                 only_dynamic("a perfectly matched layer")?;
                 let (coord, bounds) = decode_coord_and_bounds(&p, "condition 'pml'")?;
-                let profile = match p.text("profile").as_str() {
-                    "rational" => PmlProfile::Rational { curvature: p.number("curvature") },
-                    _ => PmlProfile::KappaPolynomial { kappa_max: p.number("kappa_max") },
+                let profile = match p.text("profile")?.as_str() {
+                    "rational" => PmlProfile::Rational { curvature: p.number("curvature")? },
+                    _ => PmlProfile::KappaPolynomial { kappa_max: p.number("kappa_max")? },
                 };
-                let stabilization = match p.text("stabilization").as_str() {
+                let stabilization = match p.text("stabilization")?.as_str() {
                     "off" => PmlStabilization::Off,
-                    "mpml" => PmlStabilization::Mpml { ratio: p.number("mpml_ratio") },
-                    "adiabatic" => PmlStabilization::Adiabatic { eta_max: p.number("adiabatic_eta") },
+                    "mpml" => PmlStabilization::Mpml { ratio: p.number("mpml_ratio")? },
+                    "adiabatic" => PmlStabilization::Adiabatic { eta_max: p.number("adiabatic_eta")? },
                     _ => PmlStabilization::Auto,
                 };
                 let pml = Pml {
-                    x: pml_dir(&p.text("x")),
-                    y: pml_dir(&p.text("y")),
-                    z: pml_dir(&p.text("z")),
-                    strength: p.number("strength"),
-                    order: p.number("order"),
-                    re: p.number("re"),
+                    x: pml_dir(&p.text("x")?),
+                    y: pml_dir(&p.text("y")?),
+                    z: pml_dir(&p.text("z")?),
+                    strength: p.number("strength")?,
+                    order: p.number("order")?,
+                    re: p.number("re")?,
                     coord,
                     bounds,
                     profile,
-                    auto_scale: p.boolean("auto_scale"),
-                    target_reflection: p.number("target_reflection"),
+                    auto_scale: p.boolean("auto_scale")?,
+                    target_reflection: p.number("target_reflection")?,
                     stabilization,
-                    clamp_outer: p.boolean("clamp_outer"),
+                    clamp_outer: p.boolean("clamp_outer")?,
                 };
                 for l in r.labels {
                     materials.pml.insert(l, pml.clone());
@@ -941,23 +944,23 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     ));
                 }
                 let (coord, bounds) = decode_coord_and_bounds(&p, "condition 'infinite_element'")?;
-                let profile = match p.text("profile").as_str() {
+                let profile = match p.text("profile")?.as_str() {
                     "exponential" => IeProfile::Exponential,
                     _ => IeProfile::Rational,
                 };
-                let pole_dist = p.optional_number("pole_dist").filter(|&v| v > 0.0);
+                let pole_dist = p.optional_number("pole_dist")?.filter(|&v| v > 0.0);
                 let clamp_outer =
-                    if p.has("clamp_outer") { p.boolean("clamp_outer") } else { profile == IeProfile::Rational };
+                    if p.has("clamp_outer") { p.boolean("clamp_outer")? } else { profile == IeProfile::Rational };
                 let pml = Pml {
-                    x: pml_dir(&p.text("x")),
-                    y: pml_dir(&p.text("y")),
-                    z: pml_dir(&p.text("z")),
+                    x: pml_dir(&p.text("x")?),
+                    y: pml_dir(&p.text("y")?),
+                    z: pml_dir(&p.text("z")?),
                     coord,
                     bounds,
                     clamp_outer,
                     ..Default::default()
                 };
-                let ie = InfiniteElement { pml, pole_dist, profile, decay: p.number("decay"), clamp_outer };
+                let ie = InfiniteElement { pml, pole_dist, profile, decay: p.number("decay")?, clamp_outer };
                 if !ie.is_active() {
                     return Err(Error::invalid(
                         "condition 'infinite_element' has no active stretching direction (set x/y/z for cartesian, or coord = cylindrical / spherical)",
@@ -969,29 +972,27 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             }
             "periodic" => {
                 only_dynamic("a Floquet-periodic pair")?;
-                let dest = ctx_eff.resolver.boundaries(&p.text("dest"))?;
+                let dest_name = p.text("dest")?;
+                let dest = ctx_eff.resolver.boundaries(&dest_name)?;
                 if dest.is_empty() {
-                    return Err(Error::invalid(format!(
-                        "periodic pair: destination '{}' selects nothing",
-                        p.text("dest")
-                    )));
+                    return Err(Error::invalid(format!("periodic pair: destination '{dest_name}' selects nothing")));
                 }
-                periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase") });
+                periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase")? });
             }
             "ground" => bcs.push(Bc { labels: r.labels, kind: BcKind::Ground }),
-            "potential" => bcs.push(Bc { labels: r.labels, kind: BcKind::Potential(p.number("value")) }),
-            "surface_charge" => bcs.push(Bc { labels: r.labels, kind: BcKind::SurfaceCharge(p.number("density")) }),
+            "potential" => bcs.push(Bc { labels: r.labels, kind: BcKind::Potential(p.number("value")?) }),
+            "surface_charge" => bcs.push(Bc { labels: r.labels, kind: BcKind::SurfaceCharge(p.number("density")?) }),
             "floating_potential" => {
-                bcs.push(Bc { labels: r.labels, kind: BcKind::FloatingPotential { charge: p.number("charge") } })
+                bcs.push(Bc { labels: r.labels, kind: BcKind::FloatingPotential { charge: p.number("charge")? } })
             }
             "terminal" => {
                 bcs.push(Bc {
                     labels: r.labels,
-                    kind: BcKind::Terminal { name: p.text("name"), z0_ohm: p.number("Z_0") },
+                    kind: BcKind::Terminal { name: p.text("name")?, z0_ohm: p.number("Z_0")? },
                 });
             }
             "conductor" => {
-                let role = match p.text("role").as_str() {
+                let role = match p.text("role")?.as_str() {
                     "ground" => ConductorRole::Ground,
                     "fixed" => ConductorRole::Fixed,
                     "terminal" => ConductorRole::Terminal,
@@ -1001,22 +1002,22 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     labels: r.labels,
                     kind: BcKind::Conductor {
                         role,
-                        value: p.number("value"),
-                        charge: p.number("charge"),
-                        name: p.text("name"),
-                        z0_ohm: p.number("Z_0"),
+                        value: p.number("value")?,
+                        charge: p.number("charge")?,
+                        name: p.text("name")?,
+                        z0_ohm: p.number("Z_0")?,
                     },
                 });
             }
             other => return Err(Error::Unsupported(format!("sms has no condition '{other}'"))),
         }
     }
-    let piezoelectric = match pp.text("piezoelectric").as_str() {
+    let piezoelectric = match pp.text("piezoelectric")?.as_str() {
         "on" => PiezoMode::On,
         "off" => PiezoMode::Off,
         _ => PiezoMode::Auto,
     };
-    let solver = match pp.text("solver").as_str() {
+    let solver = match pp.text("solver")?.as_str() {
         "direct" => LinearSolver::Direct,
         "iterative" => LinearSolver::Iterative,
         _ => LinearSolver::Auto,
@@ -1027,7 +1028,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         materials,
         bcs,
         plane,
-        thickness: pp.number("thickness"),
+        thickness: pp.number("thickness")?,
         thermal,
         solver,
         inactive,

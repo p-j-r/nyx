@@ -132,7 +132,10 @@ pub fn eval_triangle_tangential_basis_ordered(
     let v = mesh.cell(ci);
     let mut lf = [0usize; 3];
     for (k, &tv) in tri_sorted.iter().enumerate() {
-        lf[k] = v.iter().position(|&cv| cv == tv).expect("triangle vertex belongs to adjacent tetrahedron");
+        lf[k] = v
+            .iter()
+            .position(|&cv| cv == tv)
+            .ok_or_else(|| format!("triangle vertex {tv} does not belong to adjacent tetrahedron {ci}"))?;
     }
     let opp = 6 - lf[0] - lf[1] - lf[2];
     let (p0, p1, p2, p_opp) = (pt3(mesh, v[lf[0]]), pt3(mesh, v[lf[1]]), pt3(mesh, v[lf[2]]), pt3(mesh, v[opp]));
@@ -155,9 +158,9 @@ pub fn eval_triangle_tangential_basis_ordered(
             cell_dofs
                 .iter()
                 .position(|&cd| cd == gd)
-                .expect("every boundary dof of a face belongs to its adjacent tetrahedron")
+                .ok_or_else(|| format!("boundary dof {gd} does not belong to adjacent tetrahedron {ci}"))
         })
-        .collect();
+        .collect::<Result<Vec<usize>, String>>()?;
 
     let gid = ned.key_pairs(mesh, ci);
     let mut gs = [[0.0; 3]; 4];
@@ -405,11 +408,12 @@ pub fn validate_port_contacts_3d(mesh: &Discretisation, problem: &Problem) -> Re
         let minus_ok = end_minus.iter().any(|&v| conductor_vertex[v as usize]);
         let plus_ok = end_plus.iter().any(|&v| conductor_vertex[v as usize]);
         if !minus_ok || !plus_ok {
-            let which = match (minus_ok, plus_ok) {
-                (false, false) => "neither -d nor +d terminal end touches",
-                (false, true) => "its -d terminal end does not touch",
-                (true, false) => "its +d terminal end does not touch",
-                (true, true) => unreachable!(),
+            let which = if !minus_ok && !plus_ok {
+                "neither -d nor +d terminal end touches"
+            } else if !minus_ok {
+                "its -d terminal end does not touch"
+            } else {
+                "its +d terminal end does not touch"
             };
             return Err(format!(
                 "{kind} '{name}' is disconnected: {which} any conductor (pec, surface_impedance, or exterior PEC wall)"
@@ -949,7 +953,12 @@ pub fn assemble_waveports_3d(
             points_2d.push(dot3(p, u_hat));
             points_2d.push(dot3(p, v_hat));
         }
-        let v2d_of = |v3: u32| -> u32 { verts_3d.binary_search(&v3).expect("vertex in verts_3d") as u32 };
+        let v2d_of = |v3: u32| -> Result<u32, String> {
+            verts_3d
+                .binary_search(&v3)
+                .map(|idx| idx as u32)
+                .map_err(|_| format!("waveport '{}' vertex {v3} missing from cross-section vertex list", bc.name))
+        };
 
         let nc_2d = port_tris.len();
         let mut cells_2d = Vec::with_capacity(nc_2d * 3);
@@ -960,7 +969,7 @@ pub fn assemble_waveports_3d(
         let mut edge_use_count: BTreeMap<(u32, u32), usize> = BTreeMap::new();
 
         for (c_idx, (&tri, eval)) in port_tris.iter().zip(&tri_evals).enumerate() {
-            let (i0, i1, i2) = (v2d_of(tri[0]), v2d_of(tri[1]), v2d_of(tri[2]));
+            let (i0, i1, i2) = (v2d_of(tri[0])?, v2d_of(tri[1])?, v2d_of(tri[2])?);
             cells_2d.extend_from_slice(&[i0, i1, i2]);
             cell_labels_2d.push(c_idx as i32 + 1);
             for (a, b) in [(i0, i1), (i1, i2), (i0, i2)] {
@@ -1076,9 +1085,9 @@ pub fn assemble_waveports_3d(
                 candidates.sort_by(|a, b| {
                     let scale = a.0.abs().max(b.0.abs()).max(1.0);
                     if (a.0 - b.0).abs() > 1e-5 * scale {
-                        b.0.partial_cmp(&a.0).unwrap()
+                        b.0.total_cmp(&a.0)
                     } else {
-                        b.1.partial_cmp(&a.1).unwrap()
+                        b.1.total_cmp(&a.1)
                     }
                 });
             }

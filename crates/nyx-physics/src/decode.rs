@@ -12,9 +12,8 @@ use crate::spec::{BcSpec, MaterialAssign, ProblemSpec, PropValue};
 use femcore::props::Materials;
 use serde_json::Value;
 
-/// Typed access to the parameters of a study, a condition or the physics: a value that was given, else the default of the descriptor.
-/// `Params::new` is called after `validate_spec` has checked types and ranges, so a getter on a name the descriptors do not list is a
-/// bug of the physics crate and panics with the name.
+/// Typed access to the parameters of a study, a condition or the physics: returns the given value or the descriptor default,
+/// rejecting unknown names or mismatched JSON types cleanly with [`Error::Invalid`].
 pub struct Params<'a> {
     value: &'a Value,
     descs: &'a [ParamDesc],
@@ -25,11 +24,8 @@ impl<'a> Params<'a> {
         Params { value, descs }
     }
 
-    fn desc(&self, name: &str) -> &ParamDesc {
-        self.descs
-            .iter()
-            .find(|d| d.name == name)
-            .unwrap_or_else(|| panic!("parameter '{name}' is not in the descriptors"))
+    fn desc(&self, name: &str) -> Result<&ParamDesc, Error> {
+        self.descs.iter().find(|d| d.name == name).ok_or_else(|| Error::invalid(format!("unknown parameter '{name}'")))
     }
 
     fn given(&self, name: &str) -> Option<&Value> {
@@ -43,11 +39,11 @@ impl<'a> Params<'a> {
 
     /// Optional numeric parameter: returns `None` when explicitly passed as `null`,
     /// otherwise the given value or the descriptor default.
-    pub fn optional_number(&self, name: &str) -> Option<f64> {
+    pub fn optional_number(&self, name: &str) -> Result<Option<f64>, Error> {
         if self.is_null(name) {
-            None
+            Ok(None)
         } else {
-            Some(self.number(name))
+            self.number(name).map(Some)
         }
     }
 
@@ -56,70 +52,102 @@ impl<'a> Params<'a> {
         self.given(name).is_some()
     }
 
-    pub fn number(&self, name: &str) -> f64 {
-        match (self.given(name).and_then(Value::as_f64), &self.desc(name).kind) {
-            (Some(x), _) => x,
-            (None, ParamKind::Number { default, .. }) => *default,
-            _ => panic!("parameter '{name}' is not a number"),
+    pub fn number(&self, name: &str) -> Result<f64, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => v.as_f64().ok_or_else(|| Error::invalid(format!("parameter '{name}' must be a number"))),
+            (None, ParamKind::Number { default, .. }) => Ok(*default),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not a number"))),
         }
     }
 
-    pub fn integer(&self, name: &str) -> i64 {
-        match (self.given(name).and_then(Value::as_i64), &self.desc(name).kind) {
-            (Some(x), _) => x,
-            (None, ParamKind::Integer { default, .. }) => *default,
-            _ => panic!("parameter '{name}' is not an integer"),
+    pub fn integer(&self, name: &str) -> Result<i64, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => v.as_i64().ok_or_else(|| Error::invalid(format!("parameter '{name}' must be an integer"))),
+            (None, ParamKind::Integer { default, .. }) => Ok(*default),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not an integer"))),
         }
     }
 
-    pub fn boolean(&self, name: &str) -> bool {
-        match (self.given(name).and_then(Value::as_bool), &self.desc(name).kind) {
-            (Some(x), _) => x,
-            (None, ParamKind::Bool { default }) => *default,
-            _ => panic!("parameter '{name}' is not a boolean"),
+    pub fn boolean(&self, name: &str) -> Result<bool, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => v.as_bool().ok_or_else(|| Error::invalid(format!("parameter '{name}' must be a boolean"))),
+            (None, ParamKind::Bool { default }) => Ok(*default),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not a boolean"))),
         }
     }
 
     /// Text or a choice.
-    pub fn text(&self, name: &str) -> String {
-        match (self.given(name).and_then(Value::as_str), &self.desc(name).kind) {
-            (Some(x), _) => x.to_string(),
-            (None, ParamKind::Text { default }) | (None, ParamKind::Choice { default, .. }) => default.clone(),
-            _ => panic!("parameter '{name}' is not text"),
+    pub fn text(&self, name: &str) -> Result<String, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => {
+                v.as_str().map(str::to_string).ok_or_else(|| Error::invalid(format!("parameter '{name}' must be text")))
+            }
+            (None, ParamKind::Text { default }) | (None, ParamKind::Choice { default, .. }) => Ok(default.clone()),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not text"))),
         }
     }
 
-    pub fn vector(&self, name: &str) -> Vec<f64> {
-        match (self.given(name).and_then(Value::as_array), &self.desc(name).kind) {
-            (Some(a), _) => a.iter().filter_map(Value::as_f64).collect(),
-            (None, ParamKind::Vector { default, .. }) => default.clone(),
-            _ => panic!("parameter '{name}' is not a vector"),
+    pub fn vector(&self, name: &str) -> Result<Vec<f64>, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => v
+                .as_array()
+                .ok_or_else(|| Error::invalid(format!("parameter '{name}' must be a vector of numbers")))?
+                .iter()
+                .map(|item| {
+                    item.as_f64().ok_or_else(|| Error::invalid(format!("parameter '{name}' entries must be numbers")))
+                })
+                .collect(),
+            (None, ParamKind::Vector { default, .. }) => Ok(default.clone()),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not a vector"))),
         }
     }
 
-    pub fn names(&self, name: &str) -> Vec<String> {
-        match (self.given(name).and_then(Value::as_array), &self.desc(name).kind) {
-            (Some(a), _) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
-            (None, ParamKind::Names { default }) => default.clone(),
-            _ => panic!("parameter '{name}' is not a list of names"),
+    pub fn names(&self, name: &str) -> Result<Vec<String>, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => v
+                .as_array()
+                .ok_or_else(|| Error::invalid(format!("parameter '{name}' must be a list of names")))?
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| Error::invalid(format!("parameter '{name}' entries must be strings")))
+                })
+                .collect(),
+            (None, ParamKind::Names { default }) => Ok(default.clone()),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not a list of names"))),
         }
     }
 
-    pub fn numbers(&self, name: &str) -> Vec<f64> {
-        match (self.given(name).and_then(Value::as_array), &self.desc(name).kind) {
-            (Some(a), _) => a.iter().filter_map(Value::as_f64).collect(),
-            (None, ParamKind::Numbers { default }) | (None, ParamKind::Vector { default, .. }) => default.clone(),
-            _ => panic!("parameter '{name}' is not a list of numbers"),
+    pub fn numbers(&self, name: &str) -> Result<Vec<f64>, Error> {
+        let desc = self.desc(name)?;
+        match (self.given(name), &desc.kind) {
+            (Some(v), _) => v
+                .as_array()
+                .ok_or_else(|| Error::invalid(format!("parameter '{name}' must be a list of numbers")))?
+                .iter()
+                .map(|item| {
+                    item.as_f64().ok_or_else(|| Error::invalid(format!("parameter '{name}' entries must be numbers")))
+                })
+                .collect(),
+            (None, ParamKind::Numbers { default }) | (None, ParamKind::Vector { default, .. }) => Ok(default.clone()),
+            _ => Err(Error::invalid(format!("parameter '{name}' is not a list of numbers"))),
         }
     }
 
     /// Optional number-list parameter: returns `None` when explicitly passed as `null` or when the resolved list is empty.
-    pub fn optional_numbers(&self, name: &str) -> Option<Vec<f64>> {
+    pub fn optional_numbers(&self, name: &str) -> Result<Option<Vec<f64>>, Error> {
         if self.is_null(name) {
-            None
+            Ok(None)
         } else {
-            let v = self.numbers(name);
-            (!v.is_empty()).then_some(v)
+            let v = self.numbers(name)?;
+            Ok((!v.is_empty()).then_some(v))
         }
     }
 }
@@ -708,10 +736,9 @@ fn named(
     } else {
         // Optical dispersion applies when an optical/THz wavelength (<= 300 um, f >= 1 THz) is given and the material has [optical],
         // never for quasi-static dfs electrostatic or sms solid/piezoelectric studies.
-        let use_optical =
-            !is_quasi_static_electro && mat.optical.is_some() && ctx.wavelength.is_some_and(|lam| lam <= 3e-4);
-        if use_optical {
-            let lambda = ctx.wavelength.unwrap();
+        if let (false, Some(_), Some(lambda)) =
+            (is_quasi_static_electro, &mat.optical, ctx.wavelength.filter(|&lam| lam <= 3e-4))
+        {
             an.permittivity_im = None;
             let eps_cryst = mat
                 .optical_permittivity(lambda, temp_k, [0.0; 3])
@@ -899,18 +926,25 @@ mod tests {
         check_params(&val_ok, &descs, "driven").expect("valid numbers array");
         let p = Params::new(&val_ok, &descs);
         assert!(p.has("freqs"));
-        assert_eq!(p.numbers("freqs"), vec![5.0e9, 6.0e9, 7.5e9]);
-        assert_eq!(p.optional_numbers("freqs"), Some(vec![5.0e9, 6.0e9, 7.5e9]));
+        assert_eq!(p.numbers("freqs").unwrap(), vec![5.0e9, 6.0e9, 7.5e9]);
+        assert_eq!(p.optional_numbers("freqs").unwrap(), Some(vec![5.0e9, 6.0e9, 7.5e9]));
 
         let val_empty = json!({});
         check_params(&val_empty, &descs, "driven").expect("omitted numbers array uses default");
         let p_empty = Params::new(&val_empty, &descs);
         assert!(!p_empty.has("freqs"));
-        assert!(p_empty.numbers("freqs").is_empty());
-        assert_eq!(p_empty.optional_numbers("freqs"), None);
+        assert!(p_empty.numbers("freqs").unwrap().is_empty());
+        assert_eq!(p_empty.optional_numbers("freqs").unwrap(), None);
 
         let val_bad = json!({ "freqs": [5.0e9, "oops"] });
         assert!(check_params(&val_bad, &descs, "driven").is_err());
+        assert!(matches!(Params::new(&val_bad, &descs).numbers("freqs"), Err(Error::Invalid(_))));
+        assert!(matches!(Params::new(&val_ok, &descs).number("missing"), Err(Error::Invalid(_))));
+        assert!(matches!(Params::new(&val_ok, &descs).text("freqs"), Err(Error::Invalid(_))));
+        assert!(matches!(
+            Params::new(&json!({ "freqs": "not-an-array" }), &descs).numbers("freqs"),
+            Err(Error::Invalid(_))
+        ));
     }
 
     #[test]

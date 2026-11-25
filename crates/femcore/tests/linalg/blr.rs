@@ -200,8 +200,8 @@ fn shifted_solver_matches_faer_and_reuses_the_symbolic_analysis() {
         reference.set_shift(sigma).unwrap();
         ours.set_shift(sigma).unwrap();
         let (mut x1, mut x2) = (b.clone(), b.clone());
-        reference.solve_block_in_place(&mut x1, 1);
-        ours.solve_block_in_place(&mut x2, 1);
+        reference.solve_block_in_place(&mut x1, 1).unwrap();
+        ours.solve_block_in_place(&mut x2, 1).unwrap();
         let err = x1.iter().zip(&x2).map(|(p, q)| (p - q).powi(2)).sum::<f64>().sqrt() / norm(&x1);
         assert!(err < 1e-8, "shift {sigma}: {err}");
     }

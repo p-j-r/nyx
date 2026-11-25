@@ -197,7 +197,7 @@ pub fn residual_inverse_iteration(
         let mut coef = Vec::with_capacity(p.terms.len());
         for t in &p.terms {
             t.matrix.spmv(&x, &mut tmp);
-            fac.solve_block_in_place(&mut tmp, 1);
+            fac.solve_block_in_place(&mut tmp, 1)?;
             coef.push(dotc(&x, &tmp));
             w.push(tmp.clone());
         }
@@ -314,7 +314,7 @@ pub fn beyn_contour(p: &NonlinearEigenProblem, opts: &BeynOptions) -> Result<Bey
         };
         f.set_shift(C64::ZERO)?;
         let mut y = v_hat.clone();
-        f.solve_block_in_place(&mut y, l);
+        f.solve_block_in_place(&mut y, l)?;
         let mut zp = C64::ONE;
         for pidx in 0..nm {
             let coef = w * zp;

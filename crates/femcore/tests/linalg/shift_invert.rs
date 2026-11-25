@@ -175,7 +175,7 @@ fn solver_solves_shifted_systems_exactly() {
         f.set_shift(sigma).unwrap();
         let x = random_vector::<C64>(n * 3, 5);
         let mut y = x.clone();
-        f.solve_block_in_place(&mut y, 3);
+        f.solve_block_in_place(&mut y, 3).unwrap();
         // (A − σB) y = x
         let k = Csr::axpby(C64::ONE, &a, -sigma, &b);
         for c in 0..3 {

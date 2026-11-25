@@ -70,7 +70,7 @@ impl<T: FaerScalar> Stage<'_, T> {
         let mut k1 = vec![T::ZERO; n];
         (self.f)(y, &mut k1);
         self.stats.forcing_evals += 1;
-        fac.solve_block_in_place(&mut k1, 1);
+        fac.solve_block_in_place(&mut k1, 1)?;
         let y2: Vec<T> = y.iter().zip(&k1).map(|(&a, &b)| a + b.scale(h)).collect();
         let mut k2 = vec![T::ZERO; n];
         (self.f)(&y2, &mut k2);
@@ -80,7 +80,7 @@ impl<T: FaerScalar> Stage<'_, T> {
         for i in 0..n {
             k2[i] -= mk1[i].scale(2.0);
         }
-        fac.solve_block_in_place(&mut k2, 1);
+        fac.solve_block_in_place(&mut k2, 1)?;
         for i in 0..n {
             out[i] = y[i] + (k1[i].scale(1.5) + k2[i].scale(0.5)).scale(h);
         }

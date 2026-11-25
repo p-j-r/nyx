@@ -22,7 +22,7 @@ fn factor(a: &Csr<f64>, ord: FillOrdering) -> (ShiftedFactorization<f64>, f64) {
 
 fn solve(f: &ShiftedFactorization<f64>, b: &[f64]) -> Vec<f64> {
     let mut x = b.to_vec();
-    f.solve_block_in_place(&mut x, 1);
+    f.solve_block_in_place(&mut x, 1).unwrap();
     x
 }
 

@@ -58,7 +58,7 @@ pub fn left_eigenvector(
             }
             None => y.clone(),
         };
-        fac.solve_block_in_place(&mut rhs, 1);
+        fac.solve_block_in_place(&mut rhs, 1)?;
         let nr = norm2(&rhs);
         y = rhs.into_iter().map(|v| v.scale(1.0 / nr)).collect();
     }

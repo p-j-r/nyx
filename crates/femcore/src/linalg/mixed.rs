@@ -153,26 +153,30 @@ impl<T: LowPrecision> MixedPrecisionLu<T> {
         }
     }
 
-    fn solve_low(&self, v: &mut [T::Low]) {
-        let sym = self.sym.as_ref().unwrap();
+    fn solve_low(&self, v: &mut [T::Low]) -> Result<(), SolverError> {
+        let sym = self.sym.as_ref().ok_or(SolverError::NotFactored)?;
         let par = self.threads.solve.par();
         let mut mem = MemBuffer::new(sym.solve_in_place_scratch::<T::Low>(1, par));
         let m = MatMut::from_column_major_slice_mut(v, self.n, 1);
         LuRef::new_unchecked(sym, &self.num).solve_in_place_with_conj(Conj::No, m, par, MemStack::new(&mut mem));
         clear_upper_vector_state();
+        Ok(())
     }
 
-    fn exact_solve(&self, col: &mut [T]) {
+    fn exact_solve(&self, col: &mut [T]) -> Result<(), SolverError> {
         let mut slot = self.exact.borrow_mut();
         if slot.is_none() {
-            let mut f = ShiftedFactorization::new(&self.a, self.b.as_ref(), Definiteness::General).expect("pattern");
-            f.set_shift(self.sigma).expect("double-precision factorisation");
+            let mut f = ShiftedFactorization::new(&self.a, self.b.as_ref(), Definiteness::General)?;
+            f.set_shift(self.sigma)?;
             *slot = Some(f);
         }
-        slot.as_ref().unwrap().solve_block_in_place(col, 1);
+        slot.as_ref()
+            .ok_or(SolverError::NotFactored)?
+            .solve_block_in_place(col, 1)?;
         let mut st = self.stats.get();
         st.fallback_solves += 1;
         self.stats.set(st);
+        Ok(())
     }
 
     /// One right-hand side by refinement; `false` if the refinement did not converge.
@@ -192,7 +196,9 @@ impl<T: LowPrecision> MixedPrecisionLu<T> {
             let rn = norm2(&r);
             let scale = 1.0 / rn;
             let mut low: Vec<T::Low> = r.iter().map(|v| v.scale(scale).to_low()).collect();
-            self.solve_low(&mut low);
+            if self.solve_low(&mut low).is_err() {
+                return false;
+            }
             for (xi, l) in x.iter_mut().zip(&low) {
                 *xi += T::from_low(*l).scale(rn);
             }
@@ -266,9 +272,17 @@ impl<T: LowPrecision> ShiftedSolver<T> for MixedPrecisionLu<T> {
         Ok(())
     }
 
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+        if self.base.used == Used::None {
+            return Err(SolverError::NotFactored);
+        }
         let n = self.n;
-        assert!(rhs.len() >= n * nrhs);
+        let expected = n
+            .checked_mul(nrhs)
+            .ok_or(SolverError::InvalidArgument("rhs block size overflows usize"))?;
+        if rhs.len() < expected {
+            return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
+        }
         for c in 0..nrhs {
             let col = &mut rhs[c * n..(c + 1) * n];
             if self.low_ok {
@@ -278,8 +292,9 @@ impl<T: LowPrecision> ShiftedSolver<T> for MixedPrecisionLu<T> {
                 }
                 col.copy_from_slice(&b);
             }
-            self.exact_solve(col);
+            self.exact_solve(col)?;
         }
+        Ok(())
     }
 
     fn stats(&self) -> FactorStats {

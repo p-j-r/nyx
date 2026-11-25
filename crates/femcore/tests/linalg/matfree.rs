@@ -171,7 +171,7 @@ fn complex_helmholtz_with_absorption_matches_a_direct_solve_of_the_assembled_mat
     let mut f = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
     f.set_shift(C64::ZERO).unwrap();
     let mut exact = b.clone();
-    f.solve_block_in_place(&mut exact, 1);
+    f.solve_block_in_place(&mut exact, 1).unwrap();
     let jac = Jacobi::from_diagonal(op.diagonal());
     let mut x = vec![C64::ZERO; n];
     let info = Cg::new(CgOptions {

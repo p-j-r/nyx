@@ -48,8 +48,8 @@ fn real_system_is_solved_to_double_precision() {
     exact.set_shift(0.0).unwrap();
     let b = random_vector::<f64>(n * 3, 1);
     let (mut xm, mut xe) = (b.clone(), b.clone());
-    mixed.solve_block_in_place(&mut xm, 3);
-    exact.solve_block_in_place(&mut xe, 3);
+    mixed.solve_block_in_place(&mut xm, 3).unwrap();
+    exact.solve_block_in_place(&mut xe, 3).unwrap();
     let err = xm.iter().zip(&xe).map(|(p, q)| (p - q).powi(2)).sum::<f64>().sqrt() / norm(&xe);
     let st = mixed.mixed_stats();
     eprintln!(
@@ -78,8 +78,8 @@ fn complex_shifted_pencil_with_a_shift_and_a_mass_matrix() {
     exact.set_shift(sigma).unwrap();
     let rhs = random_vector::<C64>(n, 2);
     let (mut xm, mut xe) = (rhs.clone(), rhs.clone());
-    mixed.solve_block_in_place(&mut xm, 1);
-    exact.solve_block_in_place(&mut xe, 1);
+    mixed.solve_block_in_place(&mut xm, 1).unwrap();
+    exact.solve_block_in_place(&mut xe, 1).unwrap();
     let err = xm.iter().zip(&xe).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt() / norm(&xe);
     assert!(err < 1e-11, "{err}");
     assert_eq!(mixed.mixed_stats().fallback_solves, 0);
@@ -95,7 +95,7 @@ fn nearly_singular_shift_is_detected_and_handled_by_the_fallback() {
     mixed.set_shift(lam * (1.0 + 1e-9)).unwrap();
     let b = random_vector::<f64>(n, 5);
     let mut x = b.clone();
-    mixed.solve_block_in_place(&mut x, 1);
+    mixed.solve_block_in_place(&mut x, 1).unwrap();
     let st = mixed.mixed_stats();
     assert!(st.fallback_solves > 0 || st.low_factor_failures > 0, "{st:?}");
     // the answer solves the system to the accuracy of the double-precision factorisation
@@ -110,7 +110,7 @@ fn nearly_singular_shift_is_detected_and_handled_by_the_fallback() {
     let mut exact = ShiftedFactorization::new(&sh, None, Definiteness::General).unwrap();
     exact.set_shift(0.0).unwrap();
     let mut xe = b.clone();
-    exact.solve_block_in_place(&mut xe, 1);
+    exact.solve_block_in_place(&mut xe, 1).unwrap();
     let mut r2 = vec![0.0; n];
     sh.spmv(&xe, &mut r2);
     let res_exact = r2.iter().zip(&b).map(|(p, q)| (p - q).powi(2)).sum::<f64>().sqrt() / norm(&b);
@@ -167,11 +167,11 @@ fn timing_3d_real() {
     let b = random_vector::<f64>(shifted.nrows(), 3);
     let mut x1 = b.clone();
     let t = Instant::now();
-    exact.solve_block_in_place(&mut x1, 1);
+    exact.solve_block_in_place(&mut x1, 1).unwrap();
     let se = t.elapsed().as_secs_f64();
     let mut x2 = b.clone();
     let t = Instant::now();
-    mixed.solve_block_in_place(&mut x2, 1);
+    mixed.solve_block_in_place(&mut x2, 1).unwrap();
     let sm = t.elapsed().as_secs_f64();
     eprintln!(
         "3-D LU n = 64000: factor {te:.2} s (f64) vs {tm:.2} s (f32); solve {se:.3} s vs {sm:.3} s (with refinement, {:?})",

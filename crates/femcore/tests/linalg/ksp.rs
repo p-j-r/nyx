@@ -33,7 +33,7 @@ fn direct_solution(a: &Csr<C64>, b: &[C64]) -> Vec<C64> {
     let mut f = ShiftedFactorization::new(a, None, Definiteness::General).unwrap();
     f.set_shift(C64::ZERO).unwrap();
     let mut x = b.to_vec();
-    f.solve_block_in_place(&mut x, 1);
+    f.solve_block_in_place(&mut x, 1).unwrap();
     x
 }
 

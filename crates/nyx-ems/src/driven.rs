@@ -901,11 +901,17 @@ struct EmsPromSolver<'a> {
 impl PromLinearSolver for EmsPromSolver<'_> {
     fn update_and_solve(&mut self, omega: f64, a_mat: &CCsr, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String> {
         DrivenLinearSolver::build_or_update(&mut self.slot, self.asm, omega, a_mat)?;
-        self.slot.as_ref().unwrap().solve_many(rhs_cols)
+        self.slot
+            .as_ref()
+            .ok_or_else(|| "driven linear solver missing after build_or_update".to_string())?
+            .solve_many(rhs_cols)
     }
 
     fn solve_same_factor(&self, rhs_cols: &[Vec<C>]) -> Result<Vec<Vec<C>>, String> {
-        self.slot.as_ref().unwrap().solve_many(rhs_cols)
+        self.slot
+            .as_ref()
+            .ok_or_else(|| "driven linear solver not factored before solve_same_factor".to_string())?
+            .solve_many(rhs_cols)
     }
 }
 
@@ -1163,7 +1169,8 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
             femcore::progress::check()?;
             let a_mat = asm.assemble_matrix_at(w);
             DrivenLinearSolver::build_or_update(&mut solver, asm, w, &a_mat)?;
-            let s_ref = solver.as_ref().unwrap();
+            let s_ref =
+                solver.as_ref().ok_or_else(|| "driven linear solver missing after build_or_update".to_string())?;
             hdm_solves += 1;
             anchor_freqs_hz.push(freqs_hz[k]);
 

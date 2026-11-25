@@ -235,7 +235,7 @@ pub fn contour_eigs<T: FaerScalar>(
             let tf = t.elapsed().as_secs_f64();
             let t = Instant::now();
             let mut y = bv.clone();
-            fac.solve_block_in_place(&mut y, l);
+            fac.solve_block_in_place(&mut y, l)?;
             // (zB − A)⁻¹ B V = −(A − zB)⁻¹ B V
             for e in &mut y {
                 *e = -*e;
