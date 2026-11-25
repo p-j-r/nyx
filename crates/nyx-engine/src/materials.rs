@@ -181,7 +181,7 @@ pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
 /// wavelength follows. `None` for a study without a frequency, or for quasi-static `dfs` `electrostatic` studies where `freq` evaluates
 /// `[dielectric]` / `[electrical]` AC loss rather than `[optical]` dispersion.
 pub fn study_wavelength(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
-    if p.id() == "dfs" && spec.study.kind == "electrostatic" {
+    if (p.id() == "dfs" && spec.study.kind == "electrostatic") || p.id() == "sms" {
         return None;
     }
     let f = study_frequency(p, spec)?;
@@ -367,7 +367,7 @@ impl Engine {
 
         // Piezoelectric Legendre duals (eps^S, eps^T, C^E, C^D)
         if let Some(pz) = &m.piezoelectric {
-            let ce_voigt = m.elastic.as_ref().map(|e| femcore::material::coupled::solver_to_voigt_m6(&e.c));
+            let ce_voigt = m.elastic.as_ref().map(|e| e.c);
             out.insert(
                 "piezoelectric".into(),
                 json!({
@@ -385,7 +385,7 @@ impl Engine {
             out.insert("photoelastic".into(), json!({ "wavelength_m": pe.wavelength, "p_voigt": pe.matrix }));
         }
         if let Some(eo) = &m.electro_optic {
-            let ce_voigt = m.elastic.as_ref().map(|e| femcore::material::coupled::solver_to_voigt_m6(&e.c));
+            let ce_voigt = m.elastic.as_ref().map(|e| e.c);
             let d_mat = m.piezoelectric.as_ref().and_then(|p| p.strain_charge(ce_voigt.as_ref()).ok());
             out.insert(
                 "electro_optic".into(),

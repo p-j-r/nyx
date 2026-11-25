@@ -150,10 +150,10 @@ pub fn tls_saturation_factor(
     temperature_k: Option<f64>,
     e_field_v_per_m: Option<f64>,
 ) -> f64 {
-    if tan_delta_tls_0 <= 0.0 {
+    if tan_delta_tls_0 <= 0.0 || freq_hz.is_some_and(|f| f <= 0.0) {
         return 0.0;
     }
-    let thermal = match (freq_hz.filter(|&f| f > 0.0), temperature_k.filter(|&t| t > 0.0)) {
+    let thermal = match (freq_hz, temperature_k.filter(|&t| t > 0.0)) {
         (Some(f), Some(t)) => (PLANCK_H * f / (2.0 * KB * t)).tanh(),
         _ => 1.0,
     };
@@ -1782,5 +1782,18 @@ mod tests {
         assert!(loss_mk_low[0][0] > 10.0 * loss_mk_high[0][0]);
         assert!(loss_mk_low[0][0] > 10.0 * loss_2k_low[0][0]);
         assert!((loss_mk_high[0][0] / 11.45 - 1.3e-7).abs() < 2e-8);
+    }
+
+    #[test]
+    fn tls_saturation_factor_is_zero_at_dc() {
+        assert_eq!(tls_saturation_factor(3e-6, Some(10.0), Some(0.0), Some(0.01), Some(0.0)), 0.0);
+        let dl = Dielectric {
+            eps_clamped: Some(TensorProp::Scalar(11.45)),
+            tls_tan_delta_0: Some(3e-6),
+            tls_e_crit: Some(10.0),
+            ..Default::default()
+        };
+        let (_, loss_dc) = dl.complex_permittivity(Some(0.0), Some(0.01), None, false).unwrap();
+        assert_eq!(loss_dc, [[0.0; 3]; 3]);
     }
 }

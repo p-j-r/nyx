@@ -8,8 +8,7 @@
 
 use super::bcs::{bcs_surface_impedance, BcsEval, FilmModel, Superconducting};
 use super::coupled::{
-    resolve_piezo_legendre_duals, solver_to_voigt_m6, stiffness_to_textbook_voigt, voigt_to_solver_m6,
-    Dielectric, ElectroOptic, Interfaces, Photoelastic, Piezoelectric, Viscoelastic,
+    resolve_piezo_legendre_duals, Dielectric, ElectroOptic, Interfaces, Photoelastic, Piezoelectric, Viscoelastic,
 };
 use super::elastic::Elastic;
 use super::optics::{self, Optical, OpticsError};
@@ -625,8 +624,7 @@ impl MaterialSpec {
         }
         let dl_f = self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).map(TensorProp::matrix);
         if let (Some(ef), Some(el), Some(pz)) = (dl_f, &self.elastic, &self.piezoelectric) {
-            let ce = solver_to_voigt_m6(&el.c);
-            if let Ok((ec, _, _, _)) = resolve_piezo_legendre_duals(&ce, pz, None, Some(&ef)) {
+            if let Ok((ec, _, _, _)) = resolve_piezo_legendre_duals(&el.c, pz, None, Some(&ef)) {
                 return Some(ec);
             }
         }
@@ -646,23 +644,21 @@ impl MaterialSpec {
             .or(self.electrical.permittivity.as_ref())
             .map(TensorProp::matrix);
         if let (Some(ec_m), Some(el), Some(pz)) = (ec, &self.elastic, &self.piezoelectric) {
-            let ce = solver_to_voigt_m6(&el.c);
-            if let Ok((_, ef, _, _)) = resolve_piezo_legendre_duals(&ce, pz, Some(&ec_m), None) {
+            if let Ok((_, ef, _, _)) = resolve_piezo_legendre_duals(&el.c, pz, Some(&ec_m), None) {
                 return Some(ef);
             }
         }
         ec
     }
 
-    /// Short-circuit (constant-electric-field) stiffness `C^E` in solver Voigt order (`Pa`).
+    /// Short-circuit (constant-electric-field) stiffness `C^E` in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` (`Pa`).
     pub fn stiffness_constant_e(&self) -> Option<M6> {
         self.elastic.as_ref().map(|e| e.c)
     }
 
-    /// Open-circuit (constant-displacement) stiffness `C^D = C^E + e^T (eps^S)^-1 e` in solver Voigt order (`Pa`).
+    /// Open-circuit (constant-displacement) stiffness `C^D = C^E + e^T (eps^S)^-1 e` in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` (`Pa`).
     pub fn stiffness_constant_d(&self) -> Option<M6> {
         let el = self.elastic.as_ref()?;
-        let ce_voigt = solver_to_voigt_m6(&el.c);
         if let Some(pz) = &self.piezoelectric {
             let ec = self
                 .dielectric
@@ -671,8 +667,8 @@ impl MaterialSpec {
                 .or(self.electrical.permittivity.as_ref())
                 .map(TensorProp::matrix);
             let ef = self.dielectric.as_ref().and_then(|d| d.eps_free.as_ref()).map(TensorProp::matrix);
-            if let Ok((_, _, _, cd_voigt)) = resolve_piezo_legendre_duals(&ce_voigt, pz, ec.as_ref(), ef.as_ref()) {
-                return Some(voigt_to_solver_m6(&cd_voigt));
+            if let Ok((_, _, _, cd_voigt)) = resolve_piezo_legendre_duals(&el.c, pz, ec.as_ref(), ef.as_ref()) {
+                return Some(cd_voigt);
             }
         }
         Some(el.c)
@@ -796,7 +792,7 @@ impl MaterialSpec {
                 }
                 im.iter().flatten().any(|&v| v > 0.0).then_some(im)
             });
-        let ce_voigt = self.elastic.as_ref().map(|e| solver_to_voigt_m6(&e.c));
+        let ce_voigt = self.elastic.as_ref().map(|e| e.c);
         let piezo_e = self
             .piezoelectric
             .as_ref()
@@ -813,7 +809,7 @@ impl MaterialSpec {
             expansion: self.thermal.expansion.as_ref().map(TensorProp::to_legacy),
             euler_deg,
             permittivity_im: perm_im.map(|m| m3_to_tensor(&m)),
-            viscosity: self.viscoelastic.as_ref().map(Viscoelastic::to_solver_voigt),
+            viscosity: self.viscoelastic.as_ref().map(|v| v.matrix),
             piezo_e,
             photoelastic: self.photoelastic.as_ref().map(|pe| pe.matrix),
         }
@@ -863,7 +859,6 @@ impl MaterialSpec {
         if let Some(sc) = &self.superconducting {
             put("Tc", Some(sc.tc));
         }
-        let _ = stiffness_to_textbook_voigt;
         m
     }
 
@@ -1236,5 +1231,41 @@ pub fn keys() -> Keys {
         interface_layer: super::coupled::IFACE_KEYS,
         optical: optics::OPTICAL_KEYS,
         model: optics::MODEL_KEYS,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linbo3_anisotropy_and_stiffness_duals_use_textbook_voigt() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../materials");
+        let lib = Library::load_dir(&dir).unwrap();
+        let ln = lib.get("lithium_niobate").unwrap();
+        let an = ln.anisotropy([0.0, 0.0, 0.0]);
+        let e = an.piezo_e.expect("LiNbO3 piezo_e");
+        // Weis & Gaylord (1985) 3m symmetry in textbook Voigt (xx, yy, zz, yz, xz, xy):
+        // e15 == e24 == 3.7638, e16 == -e22, e14 == 0
+        assert!((e[0][4] - 3.7638).abs() < 1e-3, "e15 = {}", e[0][4]);
+        assert!((e[0][4] - e[1][3]).abs() < 1e-12, "e15 vs e24: {} vs {}", e[0][4], e[1][3]);
+        assert!((e[0][5] + e[1][1]).abs() < 1e-12, "e16 vs -e22: {} vs {}", e[0][5], -e[1][1]);
+        assert!(e[0][3].abs() < 1e-12, "spurious e14 = {}", e[0][3]);
+
+        // Both C^E and C^D are in textbook Voigt (C44 = C[3][3] = C[4][4])
+        let ce = ln.stiffness_constant_e().unwrap();
+        let cd = ln.stiffness_constant_d().unwrap();
+        assert!((ce[3][3] - ce[4][4]).abs() < 1e-3);
+        assert!((cd[3][3] - cd[4][4]).abs() < 1e-3);
+        assert!(cd[3][3] > 80e9 && cd[3][3] < 100e9, "C44^D = {}", cd[3][3]);
+
+        // Viscosity stored in textbook Voigt rotates once via rotate_m6_global -> solver Voigt (xx,yy,zz,xy,yz,xz)
+        let aln = lib.get("aluminum_nitride").unwrap();
+        let eta_tb = aln.anisotropy([0.0, 0.0, 0.0]).viscosity.unwrap();
+        let eta_sol = super::super::rotate_m6_global(&eta_tb, [0.0, 0.0, 0.0]);
+        // AlN: eta11=0.80 mPa*s, eta12=0.25 mPa*s -> eta66 (xy) = 0.275 mPa*s, eta44=eta55 (yz,xz) = 0.25 mPa*s
+        assert!((eta_sol[3][3] - 0.275e-3).abs() < 1e-12, "solver xy eta = {}", eta_sol[3][3]);
+        assert!((eta_sol[4][4] - 0.25e-3).abs() < 1e-12, "solver yz eta = {}", eta_sol[4][4]);
+        assert!((eta_sol[5][5] - 0.25e-3).abs() < 1e-12, "solver xz eta = {}", eta_sol[5][5]);
     }
 }

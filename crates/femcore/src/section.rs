@@ -78,6 +78,37 @@ pub fn plane_stiffness(c: &M6, dim: usize) -> M6 {
     r
 }
 
+/// A wafer piezoelectric stress-charge matrix `e_iJ` (solver Voigt columns `xx, yy, zz, xy, yz, xz`) in the axes `(x, z, y)` and
+/// Voigt order `(xx, zz, yy, xz, zy, xy)` of a 2D cross-section; the identity on a 3D mesh.
+pub fn plane_piezo_e(e: &[[f64; 6]; 3], dim: usize) -> [[f64; 6]; 3] {
+    if dim != 2 {
+        return *e;
+    }
+    const AXES: [usize; 3] = [0, 2, 1];
+    let mut r = [[0.0; 6]; 3];
+    for i in 0..3 {
+        for j in 0..6 {
+            r[i][j] = e[AXES[i]][PLANE_VOIGT[j]];
+        }
+    }
+    r
+}
+
+/// A piezoelectric stress-charge matrix `e_iJ` in **textbook Voigt order** `(xx, yy, zz, yz, xz, xy)` permuted to the
+/// cross-section / axisymmetric `(r, z, theta)` order: rows `[0, 2, 1]` `(x, z, y)` and columns `[0, 2, 1, 4, 3, 5]`
+/// `(xx, zz, yy, xz, yz, xy)`.
+pub fn plane_piezo_e_textbook(e_textbook: &[[f64; 6]; 3]) -> [[f64; 6]; 3] {
+    const AXES: [usize; 3] = [0, 2, 1];
+    const TEXTBOOK_TO_PLANE: [usize; 6] = [0, 2, 1, 4, 3, 5];
+    let mut r = [[0.0; 6]; 3];
+    for i in 0..3 {
+        for j in 0..6 {
+            r[i][j] = e_textbook[AXES[i]][TEXTBOOK_TO_PLANE[j]];
+        }
+    }
+    r
+}
+
 /// Wafer name of stress component `idx` of the solid kernels (their Voigt order: wafer order in 3D, `PLANE_VOIGT` on a cross-section).
 pub fn stress_name(dim: usize, idx: usize) -> &'static str {
     const WAFER: [&str; 6] = ["sxx", "syy", "szz", "sxy", "syz", "sxz"];
@@ -218,5 +249,35 @@ mod tests {
             assert_eq!(is_left_handed(sign), !right, "sign {sign}");
         }
         assert_eq!(LOCAL_AXES[2].1, PROP_SIGN);
+    }
+
+    #[test]
+    fn plane_piezo_permutations_match_cross_section_order() {
+        // Solver Voigt cols: [xx=0, yy=1, zz=2, xy=3, yz=4, xz=5]; rows: [x=0, y=1, z=2]
+        let mut e_sol = [[0.0; 6]; 3];
+        for i in 0..3 {
+            for j in 0..6 {
+                e_sol[i][j] = (i * 10 + j) as f64;
+            }
+        }
+        let p_sol = plane_piezo_e(&e_sol, 2);
+        assert_eq!(plane_piezo_e(&e_sol, 3), e_sol);
+        // Row 1 is z (wafer 2); col 0=xx(0), col 1=zz(2), col 2=yy(1), col 3=xz(5), col 4=zy(4), col 5=xy(3)
+        assert_eq!(p_sol[1], [20.0, 22.0, 21.0, 25.0, 24.0, 23.0]);
+        assert_eq!(p_sol[0][3], 5.0); // E_x, xz
+        assert_eq!(p_sol[2][4], 14.0); // E_y, yz
+
+        // Textbook Voigt cols: [xx=0, yy=1, zz=2, yz=3, xz=4, xy=5]; rows: [x=0, y=1, z=2]
+        let mut e_tb = [[0.0; 6]; 3];
+        for i in 0..3 {
+            for j in 0..6 {
+                e_tb[i][j] = (i * 10 + j) as f64;
+            }
+        }
+        let p_tb = plane_piezo_e_textbook(&e_tb);
+        // Row 1 is z (wafer 2); col 0=xx(0), col 1=zz(2), col 2=yy(1), col 3=xz(4), col 4=yz(3), col 5=xy(5)
+        assert_eq!(p_tb[1], [20.0, 22.0, 21.0, 24.0, 23.0, 25.0]);
+        assert_eq!(p_tb[0][3], 4.0); // E_x, xz
+        assert_eq!(p_tb[2][4], 13.0); // E_y, yz
     }
 }

@@ -239,19 +239,31 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
         }
     }
     let s = sigma.to_c64();
-    let values: Vec<C64> = res.values.iter().map(|&th| s + C64::ONE / th).collect();
+    let th_max = res.values.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
+    let th_cutoff = 1e-15 * th_max;
     let (mut ax, mut bx) = (vec![T::ZERO; n], vec![T::ZERO; n]);
-    let mut residuals = Vec::with_capacity(values.len());
-    let mut vectors = Vec::with_capacity(values.len());
-    for (i, &lam) in values.iter().enumerate() {
+    let mut values = Vec::with_capacity(res.values.len());
+    let mut residuals = Vec::with_capacity(res.values.len());
+    let mut errors = Vec::with_capacity(res.values.len());
+    let mut vectors = Vec::with_capacity(res.values.len());
+    for (i, &th) in res.values.iter().enumerate() {
+        if th.norm() == 0.0 || th.norm() < th_cutoff {
+            continue;
+        }
+        let lam = s + C64::ONE / th;
+        if !lam.is_finite() {
+            continue;
+        }
         let x = res.vectors.col(i);
         a.spmv(x, &mut ax);
         b.spmv(x, &mut bx);
         let r2: f64 = ax.iter().zip(&bx).map(|(p, q)| (p.to_c64() - lam * q.to_c64()).norm_sqr()).sum();
+        values.push(lam);
         residuals.push(r2.sqrt() / (lam.norm() * norm2(x)).max(1e-300));
+        errors.push(res.errors.get(i).copied().unwrap_or(0.0));
         vectors.push(x.to_vec());
     }
-    Ok(Pairs { values, vectors, residuals, errors: res.errors.iter().take(res.values.len()).copied().collect(), converged: res.reason == EpsReason::Converged, dim: res.ncv, restarts: res.iterations, matvecs: res.matvecs })
+    Ok(Pairs { values, vectors, residuals, errors, converged: res.reason == EpsReason::Converged, dim: res.ncv, restarts: res.iterations, matvecs: res.matvecs })
 }
 
 /// Real eigenpairs of a pencil with real, non-symmetric matrices (the 2D waveguide modes): the real eigenvalues nearest the real

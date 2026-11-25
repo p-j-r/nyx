@@ -250,6 +250,11 @@ impl Materials {
         self.aniso.values().any(|a| a.stiffness.is_some())
     }
 
+    /// True if any domain carries a piezoelectric coupling tensor `e_iJ`.
+    pub fn has_piezoelectric(&self) -> bool {
+        self.aniso.values().any(|a| a.piezo_e.is_some())
+    }
+
     /// Stiffness matrix (solver Voigt order) of every cell: crystal data where defined, else
     /// isotropic from E and nu.
     pub fn cell_stiffness(&self, mesh: &SimplexMesh) -> Result<Vec<M6>, String> {
@@ -285,11 +290,49 @@ impl Materials {
         Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
     }
 
+    /// Global-frame `3x6` piezoelectric stress-charge matrix `e` (solver Voigt order, `C/m^2`) of every cell.
+    pub fn cell_piezo_e(&self, mesh: &SimplexMesh) -> Vec<[[f64; 6]; 3]> {
+        self.cell_piezo_e_skipping(mesh, &[])
+    }
+
+    /// Global-frame `3x6` piezoelectric stress-charge matrix `e` (solver Voigt order, `C/m^2`) of every cell;
+    /// domains in `skip` or without `[piezoelectric]` get a zero matrix.
+    pub fn cell_piezo_e_skipping(&self, mesh: &SimplexMesh, skip: &[i32]) -> Vec<[[f64; 6]; 3]> {
+        let mut by_domain: BTreeMap<i32, [[f64; 6]; 3]> = BTreeMap::new();
+        for d in mesh.domain_labels() {
+            let e = if skip.contains(&d) {
+                [[0.0; 6]; 3]
+            } else if let Some(e_tb) = self.aniso.get(&d).and_then(|a| a.piezo_e.as_ref()) {
+                material::piezo_e_global(e_tb, self.aniso[&d].euler_deg)
+            } else {
+                [[0.0; 6]; 3]
+            };
+            by_domain.insert(d, e);
+        }
+        mesh.cell_labels.iter().map(|l| by_domain[l]).collect()
+    }
+
     /// Symmetric tensor property of every cell (global frame): tensor data where defined,
     /// else the scalar property times the identity.
     pub fn cell_tensor(&self, mesh: &SimplexMesh, kind: TensorKind, fallback: Option<f64>) -> Result<Vec<M3>, String> {
+        self.cell_tensor_skipping(mesh, kind, fallback, &[])
+    }
+
+    /// Symmetric tensor property of every cell (global frame); domains in `skip` get a zero matrix
+    /// without requiring the scalar or tensor property to exist on that domain.
+    pub fn cell_tensor_skipping(
+        &self,
+        mesh: &SimplexMesh,
+        kind: TensorKind,
+        fallback: Option<f64>,
+        skip: &[i32],
+    ) -> Result<Vec<M3>, String> {
         let mut by_domain: BTreeMap<i32, M3> = BTreeMap::new();
         for d in mesh.domain_labels() {
+            if skip.contains(&d) {
+                by_domain.insert(d, [[0.0; 3]; 3]);
+                continue;
+            }
             let t = match self.aniso.get(&d).and_then(|a| kind.pick(a)) {
                 Some(t) => material::tensor_global(t, self.aniso[&d].euler_deg),
                 None => {
@@ -306,8 +349,18 @@ impl Materials {
     /// Global-frame `(eps_re, eps_im_loss)` permittivity pair of every cell.
     /// Under the `exp(+i omega t)` convention, passive dielectric loss corresponds to `eps = eps_re - i eps_im_loss`.
     pub fn cell_complex_permittivity(&self, mesh: &SimplexMesh, fallback_re: Option<f64>) -> Result<Vec<(M3, M3)>, String> {
-        let re = self.cell_tensor(mesh, TensorKind::Permittivity, fallback_re)?;
-        let im = self.cell_tensor(mesh, TensorKind::PermittivityIm, Some(0.0))?;
+        self.cell_complex_permittivity_skipping(mesh, fallback_re, &[])
+    }
+
+    /// Global-frame `(eps_re, eps_im_loss)` permittivity pair of every cell; domains in `skip` get zero tensors.
+    pub fn cell_complex_permittivity_skipping(
+        &self,
+        mesh: &SimplexMesh,
+        fallback_re: Option<f64>,
+        skip: &[i32],
+    ) -> Result<Vec<(M3, M3)>, String> {
+        let re = self.cell_tensor_skipping(mesh, TensorKind::Permittivity, fallback_re, skip)?;
+        let im = self.cell_tensor_skipping(mesh, TensorKind::PermittivityIm, Some(0.0), skip)?;
         Ok(re.into_iter().zip(im).collect())
     }
 
@@ -439,6 +492,40 @@ mod tests {
             }),
         );
         assert!(m.has_pml(), "axial-only cylindrical endcap PML must be recognized as active");
+    }
+
+    #[test]
+    fn skipping_helpers_bypass_excluded_domains() {
+        let mut mesh = crate::testkit::rect(1.0, 1.0, 2, 2);
+        // Mark right-half cells as domain 2 (e.g., conductor without eps_r)
+        for ci in 0..mesh.n_cells() {
+            let v = mesh.cell(ci);
+            let cx = (0..3).map(|k| mesh.point(v[k] as usize)[0]).sum::<f64>() / 3.0;
+            mesh.cell_labels[ci] = if cx > 0.5 { 2 } else { 1 };
+        }
+        let mut m = Materials::default();
+        m.set(1, "eps_r", 9.5);
+        m.aniso.insert(
+            1,
+            material::Anisotropy {
+                piezo_e: Some([[0.0, 0.0, 0.0, 0.0, -0.48, 0.0], [0.0, 0.0, 0.0, -0.48, 0.0, 0.0], [-0.58, -0.58, 1.55, 0.0, 0.0, 0.0]]),
+                ..Default::default()
+            },
+        );
+        assert!(m.has_piezoelectric());
+        // Domain 2 has no eps_r: without skipping it fails, with skipping [2] it succeeds
+        assert!(m.cell_complex_permittivity(&mesh, None).is_err());
+        let eps = m.cell_complex_permittivity_skipping(&mesh, None, &[2]).unwrap();
+        let pz = m.cell_piezo_e_skipping(&mesh, &[2]);
+        for ci in 0..mesh.n_cells() {
+            if mesh.cell_labels[ci] == 2 {
+                assert_eq!(eps[ci].0, [[0.0; 3]; 3]);
+                assert_eq!(pz[ci], [[0.0; 6]; 3]);
+            } else {
+                assert!((eps[ci].0[0][0] - 9.5).abs() < 1e-14);
+                assert!((pz[ci][2][2] - 1.55).abs() < 1e-14);
+            }
+        }
     }
 }
 

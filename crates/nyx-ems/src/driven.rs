@@ -43,6 +43,7 @@ use femcore::linalg::blr::{BlrOptions, ShiftedBlrLu};
 use femcore::linalg::csr::{c, CCsr, Coo, RCsr, C};
 use femcore::linalg::direct::{FactorBackend, ShiftedSolver};
 use femcore::linalg::driver::{thin_svd_c64, DirectSolver};
+use femcore::linalg::equilibrate::{ruiz_symmetric_terms, scale_symmetric, scale_vec, RuizTerm, DEFAULT_RUIZ_PASSES};
 use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
 use nyx_physics::{
     cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution,
@@ -177,6 +178,58 @@ impl DrivenPortEntry {
 pub enum DrivenAmsTopology {
     P1 { g_red: RCsr, edge_vecs: Vec<[f64; 3]> },
     P2(AmsP2Topology),
+}
+
+fn equilibrate_driven_system(
+    nred: usize,
+    f0: f64,
+    k_tot_red: &CCsr,
+    c_tot_red: &CCsr,
+    m_tot_red: &CCsr,
+    lumped_ports: &[AssembledLumpedPort],
+    waveports: &[AssembledWavePort],
+) -> (Vec<f64>, Vec<CCsr>, Vec<DrivenPortEntry>) {
+    let omega_mid = 2.0 * PI * f0;
+    let k0_mid = (omega_mid / C0).max(1.0);
+    let k0_mid2 = k0_mid * k0_mid;
+    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
+
+    let mut ruiz_terms = vec![
+        RuizTerm::Complex(k_tot_red, 1.0),
+        RuizTerm::Complex(c_tot_red, k0_mid),
+        RuizTerm::Complex(m_tot_red, k0_mid2),
+    ];
+    for (w_idx, wp) in waveports.iter().enumerate() {
+        if wp.w_red.nnz() > 0 {
+            ruiz_terms.push(RuizTerm::Real(&wp.w_red, wp_betas_mid[w_idx]));
+        }
+    }
+    let d_ruiz = ruiz_symmetric_terms(nred, &ruiz_terms, DEFAULT_RUIZ_PASSES);
+
+    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
+    terms_hat.push(scale_symmetric(k_tot_red, &d_ruiz));
+    terms_hat.push(scale_symmetric(c_tot_red, &d_ruiz));
+    terms_hat.push(scale_symmetric(m_tot_red, &d_ruiz));
+    for wp in waveports {
+        terms_hat.push(scale_symmetric(&wp.w_red.to_complex(), &d_ruiz));
+    }
+
+    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
+    for lp in lumped_ports {
+        ports.push(DrivenPortEntry {
+            name: lp.bc.name.clone(),
+            kind: DrivenPortKind::Lumped { z0: lp.bc.z0 },
+            b_hat: scale_vec(&lp.b_red, &d_ruiz),
+        });
+    }
+    for (wave_index, wp) in waveports.iter().enumerate() {
+        ports.push(DrivenPortEntry {
+            name: wp.bc.name.clone(),
+            kind: DrivenPortKind::Wave { wave_index },
+            b_hat: scale_vec(&wp.b_red, &d_ruiz),
+        });
+    }
+    (d_ruiz, terms_hat, ports)
 }
 
 /// Stage 1 of the 3D driven frequency-domain solver: Nedelec numbering, PEC/periodic reduction,
@@ -448,83 +501,8 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     };
 
     // Compute iterative symmetric Ruiz diagonal equilibration at midband omega_mid
-    let omega_mid = 2.0 * PI * f0;
-    let k0_mid = (omega_mid / C0).max(1.0);
-    let k0_mid2 = k0_mid * k0_mid;
-    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
-
-    let mut d_ruiz = vec![1.0_f64; nred];
-    for _ in 0..8 {
-        let mut rmax = vec![0.0_f64; nred];
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let mut m_val = 0.0_f64;
-            let (ck, vk) = k_tot_red.row(i);
-            for (&j, &v) in ck.iter().zip(vk) {
-                m_val = m_val.max(di * v.norm() * d_ruiz[j as usize]);
-            }
-            if c_tot_red.nnz() > 0 {
-                let (cc, vc) = c_tot_red.row(i);
-                for (&j, &v) in cc.iter().zip(vc) {
-                    m_val = m_val.max(di * k0_mid * v.norm() * d_ruiz[j as usize]);
-                }
-            }
-            let (cm, vm) = m_tot_red.row(i);
-            for (&j, &v) in cm.iter().zip(vm) {
-                m_val = m_val.max(di * k0_mid2 * v.norm() * d_ruiz[j as usize]);
-            }
-            for (w_idx, wp) in waveports.iter().enumerate() {
-                if wp.w_red.nnz() > 0 {
-                    let bw = wp_betas_mid[w_idx];
-                    let (cw, vw) = wp.w_red.row(i);
-                    for (&j, &v) in cw.iter().zip(vw) {
-                        m_val = m_val.max(di * bw * v.abs() * d_ruiz[j as usize]);
-                    }
-                }
-            }
-            rmax[i] = m_val;
-        }
-        for i in 0..nred {
-            if rmax[i] > 1e-300 {
-                d_ruiz[i] = (d_ruiz[i] / rmax[i].sqrt()).clamp(1e-14, 1e14);
-            }
-        }
-    }
-
-    let scale_sym_c = |mat: &CCsr| -> CCsr {
-        if mat.nnz() == 0 {
-            return CCsr::zeros(nred, nred);
-        }
-        let mut out = mat.clone();
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let range = out.row_range(i);
-            let cols: Vec<u32> = out.indices()[range.clone()].to_vec();
-            let vals = &mut out.values_mut()[range];
-            for (v, &col) in vals.iter_mut().zip(&cols) {
-                *v *= di * d_ruiz[col as usize];
-            }
-        }
-        out
-    };
-
-    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
-    terms_hat.push(scale_sym_c(&k_tot_red));
-    terms_hat.push(scale_sym_c(&c_tot_red));
-    terms_hat.push(scale_sym_c(&m_tot_red));
-    for wp in &waveports {
-        terms_hat.push(scale_sym_c(&wp.w_red.to_complex()));
-    }
-
-    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
-    for lp in &lumped_ports {
-        let b_hat: Vec<f64> = lp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: lp.bc.name.clone(), kind: DrivenPortKind::Lumped { z0: lp.bc.z0 }, b_hat });
-    }
-    for (wave_index, wp) in waveports.iter().enumerate() {
-        let b_hat: Vec<f64> = wp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: wp.bc.name.clone(), kind: DrivenPortKind::Wave { wave_index }, b_hat });
-    }
+    let (d_ruiz, terms_hat, ports) =
+        equilibrate_driven_system(nred, f0, &k_tot_red, &c_tot_red, &m_tot_red, &lumped_ports, &waveports);
 
     let ams_data = if solver == "ams_fgmres" && problem.periodic.is_empty() {
         let nv = mesh.n_points();
@@ -2257,83 +2235,8 @@ pub fn assemble_emw_driven_mixed(
         (CCsr::zeros(0, 0), CCsr::zeros(0, 0), RCsr::zeros(0, 0), RCsr::zeros(0, 0))
     };
 
-    let omega_mid = 2.0 * PI * f0;
-    let k0_mid = (omega_mid / C0).max(1.0);
-    let k0_mid2 = k0_mid * k0_mid;
-    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
-
-    let mut d_ruiz = vec![1.0_f64; nred];
-    for _ in 0..8 {
-        let mut rmax = vec![0.0_f64; nred];
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let mut m_val = 0.0_f64;
-            let (ck, vk) = k_tot_red.row(i);
-            for (&j, &v) in ck.iter().zip(vk) {
-                m_val = m_val.max(di * v.norm() * d_ruiz[j as usize]);
-            }
-            if c_tot_red.nnz() > 0 {
-                let (cc, vc) = c_tot_red.row(i);
-                for (&j, &v) in cc.iter().zip(vc) {
-                    m_val = m_val.max(di * k0_mid * v.norm() * d_ruiz[j as usize]);
-                }
-            }
-            let (cm, vm) = m_tot_red.row(i);
-            for (&j, &v) in cm.iter().zip(vm) {
-                m_val = m_val.max(di * k0_mid2 * v.norm() * d_ruiz[j as usize]);
-            }
-            for (w_idx, wp) in waveports.iter().enumerate() {
-                if wp.w_red.nnz() > 0 {
-                    let bw = wp_betas_mid[w_idx];
-                    let (cw, vw) = wp.w_red.row(i);
-                    for (&j, &v) in cw.iter().zip(vw) {
-                        m_val = m_val.max(di * bw * v.abs() * d_ruiz[j as usize]);
-                    }
-                }
-            }
-            rmax[i] = m_val;
-        }
-        for i in 0..nred {
-            if rmax[i] > 1e-300 {
-                d_ruiz[i] = (d_ruiz[i] / rmax[i].sqrt()).clamp(1e-14, 1e14);
-            }
-        }
-    }
-
-    let scale_sym_c = |mat: &CCsr| -> CCsr {
-        if mat.nnz() == 0 {
-            return CCsr::zeros(nred, nred);
-        }
-        let mut out = mat.clone();
-        for i in 0..nred {
-            let di = d_ruiz[i];
-            let range = out.row_range(i);
-            let cols: Vec<u32> = out.indices()[range.clone()].to_vec();
-            let vals = &mut out.values_mut()[range];
-            for (v, &col) in vals.iter_mut().zip(&cols) {
-                *v *= di * d_ruiz[col as usize];
-            }
-        }
-        out
-    };
-
-    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
-    terms_hat.push(scale_sym_c(&k_tot_red));
-    terms_hat.push(scale_sym_c(&c_tot_red));
-    terms_hat.push(scale_sym_c(&m_tot_red));
-    for wp in &waveports {
-        terms_hat.push(scale_sym_c(&wp.w_red.to_complex()));
-    }
-
-    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
-    for lp in &lumped_ports {
-        let b_hat: Vec<f64> = lp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: lp.bc.name.clone(), kind: DrivenPortKind::Lumped { z0: lp.bc.z0 }, b_hat });
-    }
-    for (wave_index, wp) in waveports.iter().enumerate() {
-        let b_hat: Vec<f64> = wp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
-        ports.push(DrivenPortEntry { name: wp.bc.name.clone(), kind: DrivenPortKind::Wave { wave_index }, b_hat });
-    }
+    let (d_ruiz, terms_hat, ports) =
+        equilibrate_driven_system(nred, f0, &k_tot_red, &c_tot_red, &m_tot_red, &lumped_ports, &waveports);
 
     let ams_data = if solver == "ams_fgmres" && problem.periodic.is_empty() {
         if !fixed_verts.iter().any(|&v| v) && nv > 0 {

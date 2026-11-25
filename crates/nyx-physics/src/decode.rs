@@ -131,7 +131,8 @@ impl<'a> Params<'a> {
 /// where the material is anisotropic or oriented, and `eps_r` from the optical model at `ctx.wavelength` where the material has one.
 pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error> {
     let mut m = Materials::default();
-    let is_quasi_static_electro = spec.physics == "dfs" && spec.study.kind == "electrostatic";
+    let is_quasi_static_electro =
+        (spec.physics == "dfs" && spec.study.kind == "electrostatic") || spec.physics == "sms";
     let has_eps_r = props.iter().any(|d| d.name == "eps_r");
     let find_prop_kind = |name: &str| -> Option<PropKind> {
         if let Some(d) = props.iter().find(|d| d.name == name) {
@@ -374,9 +375,19 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                 }
                 apply_inline_tan_delta_tensors(&mut m, &labels, inline_td_tensor.as_ref());
             }
-            MaterialAssign::Named(n) => {
-                named(&mut m, region, &labels, n, [0.0; 3], ctx, freq_hz, temp_k, props, is_quasi_static_electro)?
-            }
+            MaterialAssign::Named(n) => named(
+                &mut m,
+                region,
+                &labels,
+                n,
+                [0.0; 3],
+                ctx,
+                freq_hz,
+                temp_k,
+                props,
+                is_quasi_static_electro,
+                &spec.physics,
+            )?,
             MaterialAssign::Oriented { material, euler_deg } => named(
                 &mut m,
                 region,
@@ -388,6 +399,7 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
                 temp_k,
                 props,
                 is_quasi_static_electro,
+                &spec.physics,
             )?,
         }
     }
@@ -583,6 +595,7 @@ fn named(
     temp_k: Option<f64>,
     props: &[PropDesc],
     is_quasi_static_electro: bool,
+    physics: &str,
 ) -> Result<(), Error> {
     use femcore::material::{Class, Tensor};
     let lib = ctx.library.as_ref().ok_or_else(|| {
@@ -613,7 +626,10 @@ fn named(
         }
     }
     for (k, v) in &legacy {
-        if wants(k) || (wants("eps_r") && matches!(k.as_str(), "tan_delta" | "sigma" | "eps_r_im")) {
+        if wants(k)
+            || (wants("eps_r")
+                && (matches!(k.as_str(), "tan_delta" | "eps_r_im") || (k == "sigma" && physics != "sms")))
+        {
             for &l in labels {
                 m.set(l, k, *v);
             }
@@ -639,7 +655,7 @@ fn named(
     };
     an.conductivity = if wants("k") {
         keep(&an.conductivity, legacy.get("k").copied())
-    } else if wants("sigma") || (wants("eps_r") && !wants("k")) {
+    } else if wants("sigma") || (wants("eps_r") && !wants("k") && physics != "sms") {
         let sig_t = mat.electrical.conductivity.as_ref().map(|tp| m3_to_sym_tensor(&tp.matrix()));
         keep(&sig_t, legacy.get("sigma").copied())
     } else {
@@ -650,6 +666,7 @@ fn named(
     if !wants("E") {
         an.stiffness = None;
         an.viscosity = None;
+        an.piezo_e = None;
     } else if !elastic_aniso && !tilted {
         an.stiffness = None;
     }
@@ -658,7 +675,7 @@ fn named(
         an.permittivity_im = None;
     } else {
         // Optical dispersion applies when an optical/THz wavelength (<= 300 um, f >= 1 THz) is given and the material has [optical],
-        // never for quasi-static dfs electrostatic studies.
+        // never for quasi-static dfs electrostatic or sms solid/piezoelectric studies.
         let use_optical =
             !is_quasi_static_electro && mat.optical.is_some() && ctx.wavelength.is_some_and(|lam| lam <= 3e-4);
         if use_optical {
@@ -743,6 +760,7 @@ fn named(
     }
     if an.stiffness.is_some()
         || an.viscosity.is_some()
+        || an.piezo_e.is_some()
         || an.conductivity.is_some()
         || an.permittivity.is_some()
         || an.permittivity_im.is_some()
@@ -929,5 +947,38 @@ mod tests {
         assert!(combined.ma.is_some());
         assert!(combined.ms.is_some());
         assert!(combined.sa.is_some());
+    }
+
+    #[test]
+    fn sms_decode_keeps_piezo_on_isotropic_host_and_never_loads_optical_or_sigma() {
+        let lib_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../materials");
+        let lib = Arc::new(femcore::material::Library::load_dir(&lib_dir).expect("load material library"));
+        let mut ctx = Ctx::new(&DummyResolver);
+        ctx.library = Some(lib);
+        ctx.wavelength = Some(1.55e-6); // Must be ignored for sms!
+
+        let sms_props = vec![
+            PropDesc::new("E", "Young's modulus", "Pa", PropKind::Scalar, &[], None),
+            PropDesc::new("nu", "Poisson's ratio", "", PropKind::Scalar, &[], None),
+            PropDesc::new("rho", "Density", "kg/m^3", PropKind::Scalar, &[], None),
+            PropDesc::new("eps_r", "Relative permittivity", "", PropKind::Tensor, &[], Some(1.0)),
+        ];
+        let mut spec = ProblemSpec::new("sms", 1, "eigenfrequency");
+        spec.materials.insert("sub".into(), MaterialAssign::Named("aluminum_nitride_piezomumps".into()));
+        spec.materials.insert("vac".into(), MaterialAssign::Named("gold".into()));
+        let m = materials_by_label(&spec, &ctx, &sms_props).expect("decode sms materials");
+        assert!(m.has_piezoelectric(), "piezo_e must survive even when E/nu and eps_r are isotropic");
+        // Optical n^2 at 1.55 um is ~4.07, whereas dielectric eps_clamped is 9.5
+        assert!((m.get(1, "eps_r").unwrap() - 9.5).abs() < 1e-12);
+        // Electrical conductivity sigma from gold must not leak into sms
+        assert!(m.get(2, "sigma").is_none());
+        assert!(m.aniso.get(&2).and_then(|a| a.conductivity.as_ref()).is_none());
+
+        // Non-mechanical physics (!wants("E")) strips piezo_e
+        let dfs_props = vec![PropDesc::new("eps_r", "Permittivity", "", PropKind::Tensor, &[], Some(1.0))];
+        let mut dfs_spec = ProblemSpec::new("dfs", 1, "electrostatic");
+        dfs_spec.materials.insert("sub".into(), MaterialAssign::Named("aluminum_nitride_piezomumps".into()));
+        let m_dfs = materials_by_label(&dfs_spec, &ctx, &dfs_props).expect("decode dfs materials");
+        assert!(!m_dfs.has_piezoelectric());
     }
 }
