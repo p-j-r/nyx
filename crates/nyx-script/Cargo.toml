@@ -26,3 +26,7 @@ monty-proto = { version = "=1.6.0", features = ["worker"] }
 [[bin]]
 name = "nyx-script-worker"
 path = "src/bin/nyx-script-worker.rs"
+
+[dev-dependencies]
+bolero = "0.13"
+femcore = { path = "../femcore" }

@@ -114,13 +114,13 @@ const WINDOWS_RESERVED_NAMES: &[&str] = &[
 const RAW_GITHUB_PREFIXES: &[&str] = &["/polyanskiy/refractiveindex.info-database/", "/bjornsturmberg/NumBAT/"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ValidatedUrl {
-    url: String,
-    host: String,
+pub struct ValidatedUrl {
+    pub url: String,
+    pub host: String,
 }
 
 /// Validates that `url` is a clean `https://` URL targeting an allowlisted remote material host (no userinfo, custom port, backslash, or path traversal).
-fn validate_remote_url(url: &str) -> Result<ValidatedUrl, Error> {
+pub fn validate_remote_url(url: &str) -> Result<ValidatedUrl, Error> {
     let u = url.trim();
     if u.is_empty() || u.chars().any(|c| c.is_ascii_control() || c.is_ascii_whitespace()) {
         return Err(Error::invalid(format!(
@@ -258,7 +258,7 @@ pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<S
     Ok(text)
 }
 
-fn validate_material_name(name: &str) -> Result<&str, Error> {
+pub fn validate_material_name(name: &str) -> Result<&str, Error> {
     let n = name.trim();
     if n.is_empty() || n.len() > 64 || !n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
         return Err(Error::invalid(

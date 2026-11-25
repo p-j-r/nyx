@@ -19,4 +19,5 @@ rayon = { version = "1", optional = true }
 [dev-dependencies]
 serde_json = { version = "1", features = ["float_roundtrip"] }
 proptest = "1"
+bolero = "0.13"
 

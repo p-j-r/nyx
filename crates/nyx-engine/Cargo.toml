@@ -35,3 +35,7 @@ hdf5 = ["dep:nyx-storage", "dep:hdf5-pure", "dep:quick-xml"]
 # zero-C stub for `H5Mode::Parallel` (`hdf5-pure` has no MPI-IO driver; `mode_available(H5Mode::Parallel)` returns false without C/MPI)
 phdf5 = ["hdf5"]
 
+[dev-dependencies]
+bolero = "0.13"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+

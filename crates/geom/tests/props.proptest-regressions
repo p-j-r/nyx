@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 0f120867a0c824eec5358678bf7acdaa438e178884975202112d1616e48b1512 # shrinks to shapes = [Ellipse(0.0, 0.0, 2.5864608171133345, 1.9240637670574532, 0.0)], ops = [4, 3]
+cc ebd309c3fbe3bfedd0d1026563af5c08630632e829b9b13014a063e0555fa77b # shrinks to w0 = 2e-5, w1 = 2e-5, t0 = 1.4386255733150547e-5, e0 = 0.0, t1 = 6.851438948511348e-6, e1 = 0.0, same_etch = false

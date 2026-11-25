@@ -372,7 +372,9 @@ pub fn guard(name: &str, src: &str) -> Result<(), String> {
     while let Some((f, start)) = work.pop() {
         rounds += 1;
         if rounds > 500 {
-            break;
+            return Err(format!(
+                "{name}: helper call trace exceeded 500 rounds (recursive or overly deep helper calls)"
+            ));
         }
         let mut scan = Scan { src, script: name, tainted: start, problems: vec![], calls: vec![], changed: true, defs: &defs };
         while scan.changed {

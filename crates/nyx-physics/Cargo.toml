@@ -10,3 +10,6 @@ description = "The interface between nyx and a physics: the Physics trait, the p
 femcore = { path = "../femcore" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+proptest = "1"
