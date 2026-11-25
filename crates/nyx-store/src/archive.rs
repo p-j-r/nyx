@@ -100,7 +100,11 @@ pub fn allowed(name: &str) -> bool {
         ["specs", f] => f.ends_with(".nyx.json") && f.len() < 100 && f.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')),
         ["analysis", f] => simple_file(f, &["rhai", "py", "md", "txt", "json", "csv"]),
         [e, "experiment.nyx.json"] | [e, "runs.jsonl"] => simple(e, 'e'),
-        [e, "runs", r, f] => simple(e, 'e') && simple(r, 'r') && simple_file(f, &["txt", "h5", "hdf5", "json", "csv", "mesh", "png"]),
+        [e, "runs", r, f] => {
+            simple(e, 'e')
+                && simple(r, 'r')
+                && simple_file(f, &["txt", "h5", "hdf5", "json", "csv", "mesh", "png", "nys", "xdmf"])
+        }
         _ => false,
     }
 }
@@ -113,8 +117,11 @@ fn is_mesh(name: &str) -> bool {
     name.ends_with(".mesh")
 }
 
+/// Heavy per-run outputs under `<e>/runs/<r>/` excluded from `ShareLevel::Recipe`.
+/// Lightweight provenance (`log.txt`, `script-<hash>.nys`) travels at `Recipe`;
+/// `.xdmf` indices travel alongside `results.h5` at `Results` and `Meshes`.
 fn is_heavy(name: &str) -> bool {
-    name.contains("/runs/") && !name.ends_with("/log.txt")
+    name.contains("/runs/") && !name.ends_with("/log.txt") && !name.ends_with(".nys")
 }
 
 // ---------------------------------------------------------------------------------------------------------- export
@@ -583,6 +590,79 @@ mod tests {
         got.touch().unwrap();
         assert_eq!(names(&export_bytes(&got, &opt(ShareLevel::Recipe)).unwrap()), names(&std::fs::read(&file).unwrap()));
         assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 1, "no temporary folder is left behind");
+        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(&inbox);
+    }
+
+    #[test]
+    fn provenance_nys_and_xdmf_round_trip_with_blake3_integrity() {
+        let ws = tmp("prov_nys_xdmf");
+        let mut d = workflow(&ws);
+        let spec = d.read_spec("e1").unwrap();
+        let rec = d
+            .record_run(
+                "e1",
+                RunRecord {
+                    sec: 0.2,
+                    metrics: [("neff_re".to_string(), 2.45)].into(),
+                    ..Default::default()
+                },
+                &spec,
+            )
+            .unwrap();
+        let run_dir = d.run_dir("e1", &rec.id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        let nys_bytes = b"nyx.project_new(dim=2, title='prov')\nnyx.solve_run(wait=True)\n".to_vec();
+        let nys_hash = hash_bytes(&nys_bytes);
+        let nys_name = format!("script-{}.nys", nys_hash.trim_start_matches("b3:"));
+        let xdmf_bytes = b"<?xml version=\"1.0\"?>\n<Xdmf Version=\"3.0\"><Domain><Information Name=\"Note\" Value=\"nyx\"/></Domain></Xdmf>\n".to_vec();
+        let h5_bytes = vec![42u8; 256];
+
+        std::fs::write(run_dir.join("log.txt"), b"ok\n").unwrap();
+        std::fs::write(run_dir.join(&nys_name), &nys_bytes).unwrap();
+        std::fs::write(run_dir.join("results.h5"), &h5_bytes).unwrap();
+        std::fs::write(run_dir.join("results.xdmf"), &xdmf_bytes).unwrap();
+
+        let rel_nys = format!("e1/runs/{}/{nys_name}", rec.id);
+        let rel_xdmf = format!("e1/runs/{}/results.xdmf", rec.id);
+        assert!(allowed(&rel_nys), "{rel_nys} must be allowed");
+        assert!(allowed(&rel_xdmf), "{rel_xdmf} must be allowed");
+
+        // Recipe keeps lightweight script provenance (.nys) and log.txt, while excluding heavy results (.h5 + .xdmf)
+        let recipe_zip = export_bytes(&d, &opt(ShareLevel::Recipe)).unwrap();
+        let recipe_names = names(&recipe_zip);
+        assert!(recipe_names.contains(&rel_nys), "Recipe must preserve .nys provenance: {recipe_names:?}");
+        assert!(!recipe_names.contains(&rel_xdmf), "Recipe must exclude heavy .xdmf index without .h5: {recipe_names:?}");
+        assert!(!recipe_names.iter().any(|n| n.ends_with("/results.h5")));
+
+        // Results keeps .nys, .h5, and .xdmf with exact BLAKE3 manifest hashes and intact round-trip
+        let file = ws.join("results.nyx");
+        export_file(&d, &opt(ShareLevel::Results), &file).unwrap();
+        let ins = inspect(&file, &Limits::default());
+        assert!(ins.problems.is_empty(), "{:?}", ins.problems);
+        assert!(ins.intact);
+
+        let zip_file = std::fs::File::open(&file).unwrap();
+        let mut z = zip::ZipArchive::new(zip_file).unwrap();
+        let mut m_bytes = Vec::new();
+        z.by_name(MANIFEST).unwrap().read_to_end(&mut m_bytes).unwrap();
+        let manifest: ArchiveManifest = serde_json::from_slice(&m_bytes).unwrap();
+        let nys_entry = manifest.files.iter().find(|f| f.path == rel_nys).expect("nys in manifest");
+        let xdmf_entry = manifest.files.iter().find(|f| f.path == rel_xdmf).expect("xdmf in manifest");
+        assert_eq!(nys_entry.hash, nys_hash);
+        assert_eq!(xdmf_entry.hash, hash_bytes(&xdmf_bytes));
+
+        let inbox = tmp("prov_inbox");
+        let imported = import(&file, &inbox, &Limits::default()).unwrap();
+        let imp_run_dir = imported.run_dir("e1", &rec.id);
+        let got_nys = std::fs::read(imp_run_dir.join(&nys_name)).unwrap();
+        let got_xdmf = std::fs::read(imp_run_dir.join("results.xdmf")).unwrap();
+        assert_eq!(hash_bytes(&got_nys), nys_hash);
+        assert_eq!(hash_bytes(&got_xdmf), hash_bytes(&xdmf_bytes));
+        assert_eq!(got_nys, nys_bytes);
+        assert_eq!(got_xdmf, xdmf_bytes);
+
         let _ = std::fs::remove_dir_all(&ws);
         let _ = std::fs::remove_dir_all(&inbox);
     }

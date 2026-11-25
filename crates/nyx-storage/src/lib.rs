@@ -63,6 +63,8 @@ pub struct ReadBudgetConfig {
     pub max_total_result_bytes: u64,
     /// Maximum group traversal recursion depth (default: 24).
     pub max_group_depth: usize,
+    /// Maximum number of solutions/modes accepted from an untrusted `n_solutions` attribute (default: 100_000).
+    pub max_solutions: usize,
 }
 
 impl Default for ReadBudgetConfig {
@@ -71,6 +73,7 @@ impl Default for ReadBudgetConfig {
             max_dataset_bytes: 512 * 1024 * 1024,
             max_total_result_bytes: 8 * 1024 * 1024 * 1024,
             max_group_depth: 24,
+            max_solutions: 100_000,
         }
     }
 }
@@ -195,6 +198,7 @@ mod tests {
         assert_eq!(def.max_dataset_bytes, 512 * 1024 * 1024);
         assert_eq!(def.max_total_result_bytes, 8 * 1024 * 1024 * 1024);
         assert_eq!(def.max_group_depth, 24);
+        assert_eq!(def.max_solutions, 100_000);
         let env_cfg = ReadBudgetConfig::from_env();
         assert!(env_cfg.max_total_result_bytes > 0);
     }

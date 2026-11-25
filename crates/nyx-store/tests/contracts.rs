@@ -16,15 +16,17 @@ fn contract_file(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/architecture/contracts").join(name)
 }
 
-fn check_exemplar(name: &str, got: &str) {
+fn check_exemplar(name: &str, got: &Value, pretty: bool) {
     let path = contract_file(name);
     if std::env::var_os("NYX_WRITE_CONTRACT").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, format!("{got}\n")).unwrap();
+        let text = if pretty { serde_json::to_string_pretty(got).unwrap() } else { serde_json::to_string(got).unwrap() };
+        std::fs::write(&path, format!("{text}\n")).unwrap();
         return;
     }
-    let want = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert_eq!(want.replace("\r\n", "\n").trim_end(), got.trim_end(), "{name} no longer matches the contract exemplar; this is a change of a saved format (ADR 19)");
+    let want_text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let want: Value = serde_json::from_str(&want_text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&want, got, "{name} no longer matches the contract exemplar; this is a change of a saved format (ADR 19, ADR 26)");
 }
 
 /// A project as the app saves it today: `Project { version, geometry: GeometrySpec { list, h, extrude, .. }, source, active, specs, colormap }`.
@@ -70,7 +72,7 @@ fn store_workflow_manifest_exemplar_is_stable() {
     });
     assert_eq!(wf.nyx, FORMAT);
     assert_eq!(wf.status, Status::Active);
-    check_exemplar("store_workflow.v1.json", &serde_json::to_string_pretty(&wf).unwrap());
+    check_exemplar("store_workflow.v1.json", &serde_json::to_value(&wf).unwrap(), true);
     let back: Workflow = serde_json::from_str(&std::fs::read_to_string(contract_file("store_workflow.v1.json")).unwrap()).unwrap();
     assert_eq!(back, wf);
 }
@@ -95,7 +97,7 @@ fn store_run_record_exemplar_is_stable_and_old_lines_still_read() {
         convergence: None,
         reuse: None,
     };
-    check_exemplar("store_run.v1.json", &serde_json::to_string(&r).unwrap());
+    check_exemplar("store_run.v1.json", &serde_json::to_value(&r).unwrap(), false);
     // a line written before `version`, `tags`, `star`, `note` and `artifacts` existed still reads (they are `#[serde(default)]`)
     let old = r#"{"id":"r1","t":"2026-10-31T00:00:00Z","sec":1.0,"status":"ok","spec":"b3:1","femcore":"0.1.0","params":{},"metrics":{}}"#;
     let rec: RunRecord = serde_json::from_str(old).unwrap();
