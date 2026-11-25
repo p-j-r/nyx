@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the container **app** (crate `nyx`). [Component view of the container](../../3-components/app.md) · [All code pages](../README.md)
 
-> The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
+> The nyx look (colour tokens, fonts, egui visuals with full weak-text contrast, light and dark) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md)  
-**Size:** 5 files, 1389 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
+**Size:** 5 files, 1394 lines.
 
 ## Files
 
@@ -14,7 +14,7 @@ C4 level 4 (code) of the component **Look and widgets** (`app.style`) in the con
 | `crates/app/src/cvd.rs` | 90 |  |
 | `crates/app/src/fmt.rs` | 255 |  |
 | `crates/app/src/kit.rs` | 370 |  |
-| `crates/app/src/theme.rs` | 346 |  |
+| `crates/app/src/theme.rs` | 351 |  |
 | `crates/app/src/tokens.rs` | 328 |  |
 
 ## What it uses
@@ -29,7 +29,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [Inspector tabs](./inspector.md) | fmt, theme | accent, activity_text, danger, on_accent, plural, raised, si, success +1 |
 | [Shell and dashboard](./shell.md) | fmt, kit, theme | State, card, danger, ellipsize, ellipsize_to_width, key_label, modal, muted +6 |
 | [Viewport](./viewport.md) | fmt, theme, tokens | Ink, Mode, axis_colour, ellipsize, rgb, with_alpha |
-| [Window](./window.md) | cvd, fmt, kit, theme | Kind, State, accent, activity_text, apply, card, danger, edge +9 |
+| [Window](./window.md) | cvd, fmt, kit, theme | Kind, State, accent, activity_text, apply, card, danger, edge +12 |
 
 ## Class diagram
 
@@ -122,11 +122,11 @@ classDiagram
         +mode(ctx) Mode
         +role(ctx, p) Color32
         +page(ctx) Color32
+        +page_for_dark(dark) Color32
         +card(ctx) Color32
         +raised(ctx) Color32
         +line(ctx) Color32
-        +edge(ctx) Color32
-        +more_28_functions()
+        +more_29_functions()
     }
   }
   namespace tokens_rs {
@@ -203,40 +203,41 @@ classDiagram
 | fn | `mode` | `theme.rs:26` | `pub fn mode(ctx: &egui::Context) -> Mode` |
 | fn | `role` | `theme.rs:31` | `pub fn role(ctx: &egui::Context, p: Pair) -> Color32` —  The value of a token in the look that is active. |
 | fn | `page` | `theme.rs:35` | `pub fn page(ctx: &egui::Context) -> Color32` |
-| fn | `card` | `theme.rs:38` | `pub fn card(ctx: &egui::Context) -> Color32` |
-| fn | `raised` | `theme.rs:42` | `pub fn raised(ctx: &egui::Context) -> Color32` —  hover and pressed neutral fills, popups, chips |
-| fn | `line` | `theme.rs:46` | `pub fn line(ctx: &egui::Context) -> Color32` —  Dividers and card outlines. Never the edge of a control: that is `edge`. |
-| fn | `edge` | `theme.rs:50` | `pub fn edge(ctx: &egui::Context) -> Color32` —  The edge of buttons, fields and checkboxes (3:1 against the page and the card). |
-| fn | `text` | `theme.rs:53` | `pub fn text(ctx: &egui::Context) -> Color32` |
-| fn | `muted` | `theme.rs:56` | `pub fn muted(ctx: &egui::Context) -> Color32` |
-| fn | `accent` | `theme.rs:59` | `pub fn accent(ctx: &egui::Context) -> Color32` |
-| fn | `on_accent` | `theme.rs:63` | `pub fn on_accent(ctx: &egui::Context) -> Color32` —  Text on an accent fill: white on the plum, ink on the dark pink. |
-| fn | `tint` | `theme.rs:66` | `pub fn tint(ctx: &egui::Context) -> Color32` |
-| fn | `activity` | `theme.rs:70` | `pub fn activity(ctx: &egui::Context) -> Color32` —  Amber: time and attention (running, queued, stale) and nothing else. |
-| fn | `activity_text` | `theme.rs:74` | `pub fn activity_text(ctx: &egui::Context) -> Color32` —  The activity colour as text (on `warm`). |
-| fn | `warm` | `theme.rs:78` | `pub fn warm(ctx: &egui::Context) -> Color32` —  Background of the busy chip and the stale band. |
-| fn | `success` | `theme.rs:81` | `pub fn success(ctx: &egui::Context) -> Color32` |
-| fn | `danger` | `theme.rs:84` | `pub fn danger(ctx: &egui::Context) -> Color32` |
-| fn | `scrim` | `theme.rs:88` | `pub fn scrim(alpha: u8) -> Color32` —  The black scrim behind a sheet and under a shadow (a veil, not a palette colour). |
-| fn | `sphere_ink` | `theme.rs:96` | `pub fn sphere_ink(dark: bool) -> Color32` —  The ink of the Poincaré sphere (its lines and outline): blue-grey, lighter in the dark look. |
-| fn | `sphere_body` | `theme.rs:100` | `pub fn sphere_body() -> Color32` —  The translucent ball of the Poincaré sphere (the caller sets the opacity). |
-| fn | `on_marker` | `theme.rs:104` | `pub fn on_marker() -> Color32` —  A mode marker's ring and number: white reads on every marker hue. |
-| fn | `axis_colour` | `theme.rs:108` | `pub fn axis_colour(i: usize) -> Color32` —  The x, y and z axes of the 3D triad (red, green, blue, the convention of every 3D tool). |
-| fn | `series` | `theme.rs:112` | `pub fn series(i: usize) -> Color32` —  The series of a small chart after the accent: blue, orange, green, red (readable on the card in both looks). |
-| struct | `Look` | `theme.rs:118` | fields: `dark`, `high_contrast`, `reduce_motion` —  The settings of the look that are not the light or dark colours. |
-| fn | `look` | `theme.rs:131` | `pub fn look(ctx: &egui::Context) -> Look` —  The look that was installed last (`apply_look`). |
-| fn | `reduce_motion` | `theme.rs:135` | `pub fn reduce_motion(ctx: &egui::Context) -> bool` |
-| fn | `canvas_mode` | `theme.rs:140` | `pub fn canvas_mode(ctx: &egui::Context, follow_theme: bool) -> Mode` —  The mode of the canvas that is drawn: dark by default also in a light window, the mode of the look when `follow_theme`. |
-| struct | `Ink` | `theme.rs:147` | fields: `mode`, `bg`, `text`, `muted`, `chip`, `line`, `edge` —  Everything drawn on the canvas, in the colours of the canvas and not of the window (a light window can hold a dark canvas): the viewport and the |
-| fn | `ink` | `theme.rs:160` | `pub fn ink(ctx: &egui::Context, follow_theme: bool) -> Ink` |
-| fn | `ink_of` | `theme.rs:164` | `pub fn ink_of(m: Mode) -> Ink` |
-| fn | `with_alpha` | `theme.rs:170` | `pub fn with_alpha(c: Color32, a: u8) -> Color32` —  A colour with the given opacity (0 to 255), not premultiplied. |
-| fn | `system_high_contrast` | `theme.rs:175` | `pub fn system_high_contrast() -> bool` —  True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet. |
-| fn | `resolve_contrast` | `theme.rs:207` | `pub fn resolve_contrast(setting: &str) -> bool` —  The High contrast setting ("auto", "standard", "high") as a yes or no. |
-| fn | `apply` | `theme.rs:216` | `pub fn apply(ctx: &egui::Context)` —  Light visuals (what tests and the first frame use). |
-| fn | `apply_mode` | `theme.rs:263` | `pub fn apply_mode(ctx: &egui::Context, dark: bool)` —  Light or dark with the other options of the look as they were last set (`apply_look`). |
-| fn | `apply_look` | `theme.rs:270` | `pub fn apply_look(ctx: &egui::Context, look: Look)` —  Installs the light and the dark look and makes `look.dark` the active one. Both are installed every time (it is cheap) so nothing depends on |
-| fn | `install_fonts` | `theme.rs:325` | `pub fn install_fonts(ctx: &egui::Context)` —  Installs the fonts that are available (see the module comment). Anything missing falls back to egui's own fonts. |
+| fn | `page_for_dark` | `theme.rs:39` | `pub fn page_for_dark(dark: bool) -> Color32` —  Window page background for an explicit dark/light mode (used by `eframe::App::clear_color`). |
+| fn | `card` | `theme.rs:42` | `pub fn card(ctx: &egui::Context) -> Color32` |
+| fn | `raised` | `theme.rs:46` | `pub fn raised(ctx: &egui::Context) -> Color32` —  hover and pressed neutral fills, popups, chips |
+| fn | `line` | `theme.rs:50` | `pub fn line(ctx: &egui::Context) -> Color32` —  Dividers and card outlines. Never the edge of a control: that is `edge`. |
+| fn | `edge` | `theme.rs:54` | `pub fn edge(ctx: &egui::Context) -> Color32` —  The edge of buttons, fields and checkboxes (3:1 against the page and the card). |
+| fn | `text` | `theme.rs:57` | `pub fn text(ctx: &egui::Context) -> Color32` |
+| fn | `muted` | `theme.rs:60` | `pub fn muted(ctx: &egui::Context) -> Color32` |
+| fn | `accent` | `theme.rs:63` | `pub fn accent(ctx: &egui::Context) -> Color32` |
+| fn | `on_accent` | `theme.rs:67` | `pub fn on_accent(ctx: &egui::Context) -> Color32` —  Text on an accent fill: white on the plum, ink on the dark pink. |
+| fn | `tint` | `theme.rs:70` | `pub fn tint(ctx: &egui::Context) -> Color32` |
+| fn | `activity` | `theme.rs:74` | `pub fn activity(ctx: &egui::Context) -> Color32` —  Amber: time and attention (running, queued, stale) and nothing else. |
+| fn | `activity_text` | `theme.rs:78` | `pub fn activity_text(ctx: &egui::Context) -> Color32` —  The activity colour as text (on `warm`). |
+| fn | `warm` | `theme.rs:82` | `pub fn warm(ctx: &egui::Context) -> Color32` —  Background of the busy chip and the stale band. |
+| fn | `success` | `theme.rs:85` | `pub fn success(ctx: &egui::Context) -> Color32` |
+| fn | `danger` | `theme.rs:88` | `pub fn danger(ctx: &egui::Context) -> Color32` |
+| fn | `scrim` | `theme.rs:92` | `pub fn scrim(alpha: u8) -> Color32` —  The black scrim behind a sheet and under a shadow (a veil, not a palette colour). |
+| fn | `sphere_ink` | `theme.rs:100` | `pub fn sphere_ink(dark: bool) -> Color32` —  The ink of the Poincaré sphere (its lines and outline): blue-grey, lighter in the dark look. |
+| fn | `sphere_body` | `theme.rs:104` | `pub fn sphere_body() -> Color32` —  The translucent ball of the Poincaré sphere (the caller sets the opacity). |
+| fn | `on_marker` | `theme.rs:108` | `pub fn on_marker() -> Color32` —  A mode marker's ring and number: white reads on every marker hue. |
+| fn | `axis_colour` | `theme.rs:112` | `pub fn axis_colour(i: usize) -> Color32` —  The x, y and z axes of the 3D triad (red, green, blue, the convention of every 3D tool). |
+| fn | `series` | `theme.rs:116` | `pub fn series(i: usize) -> Color32` —  The series of a small chart after the accent: blue, orange, green, red (readable on the card in both looks). |
+| struct | `Look` | `theme.rs:122` | fields: `dark`, `high_contrast`, `reduce_motion` —  The settings of the look that are not the light or dark colours. |
+| fn | `look` | `theme.rs:135` | `pub fn look(ctx: &egui::Context) -> Look` —  The look that was installed last (`apply_look`). |
+| fn | `reduce_motion` | `theme.rs:139` | `pub fn reduce_motion(ctx: &egui::Context) -> bool` |
+| fn | `canvas_mode` | `theme.rs:144` | `pub fn canvas_mode(ctx: &egui::Context, follow_theme: bool) -> Mode` —  The mode of the canvas that is drawn: dark by default also in a light window, the mode of the look when `follow_theme`. |
+| struct | `Ink` | `theme.rs:151` | fields: `mode`, `bg`, `text`, `muted`, `chip`, `line`, `edge` —  Everything drawn on the canvas, in the colours of the canvas and not of the window (a light window can hold a dark canvas): the viewport and the |
+| fn | `ink` | `theme.rs:164` | `pub fn ink(ctx: &egui::Context, follow_theme: bool) -> Ink` |
+| fn | `ink_of` | `theme.rs:168` | `pub fn ink_of(m: Mode) -> Ink` |
+| fn | `with_alpha` | `theme.rs:174` | `pub fn with_alpha(c: Color32, a: u8) -> Color32` —  A colour with the given opacity (0 to 255), not premultiplied. |
+| fn | `system_high_contrast` | `theme.rs:179` | `pub fn system_high_contrast() -> bool` —  True when the system asks for High Contrast: read from Windows (`SPI_GETHIGHCONTRAST`); other platforms have no such flag we read yet. |
+| fn | `resolve_contrast` | `theme.rs:211` | `pub fn resolve_contrast(setting: &str) -> bool` —  The High contrast setting ("auto", "standard", "high") as a yes or no. |
+| fn | `apply` | `theme.rs:220` | `pub fn apply(ctx: &egui::Context)` —  Light visuals (what tests and the first frame use). |
+| fn | `apply_mode` | `theme.rs:268` | `pub fn apply_mode(ctx: &egui::Context, dark: bool)` —  Light or dark with the other options of the look as they were last set (`apply_look`). |
+| fn | `apply_look` | `theme.rs:275` | `pub fn apply_look(ctx: &egui::Context, look: Look)` —  Installs the light and the dark look and makes `look.dark` the active one. Both are installed every time (it is cheap) so nothing depends on |
+| fn | `install_fonts` | `theme.rs:330` | `pub fn install_fonts(ctx: &egui::Context)` —  Installs the fonts that are available (see the module comment). Anything missing falls back to egui's own fonts. |
 | type | `Rgb` | `tokens.rs:8` |  An sRGB colour, 8 bits per channel. |
 | enum | `Mode` | `tokens.rs:12` | variants: `Light`, `Dark` —  Which set of colours: the window follows the system, the canvas has its own choice. |
 | struct | `Pair` | `tokens.rs:19` | fields: `light`, `dark` —  A role with one value per mode. |

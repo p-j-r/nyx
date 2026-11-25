@@ -59,16 +59,23 @@ pub fn card_of(v: &serde_json::Value) -> Card {
             _ => None,
         })
         .collect();
+    let swept = p.geometry.dim == 2 && p.mesh.sweep.as_ref().is_some_and(|s| !s.is_empty());
+    let effective_dim = if swept { 3 } else { p.geometry.dim };
     let mut keywords: Vec<String> = p.physics.iter().map(|s| s.physics.clone()).collect();
     keywords.extend(p.physics.iter().map(|s| s.study.kind.clone()));
     keywords.extend(regions.iter().map(|r| r.to_lowercase()));
     keywords.extend(p.geometry.features.iter().map(|f| crate::geomdesc::kind_of(&f.op).to_lowercase()));
+    if swept {
+        keywords.push("3d".into());
+        keywords.push("swept".into());
+    }
     keywords.sort();
     keywords.dedup();
     let wl = wavelength_m.map(|w| format!(", {:.0} nm", w * 1e9)).unwrap_or_default();
+    let dim_text = if swept { "3D (swept)".to_string() } else { format!("{effective_dim}D") };
     let summary = format!(
-        "{}D, {} feature{}, {} region{}, {} {}{}",
-        p.geometry.dim,
+        "{}, {} feature{}, {} region{}, {} {}{}",
+        dim_text,
         p.geometry.features.len(),
         if p.geometry.features.len() == 1 { "" } else { "s" },
         regions.len(),
@@ -80,7 +87,7 @@ pub fn card_of(v: &serde_json::Value) -> Card {
     Card {
         physics: active,
         study,
-        dim: p.geometry.dim,
+        dim: effective_dim,
         wavelength_m,
         geometry: GeoCard {
             family: "feature list".into(),
@@ -355,5 +362,46 @@ impl StoreLink {
     /// The run table of the bound experiment, oldest first.
     pub fn runs(&self) -> Vec<RunRecord> {
         self.dir.runs(&self.experiment).0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::card_of;
+    use crate::project::{Project, SweepLayer};
+    use serde_json::json;
+
+    #[test]
+    fn swept_2d_projects_report_effective_3d_card_and_search_keywords() {
+        let base = Project::new("Waveguide", 2);
+        let plain_val: serde_json::Value = serde_json::from_str(&base.to_json()).unwrap();
+        let plain = card_of(&plain_val);
+        assert_eq!(plain.dim, 2);
+        assert!(plain.summary.starts_with("2D, "), "{}", plain.summary);
+        assert!(!plain.keywords.contains(&"swept".to_string()));
+
+        let mut empty_sweep = base.clone();
+        empty_sweep.mesh.sweep = Some(vec![]);
+        let empty_val: serde_json::Value = serde_json::from_str(&empty_sweep.to_json()).unwrap();
+        let empty_card = card_of(&empty_val);
+        assert_eq!(empty_card.dim, 2);
+        assert!(empty_card.summary.starts_with("2D, "), "{}", empty_card.summary);
+
+        let mut swept = base;
+        swept.mesh.sweep =
+            Some(vec![SweepLayer { thickness: 2.2e-7, n: 4, domain_offset: 0, fill: None, regions: None }]);
+        let swept_val: serde_json::Value = serde_json::from_str(&swept.to_json()).unwrap();
+        let card = card_of(&swept_val);
+        assert_eq!(card.dim, 3);
+        assert!(card.summary.starts_with("3D (swept), "), "{}", card.summary);
+        assert!(card.keywords.contains(&"3d".to_string()));
+        assert!(card.keywords.contains(&"swept".to_string()));
+
+        let native_3d = Project::new("Block", 3);
+        let native_val = serde_json::to_value(&native_3d).unwrap_or_else(|_| json!({}));
+        let native_card = card_of(&native_val);
+        assert_eq!(native_card.dim, 3);
+        assert!(native_card.summary.starts_with("3D, "), "{}", native_card.summary);
+        assert!(!native_card.summary.contains("swept"));
     }
 }

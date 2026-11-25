@@ -2,23 +2,23 @@
 
 C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the container **app** (crate `nyx`). [Component view of the container](../../3-components/app.md) · [All code pages](../README.md)
 
-> The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (one bar, five tabs with the viewport always on, the runs page), the sheets (new, search, versions, share, settings) and the example starting points.
+> The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
 
-**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md)  
-**Size:** 8 files, 5175 lines.
+**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
+**Size:** 8 files, 5478 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/app/src/activity.rs` | 413 |  |
-| `crates/app/src/dashboard.rs` | 381 |  |
+| `crates/app/src/dashboard.rs` | 400 |  |
 | `crates/app/src/examples.rs` | 168 |  |
 | `crates/app/src/menu.rs` | 368 |  |
-| `crates/app/src/sheets.rs` | 1030 |  |
-| `crates/app/src/shell.rs` | 1235 |  |
+| `crates/app/src/sheets.rs` | 1050 |  |
+| `crates/app/src/shell.rs` | 1492 |  |
 | `crates/app/src/sweepui.rs` | 472 |  |
-| `crates/app/src/wfview.rs` | 1108 |  |
+| `crates/app/src/wfview.rs` | 1115 |  |
 
 ## What it uses
 
@@ -76,7 +76,7 @@ classDiagram
         +forget_validated()
         +validated_line(ui)
         ~edit_workflow(id, f)
-        +more_34_methods()
+        +more_38_methods()
     }
     class fns_activity_rs {
         <<module activity.rs>>
@@ -235,7 +235,7 @@ classDiagram
         +open HashMap
         +loaded Option
         +run Option~RunCtx~
-        +more_26_fields
+        +more_30_fields
         +detached() Shell
         +active() bool
         +settings() Settings
@@ -243,6 +243,12 @@ classDiagram
     }
     class fns_shell_rs {
         <<module shell.rs>>
+        +is_wsl() bool
+        +nyx_scale_env() Option~f32~
+        +parse_scale_mode(mode) Option~f32~
+        +auto_scale_for_display(phys_w, phys_h, native_ppp) f32
+        +resolve_effective_scale(scale_mode, saved_zoom, display_phys, env_override, script_override) tuple
+        +compute_startup_window_size(req_logical, min_logical, scale, mon_logical) tuple
         +fit_window(widths, gap, avail, active) tuple
         +spec_key(spec) String
         +params_of(json) BTreeMap
@@ -352,6 +358,7 @@ classDiagram
 | const | `ACTIONS` | `menu.rs:54` | `[Item` —  Menus in order; the items of a menu in the order of this table. |
 | fn | `menus` | `menu.rs:86` | `pub fn menus() -> Vec<&'static str>` —  The top-level menus in order. |
 | struct | `Native` | `menu.rs:256` |  The native menu bar (Windows). Other platforms use the command palette until their `muda` integration is tried: GTK on Linux and the main |
+| fn | `App::ensure_active_workflow` | `menu.rs:111` | `pub(crate) fn ensure_active_workflow(&mut self) -> Option<String>` |
 | fn | `App::bar_ui` | `menu.rs:124` | `pub fn bar_ui(&mut self, ui: &mut egui::Ui)` —  In-window themed menu bar generated from `ACTIONS`, plus the Connect menu. |
 | fn | `App::do_act` | `menu.rs:155` | `pub fn do_act(&mut self, ctx: &egui::Context, act: Act)` —  Does what a menu entry or a palette entry says. |
 | fn | `Native::set_dark` | `menu.rs:268` | `pub fn set_dark(&mut self, dark: bool)` —  The menu bar takes the look of the window: dark when the window is dark, also when the system is light (and the other way round). |
@@ -371,37 +378,46 @@ classDiagram
 | struct | `RunCtx` | `shell.rs:167` | fields: `wf_id`, `exp`, `spec_json`, `params`, `started` |
 | struct | `NewState` | `shell.rs:175` | fields: `title`, `template`, `physics`, `three_d`, `all_examples` |
 | struct | `Shell` | `shell.rs:189` | fields: `ws`, `entries`, `spark`, `page`, `tabs`, `open`, `loaded`, `run`, `live_run`, `sheet`, `new`, `palette_q`, ... |
-| fn | `fit_window` | `shell.rs:999` | `pub fn fit_window(widths: &[f32], gap: f32, avail: f32, active: Option<usize>) -> (usize, usize)` —  Which of the workflow tabs are drawn (ADR 124): `[from, to)`, the first run of whole tabs, starting as early as possible, that fits in `avail` and holds the |
-| fn | `spec_key` | `shell.rs:1027` | `pub fn spec_key(spec: &str) -> String` —  What decides that a spec changed (ADR 124): the hash of the spec without `active`. Which physics is on show is the window's state; choosing another one must not |
-| fn | `params_of` | `shell.rs:1040` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
+| fn | `is_wsl` | `shell.rs:307` | `pub fn is_wsl() -> bool` —  True when running inside WSL on Linux (WSLg / WSL2). |
+| fn | `nyx_scale_env` | `shell.rs:315` | `pub fn nyx_scale_env() -> Option<f32>` —  Optional explicit UI scale override from `NYX_SCALE` (positive finite float clamped to `0.5..=3.0`). |
+| fn | `parse_scale_mode` | `shell.rs:325` | `pub fn parse_scale_mode(mode: &str) -> Option<f32>` —  Maps `Settings::scale_mode` (`"auto"`, `"100%"`, `"125%"`, `"150%"`, `"175%"`, `"200%"`) to an explicit scale factor. |
+| fn | `auto_scale_for_display` | `shell.rs:337` | `pub fn auto_scale_for_display(phys_w: u32, phys_h: u32, native_ppp: f32) -> f32` —  Computes an automatic UI scale factor when the display reports unscaled pixels (`native_ppp <= 1.15`) on a high-DPI monitor. |
+| fn | `resolve_effective_scale` | `shell.rs:355` | `pub fn resolve_effective_scale( scale_mode: &str, saved_zoom: f32, display_phys: Option<(u32, u32, f32)>, env_override: Option<f32>, script_override: Option<f32>, ) -> (f32, f32)` —  Resolves `(base_scale, effective_zoom)` from settings, display metrics, `NYX_SCALE`, and optional `--script scale`. |
+| fn | `compute_startup_window_size` | `shell.rs:378` | `pub fn compute_startup_window_size( req_logical: [f32; 2], min_logical: [f32; 2], scale: f32, mon_logical: Option<[f32; 2]>, ) -> ([f32` —  Converts a requested logical `[width, height]` and minimum size into clamped winit inner dimensions + maximize hint. |
+| fn | `fit_window` | `shell.rs:1162` | `pub fn fit_window(widths: &[f32], gap: f32, avail: f32, active: Option<usize>) -> (usize, usize)` —  Which of the workflow tabs are drawn (ADR 124): `[from, to)`, the first run of whole tabs, starting as early as possible, that fits in `avail` and holds the |
+| fn | `spec_key` | `shell.rs:1190` | `pub fn spec_key(spec: &str) -> String` —  What decides that a spec changed (ADR 124): the hash of the spec without `active`. Which physics is on show is the window's state; choosing another one must not |
+| fn | `params_of` | `shell.rs:1203` | `pub fn params_of(json: &str) -> BTreeMap<String, f64>` —  Parameters of a run: the dimensions of the geometry and the wavelength, in SI units, from the concept card of the spec. |
 | fn | `OpenWf::new` | `shell.rs:94` | `pub fn new(id: String) -> OpenWf` |
 | fn | `OpenWf::title` | `shell.rs:129` | `pub fn title(&self) -> String` |
 | fn | `OpenWf::reload_runs` | `shell.rs:136` | `pub fn reload_runs(&mut self)` |
-| fn | `Shell::detached` | `shell.rs:235` | `pub fn detached() -> Shell` —  No workspace: the shell is off (tests and `--batch`). |
-| fn | `Shell::active` | `shell.rs:275` | `pub fn active(&self) -> bool` |
-| fn | `Shell::settings` | `shell.rs:279` | `pub fn settings(&self) -> Settings` |
-| fn | `Shell::current_mut` | `shell.rs:283` | `pub fn current_mut(&mut self) -> Option<&mut OpenWf>` |
-| fn | `App::attach_workspace` | `shell.rs:296` | `pub fn attach_workspace(&mut self, root: PathBuf)` —  Switches the shell on with the workspace at `root` (the window passes the default one; `NYX_WORKSPACE` overrides it). |
-| fn | `App::refresh_entries` | `shell.rs:318` | `pub fn refresh_entries(&mut self)` |
-| fn | `App::spec_json` | `shell.rs:345` | `pub fn spec_json(&self) -> Result<String, String>` —  The project as it would be saved (the geometry being edited included). |
-| fn | `App::flush` | `shell.rs:366` | `pub fn flush(&mut self)` —  Stores the live project in its workflow when it changed (called about once a second, and before anything that replaces it). |
-| fn | `App::persist_draft` | `shell.rs:402` | `pub fn persist_draft(&mut self, wid: &str, spec: &str) -> Result<(), String>` |
-| fn | `App::load_experiment` | `shell.rs:429` | `pub fn load_experiment(&mut self, wid: &str, eid: &str)` —  Loads experiment `eid` of workflow `wid` into the window (the current one is stored first). |
-| fn | `App::open_tab` | `shell.rs:472` | `pub fn open_tab(&mut self, id: &str, show: bool)` —  Opens a tab for the workflow `id` of the workspace and (when `show`) switches to it. |
-| fn | `App::show_workflow` | `shell.rs:503` | `pub fn show_workflow(&mut self, id: &str)` |
-| fn | `App::new_draft` | `shell.rs:513` | `pub fn new_draft(&mut self, title: &str, start: Start)` —  A new draft workflow from a project (nothing is written until the first change). |
-| fn | `App::finish_open` | `shell.rs:555` | `pub(crate) fn finish_open(&mut self, summary: &serde_json::Value)` —  The results file the window was opening on a job is in: its project is the engine's, so the draft workflow is made around it and the |
-| fn | `App::close_tab` | `shell.rs:583` | `pub fn close_tab(&mut self, id: &str)` |
-| fn | `App::shell_compute` | `shell.rs:612` | `pub fn shell_compute(&mut self)` —  Compute with a run record: stores the spec, remembers what is being solved and starts the solve. |
-| fn | `App::record_ok` | `shell.rs:649` | `pub fn record_ok(&mut self, rc: RunCtx, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun>` —  A solve finished well: writes its run record (the context `rc` was taken when the solve was taken) and keeps the log with it. Returns the run. |
-| fn | `App::note_check_in_run` | `shell.rs:657` | `pub fn note_check_in_run(&mut self)` —  A convergence check of the result on show has finished: when the engine says the result now rests on a check, the verdict goes into the |
-| fn | `App::defer` | `shell.rs:674` | `pub fn defer(&mut self, d: Deferred)` —  Puts work after a solve in the queue of pieces (a refresh is not queued twice). |
-| fn | `App::run_deferred` | `shell.rs:682` | `pub fn run_deferred(&mut self)` —  Does the next piece of work that followed a solve; one piece per call, and `poll` is called once per frame. |
-| fn | `App::record_end` | `shell.rs:693` | `pub fn record_end(&mut self, status: RunStatus, error: Option<String>)` —  A solve failed or was cancelled. |
-| fn | `App::shell_ui` | `shell.rs:747` | `pub fn shell_ui(&mut self, ui: &mut egui::Ui)` —  The whole window in the shell layout. |
-| fn | `App::pick_nyx_file` | `shell.rs:963` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
-| fn | `App::open_received` | `shell.rs:976` | `pub fn open_received(&mut self, p: PathBuf)` |
-| fn | `App::sync_look` | `shell.rs:1103` | `pub fn sync_look(&mut self, ctx: &egui::Context)` —  Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs), |
+| fn | `Shell::detached` | `shell.rs:243` | `pub fn detached() -> Shell` —  No workspace: the shell is off (tests and `--batch`). |
+| fn | `Shell::active` | `shell.rs:287` | `pub fn active(&self) -> bool` |
+| fn | `Shell::settings` | `shell.rs:291` | `pub fn settings(&self) -> Settings` |
+| fn | `Shell::current_mut` | `shell.rs:295` | `pub fn current_mut(&mut self) -> Option<&mut OpenWf>` |
+| fn | `App::apply_zoom_factor` | `shell.rs:405` | `pub fn apply_zoom_factor(&mut self, ctx: &egui::Context, z: f32)` —  Applies a new zoom factor cleanly without letting `sync_look` treat the asynchronous change as a reset. |
+| fn | `App::step_user_zoom` | `shell.rs:414` | `pub fn step_user_zoom(&mut self, ctx: &egui::Context, factor: f32)` —  Multiplies the saved user zoom multiplier by `factor`, saves settings, and applies the resulting scale. |
+| fn | `App::reset_user_zoom` | `shell.rs:428` | `pub fn reset_user_zoom(&mut self, ctx: &egui::Context)` —  Resets the saved user zoom multiplier back to `1.0` (so `scale_mode` / automatic DPI scaling stays active). |
+| fn | `App::attach_workspace` | `shell.rs:441` | `pub fn attach_workspace(&mut self, root: PathBuf)` —  Switches the shell on with the workspace at `root` (the window passes the default one; `NYX_WORKSPACE` overrides it). |
+| fn | `App::refresh_entries` | `shell.rs:470` | `pub fn refresh_entries(&mut self)` |
+| fn | `App::spec_json` | `shell.rs:497` | `pub fn spec_json(&self) -> Result<String, String>` —  The project as it would be saved (the geometry being edited included). |
+| fn | `App::flush` | `shell.rs:518` | `pub fn flush(&mut self)` —  Stores the live project in its workflow when it changed (called about once a second, and before anything that replaces it). |
+| fn | `App::persist_draft` | `shell.rs:554` | `pub fn persist_draft(&mut self, wid: &str, spec: &str) -> Result<(), String>` |
+| fn | `App::load_experiment` | `shell.rs:581` | `pub fn load_experiment(&mut self, wid: &str, eid: &str)` —  Loads experiment `eid` of workflow `wid` into the window (the current one is stored first). |
+| fn | `App::open_tab` | `shell.rs:624` | `pub fn open_tab(&mut self, id: &str, show: bool)` —  Opens a tab for the workflow `id` of the workspace and (when `show`) switches to it. |
+| fn | `App::show_workflow` | `shell.rs:655` | `pub fn show_workflow(&mut self, id: &str)` |
+| fn | `App::new_draft` | `shell.rs:665` | `pub fn new_draft(&mut self, title: &str, start: Start)` —  A new draft workflow from a project (nothing is written until the first change). |
+| fn | `App::finish_open` | `shell.rs:707` | `pub(crate) fn finish_open(&mut self, summary: &serde_json::Value)` —  The results file the window was opening on a job is in: its project is the engine's, so the draft workflow is made around it and the |
+| fn | `App::close_tab` | `shell.rs:735` | `pub fn close_tab(&mut self, id: &str)` |
+| fn | `App::shell_compute` | `shell.rs:764` | `pub fn shell_compute(&mut self)` —  Compute with a run record: stores the spec, remembers what is being solved and starts the solve. |
+| fn | `App::record_ok` | `shell.rs:801` | `pub fn record_ok(&mut self, rc: RunCtx, res: &nyx_engine::facade::physics::SolveResult) -> Option<LiveRun>` —  A solve finished well: writes its run record (the context `rc` was taken when the solve was taken) and keeps the log with it. Returns the run. |
+| fn | `App::note_check_in_run` | `shell.rs:809` | `pub fn note_check_in_run(&mut self)` —  A convergence check of the result on show has finished: when the engine says the result now rests on a check, the verdict goes into the |
+| fn | `App::defer` | `shell.rs:826` | `pub fn defer(&mut self, d: Deferred)` —  Puts work after a solve in the queue of pieces (a refresh is not queued twice). |
+| fn | `App::run_deferred` | `shell.rs:834` | `pub fn run_deferred(&mut self)` —  Does the next piece of work that followed a solve; one piece per call, and `poll` is called once per frame. |
+| fn | `App::record_end` | `shell.rs:845` | `pub fn record_end(&mut self, status: RunStatus, error: Option<String>)` —  A solve failed or was cancelled. |
+| fn | `App::shell_ui` | `shell.rs:899` | `pub fn shell_ui(&mut self, ui: &mut egui::Ui)` —  The whole window in the shell layout. |
+| fn | `App::pick_nyx_file` | `shell.rs:1126` | `pub fn pick_nyx_file(&mut self)` —  File dialog for a `.nyx` file; shows what is inside before anything is saved. |
+| fn | `App::open_received` | `shell.rs:1139` | `pub fn open_received(&mut self, p: PathBuf)` |
+| fn | `App::sync_look` | `shell.rs:1266` | `pub fn sync_look(&mut self, ctx: &egui::Context)` —  Makes the window look the way Settings says: light, dark or the system's (followed live, also when the system changes while nyx runs), |
 | struct | `Plan` | `sweepui.rs:24` | fields: `points`, `meshes`, `solves`, `problems` —  What the engine's dry run says a sweep will cost. |
 | struct | `Form` | `sweepui.rs:41` | fields: `shown`, `param`, `from`, `to`, `n`, `metric` —  The form of the section, one per open workflow. |
 | fn | `values` | `sweepui.rs:61` | `pub fn values(from: f64, to: f64, n: usize) -> Vec<f64>` —  `n` values from `from` to `to`, evenly spaced, ends included (one value when `n` is 1). |

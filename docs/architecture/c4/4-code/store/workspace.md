@@ -2,17 +2,17 @@
 
 C4 level 4 (code) of the component **Workspace** (`store.workspace`) in the container **nyx-store** (crate `nyx_store`). [Component view of the container](../../3-components/store.md) · [All code pages](../README.md)
 
-> The folder behind the dashboard: settings, the list of workflows (manifests only) and the sections of the dashboard.
+> The folder behind the dashboard: settings (`scale_mode`, `zoom`), the list of workflows (manifests only) and the sections of the dashboard.
 
-**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md)  
-**Size:** 2 files, 310 lines.
+**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
+**Size:** 2 files, 327 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-store/src/lib.rs` | 24 |  |
-| `crates/nyx-store/src/workspace.rs` | 286 |  |
+| `crates/nyx-store/src/workspace.rs` | 303 |  |
 
 ## What it uses
 
@@ -48,7 +48,7 @@ classDiagram
         +strip_paths bool
         +run_shared_scripts String
         +run_at_once usize
-        +more_11_fields
+        +more_12_fields
     }
     class Entry {
         <<struct>>
@@ -84,16 +84,16 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Settings` | `workspace.rs:19` | fields: `hide_after_days`, `dashboard_cap`, `keep_heavy`, `failed_heavy_days`, `share_default`, `strip_paths`, `run_shared_scripts`, `run_at_once`, `length_unit`, `frequency_unit`, `theme`, `assistant`, ... |
-| struct | `Entry` | `workspace.rs:82` | fields: `dir`, `wf` —  One workflow on disk as the dashboard sees it. |
-| struct | `Sections` | `workspace.rs:88` | fields: `running`, `recent`, `earlier` |
-| struct | `Workspace` | `workspace.rs:95` | fields: `root`, `settings` |
-| fn | `default_root` | `workspace.rs:101` | `pub fn default_root() -> PathBuf` —  `Documents\nyx` of the user (the current folder when there is no home). |
-| fn | `Workspace::open` | `workspace.rs:107` | `pub fn open(root: &Path) -> Result<Workspace, String>` —  Opens (and creates) the workspace folder; a missing or unreadable `workspace.json` gives the default settings. |
-| fn | `Workspace::save_settings` | `workspace.rs:113` | `pub fn save_settings(&self) -> Result<(), String>` |
-| fn | `Workspace::list` | `workspace.rs:119` | `pub fn list(&self) -> Vec<Entry>` —  Every workflow folder with a readable manifest, newest id first. Only `workflow.json` is read. |
-| fn | `Workspace::find` | `workspace.rs:134` | `pub fn find(&self, id: &str) -> Option<Entry>` |
-| fn | `Workspace::sections` | `workspace.rs:143` | `pub fn sections(&self, entries: &[Entry], running: &[String], now: i64) -> Sections` —  Dashboard sections for `entries` at time `now`: |
-| fn | `Workspace::housekeeping` | `workspace.rs:169` | `pub fn housekeeping(&self, w: &mut WorkflowDir, now: i64) -> Result<u64, String>` —  Removes heavy artifacts (everything under `runs/<id>/` except the log) according to the settings. Returns the bytes freed. |
+| struct | `Settings` | `workspace.rs:23` | fields: `hide_after_days`, `dashboard_cap`, `keep_heavy`, `failed_heavy_days`, `share_default`, `strip_paths`, `run_shared_scripts`, `run_at_once`, `length_unit`, `frequency_unit`, `theme`, `assistant`, ... |
+| struct | `Entry` | `workspace.rs:90` | fields: `dir`, `wf` —  One workflow on disk as the dashboard sees it. |
+| struct | `Sections` | `workspace.rs:96` | fields: `running`, `recent`, `earlier` |
+| struct | `Workspace` | `workspace.rs:103` | fields: `root`, `settings` |
+| fn | `default_root` | `workspace.rs:109` | `pub fn default_root() -> PathBuf` —  `Documents\nyx` of the user (the current folder when there is no home). |
+| fn | `Workspace::open` | `workspace.rs:115` | `pub fn open(root: &Path) -> Result<Workspace, String>` —  Opens (and creates) the workspace folder; a missing or unreadable `workspace.json` gives the default settings. |
+| fn | `Workspace::save_settings` | `workspace.rs:121` | `pub fn save_settings(&self) -> Result<(), String>` |
+| fn | `Workspace::list` | `workspace.rs:127` | `pub fn list(&self) -> Vec<Entry>` —  Every workflow folder with a readable manifest, newest id first. Only `workflow.json` is read. |
+| fn | `Workspace::find` | `workspace.rs:142` | `pub fn find(&self, id: &str) -> Option<Entry>` |
+| fn | `Workspace::sections` | `workspace.rs:151` | `pub fn sections(&self, entries: &[Entry], running: &[String], now: i64) -> Sections` —  Dashboard sections for `entries` at time `now`: |
+| fn | `Workspace::housekeeping` | `workspace.rs:177` | `pub fn housekeeping(&self, w: &mut WorkflowDir, now: i64) -> Result<u64, String>` —  Removes heavy artifacts (everything under `runs/<id>/` except the log) according to the settings. Returns the bytes freed. |
 
 Trait implementations in this component: `Settings: Default`

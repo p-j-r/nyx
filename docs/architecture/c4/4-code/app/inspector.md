@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the container **app** (crate `nyx`). [Component view of the container](../../3-components/app.md) · [All code pages](../README.md)
 
-> The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
+> The tabs beside the viewport: geometry editor with wrapped hints, materials, physics, study, results (with integer mode-plot ticks), analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 
-**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md)  
-**Size:** 3 files, 3180 lines.
+**Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 57](../../../adr/0057-front-ends-are-thin-the-mcp-tools-are-engine-commands.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
+**Size:** 3 files, 3265 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Inspector tabs** (`app.inspector`) in the c
 |---|---:|---|
 | `crates/app/src/forms.rs` | 151 |  |
 | `crates/app/src/geomui.rs` | 1189 |  |
-| `crates/app/src/tabs.rs` | 1840 |  |
+| `crates/app/src/tabs.rs` | 1925 |  |
 
 ## What it uses
 
@@ -77,6 +77,8 @@ classDiagram
         +num_id(ui, salt, v) Response
         +num(ui, v) Response
         +nearest_solution(at, x) Option~usize~
+        +integer_mode_marks(input) Vec~GridMark~
+        +format_integer_mode_tick(m, _range) String
         +reduce_number(v) String
     }
   }
@@ -98,12 +100,14 @@ classDiagram
 | fn | `select_all_on_focus_gain` | `tabs.rs:85` | `pub fn select_all_on_focus_gain(ctx: &egui::Context, r: &egui::Response, text: &str)` |
 | fn | `num_id` | `tabs.rs:131` | `pub fn num_id(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, v: &mut f64) -> egui::Response` —  A single-click-focusable number field with a persistent ID: accepts scientific notation and SI unit suffixes (`220 nm`, `193.414 THz`). |
 | fn | `num` | `tabs.rs:138` | `pub fn num(ui: &mut Ui, v: &mut f64) -> egui::Response` —  A number field: single-click and type (scientific notation and SI suffixes accepted). |
-| fn | `nearest_solution` | `tabs.rs:1731` | `pub fn nearest_solution(at: &[f64], x: f64) -> Option<usize>` —  The index of the solution drawn closest (along x) to `x`; `None` when there is none or `x` is not a number. |
-| fn | `reduce_number` | `tabs.rs:1742` | `pub fn reduce_number(v: &Value) -> String` —  A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair. |
+| fn | `nearest_solution` | `tabs.rs:1750` | `pub fn nearest_solution(at: &[f64], x: f64) -> Option<usize>` —  The index of the solution drawn closest (along x) to `x`; `None` when there is none or `x` is not a number. |
+| fn | `integer_mode_marks` | `tabs.rs:1758` | `pub fn integer_mode_marks(input: egui_plot::GridInput) -> Vec<egui_plot::GridMark>` —  Grid ticks for discrete 1-based mode indices: integer values &gt;= 1 with nice integer steps (no fractional `1.1`, `1.2`, ...). |
+| fn | `format_integer_mode_tick` | `tabs.rs:1792` | `pub fn format_integer_mode_tick(m: egui_plot::GridMark, _range: &std::ops::RangeInclusive<f64>) -> String` —  Formats discrete mode-number ticks as integers and hides any non-integer marks. |
+| fn | `reduce_number` | `tabs.rs:1805` | `pub fn reduce_number(v: &Value) -> String` —  A number of a reduction answer as the form shows it: a real one, or `re + im i` for a pair. |
 | fn | `App::inspector` | `tabs.rs:200` | `pub fn inspector(&mut self, ui: &mut Ui)` |
 | fn | `App::inspector_tab` | `tabs.rs:236` | `pub fn inspector_tab(&mut self, ui: &mut Ui, t: Tab)` —  One inspector tab on its own: the workflow view lays the six tabs out in its three sections. |
-| fn | `App::material_regions` | `tabs.rs:383` | `pub(crate) fn material_regions(&self) -> Vec<(String, String)>` —  The regions of the model by base name (the absorbing pieces `name.pml_*` belong to `name`), with the key a material is stored under. |
-| fn | `App::prune_stale_materials` | `tabs.rs:408` | `pub fn prune_stale_materials(&mut self)` —  Removes material assignments for region names that no longer exist in `geom_edit`. |
-| fn | `App::reduce_now` | `tabs.rs:1437` | `pub fn reduce_now(&mut self, action: &str)` —  Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine |
-| fn | `App::has_analysis` | `tabs.rs:1508` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
-| fn | `App::results_panel` | `tabs.rs:1656` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |
+| fn | `App::material_regions` | `tabs.rs:390` | `pub(crate) fn material_regions(&self) -> Vec<(String, String)>` —  The regions of the model by base name (the absorbing pieces `name.pml_*` belong to `name`), with the key a material is stored under. |
+| fn | `App::prune_stale_materials` | `tabs.rs:415` | `pub fn prune_stale_materials(&mut self)` —  Removes material assignments for region names that no longer exist in `geom_edit`. |
+| fn | `App::reduce_now` | `tabs.rs:1444` | `pub fn reduce_now(&mut self, action: &str)` —  Runs one reduction of the Reduce form (`integrate`, `max`, `min` or `fraction`) on the field, quantity and region it holds, through the engine |
+| fn | `App::has_analysis` | `tabs.rs:1515` | `pub fn has_analysis(&self) -> bool` —  Whether the result on show carries a polarization analysis. |
+| fn | `App::results_panel` | `tabs.rs:1663` | `pub fn results_panel(&mut self, ui: &mut Ui)` —  Bottom panel: how the shown field's extremes (or the mode frequencies) vary over the |

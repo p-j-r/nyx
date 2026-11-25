@@ -165,12 +165,24 @@ pub struct App {
     pub deferred: VecDeque<crate::shell::Deferred>,
     /// form state of the Materials tab's on-demand download / import panel
     pub mat_fetch: crate::state::MaterialFetchForm,
+    /// last seen surface / viewport state for multi-frame repaint bursts on resize, maximize, scale, or theme change
+    last_inner_rect: Option<egui::Rect>,
+    last_maximized: Option<bool>,
+    last_ppp: Option<f32>,
+    last_dark: Option<bool>,
+    repaint_burst: u8,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         crate::theme::install_fonts(&cc.egui_ctx);
         let mut app = Self::with_context(cc.egui_ctx.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(m) = cc.winit_window().and_then(|w| w.current_monitor()) {
+            let sz = m.size();
+            let sf = m.scale_factor().max(0.5) as f32;
+            app.shell.display_phys = Some((sz.width, sz.height, sf));
+        }
         let root = std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_engine::facade::store::workspace::default_root);
         app.attach_workspace(root);
         app
@@ -179,6 +191,7 @@ impl App {
     /// The application state on an egui context; no window is needed (tests use a default context). It opens with the first example.
     pub fn with_context(ctx: egui::Context) -> Self {
         crate::theme::apply(&ctx);
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let (tx, rx) = channel();
         let mut app = App {
             engine: Engine::new(),
@@ -239,6 +252,11 @@ impl App {
             connect_note: None,
             mat_fetch: Default::default(),
             ctx,
+            last_inner_rect: None,
+            last_maximized: None,
+            last_ppp: None,
+            last_dark: None,
+            repaint_burst: 0,
         };
         app.engine.set_owner("gui"); // a person's requests run before an agent's (ADR 87)
         app.refresh_connect();
@@ -611,7 +629,7 @@ impl App {
         }
     }
 
-    fn poll(&mut self) {
+    pub(crate) fn poll(&mut self) {
         self.poll_sweep();
         while let Ok((generation, msg)) = self.rx.try_recv() {
             match msg {
@@ -762,7 +780,7 @@ impl App {
     }
 
     /// Starts the work that was asked for while a job was running, once nothing is running.
-    fn run_queued(&mut self) {
+    pub(crate) fn run_queued(&mut self) {
         if self.busy.is_some() {
             return;
         }
@@ -1647,10 +1665,90 @@ impl App {
             self.rules_dirty = true;
         }
     }
-}
 
-impl eframe::App for App {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn handle_zoom_shortcuts(&mut self, ctx: &egui::Context) {
+        let (mut zoom_in, mut zoom_out, mut zoom_reset) = (false, false, false);
+        ctx.input_mut(|i| {
+            i.events.retain(|e| {
+                if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
+                    if modifiers.command && !modifiers.alt {
+                        match key {
+                            egui::Key::Plus | egui::Key::Equals => {
+                                zoom_in = true;
+                                return false;
+                            }
+                            egui::Key::Minus => {
+                                zoom_out = true;
+                                return false;
+                            }
+                            egui::Key::Num0 => {
+                                zoom_reset = true;
+                                return false;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                true
+            });
+        });
+        if zoom_reset {
+            self.reset_user_zoom(ctx);
+        } else if zoom_in {
+            self.step_user_zoom(ctx, 1.1);
+        } else if zoom_out {
+            self.step_user_zoom(ctx, 1.0 / 1.1);
+        }
+    }
+
+    /// Requests a repaint immediately on pointer button events and triggers a multi-frame repaint burst after surface state transitions.
+    pub(crate) fn track_surface_and_pointer(&mut self, ctx: &egui::Context, advance_burst: bool) {
+        if ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::PointerButton { .. }))) {
+            ctx.request_repaint();
+        }
+        if self.shell.display_phys.is_none() {
+            if let Some(mon_sz) = ctx.input(|i| i.viewport().monitor_size) {
+                let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+                self.shell.display_phys = Some((
+                    (mon_sz.x * native).round().max(1.0) as u32,
+                    (mon_sz.y * native).round().max(1.0) as u32,
+                    native,
+                ));
+                self.sync_look(ctx);
+            }
+        }
+        let (inner_rect, maximized) = ctx.input(|i| {
+            let vp = i.viewport();
+            (vp.inner_rect, vp.maximized)
+        });
+        let ppp = ctx.pixels_per_point();
+        let dark = crate::theme::is_dark(ctx);
+        let surface_changed = (self.last_inner_rect.is_some() && inner_rect.is_some() && self.last_inner_rect != inner_rect)
+            || (self.last_maximized.is_some() && maximized.is_some() && self.last_maximized != maximized)
+            || self.last_ppp.is_some_and(|p| (p - ppp).abs() > 1e-4)
+            || self.last_dark.is_some_and(|d| d != dark);
+        if let Some(r) = inner_rect {
+            self.last_inner_rect = Some(r);
+        }
+        if maximized.is_some() {
+            self.last_maximized = maximized;
+        }
+        self.last_ppp = Some(ppp);
+        self.last_dark = Some(dark);
+        if surface_changed {
+            self.repaint_burst = self.repaint_burst.max(4);
+        }
+        if self.repaint_burst > 0 {
+            if advance_burst {
+                self.repaint_burst -= 1;
+            }
+            ctx.request_repaint();
+        }
+    }
+
+    pub(crate) fn logic_tick(&mut self, ctx: &egui::Context) {
+        self.track_surface_and_pointer(ctx, false);
+        self.handle_zoom_shortcuts(ctx);
         crate::spans::span("poll", || self.poll());
         crate::spans::span("run_queued", || self.run_queued());
         if self.rules_dirty {
@@ -1701,8 +1799,15 @@ impl eframe::App for App {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    pub(crate) fn draw_ui(&mut self, ui: &mut egui::Ui) {
         let t_ui = Instant::now();
+        self.track_surface_and_pointer(ui.ctx(), true);
+        self.handle_zoom_shortcuts(ui.ctx());
+        ui.ctx().layer_painter(egui::LayerId::background()).rect_filled(
+            ui.ctx().content_rect(),
+            0.0,
+            crate::theme::page(ui.ctx()),
+        );
         crate::spans::span("queue_panel", || self.queue_panel(ui.ctx()));
         if let Some(text) = self.script_output.clone() {
             let mut open = true;
@@ -1753,6 +1858,20 @@ impl eframe::App for App {
             eprintln!("FRAME t={now:.3} ui_ms={:.2} viewport_ms={:.2} busy={} show_results={}", t_ui.elapsed().as_secs_f64() * 1e3, t_vp.elapsed().as_secs_f64() * 1e3, self.busy.is_some(), self.show_results);
             self.frame_csv(t_ui.elapsed().as_secs_f64() * 1e3, t_vp.elapsed().as_secs_f64() * 1e3);
         }
+    }
+}
+
+impl eframe::App for App {
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        crate::theme::page_for_dark(visuals.dark_mode).to_normalized_gamma_f32()
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.logic_tick(ctx);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.draw_ui(ui);
     }
 }
 
@@ -3138,11 +3257,23 @@ mod tests {
             .unwrap_or_else(|| panic!("exact 'Overlay' item not found; texts={texts:?}"));
         gui_click_at(&mut a, ov_rect.center());
         assert_eq!(a.geom_edit.features.len(), 4, "expected 3 Rects + 1 Overlay");
-        gui_scroll_inspector(&mut a, -400.0);
+        // Ensure the Overlay region rows sit inside the visible ScrollArea below the tab bar/header
+        for _ in 0..8 {
+            let texts = gui_frame(&mut a, egui::RawInput::default());
+            if let Some(add_reg) = texts.iter().find(|(t, r)| t == "+ region" && r.max.x < 700.0).map(|(_, r)| *r) {
+                if add_reg.min.y >= 360.0 && add_reg.max.y <= E2E_SCREEN.y - 8.0 {
+                    break;
+                }
+                let dy = if add_reg.min.y < 360.0 { 220.0 } else { -220.0 };
+                gui_scroll_inspector(&mut a, dy);
+            } else {
+                gui_scroll_inspector(&mut a, -220.0);
+            }
+        }
         let mut all_boxes: Vec<egui::Rect> = gui_focusable_rects(&a)
             .into_iter()
             .map(|(_, _, r)| r)
-            .filter(|r| r.max.x < 700.0)
+            .filter(|r| r.max.x < 700.0 && r.min.y >= 245.0 && r.max.y <= E2E_SCREEN.y)
             .collect();
         all_boxes.sort_by(|a, b| a.center().y.partial_cmp(&b.center().y).unwrap());
         assert!(all_boxes.len() >= 3, "expected at least 3 region name boxes in Overlay: {all_boxes:?}");
@@ -3160,7 +3291,10 @@ mod tests {
         // Click "Materials" pill and assign silica / silica / silicon
         gui_click_text(&mut a, "Materials");
         assert_eq!(a.shell.open[&wid].tab, Tab::Materials);
-        // Assign "silica" to all regions via "apply material...", then override "Si" to "silicon"
+        // Reset ScrollArea to top of Materials if needed before clicking "apply material..."
+        if gui_find_text(&gui_frame(&mut a, egui::RawInput::default()), "apply material...").is_none() {
+            gui_scroll_inspector(&mut a, 800.0);
+        }
         gui_click_text(&mut a, "apply material...");
         gui_click_combo_item(&mut a, "silica");
         let mut texts = gui_frame(&mut a, egui::RawInput::default());
@@ -3448,5 +3582,127 @@ nyx.result_info(physics=\"ems\")
         assert!(a.shell.open_file.as_ref().is_some_and(|(p, _)| p == &nyx_path));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn single_frame_pointer_clicks_surface_repaints_and_zoom_shortcuts_work() {
+        let root = std::env::temp_dir().join(format!("nyx-pointer-repaint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut a = app();
+        wait_idle(&mut a, 30);
+        a.attach_workspace(root.clone());
+
+        // Helper running full production `draw_ui` path and returning rendered text rects + repaint status.
+        let run_full_frame = |app: &mut App, mut raw: egui::RawInput| -> (Vec<(String, egui::Rect)>, bool) {
+            raw.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, E2E_SCREEN));
+            app.poll();
+            app.run_queued();
+            if app.rules_dirty {
+                app.sync_rules();
+            }
+            let ctx = app.ctx.clone();
+            app.logic_tick(&ctx);
+            let mut out = ctx.run_ui(raw, |ui| {
+                app.draw_ui(ui);
+            });
+            out.textures_delta.clear();
+            let wants_repaint = out.viewport_output.values().any(|v| v.repaint_delay.is_zero());
+            let mut texts = Vec::new();
+            for cs in &out.shapes {
+                collect_shape_texts(cs.clip_rect, &cs.shape, &mut texts);
+            }
+            (texts, wants_repaint)
+        };
+
+        let single_frame_click = |app: &mut App, pos: egui::Pos2| -> (Vec<(String, egui::Rect)>, bool) {
+            let mut raw = egui::RawInput::default();
+            raw.events.push(egui::Event::PointerMoved(pos));
+            raw.events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            raw.events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            run_full_frame(app, raw)
+        };
+
+        // clear_color must be completely opaque in both light and dark looks
+        use eframe::App as _;
+        assert_eq!(a.clear_color(&egui::Visuals::light())[3], 1.0);
+        assert_eq!(a.clear_color(&egui::Visuals::dark())[3], 1.0);
+
+        // Initial Dashboard frame
+        let (texts, _) = run_full_frame(&mut a, egui::RawInput::default());
+        let new_wf_btn = gui_find_text(&texts, "New workflow").expect("New workflow button on Dashboard");
+        let (_, click_repainted) = single_frame_click(&mut a, new_wf_btn.center());
+        assert!(click_repainted, "PointerButton frame must request repaint");
+        assert_eq!(a.shell.sheet, crate::shell::Sheet::New, "single-frame click on `+ New workflow` failed");
+        a.shell.sheet = crate::shell::Sheet::None;
+
+        // Top-bar Settings click in one frame
+        let (texts, _) = run_full_frame(&mut a, egui::RawInput::default());
+        let settings_btn = gui_find_text(&texts, "Settings").expect("Settings button in top_bar");
+        let _ = single_frame_click(&mut a, settings_btn.center());
+        assert_eq!(a.shell.page, crate::shell::Page::Settings, "single-frame click on `Settings` failed");
+
+        // Top-bar `+` click in one frame
+        let (texts, _) = run_full_frame(&mut a, egui::RawInput::default());
+        let plus_btn = gui_find_text(&texts, "+").expect("`+` button in top_bar");
+        let _ = single_frame_click(&mut a, plus_btn.center());
+        assert_eq!(a.shell.sheet, crate::shell::Sheet::New, "single-frame click on `+` failed");
+        a.shell.sheet = crate::shell::Sheet::None;
+
+        // Open a draft workflow and verify single-frame clicks on `Script` and `Compute F5`
+        a.new_draft("Click Check", crate::shell::Start::Blank { physics: "dfs".into(), three_d: false });
+        wait_idle(&mut a, 30);
+        let (texts, _) = run_full_frame(&mut a, egui::RawInput::default());
+        let script_btn = gui_find_text(&texts, "Script").expect("Script button in wf_bar");
+        let _ = single_frame_click(&mut a, script_btn.center());
+        assert!(a.nys.open, "single-frame click on `Script` failed");
+        a.nys.open = false;
+
+        let (texts, _) = run_full_frame(&mut a, egui::RawInput::default());
+        let compute_btn = gui_find_text(&texts, "Compute").expect("Compute F5 button in wf_bar");
+        let _ = single_frame_click(&mut a, compute_btn.center());
+        assert!(a.busy.is_some() || a.shell.run.is_some() || !a.results.is_empty(), "single-frame click on `Compute F5` did not trigger solve");
+        wait_idle(&mut a, 30);
+
+        // Surface resize / dark theme transition triggers a multi-frame repaint burst
+        let mut raw_resize = egui::RawInput::default();
+        raw_resize.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().inner_rect =
+            Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0)));
+        let _ = run_full_frame(&mut a, raw_resize);
+        let mut raw_max = egui::RawInput::default();
+        raw_max.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().inner_rect =
+            Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0)));
+        let (_, rep1) = run_full_frame(&mut a, raw_max);
+        assert!(rep1 && a.repaint_burst > 0);
+        for _ in 0..3 {
+            let _ = run_full_frame(&mut a, egui::RawInput::default());
+        }
+
+        // Ctrl+= shortcut zooms and saves to workspace.json cleanly
+        let mut raw_zoom = egui::RawInput::default();
+        raw_zoom.events.push(egui::Event::Key {
+            key: egui::Key::Equals,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        });
+        let _ = run_full_frame(&mut a, raw_zoom);
+        let _ = run_full_frame(&mut a, egui::RawInput::default());
+        assert!(
+            nyx_engine::facade::store::Workspace::open(&root).unwrap().settings.zoom > 1.05,
+            "Ctrl+= did not persist updated zoom"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

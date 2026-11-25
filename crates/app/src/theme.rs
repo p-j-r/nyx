@@ -35,6 +35,10 @@ pub fn role(ctx: &egui::Context, p: Pair) -> Color32 {
 pub fn page(ctx: &egui::Context) -> Color32 {
     role(ctx, tokens::PAGE)
 }
+/// Window page background for an explicit dark/light mode (used by `eframe::App::clear_color`).
+pub fn page_for_dark(dark: bool) -> Color32 {
+    rgb(tokens::PAGE.get(if dark { Mode::Dark } else { Mode::Light }))
+}
 pub fn card(ctx: &egui::Context) -> Color32 {
     role(ctx, tokens::CARD)
 }
@@ -229,6 +233,7 @@ fn build_visuals(m: Mode, high: bool) -> Visuals {
     v.extreme_bg_color = card;
     v.faint_bg_color = page.lerp_to_gamma(raised, 0.5);
     v.override_text_color = Some(text);
+    v.weak_text_color = Some(g(tokens::MUTED));
     v.selection.bg_fill = card.lerp_to_gamma(accent, 0.30);
     v.selection.stroke = Stroke::new(1.0, accent);
     v.hyperlink_color = accent;

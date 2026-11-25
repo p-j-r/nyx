@@ -5,7 +5,7 @@ One page per component, C4 level 4. [Component view](../../3-components/store.md
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
 | [Data model and card](./model.md) | 2 | 227 | 20 | 10 |
-| [Workspace](./workspace.md) | 2 | 310 | 11 | 4 |
+| [Workspace](./workspace.md) | 2 | 327 | 11 | 4 |
 | [Workflow folder](./flow.md) | 1 | 486 | 40 | 1 |
 | [Versions](./versions.md) | 1 | 202 | 11 | 4 |
 | [Runs](./runs.md) | 1 | 454 | 17 | 6 |

@@ -267,8 +267,15 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("element size h (m)");
             num_id(ui, "mesh_h", &mut m.h);
-            ui.weak(format!("{}D model, x-z cross-section; the size rules of the model refine it", g.dim));
         });
+        let mesh_hint = if g.dim == 2 && m.sweep.as_ref().is_some_and(|s| !s.is_empty()) {
+            "3D swept model (x-z cross-section along y); the size rules of the model refine it"
+        } else if g.dim == 2 {
+            "2D model, x-z cross-section; the size rules of the model refine it"
+        } else {
+            "3D model; the size rules of the model refine it"
+        };
+        ui.add(egui::Label::new(RichText::new(mesh_hint).weak()).wrap());
         ui.checkbox(&mut m.physics_sizing, "size the mesh from the physics")
             .on_hover_text("Elements are made fine enough for the wavelength of the study in each material (points per wavelength by element order). Applies to EM waves and solid-mechanics eigenfrequencies; the sizes of the model still apply.");
         if m.physics_sizing {
@@ -1102,7 +1109,7 @@ impl App {
             }
         });
         if let Some(s) = studies.iter().find(|s| s.kind == spec.study.kind) {
-            ui.weak(&s.doc);
+            ui.add(egui::Label::new(RichText::new(&s.doc).weak()).wrap());
             let runs_here = match s.dims {
                 nyx_engine::facade::physics::Dims::Two => dim == 2,
                 nyx_engine::facade::physics::Dims::Three => dim == 3,
@@ -1122,7 +1129,7 @@ impl App {
                 if freq > 0.0 && freq.is_finite() {
                     let lam0 = 299_792_458.0 / freq;
                     let mut lam = lam0;
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("wavelength λ₀ (vacuum) [m]")
                             .on_hover_text("Free-space wavelength c₀ / freq (e.g. type 1550 nm); updates Frequency [Hz] above.");
                         if num_id(ui, ("study_lambda0", &active, &s.kind), &mut lam).changed() && (lam - lam0).abs() > 0.0 && lam > 0.0 && lam.is_finite() {
@@ -1695,7 +1702,19 @@ impl App {
         let top = if is_eigen { xs.iter().fold(0.0f64, |m, x| m.max(x.abs())) } else { 0.0 };
         let (fscale, funit) = if top >= 1e9 { (1e9, "GHz") } else if top >= 1e6 { (1e6, "MHz") } else if top >= 1e3 { (1e3, "kHz") } else { (1.0, "Hz") };
         let ylabel = if is_eigen { format!("frequency ({funit})") } else if is_modes { "|neff|".to_string() } else { fname.clone() };
-        let out = egui_plot::Plot::new("summary_plot").set_margin_fraction(egui::vec2(0.08, 0.3)).height(ui.available_height().max(90.0)).x_axis_label(xlabel).y_axis_label(ylabel).y_axis_formatter(move |m, _| if is_eigen { format!("{}", m.value / fscale) } else { format!("{}", m.value) }).legend(egui_plot::Legend::default()).show(ui, |p| {
+        let mut plot = egui_plot::Plot::new("summary_plot")
+            .set_margin_fraction(egui::vec2(0.08, 0.3))
+            .height(ui.available_height().max(90.0))
+            .x_axis_label(xlabel)
+            .y_axis_label(ylabel)
+            .y_axis_formatter(move |m, _| if is_eigen { format!("{}", m.value / fscale) } else { format!("{}", m.value) })
+            .legend(egui_plot::Legend::default());
+        if is_eigen || is_modes {
+            plot = plot
+                .x_grid_spacer(integer_mode_marks)
+                .x_axis_formatter(format_integer_mode_tick);
+        }
+        let out = plot.show(ui, |p| {
             if is_eigen {
                 p.points(egui_plot::Points::new("f", egui_plot::PlotPoints::from(xs.iter().enumerate().map(|(i, _)| [i as f64 + 1.0, xs[i]]).collect::<Vec<_>>())).radius(4.0));
                 p.points(egui_plot::Points::new("", egui_plot::PlotPoints::from(vec![[chosen as f64 + 1.0, xs[chosen]]])).radius(7.0).color(shown_colour));
@@ -1735,6 +1754,50 @@ pub fn nearest_solution(at: &[f64], x: f64) -> Option<usize> {
     at.iter().enumerate().filter(|(_, a)| a.is_finite()).min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs())).map(|(i, _)| i)
 }
 
+/// Grid ticks for discrete 1-based mode indices: integer values >= 1 with nice integer steps (no fractional `1.1`, `1.2`, ...).
+pub fn integer_mode_marks(input: egui_plot::GridInput) -> Vec<egui_plot::GridMark> {
+    let (lo, hi) = input.bounds;
+    if !lo.is_finite() || !hi.is_finite() || hi < 1.0 {
+        return vec![];
+    }
+    let raw = input.base_step_size.abs().max(1.0);
+    let exp = 10f64.powf(raw.log10().floor());
+    let norm = raw / exp;
+    let nice = if norm <= 1.0 {
+        1.0
+    } else if norm <= 2.0 {
+        2.0
+    } else if norm <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    let step = (nice * exp).round().max(1.0);
+    let first = ((lo / step).ceil() * step).max(step);
+    let mut marks = Vec::new();
+    let mut x = first;
+    for _ in 0..512 {
+        if x > hi + 1e-9 {
+            break;
+        }
+        if x >= lo - 1e-9 && x >= 1.0 {
+            marks.push(egui_plot::GridMark { value: x, step_size: step });
+        }
+        x += step;
+    }
+    marks
+}
+
+/// Formats discrete mode-number ticks as integers and hides any non-integer marks.
+pub fn format_integer_mode_tick(m: egui_plot::GridMark, _range: &std::ops::RangeInclusive<f64>) -> String {
+    let rounded = m.value.round();
+    if rounded >= 1.0 && (m.value - rounded).abs() < 1e-6 {
+        format!("{rounded:.0}")
+    } else {
+        String::new()
+    }
+}
+
 /// What the Reduce form can take of a field.
 const QUANTITIES: [&str; 3] = ["value", "modulus", "modulus squared"];
 
@@ -1761,6 +1824,28 @@ mod tests {
         assert_eq!(nearest_solution(&[0.0, 0.5, 5.0], 1.0), Some(1));
         assert_eq!(nearest_solution(&[], 1.0), None);
         assert_eq!(nearest_solution(&at, f64::NAN), None);
+    }
+
+    #[test]
+    fn mode_plot_ticks_are_positive_integers_only() {
+        let marks = integer_mode_marks(egui_plot::GridInput { bounds: (0.8, 2.2), base_step_size: 0.1 });
+        let vals: Vec<f64> = marks.iter().map(|m| m.value).collect();
+        assert_eq!(vals, vec![1.0, 2.0]);
+        assert_eq!(format_integer_mode_tick(marks[0], &(0.8..=2.2)), "1");
+        assert_eq!(format_integer_mode_tick(marks[1], &(0.8..=2.2)), "2");
+        assert_eq!(
+            format_integer_mode_tick(egui_plot::GridMark { value: 1.5, step_size: 0.5 }, &(0.8..=2.2)),
+            ""
+        );
+        assert_eq!(
+            format_integer_mode_tick(egui_plot::GridMark { value: 0.0, step_size: 1.0 }, &(0.0..=3.0)),
+            ""
+        );
+
+        let wide = integer_mode_marks(egui_plot::GridInput { bounds: (0.5, 25.0), base_step_size: 2.3 });
+        assert!(!wide.is_empty());
+        assert!(wide.iter().all(|m| m.value >= 1.0 && (m.value - m.value.round()).abs() < 1e-9));
+        assert!(wide.iter().all(|m| !format_integer_mode_tick(*m, &(0.5..=25.0)).is_empty()));
     }
 
     #[test]

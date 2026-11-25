@@ -216,6 +216,14 @@ pub struct Shell {
     pub dark: bool,
     /// the zoom factor last seen: a change is Ctrl +/- (or the View menu) and is saved
     pub last_zoom: f32,
+    /// zoom factor from `set_zoom_factor` waiting for egui's next `begin_pass` before comparison
+    pub pending_zoom: Option<f32>,
+    /// resolved base UI scale from `NYX_SCALE`, `Settings::scale_mode`, or automatic DPI detection
+    pub base_scale: f32,
+    /// `--script` `scale <f>` override (never written back to settings)
+    pub script_scale: Option<f32>,
+    /// physical monitor `(width, height, native_pixels_per_point)` captured at startup or from ViewportInfo
+    pub display_phys: Option<(u32, u32, f32)>,
     /// the native menu bar (Windows)
     #[cfg(windows)]
     pub native_menu: Option<crate::menu::Native>,
@@ -260,6 +268,10 @@ impl Shell {
             classic: true,
             dark: false,
             last_zoom: 1.0,
+            pending_zoom: None,
+            base_scale: 1.0,
+            script_scale: None,
+            display_phys: None,
             #[cfg(windows)]
             native_menu: None,
             logo: None,
@@ -291,17 +303,157 @@ impl Shell {
     }
 }
 
+/// True when running inside WSL on Linux (WSLg / WSL2).
+pub fn is_wsl() -> bool {
+    cfg!(target_os = "linux")
+        && (std::env::var_os("WSL_DISTRO_NAME").is_some()
+            || std::env::var_os("WSL_INTEROP").is_some()
+            || std::path::Path::new("/mnt/wslg").exists())
+}
+
+/// Optional explicit UI scale override from `NYX_SCALE` (positive finite float clamped to `0.5..=3.0`).
+pub fn nyx_scale_env() -> Option<f32> {
+    parse_scale_str(&std::env::var("NYX_SCALE").ok()?)
+}
+
+fn parse_scale_str(raw: &str) -> Option<f32> {
+    let v: f32 = raw.trim().parse().ok()?;
+    (v.is_finite() && v > 0.0).then(|| v.clamp(0.5, 3.0))
+}
+
+/// Maps `Settings::scale_mode` (`"auto"`, `"100%"`, `"125%"`, `"150%"`, `"175%"`, `"200%"`) to an explicit scale factor.
+pub fn parse_scale_mode(mode: &str) -> Option<f32> {
+    match mode.trim() {
+        "100%" => Some(1.0),
+        "125%" => Some(1.25),
+        "150%" => Some(1.5),
+        "175%" => Some(1.75),
+        "200%" => Some(2.0),
+        _ => None,
+    }
+}
+
+/// Computes an automatic UI scale factor when the display reports unscaled pixels (`native_ppp <= 1.15`) on a high-DPI monitor.
+pub fn auto_scale_for_display(phys_w: u32, phys_h: u32, native_ppp: f32) -> f32 {
+    if !native_ppp.is_finite() || native_ppp > 1.15 {
+        return 1.0;
+    }
+    let long_edge = phys_w.max(phys_h);
+    let short_edge = phys_w.min(phys_h);
+    if long_edge >= 3200 || short_edge >= 1800 {
+        2.0
+    } else if long_edge >= 2500 || short_edge >= 1400 {
+        1.5
+    } else if long_edge >= 2048 {
+        1.25
+    } else {
+        1.0
+    }
+}
+
+/// Resolves `(base_scale, effective_zoom)` from settings, display metrics, `NYX_SCALE`, and optional `--script scale`.
+pub fn resolve_effective_scale(
+    scale_mode: &str,
+    saved_zoom: f32,
+    display_phys: Option<(u32, u32, f32)>,
+    env_override: Option<f32>,
+    script_override: Option<f32>,
+) -> (f32, f32) {
+    if let Some(s) = script_override.filter(|v| v.is_finite() && *v > 0.0) {
+        let s = s.clamp(0.5, 3.0);
+        return (s, s);
+    }
+    if let Some(s) = env_override.filter(|v| v.is_finite() && *v > 0.0) {
+        let s = s.clamp(0.5, 3.0);
+        return (s, s);
+    }
+    let base = parse_scale_mode(scale_mode).unwrap_or_else(|| {
+        display_phys.map(|(w, h, p)| auto_scale_for_display(w, h, p)).unwrap_or(1.0)
+    });
+    let z = if saved_zoom.is_finite() && saved_zoom > 0.0 { saved_zoom.clamp(0.5, 3.0) } else { 1.0 };
+    (base, (base * z).clamp(0.5, 3.0))
+}
+
+/// Converts a requested logical `[width, height]` and minimum size into clamped winit inner dimensions + maximize hint.
+pub fn compute_startup_window_size(
+    req_logical: [f32; 2],
+    min_logical: [f32; 2],
+    scale: f32,
+    mon_logical: Option<[f32; 2]>,
+) -> ([f32; 2], [f32; 2], bool) {
+    let s = if scale.is_finite() && scale > 0.0 { scale.clamp(0.5, 3.0) } else { 1.0 };
+    let want_w = (req_logical[0] * s).max(320.0);
+    let want_h = (req_logical[1] * s).max(240.0);
+    let min_w = (min_logical[0] * s).max(320.0);
+    let min_h = (min_logical[1] * s).max(240.0);
+    if let Some([mw, mh]) = mon_logical {
+        let usable_w = (mw - 16.0).max(400.0);
+        let usable_h = (mh - 48.0).max(300.0);
+        let exceeds = want_w > usable_w || want_h > usable_h;
+        (
+            [want_w.clamp(320.0, usable_w), want_h.clamp(240.0, usable_h)],
+            [min_w.min(usable_w), min_h.min(usable_h)],
+            exceeds,
+        )
+    } else {
+        ([want_w, want_h], [min_w, min_h], false)
+    }
+}
+
 impl App {
+    /// Applies a new zoom factor cleanly without letting `sync_look` treat the asynchronous change as a reset.
+    pub fn apply_zoom_factor(&mut self, ctx: &egui::Context, z: f32) {
+        let z = z.clamp(0.5, 3.0);
+        self.shell.pending_zoom = Some(z);
+        self.shell.last_zoom = z;
+        ctx.set_zoom_factor(z);
+        ctx.request_repaint();
+    }
+
+    /// Multiplies the saved user zoom multiplier by `factor`, saves settings, and applies the resulting scale.
+    pub fn step_user_zoom(&mut self, ctx: &egui::Context, factor: f32) {
+        self.shell.script_scale = None;
+        let next = if let Some(ws) = &mut self.shell.ws {
+            let updated = (ws.settings.zoom * factor).clamp(0.5, 3.0);
+            ws.settings.zoom = updated;
+            let _ = ws.save_settings();
+            (self.shell.base_scale * updated).clamp(0.5, 3.0)
+        } else {
+            (ctx.zoom_factor() * factor).clamp(0.5, 3.0)
+        };
+        self.apply_zoom_factor(ctx, next);
+    }
+
+    /// Resets the saved user zoom multiplier back to `1.0` (so `scale_mode` / automatic DPI scaling stays active).
+    pub fn reset_user_zoom(&mut self, ctx: &egui::Context) {
+        self.shell.script_scale = None;
+        let next = if let Some(ws) = &mut self.shell.ws {
+            ws.settings.zoom = 1.0;
+            let _ = ws.save_settings();
+            self.shell.base_scale.clamp(0.5, 3.0)
+        } else {
+            1.0
+        };
+        self.apply_zoom_factor(ctx, next);
+    }
+
     /// Switches the shell on with the workspace at `root` (the window passes the default one; `NYX_WORKSPACE` overrides it).
     pub fn attach_workspace(&mut self, root: PathBuf) {
         match Workspace::open(&root) {
             Ok(ws) => {
-                let zoom = ws.settings.zoom.clamp(0.5, 3.0);
+                let (base, zoom) = resolve_effective_scale(
+                    &ws.settings.scale_mode,
+                    ws.settings.zoom,
+                    self.shell.display_phys,
+                    nyx_scale_env(),
+                    self.shell.script_scale,
+                );
                 self.shell.ws = Some(ws);
                 self.shell.classic = false;
-                self.ctx.set_zoom_factor(zoom);
-                self.shell.last_zoom = zoom;
-                self.sync_look(&self.ctx.clone());
+                self.shell.base_scale = base;
+                let ctx = self.ctx.clone();
+                self.apply_zoom_factor(&ctx, zoom);
+                self.sync_look(&ctx);
                 self.refresh_entries();
                 let tabs = self.shell.settings().open_tabs;
                 for id in tabs {
@@ -872,18 +1024,29 @@ impl App {
             let mut go_dash = crate::kit::tab(ui, "dashboard", "Dashboard", on_dash, None, false).select.clicked();
             let mut close = None;
             let mut show = None;
-            let right_reserve = 420.0 + busy_w;
-            let max_tabs_w = (ui.available_width() - right_reserve).max(80.0);
+            let gap = ui.spacing().item_spacing.x;
+            let font_btn = egui::TextStyle::Button.resolve(ui.style());
+            let settings_w = ui.painter().layout_no_wrap("Settings".into(), font_btn, theme::text(&ctx)).size().x + 28.0;
+            let avail_after_dash = ui.available_width();
+            let search_full = avail_after_dash >= 620.0;
+            let search_w = if search_full { 250.0 } else { 150.0 };
+            let search_label = if search_full { "Search or run anything        Ctrl K" } else { "Search  Ctrl K" };
+            let busy_reserve = if busy_w > 0.0 { busy_w + gap } else { 0.0 };
+            let controls_reserve = 34.0 + gap + 34.0 + gap + busy_reserve + search_w + gap + settings_w + 12.0;
+            let max_tabs_w = (avail_after_dash - controls_reserve).max(0.0);
             // the workflow tabs that fit (ADR 124): the titles shorten before a tab is dropped, and a tab that does not fit whole is not drawn (the ▾ menu lists them all);
             // nothing scrolls, so no tab is ever half out of view
             let ids: Vec<String> = self.shell.tabs.iter().filter(|i| self.shell.open.contains_key(*i)).cloned().collect();
             let active = ids.iter().position(|i| self.shell.page == Page::Workflow(i.clone()));
-            let gap = ui.spacing().item_spacing.x;
             let mut chars = 22;
             let (titles, from, to) = loop {
                 let titles: Vec<String> = ids.iter().map(|i| crate::fmt::ellipsize(&self.shell.open[i].title(), chars)).collect();
                 let widths: Vec<f32> = titles.iter().map(|t| crate::kit::tab_width(ui, t, true, true)).collect();
-                let (from, to) = fit_window(&widths, gap, max_tabs_w, active);
+                let (from, to) = if max_tabs_w >= 48.0 {
+                    fit_window(&widths, gap, max_tabs_w, active)
+                } else {
+                    (0, 0)
+                };
                 if (from == 0 && to == ids.len()) || chars <= 16 {
                     break (titles, from, to);
                 }
@@ -948,7 +1111,7 @@ impl App {
                     self.flush();
                     self.shell.page = Page::Settings;
                 }
-                let search = ui.add(egui::Button::new(RichText::new("Search or run anything        Ctrl K").color(theme::muted(&ctx))).min_size(Vec2::new(250.0, 32.0)));
+                let search = ui.add(egui::Button::new(RichText::new(search_label).color(theme::muted(&ctx))).min_size(Vec2::new(search_w, 32.0)));
                 if search.clicked() {
                     self.shell.sheet = Sheet::Palette;
                     self.shell.palette_q.clear();
@@ -1118,12 +1281,37 @@ impl App {
             m.set_dark(dark);
         }
         let z = ctx.zoom_factor();
-        if (z - self.shell.last_zoom).abs() > 1e-4 {
-            self.shell.last_zoom = z;
-            if let Some(ws) = &mut self.shell.ws {
-                ws.settings.zoom = z;
-                let _ = ws.save_settings();
+        if let Some(pending) = self.shell.pending_zoom {
+            if (z - pending).abs() <= 1e-4 {
+                self.shell.pending_zoom = None;
+                self.shell.last_zoom = z;
+            } else {
+                // `set_zoom_factor` takes effect on the next pass; keep waiting rather than clobbering saved settings.
+                return;
             }
+        }
+        let (base, want_zoom) = resolve_effective_scale(
+            &s.scale_mode,
+            s.zoom,
+            self.shell.display_phys,
+            nyx_scale_env(),
+            self.shell.script_scale,
+        );
+        self.shell.base_scale = base;
+        if nyx_scale_env().is_none()
+            && self.shell.script_scale.is_none()
+            && (z - self.shell.last_zoom).abs() > 1e-4
+        {
+            self.shell.last_zoom = z;
+            let mult = (z / base).clamp(0.5, 3.0);
+            if let Some(ws) = &mut self.shell.ws {
+                if (ws.settings.zoom - mult).abs() > 1e-4 {
+                    ws.settings.zoom = mult;
+                    let _ = ws.save_settings();
+                }
+            }
+        } else if (want_zoom - z).abs() > 1e-4 {
+            self.apply_zoom_factor(ctx, want_zoom);
         }
     }
 }
@@ -1229,6 +1417,75 @@ mod tests {
         app.cmd("set_active", serde_json::json!({ "physics": other }));
         app.flush();
         assert_eq!(version(&app), before, "a switch of the physics on show wrote a version");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn high_dpi_scaling_helpers_and_zoom_persistence_work_across_restarts() {
+        assert_eq!(parse_scale_str("1.5"), Some(1.5));
+        assert_eq!(parse_scale_str("5.0"), Some(3.0));
+        assert_eq!(parse_scale_str("0.1"), Some(0.5));
+        assert_eq!(parse_scale_str("0.0"), None);
+        assert_eq!(parse_scale_str("-1"), None);
+        assert_eq!(parse_scale_str("nan"), None);
+
+        assert_eq!(parse_scale_mode("auto"), None);
+        assert_eq!(parse_scale_mode("125%"), Some(1.25));
+        assert_eq!(parse_scale_mode("200%"), Some(2.0));
+
+        assert_eq!(auto_scale_for_display(3840, 2160, 1.0), 2.0);
+        assert_eq!(auto_scale_for_display(2560, 1440, 1.0), 1.5);
+        assert_eq!(auto_scale_for_display(1920, 1080, 1.0), 1.0);
+        assert_eq!(auto_scale_for_display(3840, 2160, 2.0), 1.0);
+
+        // Precedence: script > env > fixed scale_mode > auto display scale * user zoom
+        assert_eq!(
+            resolve_effective_scale("auto", 1.25, Some((3840, 2160, 1.0)), Some(1.75), Some(1.5)),
+            (1.5, 1.5)
+        );
+        assert_eq!(
+            resolve_effective_scale("100%", 1.5, Some((3840, 2160, 1.0)), Some(1.75), None),
+            (1.75, 1.75)
+        );
+        assert_eq!(
+            resolve_effective_scale("auto", 1.1, Some((3840, 2160, 1.0)), None, None),
+            (2.0, 2.2)
+        );
+        assert_eq!(
+            resolve_effective_scale("150%", 1.0, Some((3840, 2160, 1.0)), None, None),
+            (1.5, 1.5)
+        );
+
+        let (inner_4k, _, exceeds_4k) = compute_startup_window_size([1400.0, 860.0], [900.0, 600.0], 2.0, Some([3840.0, 2160.0]));
+        assert_eq!(inner_4k, [2800.0, 1720.0]);
+        assert!(!exceeds_4k);
+        let (inner_small, min_small, exceeds_small) = compute_startup_window_size([1400.0, 860.0], [900.0, 600.0], 1.0, Some([1366.0, 768.0]));
+        assert_eq!(inner_small, [1350.0, 720.0]);
+        assert_eq!(min_small, [900.0, 600.0]);
+        assert!(exceeds_small);
+
+        // Zoom persistence: attach_workspace + sync_look must never overwrite saved zoom on startup before egui commits new_zoom_factor
+        let root = std::env::temp_dir().join(format!("nyx-zoom-persist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut ws = Workspace::open(&root).unwrap();
+        ws.settings.zoom = 1.6;
+        ws.save_settings().unwrap();
+
+        let mut app = App::with_context(egui::Context::default());
+        app.shell.display_phys = Some((1920, 1080, 1.0));
+        app.attach_workspace(root.clone());
+        assert_eq!(app.shell.settings().zoom, 1.6);
+        assert_eq!(Workspace::open(&root).unwrap().settings.zoom, 1.6);
+
+        let ctx = app.ctx.clone();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.shell_ui(ui);
+        });
+        out.textures_delta.clear();
+        assert_eq!(Workspace::open(&root).unwrap().settings.zoom, 1.6);
+        assert!((app.ctx.zoom_factor() - 1.6).abs() < 1e-4);
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }

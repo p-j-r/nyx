@@ -190,14 +190,14 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
 | `crates/nyx-storage/*` | 107, 62, 99 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF, sweep checkpoint |
-| `crates/nyx-store/*` | 14, 39 | JSON specs and the card function (39) |
-| `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124 | colour tokens as data, the looks built from them, the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
+| `crates/nyx-store/*` | 14, 39, 130 | JSON specs, settings (`scale_mode`, `zoom`), and the card function (39) |
+| `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124, 130 | colour tokens as data, the looks built from them (`weak_text_color`), the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/src/console.rs` | 123, 122 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
-| `crates/app/src/{feedback,spans}.rs` | 92 | the problem and size lines of an edit, the polarization thread, and the timing spans of the frame log |
-| `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23, 124 | the workflow view: the one bar, the five tabs with the viewport always on, the Results tab, the runs page, the script dock, the spec key that ignores the physics on show |
-| `crates/app/src/*` | 23 | |
-| `crates/app/*` | 23 | |
+| `crates/app/src/{feedback,spans}.rs` | 92, 130 | the problem and size lines of an edit (`Feedback::is_busy`), the polarization thread, and the timing spans of the frame log |
+| `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23, 124, 130 | the workflow view: the one bar, the five tabs with the viewport always on, high-DPI scaling/persistence (`NYX_SCALE`, `scale_mode`), WSL workspace hint, responsive cards, non-overlapping toolbars |
+| `crates/app/src/*` | 23, 130 | window startup/WSLg backend selection, repaint bursts, opaque clear, pointer/zoom handling, mode plot integer ticks, shell `--script` driver |
+| `crates/app/*` | 23, 130 | |
 | `crates/nyx-mcp/tests/{contracts,stdio}.rs` | 94, 97, 19, 15 | the `mcp_tools.v3` snapshot (four tools), the handshake, and the gate of S7: the P0 workflows in script mode against the per-command baseline |
 | `crates/nyx-mcp/tests/{reset_session,multi_session}.rs` | 113, 94 | `reset_session` REPL global reset and isolated concurrent multi-session (`session`) MCP tests |
 | `crates/nyx-mcp/*` | 94, 97, 15, 113 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels |
@@ -295,7 +295,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 125, 126, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, `bug2`–`bug5`, and thread determinism |
 | `crates/nyx-engine/tests/fr25_33_e2e.rs` | 125, 126, 127 | end-to-end post-SQuADDS (`FR-25..FR-33`) integration tests through `Engine::call` (`ibc_mode: "perturbative"`, hybrid quasi-electrostatic TLS, and `ems::driven` `blr`/`ams_fgmres` + memory calibration) |
 | `crates/nyx-engine/tests/piezo_driven_network.rs` | 129, 106, 118 | Mason 1D BAW driven piezo FEM -> `NetworkAnalysis` and `piezo_resonator` mBVD round-trip tests |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129 | `Project`, commands, jobs, store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130 | `Project`, commands, jobs, store wiring (`card_of` swept 3D), pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
 | `crates/nyx-script/src/kernel.rs` | 94, 93, 113 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, and worker recovery |

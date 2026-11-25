@@ -14,5 +14,5 @@ One page per component, C4 level 4. [Component view](../../3-components/engine.m
 | [Materials](./materials.md) | 2 | 1159 | 28 | 2 |
 | [Analyses](./analyse.md) | 2 | 911 | 8 | 1 |
 | [Results files](./resultsIO.md) | 3 | 1702 | 27 | 7 |
-| [Store link](./storeLink.md) | 1 | 360 | 12 | 2 |
+| [Store link](./storeLink.md) | 1 | 408 | 12 | 2 |
 | [Registry and facade](./registry.md) | 1 | 107 | 2 | 0 |

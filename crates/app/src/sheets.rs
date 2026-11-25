@@ -817,6 +817,9 @@ impl App {
                         ui.label(RichText::new("WHERE THINGS LIVE").size(12.5).strong());
                         ui.label(kit::mono(root.display().to_string()));
                         ui.label(kit::muted(ui, "One folder per workflow. Move it and nyx follows (set NYX_WORKSPACE). Back it up like any folder.").size(12.5));
+                        if crate::shell::is_wsl() {
+                            ui.label(kit::muted(ui, "Under WSL, the default workspace lives under /home/<user>/Documents/nyx inside Linux (separate from Windows Documents\\nyx unless NYX_WORKSPACE is set).").size(12.5));
+                        }
                         if ui.link("Open in file manager").clicked() {
                             self.reveal(&root);
                         }
@@ -877,7 +880,7 @@ impl App {
                     kit::plain_card(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("UNITS AND LOOK").size(12.5).strong());
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Theme");
                             for (t, l) in [("system", "Follow system"), ("light", "Light"), ("dark", "Dark")] {
                                 if ui.selectable_label(s.theme == t, l).clicked() {
@@ -885,7 +888,24 @@ impl App {
                                 }
                             }
                         });
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Interface size");
+                            for (t, l) in [
+                                ("auto", "Automatic"),
+                                ("100%", "100%"),
+                                ("125%", "125%"),
+                                ("150%", "150%"),
+                                ("175%", "175%"),
+                                ("200%", "200%"),
+                            ] {
+                                if ui.selectable_label(s.scale_mode == t, l).clicked() {
+                                    s.scale_mode = t.into();
+                                    s.zoom = 1.0;
+                                }
+                            }
+                        });
+                        ui.label(kit::muted(ui, "Automatic picks a legible scale on high-DPI screens. Use Ctrl+= / Ctrl+- to zoom or Ctrl+0 to reset (NYX_SCALE overrides from the environment).").size(12.5));
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Contrast");
                             for (t, l) in [("auto", "Follow system"), ("standard", "Standard"), ("high", "High")] {
                                 if ui.selectable_label(s.contrast == t, l).clicked() {
@@ -895,7 +915,7 @@ impl App {
                         });
                         ui.label(kit::muted(ui, "High contrast: stronger edges on every control. Follow system reads the Windows High Contrast setting; on other systems it stays standard.").size(12.5));
                         ui.checkbox(&mut s.reduce_motion, "Reduce motion (no sliding progress bar, no easing)");
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Canvas");
                             for (t, l) in [("dark", "Always dark"), ("theme", "Follow the look")] {
                                 if ui.selectable_label(s.canvas == t, l).clicked() {
@@ -904,7 +924,7 @@ impl App {
                             }
                         });
                         ui.label(kit::muted(ui, "The canvas is the background of the model and the plots. Dark is the default also in a light window; the region colours are chosen for the canvas that is drawn.").size(12.5));
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Colour regions by");
                             for (t, l) in [("material", "Material"), ("region", "Region")] {
                                 if ui.selectable_label(s.region_colouring == t, l).clicked() {

@@ -122,16 +122,53 @@ fn main() -> eframe::Result {
         }
     }
     let arg = args.first().cloned();
-    let mut viewport = eframe::egui::ViewportBuilder::default().with_inner_size(size).with_min_inner_size([900.0, 600.0]).with_title("nyx").with_drag_and_drop(true);
+    let script_has_scale = script
+        .as_ref()
+        .is_some_and(|s| s.split(';').any(|c| c.trim().starts_with("scale ")));
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_inner_size(size)
+        .with_min_inner_size([900.0, 600.0])
+        .with_title("nyx")
+        .with_drag_and_drop(true)
+        .with_visible(true)
+        .with_active(true)
+        .with_transparent(false)
+        .with_clamp_size_to_monitor_size(true);
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);
     }
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
-    eframe::run_native(
+    let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    let wslg = shell::is_wsl();
+    if wslg {
+        // Explicit FIFO presentation with single-frame queue prevents stale swapchain/compositor borders on WSLg resize/maximize.
+        options.wgpu_options.surface = eframe::SurfaceConfig {
+            present_mode: eframe::wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: Some(1),
+        };
+    }
+    #[cfg(target_os = "linux")]
+    let backend_choice = configure_linux_backend(&mut options, wslg);
+    let res = eframe::run_native(
         "nyx",
         options,
         Box::new(move |cc| {
             let mut a = app::App::new(cc);
+            if !script_has_scale {
+                apply_startup_window_geometry(cc, size, a.shell.last_zoom, script.is_none());
+            } else {
+                cc.egui_ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Visible(true));
+            }
+            if wslg && script.is_none() {
+                if let Some(rs) = &cc.wgpu_render_state {
+                    let info = rs.adapter.get_info();
+                    if info.device_type == eframe::wgpu::DeviceType::Cpu {
+                        eprintln!(
+                            "nyx: running under WSLg with software rendering ({}); graphics may be slower.",
+                            info.name
+                        );
+                    }
+                }
+            }
             #[cfg(windows)]
             if script.is_none() && std::env::var_os("NYX_NATIVE_MENU").is_some() {
                 a.shell.native_menu = menu::Native::install(cc);
@@ -145,7 +182,91 @@ fn main() -> eframe::Result {
             }
             Ok(Box::new(a))
         }),
-    )
+    );
+    #[cfg(target_os = "linux")]
+    if let Err(err) = &res {
+        if wslg {
+            eprintln!(
+                "nyx: GUI window failed on {backend_choice} under WSLg ({err}). Try WINIT_UNIX_BACKEND=x11 if Wayland is unstable."
+            );
+        }
+    }
+    res
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_backend(options: &mut eframe::NativeOptions, wslg: bool) -> &'static str {
+    use winit::platform::wayland::EventLoopBuilderExtWayland;
+    use winit::platform::x11::EventLoopBuilderExtX11;
+    let req = std::env::var("WINIT_UNIX_BACKEND").ok().map(|s| s.to_ascii_lowercase());
+    let has_x11 = std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty());
+    let has_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+        || std::env::var_os("WAYLAND_SOCKET").is_some_and(|v| !v.is_empty());
+    match req.as_deref() {
+        Some("x11") => {
+            options.event_loop_builder = Some(Box::new(|b| {
+                b.with_x11();
+            }));
+            "x11"
+        }
+        Some("wayland") => {
+            options.event_loop_builder = Some(Box::new(|b| {
+                b.with_wayland();
+            }));
+            "wayland"
+        }
+        _ if wslg && has_x11 => {
+            // WSLg's Wayland socket frequently fails with `Broken pipe (os error 32)`; X11/XWayland is reliable.
+            options.event_loop_builder = Some(Box::new(|b| {
+                b.with_x11();
+            }));
+            "x11"
+        }
+        _ if has_wayland => "wayland",
+        _ => "default",
+    }
+}
+
+fn apply_startup_window_geometry(
+    cc: &eframe::CreationContext<'_>,
+    req_logical: [f32; 2],
+    scale: f32,
+    allow_maximize: bool,
+) {
+    let mon_logical = cc.winit_window().and_then(|w| w.current_monitor()).map(|m| {
+        let sf = m.scale_factor().max(0.5) as f32;
+        let sz = m.size();
+        [sz.width as f32 / sf, sz.height as f32 / sf]
+    });
+    let (inner, min_inner, exceeds) =
+        shell::compute_startup_window_size(req_logical, [900.0, 600.0], scale, mon_logical);
+    cc.egui_ctx.send_viewport_cmd(eframe::egui::ViewportCommand::MinInnerSize(min_inner.into()));
+    cc.egui_ctx.send_viewport_cmd(eframe::egui::ViewportCommand::InnerSize(inner.into()));
+    if let Some(w) = cc.winit_window() {
+        let _ = w.request_inner_size(winit::dpi::LogicalSize::new(inner[0], inner[1]));
+        if let (Some(m), Ok(pos)) = (w.current_monitor(), w.outer_position()) {
+            let mpos = m.position();
+            let msz = m.size();
+            let sf = m.scale_factor().max(0.5) as f32;
+            let phys_w = (inner[0] * sf).round() as i32;
+            let phys_h = (inner[1] * sf).round() as i32;
+            let max_x = mpos.x + (msz.width as i32 - phys_w).max(0);
+            let max_y = mpos.y + (msz.height as i32 - phys_h).max(0);
+            let nx = pos.x.clamp(mpos.x, max_x);
+            let ny = pos.y.clamp(mpos.y, max_y);
+            if nx != pos.x || ny != pos.y {
+                w.set_outer_position(winit::dpi::PhysicalPosition::new(nx, ny));
+            }
+        }
+        w.set_visible(true);
+    }
+    cc.egui_ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Visible(true));
+    if allow_maximize {
+        cc.egui_ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
+        if exceeds {
+            cc.egui_ctx.send_viewport_cmd(eframe::egui::ViewportCommand::Maximized(true));
+        }
+    }
 }
 
 /// The nyx mark as the icon of the window (title bar, taskbar, Alt+Tab): the same picture as the top bar, scaled once with a good filter.
