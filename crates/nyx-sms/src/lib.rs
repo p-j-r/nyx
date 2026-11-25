@@ -455,6 +455,8 @@ impl Physics for Sms {
                 FieldDesc::new("Re uz", "a.u.", &[], "real part of the vertical (z) component"),
                 FieldDesc::new("Re uy", "a.u.", &[], "real part of the longitudinal (y) component"),
                 FieldDesc::new("|uy|", "a.u.", &[], "magnitude of the longitudinal (y) component"),
+                FieldDesc::new("Re phi", "a.u.", &[], "real part of the electric potential of a mode (piezoelectric)"),
+                FieldDesc::new("|phi|", "a.u.", &[], "magnitude of the electric potential of a mode (piezoelectric)"),
             ],
             _ => vec![],
         }
@@ -611,11 +613,6 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
         } else if matches!(problem.study, Study::Modes { .. }) {
             if mixed.dim != 2 {
                 return Err(Error::invalid("the waveguide modes study needs a 2D mesh (the (x, z) cross-section)"));
-            }
-            if problem.uses_piezoelectric() {
-                return Err(Error::Unsupported(
-                    "piezoelectric coupling in the waveguide modes study is not yet enabled".into(),
-                ));
             }
             problem.check_modes()?;
             if use_mixed {

@@ -203,7 +203,7 @@ fn recover_phi_real(k_pp: &RCsr, k_pu: &RCsr, u_vecs: &[Vec<f64>]) -> Result<Vec
     Ok(out)
 }
 
-fn recover_phi_complex(k_pp: &CCsr, k_pu: &CCsr, u_vecs: &[Vec<C64>]) -> Result<Vec<Vec<C64>>, String> {
+pub(crate) fn recover_phi_complex(k_pp: &CCsr, k_pu: &CCsr, u_vecs: &[Vec<C64>]) -> Result<Vec<Vec<C64>>, String> {
     let n_phi = k_pp.nrows();
     if n_phi == 0 {
         return Ok(vec![Vec::new(); u_vecs.len()]);
@@ -222,12 +222,275 @@ fn recover_phi_complex(k_pp: &CCsr, k_pu: &CCsr, u_vecs: &[Vec<C64>]) -> Result<
     Ok(out)
 }
 
-struct PiezoModeSolved {
-    freqs: Vec<C>,
-    full_vecs: Vec<Vec<C>>,
-    dim: usize,
-    converged: bool,
-    backend: FactorBackend,
+pub(crate) struct PiezoComplexEigenInput<'a> {
+    pub n_u: usize,
+    pub n_tot: usize,
+    pub n_modes: usize,
+    pub f_search: f64,
+    pub is_hermitian: bool,
+    pub has_pml: bool,
+    pub has_dielectric_loss: bool,
+    pub n_pairs: usize,
+    pub k_red: &'a CCsr,
+    pub m_uu_red: &'a CCsr,
+    pub c_uu_red: Option<&'a CCsr>,
+    pub k_pp_red: &'a CCsr,
+    pub k_pu_red: &'a CCsr,
+}
+
+pub(crate) struct PiezoComplexEigenSolved {
+    pub freqs: Vec<C>,
+    pub reduced_vecs: Vec<Vec<C>>,
+    pub dim: usize,
+    pub converged: bool,
+    pub backend: FactorBackend,
+}
+
+pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> Result<PiezoComplexEigenSolved, String> {
+    let (n_u, n_tot, nev, f_search) = (input.n_u, input.n_tot, input.n_modes, input.f_search);
+    if n_u == 0 {
+        return Err("no free mechanical degrees of freedom remain".into());
+    }
+    if nev < 1 || nev + 1 >= n_u {
+        return Err(format!("number of modes ({nev}) must be between 1 and free mechanical dofs - 2 ({n_u})"));
+    }
+    let k_red = input.k_red;
+    let m_uu = input.m_uu_red;
+    let k_pp = input.k_pp_red;
+    let k_pu = input.k_pu_red;
+
+    let Some(c_uu) = input.c_uu_red else {
+        let sigma_phys = if f_search > 0.0 { (2.0 * PI * f_search).powi(2) } else { -1.0 };
+        let lam_scale = if f_search > 0.0 {
+            (2.0 * PI * f_search).powi(2).max(1.0)
+        } else {
+            estimate_omega2_scale(k_red, m_uu, n_u)
+        };
+        let sigma_dimless = if f_search > 0.0 { c(sigma_phys / lam_scale, 0.0) } else { c(-1e-4, 0.0) };
+        let m_uu_scaled = m_uu.map(|v| v * c(lam_scale, 0.0));
+        let mut m_full_coo = femcore::linalg::csr::CCoo::new(n_tot, n_tot);
+        for r in 0..n_u {
+            let (cols, vals) = m_uu_scaled.row(r);
+            for (&col, &val) in cols.iter().zip(vals) {
+                m_full_coo.push(r, col as usize, val);
+            }
+        }
+        let m_full = m_full_coo.to_csr();
+        let d_scale =
+            compute_piezo_complex_scaling(n_tot, n_u, k_red, &[(k_red, 1.0), (&m_full, sigma_dimless.norm().max(1.0))]);
+        let k_hat = scale_symmetric(k_red, &d_scale);
+        let m_hat = scale_symmetric(&m_full, &d_scale);
+
+        let mut fac = ShiftedFactorization::new(&k_hat, Some(&m_hat), Definiteness::General)
+            .map_err(|e| format!("complex coupled piezo factorisation failed: {e}"))?;
+        fac.set_shift(sigma_dimless).map_err(|e| format!("complex coupled piezo shifted factorisation failed: {e}"))?;
+
+        let block = nev.min(8).min(n_u).max(1);
+        let eps = EpsOptions {
+            which: Which::LargestMagnitude,
+            tol: 1e-9,
+            block_size: block,
+            ..if input.is_hermitian { EpsOptions::hermitian(nev) } else { EpsOptions::general(nev) }
+        };
+        let op = SchurShiftInvertOp { n_u, n_tot, m_uu_scaled: &m_uu_scaled, fac: &fac, d_scale: &d_scale };
+        let weight: Option<&dyn LinearOperator<C64>> = if input.is_hermitian { Some(&m_uu_scaled) } else { None };
+        let res = catching_cancel(|| krylov_schur(&op, weight, None, &eps))?
+            .map_err(|e| format!("complex coupled piezo eigensolver failed: {e}"))?;
+
+        let th_max = res.values.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
+        let th_cut = 1e-15 * th_max;
+        let mut ku_buf = vec![C64::ZERO; n_tot];
+        let mut mu_buf = vec![C64::ZERO; n_u];
+        let mut pairs: Vec<(C64, Vec<C64>)> = Vec::with_capacity(res.values.len());
+
+        let u_raws: Vec<Vec<C64>> = (0..res.values.len()).map(|i| res.vectors.col(i).to_vec()).collect();
+        let p_vecs = recover_phi_complex(k_pp, k_pu, &u_raws)?;
+        let k_diag_scale = k_red.diagonal()[..n_u].iter().map(|z| z.norm()).fold(0.0_f64, f64::max).max(1.0);
+
+        for (i, &th) in res.values.iter().enumerate() {
+            if th.norm() == 0.0 || th.norm() < th_cut {
+                continue;
+            }
+            let mu = sigma_dimless + C64::ONE / th;
+            if !mu.is_finite() {
+                continue;
+            }
+            let lam = mu * lam_scale;
+            let mut f = lam.sqrt() / (2.0 * PI);
+            if f.re < 0.0 {
+                f = -f;
+            }
+            if input.n_pairs > 0 || input.has_pml {
+                let mut x_red = Vec::with_capacity(n_tot);
+                x_red.extend_from_slice(&u_raws[i]);
+                x_red.extend_from_slice(&p_vecs[i]);
+                k_red.spmv(&x_red, &mut ku_buf);
+                m_uu.spmv(&u_raws[i], &mut mu_buf);
+                let r_norm: f64 = (0..n_u).map(|r| (ku_buf[r] - lam * mu_buf[r]).norm_sqr()).sum::<f64>().sqrt();
+                let u_norm = norm2_vec(&u_raws[i]);
+                let denom =
+                    norm2_vec(&ku_buf[..n_u]) + lam.norm() * norm2_vec(&mu_buf) + k_diag_scale * u_norm * 1e-4 + 1e-300;
+                if input.n_pairs > 0 && r_norm / denom >= 1e-5 {
+                    continue;
+                }
+            }
+            let mut x_red = Vec::with_capacity(n_tot);
+            x_red.extend_from_slice(&u_raws[i]);
+            x_red.extend_from_slice(&p_vecs[i]);
+            pairs.push((f, x_red));
+        }
+        if f_search > 0.0 {
+            pairs.sort_by(|a, b| (a.0.re - f_search).abs().total_cmp(&(b.0.re - f_search).abs()));
+        } else {
+            pairs.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
+        }
+        pairs.truncate(nev);
+        pairs.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
+        if pairs.is_empty() {
+            return Err("no eigenfrequencies converged near the shift".into());
+        }
+        return Ok(PiezoComplexEigenSolved {
+            freqs: pairs.iter().map(|(f, _)| *f).collect(),
+            reduced_vecs: pairs.into_iter().map(|(_, xr)| xr).collect(),
+            dim: res.ncv,
+            converged: res.reason == EpsReason::Converged,
+            backend: fac.stats().backend,
+        });
+    };
+
+    // Damped / LRB piezoelectric quadratic eigenproblem in dimensionless s = omega / omega_0
+    let omega_0 = if f_search > 0.0 { 2.0 * PI * f_search } else { estimate_omega2_scale(k_red, m_uu, n_u).sqrt() };
+    let s0 = if f_search > 0.0 { c(1.0, 0.0) } else { c(1e-3, 0.0) };
+
+    let a1_uu = c_uu.map(|v| v * c(0.0, omega_0));
+    let a2_uu = m_uu.map(|v| v * c(-omega_0 * omega_0, 0.0));
+    let p_prime_uu = Csr::axpby(c(1.0, 0.0), &a1_uu, s0 * 2.0, &a2_uu);
+
+    let pad_uu = |blk: &CCsr| -> CCsr {
+        let mut coo = femcore::linalg::csr::CCoo::new(n_tot, n_tot);
+        for r in 0..n_u {
+            let (cols, vals) = blk.row(r);
+            for (&col, &val) in cols.iter().zip(vals) {
+                coo.push(r, col as usize, val);
+            }
+        }
+        coo.to_csr()
+    };
+    let a1_full = pad_uu(&a1_uu);
+    let a2_full = pad_uu(&a2_uu);
+    let p_s0 = Csr::axpby(c(1.0, 0.0), &Csr::axpby(c(1.0, 0.0), k_red, s0, &a1_full), s0 * s0, &a2_full);
+
+    let d_scale = compute_piezo_complex_scaling(
+        n_tot,
+        n_u,
+        &p_s0,
+        &[(k_red, 1.0), (&a1_full, s0.norm().max(1.0)), (&a2_full, (s0 * s0).norm().max(1.0))],
+    );
+    let p_s0_hat = scale_symmetric(&p_s0, &d_scale);
+
+    let mut fac = ShiftedFactorization::new(&p_s0_hat, None, Definiteness::General)
+        .map_err(|e| format!("damped piezo QEP factorisation failed: {e}"))?;
+    fac.set_shift(C64::ZERO).map_err(|e| format!("damped piezo QEP shift failed: {e}"))?;
+
+    let nev_q = if f_search > 0.0 { nev } else { (2 * nev).min(2 * n_u - 1).max(nev) };
+    let block = nev_q.min(8).min(2 * n_u).max(1);
+    let eps = EpsOptions { which: Which::LargestMagnitude, tol: 1e-9, block_size: block, ..EpsOptions::general(nev_q) };
+    let op = SchurQepShiftInvertOp { n_u, n_tot, a2_uu: &a2_uu, p_prime_uu: &p_prime_uu, fac: &fac, d_scale: &d_scale };
+    let res = catching_cancel(|| krylov_schur(&op, None, None, &eps))?
+        .map_err(|e| format!("damped piezo QEP eigensolver failed: {e}"))?;
+
+    let th_max = res.values.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
+    let th_cut = 1e-15 * th_max;
+    let mut r0 = vec![C64::ZERO; n_u];
+    let mut r1 = vec![C64::ZERO; n_u];
+    let mut r2 = vec![C64::ZERO; n_u];
+    let k_uu = crate::piezo_asm::sub_csr(k_red, 0, n_u, 0, n_u);
+    let k_up = crate::piezo_asm::sub_csr(k_red, 0, n_u, n_u, n_tot);
+
+    let mut candidates: Vec<(C64, Vec<C64>)> = Vec::with_capacity(res.values.len());
+    for (i, &th) in res.values.iter().enumerate() {
+        if th.norm() == 0.0 || th.norm() < th_cut {
+            continue;
+        }
+        let s = s0 + C64::ONE / th;
+        if !s.is_finite() {
+            continue;
+        }
+        let u_raw = &res.vectors.col(i)[..n_u];
+        let un = norm2_vec(u_raw);
+        if un <= 1e-300 {
+            continue;
+        }
+        let mut u: Vec<C64> = u_raw.iter().map(|&z| z / un).collect();
+        let p_vec = recover_phi_complex(k_pp, k_pu, &[u.clone()])?.pop().unwrap_or_default();
+
+        k_uu.spmv(&u, &mut r0);
+        if k_up.ncols() > 0 {
+            let mut ku_p = vec![C64::ZERO; n_u];
+            k_up.spmv(&p_vec, &mut ku_p);
+            for k in 0..n_u {
+                r0[k] += ku_p[k];
+            }
+        }
+        a1_uu.spmv(&u, &mut r1);
+        a2_uu.spmv(&u, &mut r2);
+        let s2 = s * s;
+        let res_num: f64 = (0..n_u).map(|k| (r0[k] + s * r1[k] + s2 * r2[k]).norm_sqr()).sum::<f64>().sqrt();
+        let res_den = norm2_vec(&r0) + s.norm() * norm2_vec(&r1) + s2.norm() * norm2_vec(&r2) + 1e-300;
+        if res_num / res_den > 1e-4 {
+            continue;
+        }
+
+        let mut f = s * omega_0 / (2.0 * PI);
+        let mut p_fin = p_vec;
+        if f.re < -1e-6 * f.im.abs().max(1.0) {
+            if !input.has_pml && !input.has_dielectric_loss {
+                f = -f.conj();
+                u.iter_mut().for_each(|z| *z = z.conj());
+                p_fin.iter_mut().for_each(|z| *z = z.conj());
+            } else {
+                continue;
+            }
+        }
+        if f.re < 0.0 && f.re.abs() < 1e-9 * f.norm().max(1.0) {
+            f.re = 0.0;
+        }
+
+        let dup = candidates.iter().any(|(fc, _)| (*fc - f).norm() <= 1e-6 * f.norm().max(1.0));
+        if !dup {
+            let mut x_red = Vec::with_capacity(n_tot);
+            x_red.extend(u);
+            x_red.extend(p_fin);
+            candidates.push((f, x_red));
+        }
+    }
+
+    if candidates.is_empty() {
+        return Err("no coupled piezoelectric eigenfrequencies converged near the shift".into());
+    }
+    if f_search > 0.0 {
+        candidates.sort_by(|a, b| (a.0.re - f_search).abs().total_cmp(&(b.0.re - f_search).abs()));
+    } else {
+        candidates.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
+    }
+    candidates.truncate(nev);
+    candidates.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
+
+    Ok(PiezoComplexEigenSolved {
+        freqs: candidates.iter().map(|(f, _)| *f).collect(),
+        reduced_vecs: candidates.into_iter().map(|(_, xr)| xr).collect(),
+        dim: res.ncv,
+        converged: res.reason == EpsReason::Converged,
+        backend: fac.stats().backend,
+    })
+}
+
+pub(crate) struct PiezoModeSolved {
+    pub freqs: Vec<C>,
+    pub full_vecs: Vec<Vec<C>>,
+    pub dim: usize,
+    pub converged: bool,
+    pub backend: FactorBackend,
 }
 
 fn solve_piezo_eigen_modes(asm: &PiezoEigenAssembly) -> Result<PiezoModeSolved, String> {
@@ -320,243 +583,29 @@ fn solve_piezo_eigen_modes(asm: &PiezoEigenAssembly) -> Result<PiezoModeSolved, 
         });
     }
 
-    if !asm.has_damping {
-        let k_red = asm.k_red_c.as_ref().expect("complex K_red");
-        let m_uu = asm.m_uu_red_c.as_ref().expect("complex M_uu_red");
-        let sigma_phys = if f_search > 0.0 { (2.0 * PI * f_search).powi(2) } else { -1.0 };
-        let lam_scale = if f_search > 0.0 {
-            (2.0 * PI * f_search).powi(2).max(1.0)
-        } else {
-            estimate_omega2_scale(k_red, m_uu, n_u)
-        };
-        let sigma_dimless = if f_search > 0.0 { c(sigma_phys / lam_scale, 0.0) } else { c(-1e-4, 0.0) };
-        let m_uu_scaled = m_uu.map(|v| v * c(lam_scale, 0.0));
-        let mut m_full_coo = femcore::linalg::csr::CCoo::new(n_tot, n_tot);
-        for r in 0..n_u {
-            let (cols, vals) = m_uu_scaled.row(r);
-            for (&col, &val) in cols.iter().zip(vals) {
-                m_full_coo.push(r, col as usize, val);
-            }
-        }
-        let m_full = m_full_coo.to_csr();
-        let d_scale =
-            compute_piezo_complex_scaling(n_tot, n_u, k_red, &[(k_red, 1.0), (&m_full, sigma_dimless.norm().max(1.0))]);
-        let k_hat = scale_symmetric(k_red, &d_scale);
-        let m_hat = scale_symmetric(&m_full, &d_scale);
-
-        let mut fac = ShiftedFactorization::new(&k_hat, Some(&m_hat), Definiteness::General)
-            .map_err(|e| format!("complex coupled piezo factorisation failed: {e}"))?;
-        fac.set_shift(sigma_dimless).map_err(|e| format!("complex coupled piezo shifted factorisation failed: {e}"))?;
-
-        let block = nev.min(8).min(n_u);
-        let eps = EpsOptions {
-            which: Which::LargestMagnitude,
-            tol: 1e-9,
-            block_size: block,
-            ..if asm.is_hermitian { EpsOptions::hermitian(nev) } else { EpsOptions::general(nev) }
-        };
-        let op = SchurShiftInvertOp { n_u, n_tot, m_uu_scaled: &m_uu_scaled, fac: &fac, d_scale: &d_scale };
-        let weight: Option<&dyn LinearOperator<C64>> = if asm.is_hermitian { Some(&m_uu_scaled) } else { None };
-        let res = catching_cancel(|| krylov_schur(&op, weight, None, &eps))?
-            .map_err(|e| format!("complex coupled piezo eigensolver failed: {e}"))?;
-
-        let th_max = res.values.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
-        let th_cut = 1e-15 * th_max;
-        let mut ku_buf = vec![C64::ZERO; n_tot];
-        let mut mu_buf = vec![C64::ZERO; n_u];
-        let mut pairs: Vec<(C64, Vec<C64>)> = Vec::with_capacity(res.values.len());
-        let k_pu = asm.k_pu_red_c.as_ref().unwrap();
-        let k_pp = asm.k_pp_red_c.as_ref().unwrap();
-
-        let u_raws: Vec<Vec<C64>> = (0..res.values.len()).map(|i| res.vectors.col(i).to_vec()).collect();
-        let p_vecs = recover_phi_complex(k_pp, k_pu, &u_raws)?;
-        let k_diag_scale = k_red.diagonal()[..n_u].iter().map(|z| z.norm()).fold(0.0_f64, f64::max).max(1.0);
-
-        for (i, &th) in res.values.iter().enumerate() {
-            if th.norm() == 0.0 || th.norm() < th_cut {
-                continue;
-            }
-            let mu = sigma_dimless + C64::ONE / th;
-            if !mu.is_finite() {
-                continue;
-            }
-            let lam = mu * lam_scale;
-            let mut f = lam.sqrt() / (2.0 * PI);
-            if f.re < 0.0 {
-                f = -f;
-            }
-            if asm.n_pairs > 0 || asm.has_pml {
-                let mut x_red = Vec::with_capacity(n_tot);
-                x_red.extend_from_slice(&u_raws[i]);
-                x_red.extend_from_slice(&p_vecs[i]);
-                k_red.spmv(&x_red, &mut ku_buf);
-                m_uu.spmv(&u_raws[i], &mut mu_buf);
-                let r_norm: f64 = (0..n_u).map(|r| (ku_buf[r] - lam * mu_buf[r]).norm_sqr()).sum::<f64>().sqrt();
-                let u_norm = norm2_vec(&u_raws[i]);
-                let denom =
-                    norm2_vec(&ku_buf[..n_u]) + lam.norm() * norm2_vec(&mu_buf) + k_diag_scale * u_norm * 1e-4 + 1e-300;
-                if asm.n_pairs > 0 && r_norm / denom >= 1e-5 {
-                    continue;
-                }
-            }
-            let mut x_red = Vec::with_capacity(n_tot);
-            x_red.extend_from_slice(&u_raws[i]);
-            x_red.extend_from_slice(&p_vecs[i]);
-            pairs.push((f, x_red));
-        }
-        if f_search > 0.0 {
-            pairs.sort_by(|a, b| (a.0.re - f_search).abs().total_cmp(&(b.0.re - f_search).abs()));
-        } else {
-            pairs.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
-        }
-        pairs.truncate(nev);
-        pairs.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
-        if pairs.is_empty() {
-            return Err("no eigenfrequencies converged near the shift".into());
-        }
-        let full_vecs =
-            pairs.iter().map(|(_, xr)| asm.constraints.red_all.expand_with(xr, &asm.constraints.g_all)).collect();
-        return Ok(PiezoModeSolved {
-            freqs: pairs.into_iter().map(|(f, _)| f).collect(),
-            full_vecs,
-            dim: res.ncv,
-            converged: res.reason == EpsReason::Converged,
-            backend: fac.stats().backend,
-        });
-    }
-
-    // Damped / LRB piezoelectric quadratic eigenproblem in dimensionless s = omega / omega_0
-    let k_red = asm.k_red_c.as_ref().expect("complex K_red");
-    let m_uu = asm.m_uu_red_c.as_ref().expect("complex M_uu_red");
-    let c_uu = asm.c_uu_red_c.as_ref().expect("complex C_uu_red");
-    let omega_0 = if f_search > 0.0 { 2.0 * PI * f_search } else { estimate_omega2_scale(k_red, m_uu, n_u).sqrt() };
-    let s0 = if f_search > 0.0 { c(1.0, 0.0) } else { c(1e-3, 0.0) };
-
-    let a1_uu = c_uu.map(|v| v * c(0.0, omega_0));
-    let a2_uu = m_uu.map(|v| v * c(-omega_0 * omega_0, 0.0));
-    let p_prime_uu = Csr::axpby(c(1.0, 0.0), &a1_uu, s0 * 2.0, &a2_uu);
-
-    let pad_uu = |blk: &CCsr| -> CCsr {
-        let mut coo = femcore::linalg::csr::CCoo::new(n_tot, n_tot);
-        for r in 0..n_u {
-            let (cols, vals) = blk.row(r);
-            for (&col, &val) in cols.iter().zip(vals) {
-                coo.push(r, col as usize, val);
-            }
-        }
-        coo.to_csr()
-    };
-    let a1_full = pad_uu(&a1_uu);
-    let a2_full = pad_uu(&a2_uu);
-    let p_s0 = Csr::axpby(c(1.0, 0.0), &Csr::axpby(c(1.0, 0.0), k_red, s0, &a1_full), s0 * s0, &a2_full);
-
-    let d_scale = compute_piezo_complex_scaling(
-        n_tot,
+    let solved = solve_piezo_complex_schur(&PiezoComplexEigenInput {
         n_u,
-        &p_s0,
-        &[(k_red, 1.0), (&a1_full, s0.norm().max(1.0)), (&a2_full, (s0 * s0).norm().max(1.0))],
-    );
-    let p_s0_hat = scale_symmetric(&p_s0, &d_scale);
-
-    let mut fac = ShiftedFactorization::new(&p_s0_hat, None, Definiteness::General)
-        .map_err(|e| format!("damped piezo QEP factorisation failed: {e}"))?;
-    fac.set_shift(C64::ZERO).map_err(|e| format!("damped piezo QEP shift failed: {e}"))?;
-
-    let nev_q = if f_search > 0.0 { nev } else { (2 * nev).min(2 * n_u - 1).max(nev) };
-    let block = nev_q.min(8).min(2 * n_u);
-    let eps = EpsOptions { which: Which::LargestMagnitude, tol: 1e-9, block_size: block, ..EpsOptions::general(nev_q) };
-    let op = SchurQepShiftInvertOp { n_u, n_tot, a2_uu: &a2_uu, p_prime_uu: &p_prime_uu, fac: &fac, d_scale: &d_scale };
-    let res = catching_cancel(|| krylov_schur(&op, None, None, &eps))?
-        .map_err(|e| format!("damped piezo QEP eigensolver failed: {e}"))?;
-
-    let th_max = res.values.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
-    let th_cut = 1e-15 * th_max;
-    let mut r0 = vec![C64::ZERO; n_u];
-    let mut r1 = vec![C64::ZERO; n_u];
-    let mut r2 = vec![C64::ZERO; n_u];
-    let k_uu = crate::piezo_asm::sub_csr(k_red, 0, n_u, 0, n_u);
-    let k_up = crate::piezo_asm::sub_csr(k_red, 0, n_u, n_u, n_tot);
-    let k_pp = asm.k_pp_red_c.as_ref().unwrap();
-    let k_pu = asm.k_pu_red_c.as_ref().unwrap();
-
-    let mut candidates: Vec<(C64, Vec<C64>)> = Vec::with_capacity(res.values.len());
-    for (i, &th) in res.values.iter().enumerate() {
-        if th.norm() == 0.0 || th.norm() < th_cut {
-            continue;
-        }
-        let s = s0 + C64::ONE / th;
-        if !s.is_finite() {
-            continue;
-        }
-        let u_raw = &res.vectors.col(i)[..n_u];
-        let un = norm2_vec(u_raw);
-        if un <= 1e-300 {
-            continue;
-        }
-        let mut u: Vec<C64> = u_raw.iter().map(|&z| z / un).collect();
-        let p_vec = recover_phi_complex(k_pp, k_pu, &[u.clone()])?.pop().unwrap_or_default();
-
-        k_uu.spmv(&u, &mut r0);
-        if k_up.ncols() > 0 {
-            let mut ku_p = vec![C64::ZERO; n_u];
-            k_up.spmv(&p_vec, &mut ku_p);
-            for k in 0..n_u {
-                r0[k] += ku_p[k];
-            }
-        }
-        a1_uu.spmv(&u, &mut r1);
-        a2_uu.spmv(&u, &mut r2);
-        let s2 = s * s;
-        let res_num: f64 = (0..n_u).map(|k| (r0[k] + s * r1[k] + s2 * r2[k]).norm_sqr()).sum::<f64>().sqrt();
-        let res_den = norm2_vec(&r0) + s.norm() * norm2_vec(&r1) + s2.norm() * norm2_vec(&r2) + 1e-300;
-        if res_num / res_den > 1e-4 {
-            continue;
-        }
-
-        let mut f = s * omega_0 / (2.0 * PI);
-        let mut p_fin = p_vec;
-        if f.re < -1e-6 * f.im.abs().max(1.0) {
-            if !asm.has_pml && !asm.mats.iter().any(|m| m.eps_im.iter().flatten().any(|&v| v != 0.0)) {
-                f = -f.conj();
-                u.iter_mut().for_each(|z| *z = z.conj());
-                p_fin.iter_mut().for_each(|z| *z = z.conj());
-            } else {
-                continue;
-            }
-        }
-        if f.re < 0.0 && f.re.abs() < 1e-9 * f.norm().max(1.0) {
-            f.re = 0.0;
-        }
-
-        // Deduplicate mirrored conjugates when searching near 0
-        let dup = candidates.iter().any(|(fc, _)| (*fc - f).norm() <= 1e-6 * f.norm().max(1.0));
-        if !dup {
-            let mut x_red = Vec::with_capacity(n_tot);
-            x_red.extend(u);
-            x_red.extend(p_fin);
-            candidates.push((f, x_red));
-        }
-    }
-
-    if candidates.is_empty() {
-        return Err("no coupled piezoelectric eigenfrequencies converged near the shift".into());
-    }
-    if f_search > 0.0 {
-        candidates.sort_by(|a, b| (a.0.re - f_search).abs().total_cmp(&(b.0.re - f_search).abs()));
-    } else {
-        candidates.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
-    }
-    candidates.truncate(nev);
-    candidates.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
-
+        n_tot,
+        n_modes: nev,
+        f_search,
+        is_hermitian: asm.is_hermitian,
+        has_pml: asm.has_pml,
+        has_dielectric_loss: asm.mats.iter().any(|m| m.eps_im.iter().flatten().any(|&v| v != 0.0)),
+        n_pairs: asm.n_pairs,
+        k_red: asm.k_red_c.as_ref().expect("complex K_red"),
+        m_uu_red: asm.m_uu_red_c.as_ref().expect("complex M_uu_red"),
+        c_uu_red: if asm.has_damping { asm.c_uu_red_c.as_ref() } else { None },
+        k_pp_red: asm.k_pp_red_c.as_ref().unwrap(),
+        k_pu_red: asm.k_pu_red_c.as_ref().unwrap(),
+    })?;
     let full_vecs =
-        candidates.iter().map(|(_, xr)| asm.constraints.red_all.expand_with(xr, &asm.constraints.g_all)).collect();
+        solved.reduced_vecs.iter().map(|xr| asm.constraints.red_all.expand_with(xr, &asm.constraints.g_all)).collect();
     Ok(PiezoModeSolved {
-        freqs: candidates.into_iter().map(|(f, _)| f).collect(),
+        freqs: solved.freqs,
         full_vecs,
-        dim: res.ncv,
-        converged: res.reason == EpsReason::Converged,
-        backend: fac.stats().backend,
+        dim: solved.dim,
+        converged: solved.converged,
+        backend: solved.backend,
     })
 }
 

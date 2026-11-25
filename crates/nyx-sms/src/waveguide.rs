@@ -6,6 +6,7 @@
 //! `femcore::section::plane_stiffness(c, 2)`. Supports both `SimplexMesh` and native
 //! `MixedDiscretisation` (`Tri` + `Quad`, straight and curved) with full `2x2` curvilinear PML Jacobians.
 
+use crate::piezo_mat::PiezoCellMat;
 use crate::pml::ResolvedPmlDomains;
 use femcore::fem::*;
 use femcore::fem_mixed::{lagrange_shape_into, quad_rule_mixed, IsoparametricCell, MixedLagrangeDofMap};
@@ -423,4 +424,418 @@ pub fn mode_energy_waveguide(
         }
     }
     out
+}
+
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+fn accumulate_waveguide_piezo_qpoint(
+    nloc: usize,
+    mat: &PiezoCellMat,
+    beta: C,
+    beta_h: C,
+    w_k: C,
+    w_coup: C,
+    vals: &[f64],
+    gx_gz: &[(C, C)],
+    b0: &mut [C],
+    b1: &mut [f64],
+    db: &mut [C],
+    ke_uu: &mut [C],
+    ce_uu: Option<&mut [C]>,
+    ke_up: &mut [C],
+    ke_pu: &mut [C],
+    ke_pp: &mut [C],
+) {
+    let nd = 3 * nloc;
+    if mat.mech_active {
+        accumulate_waveguide_qpoint(nloc, &mat.c6, beta, beta_h, w_k, vals, gx_gz, b0, b1, db, ke_uu);
+        if let Some(ce) = ce_uu {
+            if mat.eta.iter().flatten().any(|&v| v != 0.0) {
+                for s in 0..6 {
+                    for j in 0..nd {
+                        let mut acc = c(0.0, 0.0);
+                        for t in 0..6 {
+                            acc += (b0[t * nd + j] + beta * b1[t * nd + j]) * mat.eta[s][t];
+                        }
+                        db[s * nd + j] = acc;
+                    }
+                }
+                for i in 0..nd {
+                    for j in 0..nd {
+                        let mut acc = c(0.0, 0.0);
+                        for s in 0..6 {
+                            acc += (b0[s * nd + i] + beta_h * b1[s * nd + i]) * db[s * nd + j];
+                        }
+                        ce[i * nd + j] += acc * w_coup;
+                    }
+                }
+            }
+        }
+    }
+    if mat.elec_active {
+        let mut bphi_t = Vec::with_capacity(nloc);
+        let mut bphi_h = Vec::with_capacity(nloc);
+        for a in 0..nloc {
+            let (gx, gz) = gx_gz[a];
+            let nv = vals[a];
+            bphi_t.push([gx, gz, beta * nv]);
+            bphi_h.push([gx, gz, beta_h * nv]);
+        }
+        if mat.mech_active && mat.e.iter().flatten().any(|&v| v != 0.0) {
+            for i in 0..nd {
+                let mut be_h = [c(0.0, 0.0); 3];
+                for s in 0..6 {
+                    let b_si = b0[s * nd + i] + beta_h * b1[s * nd + i];
+                    for p in 0..3 {
+                        be_h[p] += b_si * mat.e[p][s];
+                    }
+                }
+                for a in 0..nloc {
+                    let mut acc = c(0.0, 0.0);
+                    for p in 0..3 {
+                        acc += be_h[p] * bphi_t[a][p];
+                    }
+                    ke_up[i * nloc + a] += acc * w_coup;
+                }
+            }
+            for j in 0..nd {
+                let mut e_b = [c(0.0, 0.0); 3];
+                for s in 0..6 {
+                    let b_sj = b0[s * nd + j] + beta * b1[s * nd + j];
+                    for p in 0..3 {
+                        e_b[p] += mat.e[p][s] * b_sj;
+                    }
+                }
+                for a in 0..nloc {
+                    let mut acc = c(0.0, 0.0);
+                    for p in 0..3 {
+                        acc += bphi_h[a][p] * e_b[p];
+                    }
+                    ke_pu[a * nd + j] += acc * w_coup;
+                }
+            }
+        }
+        let mut eps_c = [[c(0.0, 0.0); 3]; 3];
+        for p in 0..3 {
+            for q in 0..3 {
+                eps_c[p][q] = c(mat.eps_re[p][q], -mat.eps_im[p][q]);
+            }
+        }
+        for b in 0..nloc {
+            let mut eb = [c(0.0, 0.0); 3];
+            for p in 0..3 {
+                for q in 0..3 {
+                    eb[p] += eps_c[p][q] * bphi_t[b][q];
+                }
+            }
+            for a in 0..nloc {
+                let mut acc = c(0.0, 0.0);
+                for p in 0..3 {
+                    acc += bphi_h[a][p] * eb[p];
+                }
+                ke_pp[a * nloc + b] += acc * w_coup;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_waveguide_piezo_cell(
+    kc: &mut CCoo,
+    mc: &mut CCoo,
+    cc: &mut Option<CCoo>,
+    n1: usize,
+    cell_dofs: &[usize],
+    mat: &PiezoCellMat,
+    has_eta: bool,
+    ke_uu: &[C],
+    me: &[C],
+    ce_uu: &[C],
+    ke_up: &[C],
+    ke_pu: &[C],
+    ke_pp: &mut [C],
+    u_dofs: &mut Vec<usize>,
+    p_dofs: &mut Vec<usize>,
+) {
+    u_dofs.clear();
+    for k in 0..3 {
+        u_dofs.extend(cell_dofs.iter().map(|&d| d + k * n1));
+    }
+    p_dofs.clear();
+    p_dofs.extend(cell_dofs.iter().map(|&d| d + 3 * n1));
+    let nloc = cell_dofs.len();
+
+    if mat.mech_active {
+        kc.push_block(u_dofs, u_dofs, ke_uu);
+        for k in 0..3 {
+            let comp = &u_dofs[k * nloc..(k + 1) * nloc];
+            mc.push_block(comp, comp, me);
+        }
+        if has_eta && mat.eta.iter().flatten().any(|&v| v != 0.0) {
+            if let Some(c_coo) = cc.as_mut() {
+                c_coo.push_block(u_dofs, u_dofs, ce_uu);
+            }
+        }
+        if mat.elec_active && mat.e.iter().flatten().any(|&v| v != 0.0) {
+            kc.push_block(u_dofs, p_dofs, ke_up);
+            kc.push_block(p_dofs, u_dofs, ke_pu);
+        }
+    }
+    if mat.elec_active {
+        for x in ke_pp.iter_mut() {
+            *x = -*x;
+        }
+        kc.push_block(p_dofs, p_dofs, ke_pp);
+    }
+}
+
+/// Assembles 4-block `(u_x, u_z, u_y, phi)` coupled piezoelectric waveguide matrices
+/// `(K_full, M_uu, C_eta_opt)` on a 2D [`Discretisation`] (`SimplexMesh`).
+pub(crate) fn assemble_waveguide_piezo_simplex(
+    mesh: &Discretisation,
+    mats: &[PiezoCellMat],
+    order: usize,
+    q: f64,
+    resolved: Option<&ResolvedPmlDomains>,
+) -> Result<(CCsr, CCsr, Option<CCsr>), String> {
+    if mesh.dim != 2 {
+        return Err("a waveguide cross-section model needs a 2D mesh".into());
+    }
+    let has_pml = resolved.is_some();
+    let has_eta = mats.iter().any(|m| m.mech_active && m.eta.iter().flatten().any(|&v| v != 0.0));
+    let deg = if has_pml { 2 * order + 4 } else { 2 * order + 2 };
+    let re = RefElement::new(2, order, deg);
+    let geo = geometry(mesh);
+    let nloc = re.nloc;
+    let nd = 3 * nloc;
+    let n1 = mesh.n_dofs(order);
+    let mut kc = CCoo::new(4 * n1, 4 * n1);
+    let mut mc = CCoo::new(3 * n1, 3 * n1);
+    let mut cc = if has_eta { Some(CCoo::new(3 * n1, 3 * n1)) } else { None };
+
+    let (mut scratch, mut u_dofs, mut p_dofs) = (Vec::new(), Vec::new(), Vec::new());
+    let mut grad = vec![0.0; nloc * 2];
+    let mut gx_gz = vec![(c(0.0, 0.0), c(0.0, 0.0)); nloc];
+    let mut b0 = vec![c(0.0, 0.0); 6 * nd];
+    let mut b1 = vec![0.0; 6 * nd];
+    let mut db = vec![c(0.0, 0.0); 6 * nd];
+    let mut ke_uu = vec![c(0.0, 0.0); nd * nd];
+    let mut ce_uu = vec![c(0.0, 0.0); nd * nd];
+    let mut me = vec![c(0.0, 0.0); nloc * nloc];
+    let mut ke_up = vec![c(0.0, 0.0); nd * nloc];
+    let mut ke_pu = vec![c(0.0, 0.0); nloc * nd];
+    let mut ke_pp = vec![c(0.0, 0.0); nloc * nloc];
+    let beta = c(0.0, -q);
+    let beta_h = c(0.0, q);
+
+    for ci in 0..mesh.n_cells() {
+        let mat = &mats[ci];
+        if !mat.mech_active && !mat.elec_active {
+            continue;
+        }
+        let dom = mesh.cell_labels[ci];
+        let v = mesh.cell(ci);
+        let p0 = mesh.point(v[0] as usize);
+        let p1 = mesh.point(v[1] as usize);
+        let p2 = mesh.point(v[2] as usize);
+        let vol = geo.vol[ci];
+        ke_uu.fill(c(0.0, 0.0));
+        ce_uu.fill(c(0.0, 0.0));
+        me.fill(c(0.0, 0.0));
+        ke_up.fill(c(0.0, 0.0));
+        ke_pu.fill(c(0.0, 0.0));
+        ke_pp.fill(c(0.0, 0.0));
+
+        for qp in 0..re.w.len() {
+            shape_gradients(&re, &geo, ci, qp, &mut grad);
+            let (jac, loss) = match resolved {
+                Some(res) => {
+                    let lam = tri_barycentric(&re, qp, order);
+                    let x = lam[0] * p0[0] + lam[1] * p1[0] + lam[2] * p2[0];
+                    let z = lam[0] * p0[1] + lam[1] * p1[1] + lam[2] * p2[1];
+                    res.eval_jacobian(dom, [x, 0.0, z], 2, false)
+                }
+                None => (femcore::pml::PmlJacobian::identity(), c(1.0, 0.0)),
+            };
+            for a in 0..nloc {
+                let (dx, dz) = (grad[a * 2], grad[a * 2 + 1]);
+                let gx = jac.j_inv[0][0] * dx + jac.j_inv[1][0] * dz;
+                let gz = jac.j_inv[0][1] * dx + jac.j_inv[1][1] * dz;
+                gx_gz[a] = (gx, gz);
+            }
+            let w_coup = jac.det * (re.w[qp] * vol);
+            let w_k = w_coup * loss;
+            accumulate_waveguide_piezo_qpoint(
+                nloc,
+                mat,
+                beta,
+                beta_h,
+                w_k,
+                w_coup,
+                &re.n[qp],
+                &gx_gz,
+                &mut b0,
+                &mut b1,
+                &mut db,
+                &mut ke_uu,
+                if has_eta { Some(&mut ce_uu) } else { None },
+                &mut ke_up,
+                &mut ke_pu,
+                &mut ke_pp,
+            );
+            if mat.mech_active && mat.rho != 0.0 {
+                let w_m = jac.det * (re.w[qp] * vol * mat.rho);
+                let nv = &re.n[qp];
+                for a in 0..nloc {
+                    let wa = w_m * nv[a];
+                    for bb in 0..nloc {
+                        me[a * nloc + bb] += wa * nv[bb];
+                    }
+                }
+            }
+        }
+        mesh.cell_dofs(ci, order, &mut scratch);
+        push_waveguide_piezo_cell(
+            &mut kc,
+            &mut mc,
+            &mut cc,
+            n1,
+            &scratch,
+            mat,
+            has_eta,
+            &ke_uu,
+            &me,
+            &ce_uu,
+            &ke_up,
+            &ke_pu,
+            &mut ke_pp,
+            &mut u_dofs,
+            &mut p_dofs,
+        );
+    }
+    Ok((kc.to_csr(), mc.to_csr(), cc.map(|x| x.to_csr())))
+}
+
+/// Native mixed-cell (`Tri` + `Quad`, straight and curved) 4-block `(u_x, u_z, u_y, phi)`
+/// coupled piezoelectric waveguide assembly `(K_full, M_uu, C_eta_opt)`.
+pub(crate) fn assemble_waveguide_piezo_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    mats: &[PiezoCellMat],
+    q: f64,
+    resolved: Option<&ResolvedPmlDomains>,
+) -> Result<(CCsr, CCsr, Option<CCsr>), String> {
+    if mixed.dim != 2 {
+        return Err("a waveguide cross-section model needs a 2D mesh".into());
+    }
+    let space = dof_map.space;
+    let order = space.order();
+    let n1 = dof_map.n_dofs;
+    let has_eta = mats.iter().any(|m| m.mech_active && m.eta.iter().flatten().any(|&v| v != 0.0));
+    let beta = c(0.0, -q);
+    let beta_h = c(0.0, q);
+    let mut kc = CCoo::new(4 * n1, 4 * n1);
+    let mut mc = CCoo::new(3 * n1, 3 * n1);
+    let mut cc = if has_eta { Some(CCoo::new(3 * n1, 3 * n1)) } else { None };
+
+    let (mut vals, mut dxi, mut sn, mut sdn) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut gx_gz, mut b0, mut b1, mut db) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut ke_uu, mut ce_uu, mut me) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut ke_up, mut ke_pu, mut ke_pp) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut u_dofs, mut p_dofs) = (Vec::new(), Vec::new());
+
+    for ci in 0..mixed.n_cells() {
+        let mat = &mats[ci];
+        if !mat.mech_active && !mat.elec_active {
+            continue;
+        }
+        let dom = mixed.cell_labels[ci];
+        let ct = mixed.cell_type(ci);
+        let iso = IsoparametricCell::from_mesh(mixed, ci);
+        let in_pml = resolved.is_some_and(|r| r.contains(dom));
+        let deg = if in_pml || iso.curved { 2 * order + 4 } else { 2 * order + 2 };
+        let rule = quad_rule_mixed(ct, deg);
+        let cdofs = dof_map.cell_dofs(ci);
+        let nloc = cdofs.len();
+        let nd = 3 * nloc;
+
+        gx_gz.resize(nloc, (c(0.0, 0.0), c(0.0, 0.0)));
+        b0.resize(6 * nd, c(0.0, 0.0));
+        b1.resize(6 * nd, 0.0);
+        db.resize(6 * nd, c(0.0, 0.0));
+        ke_uu.clear();
+        ke_uu.resize(nd * nd, c(0.0, 0.0));
+        ce_uu.clear();
+        ce_uu.resize(if has_eta { nd * nd } else { 0 }, c(0.0, 0.0));
+        me.clear();
+        me.resize(nloc * nloc, c(0.0, 0.0));
+        ke_up.clear();
+        ke_up.resize(nd * nloc, c(0.0, 0.0));
+        ke_pu.clear();
+        ke_pu.resize(nloc * nd, c(0.0, 0.0));
+        ke_pp.clear();
+        ke_pp.resize(nloc * nloc, c(0.0, 0.0));
+
+        for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+            let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+            lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+            let (jac, loss) = match resolved {
+                Some(res) => res.eval_jacobian(dom, [jg.x[0], 0.0, jg.x[1]], 2, false),
+                None => (femcore::pml::PmlJacobian::identity(), c(1.0, 0.0)),
+            };
+            for a in 0..nloc {
+                let gp = jg.map_grad(dxi[a]);
+                let gx = jac.j_inv[0][0] * gp[0] + jac.j_inv[1][0] * gp[1];
+                let gz = jac.j_inv[0][1] * gp[0] + jac.j_inv[1][1] * gp[1];
+                gx_gz[a] = (gx, gz);
+            }
+            let w_da = wq * jg.det.abs();
+            let w_coup = jac.det * w_da;
+            let w_k = w_coup * loss;
+            accumulate_waveguide_piezo_qpoint(
+                nloc,
+                mat,
+                beta,
+                beta_h,
+                w_k,
+                w_coup,
+                &vals,
+                &gx_gz,
+                &mut b0,
+                &mut b1,
+                &mut db,
+                &mut ke_uu,
+                if has_eta { Some(&mut ce_uu) } else { None },
+                &mut ke_up,
+                &mut ke_pu,
+                &mut ke_pp,
+            );
+            if mat.mech_active && mat.rho != 0.0 {
+                let w_m = jac.det * (w_da * mat.rho);
+                for a in 0..nloc {
+                    let wa = w_m * vals[a];
+                    for bb in 0..nloc {
+                        me[a * nloc + bb] += wa * vals[bb];
+                    }
+                }
+            }
+        }
+        push_waveguide_piezo_cell(
+            &mut kc,
+            &mut mc,
+            &mut cc,
+            n1,
+            cdofs,
+            mat,
+            has_eta,
+            &ke_uu,
+            &me,
+            &ce_uu,
+            &ke_up,
+            &ke_pu,
+            &mut ke_pp,
+            &mut u_dofs,
+            &mut p_dofs,
+        );
+    }
+    Ok((kc.to_csr(), mc.to_csr(), cc.map(|x| x.to_csr())))
 }
