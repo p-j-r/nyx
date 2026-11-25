@@ -11,6 +11,9 @@ pub mod axisym;
 pub mod cross_section;
 pub mod floquet;
 pub mod lrb;
+pub mod piezo;
+pub mod piezo_asm;
+pub mod piezo_mat;
 pub mod pml;
 pub mod problem;
 pub mod solid;
@@ -21,7 +24,8 @@ pub use cross_section::{
     solve_waveguide_modes_mixed, CrossModes,
 };
 pub use problem::{
-    decode, Bc, BcKind, IeProfile, InfiniteElement, Plane, Problem, Study, ThermalExpansion, ThermalSource,
+    decode, Bc, BcKind, ConductorRole, IeProfile, InfiniteElement, PiezoMode, Plane, Problem, Study, ThermalExpansion,
+    ThermalSource,
 };
 pub use solid::{solve_solid, solve_solid_mixed, Setup};
 
@@ -267,6 +271,57 @@ impl Physics for Sms {
                     ParamDesc::number("phase", "Phase advance", "rad", 0.0, "k . d over the period"),
                 ],
             },
+            BcDesc {
+                kind: "ground".into(),
+                name: "Ground".into(),
+                doc: "Fixes electric potential phi = 0 V on the boundary (piezoelectric / electro-elastic coupling).".into(),
+                applies: Applies::Boundary,
+                params: vec![],
+            },
+            BcDesc {
+                kind: "potential".into(),
+                name: "Electric potential".into(),
+                doc: "Prescribes electric potential phi = value (V) on the boundary (0 V in eigenfrequency studies).".into(),
+                applies: Applies::Boundary,
+                params: vec![ParamDesc::number("value", "Potential", "V", 1.0, "")],
+            },
+            BcDesc {
+                kind: "surface_charge".into(),
+                name: "Surface charge".into(),
+                doc: "Prescribes surface free charge density sigma_s (C/m^2) on the boundary (static study).".into(),
+                applies: Applies::Boundary,
+                params: vec![ParamDesc::number("density", "Surface charge density", "C/m^2", 0.0, "")],
+            },
+            BcDesc {
+                kind: "floating_potential".into(),
+                name: "Floating potential".into(),
+                doc: "Constrains all potential dofs on the boundary to a single equipotential value with prescribed net charge (0 C in eigenfrequency studies).".into(),
+                applies: Applies::Boundary,
+                params: vec![ParamDesc::number(
+                    "charge",
+                    "Total charge",
+                    "C",
+                    0.0,
+                    "prescribed net free charge on the floating electrode",
+                )],
+            },
+            BcDesc {
+                kind: "conductor".into(),
+                name: "Conductor".into(),
+                doc: "Marks a domain as an equipotential metallic electrode (skipped in K_{phi phi} and K_{u phi}, with role floating, ground, or fixed).".into(),
+                applies: Applies::Domain,
+                params: vec![
+                    ParamDesc::choice(
+                        "role",
+                        "Electrical role",
+                        &["floating", "ground", "fixed"],
+                        "floating",
+                        "floating: unknown equipotential with prescribed net charge; ground: phi = 0 V; fixed: phi = value",
+                    ),
+                    ParamDesc::number("value", "Potential", "V", 0.0, "electric potential when role = fixed"),
+                    ParamDesc::number("charge", "Total charge", "C", 0.0, "net free charge when role = floating (static only)"),
+                ],
+            },
         ]
     }
 
@@ -277,6 +332,8 @@ impl Physics for Sms {
             PropDesc::new("nu", "Poisson's ratio", "", Scalar, &[], None),
             PropDesc::new("rho", "Density", "kg/m^3", Scalar, &["eigenfrequency"], None),
             PropDesc::new("alpha", "Thermal expansion", "1/K", Tensor, &["static"], Some(0.0)),
+            PropDesc::new("eps_r", "Relative permittivity (clamped)", "", Tensor, &[], Some(1.0)),
+            PropDesc::new("eta", "Mechanical viscosity", "Pa*s", Scalar, &["eigenfrequency"], Some(0.0)),
         ]
     }
 
@@ -285,6 +342,13 @@ impl Physics for Sms {
             ParamDesc::choice("plane", "Plane assumption (2D)", &["strain", "stress"], "strain", ""),
             ParamDesc::number("thickness", "Thickness (2D plane stress)", "m", 1.0, "")
                 .range(Some(f64::MIN_POSITIVE), None),
+            ParamDesc::choice(
+                "piezoelectric",
+                "Piezoelectric coupling",
+                &["auto", "on", "off"],
+                "auto",
+                "auto: enable coupled (u, phi) formulation when electrical boundary conditions are present; on: force coupled formulation; off: ignore piezoelectric coupling",
+            ),
             ParamDesc::choice(
                 "thermal",
                 "Thermal expansion",
@@ -314,8 +378,14 @@ impl Physics for Sms {
             "static" => vec![
                 FieldDesc::new("u", "m", &WAFER, "displacement (2D: x and z)"),
                 FieldDesc::new("von Mises", "Pa", &[], "equivalent stress"),
+                FieldDesc::new("phi", "V", &[], "electric potential (piezoelectric / electro-elastic)"),
+                FieldDesc::new("E", "V/m", &WAFER, "electric field -grad phi (piezoelectric / electro-elastic)"),
+                FieldDesc::new("D", "C/m^2", &WAFER, "electric displacement D (piezoelectric / electro-elastic)"),
             ],
-            "eigenfrequency" => vec![FieldDesc::new("u", "a.u.", &WAFER, "displacement of a mode (normalised)")],
+            "eigenfrequency" => vec![
+                FieldDesc::new("u", "a.u.", &WAFER, "displacement of a mode (normalised)"),
+                FieldDesc::new("phi", "a.u.", &[], "electric potential of a mode (piezoelectric)"),
+            ],
             "axisymmetric_eigenfrequency" => vec![
                 FieldDesc::new("|u|", "a.u.", &[], "magnitude of the displacement of a mode, scaled to a maximum of 1"),
                 FieldDesc::new(
@@ -438,6 +508,7 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
     problem.check_study_open_domains()?;
+    problem.check_electrical()?;
     let mut result = {
         let _s =
             progress::stage(format!("solving solid mechanics on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
@@ -447,6 +518,11 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
         if matches!(problem.study, Study::AxisymmetricEigenfrequency { .. }) {
             if mixed.dim != 2 {
                 return Err(Error::invalid("the axisymmetric study needs a 2D mesh (the (r, z) half plane)"));
+            }
+            if problem.uses_piezoelectric() {
+                return Err(Error::Unsupported(
+                    "piezoelectric coupling in the axisymmetric study is not yet enabled".into(),
+                ));
             }
             problem.check_axisymmetric()?;
             if use_mixed {
@@ -459,12 +535,24 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             if mixed.dim != 2 {
                 return Err(Error::invalid("the waveguide modes study needs a 2D mesh (the (x, z) cross-section)"));
             }
+            if problem.uses_piezoelectric() {
+                return Err(Error::Unsupported(
+                    "piezoelectric coupling in the waveguide modes study is not yet enabled".into(),
+                ));
+            }
             problem.check_modes()?;
             if use_mixed {
                 solve_waveguide_modes_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
             } else {
                 let d = discretise(mesh)?;
                 solve_waveguide_modes(&d, problem).map_err(Error::from_kernel)?
+            }
+        } else if problem.uses_piezoelectric() {
+            if use_mixed {
+                piezo::solve_piezo_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+            } else {
+                let d = discretise(mesh)?;
+                piezo::solve_piezo(&d, problem).map_err(Error::from_kernel)?
             }
         } else if use_mixed {
             solve_solid_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
@@ -474,6 +562,15 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
         }
     };
     check_result_finite(&result)?;
+    if !problem.uses_piezoelectric()
+        && problem.piezoelectric == PiezoMode::Auto
+        && problem.materials.has_piezoelectric()
+    {
+        result.log.push(
+            "piezoelectric material constants detected with no electrical boundary conditions under piezoelectric='auto'; running pure elastic solver (set piezoelectric='on' or add electrical BCs to solve coupled (u, phi))"
+                .into(),
+        );
+    }
     result.log.extend(progress.log().into_iter().skip(first_line));
     Ok(result)
 }

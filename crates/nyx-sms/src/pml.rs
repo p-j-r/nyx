@@ -16,13 +16,18 @@ use femcore::fem_mixed::{
 use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::eigs_complex;
-use femcore::material::{isotropic_stiffness, stiffness_global, M6};
+use femcore::material::{
+    coupled::EPSILON_0, isotropic_stiffness, piezo_e_global, stiffness_global, tensor_global, M3, M6,
+};
 use femcore::mesh::cells::canonical_quad_face;
 use femcore::mesh::mixed::{
     cell_local_edges, cell_local_quad_faces, cell_local_tri_faces, sorted_tri_face, FacetType, MixedDiscretisation,
     QUAD_EDGES, TRI_EDGES,
 };
-use femcore::meshing::physics_size::{backward_wave_mpml_ratio, wave_speed_range, BackwardWaveCheck};
+use femcore::meshing::physics_size::{
+    backward_wave_mpml_ratio, piezo_backward_wave_mpml_ratio, piezo_wave_speed_range, wave_speed_range,
+    BackwardWaveCheck,
+};
 use femcore::periodic::{congruence, match_vertices, nodal_relations, Reduction};
 use femcore::pml::{adiabatic_loss_factor, auto_scale_params, pml_jacobian, PmlJacobian};
 use femcore::props::{Pml, PmlCoord, PmlDir, PmlProfile, PmlStabilization};
@@ -269,6 +274,30 @@ impl ResolvedPmlDomains {
             };
 
             let mut c6_w = domain_wafer_stiffness(&spec.materials, dom)?;
+            let piezo_info: Option<([[f64; 6]; 3], M3)> = if spec.uses_piezoelectric() {
+                spec.materials.aniso.get(&dom).and_then(|an| an.piezo_e.as_ref()).map(|e_tb| {
+                    let e_sol = piezo_e_global(e_tb, spec.materials.aniso[&dom].euler_deg);
+                    let eps_r = spec
+                        .materials
+                        .aniso
+                        .get(&dom)
+                        .and_then(|a| a.permittivity.as_ref())
+                        .map(|t| tensor_global(t, spec.materials.aniso[&dom].euler_deg))
+                        .unwrap_or_else(|| {
+                            let s = spec.materials.get(dom, "eps_r").unwrap_or(1.0);
+                            [[s, 0.0, 0.0], [0.0, s, 0.0], [0.0, 0.0, s]]
+                        });
+                    let mut eps_abs = [[0.0; 3]; 3];
+                    for i in 0..3 {
+                        for j in 0..3 {
+                            eps_abs[i][j] = EPSILON_0 * eps_r[i][j];
+                        }
+                    }
+                    (e_sol, eps_abs)
+                })
+            } else {
+                None
+            };
             if axisym {
                 // In wafer `(x, y, z)`, the symmetry axis is `z` (index 2).
                 c6_w = crate::axisym::average_about_axis(&c6_w, 2, 16);
@@ -276,7 +305,11 @@ impl ResolvedPmlDomains {
             let rho = spec.materials.get(dom, "rho").ok_or_else(|| format!("domain {dom} has no value for 'rho'"))?;
 
             if eff.auto_scale && f_search > 0.0 {
-                let (c_min, c_max) = wave_speed_range(&c6_w, rho);
+                let (c_min, c_max) = if let Some((ref e_sol, ref eps_abs)) = piezo_info {
+                    piezo_wave_speed_range(&c6_w, e_sol, eps_abs, rho)
+                } else {
+                    wave_speed_range(&c6_w, rho)
+                };
                 let lam_max = (c_max / f_search).max(1e-30);
                 let lam_min = (c_min / (1.5 * f_search)).clamp(1e-30, lam_max);
                 let d_act = effective_pml_thickness(&eff, bounds, dim);
@@ -290,12 +323,16 @@ impl ResolvedPmlDomains {
                 };
             }
 
-            // Pre-solve Christoffel backward-wave check for anisotropic domains
-            if spec.materials.aniso.get(&dom).and_then(|a| a.stiffness.as_ref()).is_some() {
+            // Pre-solve Christoffel backward-wave check for anisotropic (or piezoelectric) domains
+            if spec.materials.aniso.get(&dom).and_then(|a| a.stiffness.as_ref()).is_some() || piezo_info.is_some() {
                 let mut worst =
                     BackwardWaveCheck { min_projection: 1.0, has_backward_wave: false, recommended_mpml_ratio: 0.0 };
                 for n_out in pml_outward_normals(&eff, dim, axisym) {
-                    let chk = backward_wave_mpml_ratio(&c6_w, rho, n_out);
+                    let chk = if let Some((ref e_sol, ref eps_abs)) = piezo_info {
+                        piezo_backward_wave_mpml_ratio(&c6_w, e_sol, eps_abs, rho, n_out)
+                    } else {
+                        backward_wave_mpml_ratio(&c6_w, rho, n_out)
+                    };
                     if chk.min_projection < worst.min_projection {
                         worst.min_projection = chk.min_projection;
                     }
@@ -507,10 +544,15 @@ fn explicit_protected_facet_labels(spec: &Problem) -> BTreeSet<i32> {
     let mut out = BTreeSet::new();
     for bc in &spec.bcs {
         match bc.kind {
-            BcKind::Fixed { .. } | BcKind::LowReflecting => {
+            BcKind::Fixed { .. }
+            | BcKind::LowReflecting
+            | BcKind::Ground
+            | BcKind::Potential(_)
+            | BcKind::SurfaceCharge(_)
+            | BcKind::FloatingPotential { .. } => {
                 out.extend(bc.labels.iter().copied());
             }
-            BcKind::Load(_) => {}
+            BcKind::Load(_) | BcKind::Conductor { .. } => {}
         }
     }
     for p in &spec.periodic {
@@ -790,7 +832,7 @@ pub(crate) fn outer_clamped_dofs_mixed(
 }
 
 /// Complex strain-displacement matrix from complex shape gradients `g[a*d + k]`.
-fn b_matrix_c(g: &[C], nloc: usize, d: usize, b: &mut [C]) {
+pub(crate) fn b_matrix_c(g: &[C], nloc: usize, d: usize, b: &mut [C]) {
     let ns = if d == 2 { 3 } else { 6 };
     b[..ns * d * nloc].iter_mut().for_each(|x| *x = c(0.0, 0.0));
     let nd = d * nloc;
@@ -809,7 +851,7 @@ fn b_matrix_c(g: &[C], nloc: usize, d: usize, b: &mut [C]) {
     }
 }
 
-fn simplex_barycentric(re: &RefElement, q: usize, d: usize, order: usize) -> [f64; 4] {
+pub(crate) fn simplex_barycentric(re: &RefElement, q: usize, d: usize, order: usize) -> [f64; 4] {
     let nv = &re.n[q];
     if order == 1 {
         let mut out = [0.0; 4];
@@ -829,7 +871,7 @@ fn simplex_barycentric(re: &RefElement, q: usize, d: usize, order: usize) -> [f6
     }
 }
 
-fn real_quad_norm(m1: &Csr, u: &[C], n1: usize, d: usize) -> f64 {
+pub(crate) fn real_quad_norm(m1: &Csr, u: &[C], n1: usize, d: usize) -> f64 {
     let mut acc = 0.0;
     for comp in 0..d {
         let off = comp * n1;
@@ -1358,7 +1400,7 @@ pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
     Ok(PmlSolve { freqs, vectors: pairs.vectors.clone(), dim: pairs.dim, converged: pairs.converged })
 }
 
-fn push_pml_mode_scalars_and_label(
+pub(crate) fn push_pml_mode_scalars_and_label(
     j: usize,
     f: C,
     layer_fraction: f64,

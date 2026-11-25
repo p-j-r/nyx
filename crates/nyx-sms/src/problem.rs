@@ -16,6 +16,31 @@ pub enum Plane {
     Stress,
 }
 
+/// Piezoelectric coupling activation policy in solid mechanics (`sms`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PiezoMode {
+    /// Enable coupled `(u, phi)` assembly automatically when any domain has `[piezoelectric]` data
+    /// or when electrical boundary conditions (`ground`, `potential`, etc.) are present.
+    #[default]
+    Auto,
+    /// Force coupled piezoelectric/electro-elastic assembly even with zero coupling tensor (`e = 0`).
+    On,
+    /// Solve pure mechanical elasticity, ignoring `[piezoelectric]` coupling tensors.
+    Off,
+}
+
+/// Electrical role of a domain-level metallic `conductor` condition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConductorRole {
+    /// Equipotential electrode whose potential floats with net free charge `charge` (0 C in eigenfrequency).
+    #[default]
+    Floating,
+    /// Grounded electrode (`phi = 0 V`).
+    Ground,
+    /// Fixed-potential electrode (`phi = value`, static only when `value != 0`).
+    Fixed,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum BcKind {
     /// per-component constraint (x, y, z, in wafer axes) to the given displacement
@@ -24,6 +49,16 @@ pub enum BcKind {
     Load([f64; 3]),
     /// absorbing traction for outgoing pressure and shear waves (eigenfrequency studies: complex frequencies, Q)
     LowReflecting,
+    /// Grounded electrical boundary (`phi = 0 V`)
+    Ground,
+    /// Fixed electric potential (`phi = value` in V)
+    Potential(f64),
+    /// Surface free charge density (`sigma_s` in `C/m^2`, static only when non-zero)
+    SurfaceCharge(f64),
+    /// Equipotential floating electrode boundary with prescribed net charge `charge` (C, 0 in eigenfrequency)
+    FloatingPotential { charge: f64 },
+    /// Domain-level equipotential metallic body (skipped in electrical `K_{phi phi}` assembly)
+    Conductor { role: ConductorRole, value: f64, charge: f64 },
 }
 
 impl BcKind {
@@ -32,7 +67,29 @@ impl BcKind {
             BcKind::Fixed { .. } => "Fixed constraint",
             BcKind::Load(_) => "Boundary load",
             BcKind::LowReflecting => "Low-reflecting boundary",
+            BcKind::Ground => "Ground",
+            BcKind::Potential(_) => "Electric potential",
+            BcKind::SurfaceCharge(_) => "Surface charge",
+            BcKind::FloatingPotential { .. } => "Floating potential",
+            BcKind::Conductor { .. } => "Conductor",
         }
+    }
+
+    /// True if this boundary condition applies to electrical potential `phi`.
+    pub fn is_electrical(&self) -> bool {
+        matches!(
+            self,
+            BcKind::Ground
+                | BcKind::Potential(_)
+                | BcKind::SurfaceCharge(_)
+                | BcKind::FloatingPotential { .. }
+                | BcKind::Conductor { .. }
+        )
+    }
+
+    /// True if this condition selects volumetric domain labels rather than boundary facets.
+    pub fn is_domain_condition(&self) -> bool {
+        matches!(self, BcKind::Conductor { .. })
     }
 }
 
@@ -161,6 +218,8 @@ pub struct Problem {
     pub periodic: Vec<Periodic>,
     /// Static Infinite Element domains (`sms::static` open-boundary real coordinate stretching)
     pub infinite_elements: BTreeMap<i32, InfiniteElement>,
+    /// Coupled piezoelectric activation mode (`Auto`, `On`, or `Off`)
+    pub piezoelectric: PiezoMode,
 }
 
 impl Problem {
@@ -177,12 +236,44 @@ impl Problem {
             inactive: vec![],
             periodic: vec![],
             infinite_elements: BTreeMap::new(),
+            piezoelectric: PiezoMode::Auto,
         }
     }
 
     /// True if any domain carries an active static Infinite Element.
     pub fn has_infinite_elements(&self) -> bool {
         self.infinite_elements.values().any(InfiniteElement::is_active)
+    }
+
+    /// True if any electrical boundary/domain condition (`ground`, `potential`, `surface_charge`,
+    /// `floating_potential`, `conductor`) is present.
+    pub fn has_electrical_bcs(&self) -> bool {
+        self.bcs.iter().any(|bc| bc.kind.is_electrical())
+    }
+
+    /// Domain labels marked as equipotential `conductor` bodies (sorted, unique).
+    pub fn conductor_domains(&self) -> Vec<i32> {
+        let mut out: Vec<i32> = self
+            .bcs
+            .iter()
+            .filter_map(|bc| match bc.kind {
+                BcKind::Conductor { .. } => Some(bc.labels.iter().copied()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// True when the coupled `(u, phi)` piezoelectric/electro-elastic solver should handle this problem.
+    pub fn uses_piezoelectric(&self) -> bool {
+        match self.piezoelectric {
+            PiezoMode::Off => false,
+            PiezoMode::On => true,
+            PiezoMode::Auto => self.has_electrical_bcs(),
+        }
     }
 
     /// Every number the user can type must be finite: NaN or infinity does not stop a factorisation or a Krylov iteration, it flows into
@@ -209,7 +300,9 @@ impl Problem {
             let vals: Vec<f64> = match &bc.kind {
                 BcKind::Fixed { values, .. } => values.to_vec(),
                 BcKind::Load(f) => f.to_vec(),
-                BcKind::LowReflecting => vec![],
+                BcKind::LowReflecting | BcKind::Ground => vec![],
+                BcKind::Potential(v) | BcKind::SurfaceCharge(v) | BcKind::FloatingPotential { charge: v } => vec![*v],
+                BcKind::Conductor { value, charge, .. } => vec![*value, *charge],
             };
             if vals.iter().any(|v| !v.is_finite()) {
                 return Err(format!(
@@ -284,6 +377,77 @@ impl Problem {
         Ok(())
     }
 
+    /// Validates electrical/piezoelectric settings and boundary/domain conflicts.
+    pub fn check_electrical(&self) -> Result<(), Error> {
+        if self.piezoelectric == PiezoMode::Off && self.has_electrical_bcs() {
+            return Err(Error::invalid(
+                "electrical boundary conditions ('ground', 'potential', 'surface_charge', 'floating_potential', 'conductor') cannot be used when piezoelectric = 'off'",
+            ));
+        }
+        let eigen = self.study.is_eigen();
+        let mut seen_conductors: BTreeMap<i32, (ConductorRole, f64, f64)> = BTreeMap::new();
+        for bc in &self.bcs {
+            match &bc.kind {
+                BcKind::Potential(v) if eigen && *v != 0.0 => {
+                    return Err(Error::invalid(
+                        "an eigenfrequency study takes zero electrical sources only: fixed potential must be 0 V (or use 'ground')",
+                    ));
+                }
+                BcKind::SurfaceCharge(q) if eigen && *q != 0.0 => {
+                    return Err(Error::invalid(
+                        "a non-zero surface_charge boundary condition belongs to the static study",
+                    ));
+                }
+                BcKind::FloatingPotential { charge } if eigen && *charge != 0.0 => {
+                    return Err(Error::invalid(
+                        "a floating_potential with non-zero charge belongs to the static study",
+                    ));
+                }
+                BcKind::Conductor { role, value, charge } => {
+                    if eigen {
+                        match role {
+                            ConductorRole::Fixed if *value != 0.0 => {
+                                return Err(Error::invalid(
+                                    "an eigenfrequency study takes zero electrical sources only: conductor fixed potential must be 0 V",
+                                ));
+                            }
+                            ConductorRole::Floating if *charge != 0.0 => {
+                                return Err(Error::invalid(
+                                    "a conductor with non-zero charge belongs to the static study",
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                    for &dom in &bc.labels {
+                        if self.materials.pml.contains_key(&dom) {
+                            return Err(Error::invalid(format!(
+                                "domain {dom} cannot be both an equipotential 'conductor' and a 'pml'"
+                            )));
+                        }
+                        if self.infinite_elements.contains_key(&dom) {
+                            return Err(Error::invalid(format!(
+                                "domain {dom} cannot be both an equipotential 'conductor' and an 'infinite_element'"
+                            )));
+                        }
+                        if let Some(&(r0, v0, c0)) = seen_conductors.get(&dom) {
+                            let same = r0 == *role && (v0 - value).abs() <= 1e-12 && (c0 - charge).abs() <= 1e-12;
+                            if !same {
+                                return Err(Error::invalid(format!(
+                                    "conflicting 'conductor' conditions assigned to domain {dom}"
+                                )));
+                            }
+                        } else {
+                            seen_conductors.insert(dom, (*role, *value, *charge));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// The rules of the axisymmetric study that do not need the mesh (ADR 68): no boundary load, no Floquet pair, no low-reflecting boundary
     /// (its damping matrix has no `r` weight, rough spot D1), only zero constraints, and a layer cannot absorb towards the axis. A problem of
     /// another study passes. The mesh rule (the half plane lies in `x >= 0`) is checked by `cross_section::solve_axisymmetric`.
@@ -312,6 +476,11 @@ impl Problem {
                         ));
                     }
                 }
+                BcKind::Ground
+                | BcKind::Potential(_)
+                | BcKind::SurfaceCharge(_)
+                | BcKind::FloatingPotential { .. }
+                | BcKind::Conductor { .. } => {}
             }
         }
         for (d, p) in &self.materials.pml {
@@ -357,6 +526,7 @@ impl Problem {
     /// absorbing layers in the cross-section plane (x and z; y is refused by `check_wafer(2)`) are allowed.
     pub fn check_modes(&self) -> Result<(), Error> {
         self.check_study_open_domains()?;
+        self.check_electrical()?;
         if !matches!(self.study, Study::Modes { .. }) {
             return Ok(());
         }
@@ -371,6 +541,11 @@ impl Problem {
                         ));
                     }
                 }
+                BcKind::Ground
+                | BcKind::Potential(_)
+                | BcKind::SurfaceCharge(_)
+                | BcKind::FloatingPotential { .. }
+                | BcKind::Conductor { .. } => {}
             }
         }
         Ok(())
@@ -603,9 +778,31 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 }
                 periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase") });
             }
+            "ground" => bcs.push(Bc { labels: r.labels, kind: BcKind::Ground }),
+            "potential" => bcs.push(Bc { labels: r.labels, kind: BcKind::Potential(p.number("value")) }),
+            "surface_charge" => bcs.push(Bc { labels: r.labels, kind: BcKind::SurfaceCharge(p.number("density")) }),
+            "floating_potential" => {
+                bcs.push(Bc { labels: r.labels, kind: BcKind::FloatingPotential { charge: p.number("charge") } })
+            }
+            "conductor" => {
+                let role = match p.text("role").as_str() {
+                    "ground" => ConductorRole::Ground,
+                    "fixed" => ConductorRole::Fixed,
+                    _ => ConductorRole::Floating,
+                };
+                bcs.push(Bc {
+                    labels: r.labels,
+                    kind: BcKind::Conductor { role, value: p.number("value"), charge: p.number("charge") },
+                });
+            }
             other => return Err(Error::Unsupported(format!("sms has no condition '{other}'"))),
         }
     }
+    let piezoelectric = match pp.text("piezoelectric").as_str() {
+        "on" => PiezoMode::On,
+        "off" => PiezoMode::Off,
+        _ => PiezoMode::Auto,
+    };
     let solver = match pp.text("solver").as_str() {
         "direct" => LinearSolver::Direct,
         "iterative" => LinearSolver::Iterative,
@@ -623,8 +820,10 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         inactive,
         periodic,
         infinite_elements,
+        piezoelectric,
     };
     problem.check_study_open_domains()?;
+    problem.check_electrical()?;
     problem.check_axisymmetric()?;
     problem.check_modes()?;
     Ok(problem)
