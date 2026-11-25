@@ -290,7 +290,32 @@ impl App {
                 num_id(ui, "adapt_s", s);
             }
         });
-        ui.checkbox(&mut m.structured_pml, "structured absorbing layers").on_hover_text("Rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra) cut into simplices.");
+        let cur_pml_mode = m.resolved_pml_mode();
+        ui.horizontal(|ui| {
+            ui.label("absorbing layers");
+            for (val, label, tip) in [
+                (
+                    nyx_engine::PmlModeRequest::Auto,
+                    "Auto",
+                    "Structured native Quad/Prism/Hex layers whenever the geometry has absorbing layers (default).",
+                ),
+                (
+                    nyx_engine::PmlModeRequest::Structured,
+                    "Structured",
+                    "Always build structured Quad/Prism/Hex absorbing layers.",
+                ),
+                (
+                    nyx_engine::PmlModeRequest::Inline,
+                    "Inline",
+                    "Legacy unstructured simplex triangulation inside inward CAD-sliced PML domains.",
+                ),
+            ] {
+                if ui.selectable_label(cur_pml_mode == val, label).on_hover_text(tip).clicked() {
+                    m.pml_mode = val;
+                    m.structured_pml = None;
+                }
+            }
+        });
         sweep_editor(ui, &mut m.sweep);
         ui.add_space(4.0);
         crate::geomui::show(ui, &mut self.geom_ui, &mut g);
@@ -1006,19 +1031,46 @@ impl App {
             self.picked.clear();
             self.suggestions.clear();
         }
+        let has_geom_pml = self
+            .geom_edit
+            .features
+            .iter()
+            .any(|f| !f.suppressed && matches!(f.op, nyx_engine::facade::geom::model::Op::Pml { .. }));
+        let supports_pml_bc = kinds
+            .iter()
+            .any(|k| matches!(k.kind.as_str(), "pml" | "infinite_element"));
+        let mut add_from_geom = false;
         if !kinds.is_empty() {
-            egui::ComboBox::from_id_salt(format!("bc_add_{active}")).selected_text("+ add condition").show_ui(ui, |ui| {
-                for k in &kinds {
-                    if ui.selectable_label(false, &k.name).clicked() {
-                        let mut params = Value::Null;
-                        forms::fill_required(&k.params, &mut params);
-                        spec.bcs.push(nyx_engine::facade::physics::BcSpec { on: String::new(), kind: k.kind.clone(), params });
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt(format!("bc_add_{active}")).selected_text("+ add condition").show_ui(ui, |ui| {
+                    for k in &kinds {
+                        if ui.selectable_label(false, &k.name).clicked() {
+                            let mut params = Value::Null;
+                            forms::fill_required(&k.params, &mut params);
+                            spec.bcs.push(nyx_engine::facade::physics::BcSpec { on: String::new(), kind: k.kind.clone(), params });
+                        }
                     }
+                });
+                if has_geom_pml
+                    && supports_pml_bc
+                    && ui
+                        .button("Add PML Conditions from Geometry")
+                        .on_hover_text("Automatically create or update absorbing conditions for every PML domain in the geometry, jointly auto-calibrated from study wavelengths.")
+                        .clicked()
+                {
+                    add_from_geom = true;
                 }
             });
         }
         if spec != spec0 {
             self.set_problem(&active, &spec);
+        }
+        if add_from_geom && self.push_edits() {
+            self.cmd(
+                "add_pml_conditions",
+                json!({ "physics": active, "auto_scale": true }),
+            );
+            self.rules_dirty = true;
         }
     }
 

@@ -897,7 +897,11 @@ fn fr29_assemble_maxwell_bitwise_deterministic_across_chunks() {
         row[a] = femcore::linalg::csr::c(11.45, -1e-4);
     }
     let eps = vec![e; mesh.n_cells()];
-    let mu_inv = vec![[femcore::linalg::csr::c(1.0, 0.0); 3]; mesh.n_cells()];
+    let mut mu_e = [[femcore::linalg::csr::c(0.0, 0.0); 3]; 3];
+    for (a, row) in mu_e.iter_mut().enumerate() {
+        row[a] = femcore::linalg::csr::c(1.0, 0.0);
+    }
+    let mu_inv = vec![mu_e; mesh.n_cells()];
     let (k1, m1) = nyx_ems::cavity::assemble_maxwell(&mesh, &ned, &eps, &mu_inv);
     let (k2, m2) = nyx_ems::cavity::assemble_maxwell(&mesh, &ned, &eps, &mu_inv);
     assert_eq!(k1.indptr(), k2.indptr());

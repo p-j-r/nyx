@@ -1,0 +1,154 @@
+{
+  "active": "ems",
+  "format": 1,
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "cladding_circle",
+        "op": {
+          "Circle": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "r": 2.2e-6
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "core_circle",
+        "op": {
+          "Circle": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "r": 1.2e-6
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "cladding",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "core",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "pml",
+        "op": {
+          "Pml": {
+            "coord": "Cylindrical",
+            "grading": 2.0,
+            "layer_grading": 2.0,
+            "layers": 5.0,
+            "mode": "Outward",
+            "regions": [],
+            "sides": [],
+            "thickness": 8e-7
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "format": 1,
+    "params": []
+  },
+  "mesh": {
+    "h": 3.5e-7
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "pml",
+          "on": "cladding.pml_radial",
+          "params": {
+            "auto_scale": true,
+            "axial": "off",
+            "axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "coord": "cylindrical",
+            "kappa_max": 2.0,
+            "order": 2.0,
+            "profile": "kappa_polynomial",
+            "r_in": 2.2e-6,
+            "r_thickness": 8e-7,
+            "radial_on": true,
+            "re": 1.0,
+            "strength": 6.39028225273001,
+            "target_reflection": 1e-6,
+            "thickness": 8e-7,
+            "x": "plus",
+            "y": "off",
+            "z": "off",
+            "z_in": 2.2e-6,
+            "z_thickness": 8e-7
+          }
+        }
+      ],
+      "format": 1,
+      "materials": {
+        "cladding*": {
+          "eps_r": 1.0,
+          "mu_r": 1.0
+        },
+        "core": {
+          "eps_r": 12.0,
+          "mu_r": 1.0
+        }
+      },
+      "order": 2,
+      "physics": "ems",
+      "study": {
+        "kind": "modes",
+        "params": {
+          "freq": 193414489032258.06,
+          "n_modes": 4,
+          "n_target": 2.4
+        }
+      }
+    }
+  ],
+  "title": "Dielectric cylinder with outward cylindrical PML annulus (EM waves, 2D cylindrical Quad shells)"
+}

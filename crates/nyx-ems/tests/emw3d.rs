@@ -101,9 +101,18 @@ fn a_real_stretch_makes_the_cavity_longer() {
     s.materials.set(2, "eps_r", 1.0);
     s.materials.set(1, "mu_r", 1.0);
     s.materials.set(2, "mu_r", 1.0);
-    s.materials
-        .pml
-        .insert(2, Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, strength: 0.0, order: 0.0, re: 2.0 });
+    s.materials.pml.insert(
+        2,
+        Pml {
+            x: PmlDir::Off,
+            y: PmlDir::Off,
+            z: PmlDir::Plus,
+            strength: 0.0,
+            order: 0.0,
+            re: 2.0,
+            ..Default::default()
+        },
+    );
     let res = common::solve(&mesh, &s).unwrap();
     let exact = cavity_modes(a, b, 1.5 * d, 20e9);
     let got: Vec<f64> = res.solutions.iter().map(|x| x.value.unwrap()).collect();

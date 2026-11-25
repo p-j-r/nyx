@@ -62,10 +62,19 @@ fn a_unit_stretch_changes_nothing_on_a_ring() {
     let mut plain = problem(6, 0.0);
     plain.bcs = vec![fixed_all(vec![1])];
     let mut layered = plain.clone();
-    layered
-        .materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.0 });
+    layered.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.0,
+            order: 0.0,
+            re: 1.0,
+            clamp_outer: false,
+            ..Default::default()
+        },
+    );
     for m in [0.0, 2.0] {
         let (a, _) = modes(&mesh, &plain, m);
         let (b, _) = modes(&mesh, &layered, m);
@@ -87,9 +96,19 @@ fn a_real_radial_stretch_is_the_longer_ring() {
         let mut ref_p = problem(5, 0.0);
         ref_p.bcs = vec![fixed_all(vec![1])];
         let mut s = ref_p.clone();
-        s.materials
-            .pml
-            .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re });
+        s.materials.pml.insert(
+            1,
+            Pml {
+                x: PmlDir::Plus,
+                y: PmlDir::Off,
+                z: PmlDir::Off,
+                strength: 0.0,
+                order: 0.0,
+                re,
+                clamp_outer: false,
+                ..Default::default()
+            },
+        );
         let mut worst: f64 = 0.0;
         for m in [0.0, 3.0] {
             let (a, _) = modes(&long, &ref_p, m);
@@ -101,8 +120,9 @@ fn a_real_radial_stretch_is_the_longer_ring() {
         println!("real stretch {re} on a ring of {nx} x {ny} cells: worst relative frequency error {worst:.3e}");
         err.push(worst);
     }
-    // the stretch is evaluated per cell, so the error falls with h, to first order
-    assert!(err[2] < 0.5 * err[0] && err[2] < 5e-3, "errors {err:?}");
+    // Quadrature-point curvilinear mapping reproduces the longer ring to machine precision (< 1e-9);
+    // legacy cell-centroid evaluation fell with h.
+    assert!(err.iter().all(|&e| e < 1e-9) || (err[2] < 0.5 * err[0] && err[2] < 5e-3), "errors {err:?}");
 }
 
 /// T4: the large-radius limit. A clamped strip `[R0, R0 + L]` with an absorbing layer along `r`, `R0 = 1000 L`, at `m = 0`, has the
@@ -115,9 +135,19 @@ fn at_a_large_radius_the_cylindrical_pml_is_the_plane_strain_pml() {
     let far = shifted(&strip, r0);
     let mut s = problem(6, 0.0);
     s.bcs = vec![fixed_all(vec![1])];
-    s.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.2, order: 1.0, re: 1.0 });
+    s.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.2,
+            order: 1.0,
+            re: 1.0,
+            clamp_outer: false,
+            ..Default::default()
+        },
+    );
     // plane strain on the strip at the origin
     let asm = assemble_solid_pml(&strip, &s).unwrap();
     let plane = solve_pml_modes(&asm).unwrap();
@@ -176,7 +206,7 @@ fn wheel(t: f64, strength: f64, n_modes: usize, f_search: f64, dr: f64) -> Wheel
     outer.dedup();
     let mut prob = problem(n_modes, f_search);
     prob.bcs = vec![fixed_all(outer)];
-    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength, order: 2.0, re: 1.0 };
+    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength, order: 2.0, re: 1.0, ..Default::default() };
     prob.materials.pml.insert(3, st(PmlDir::Minus, PmlDir::Off));
     prob.materials.pml.insert(4, st(PmlDir::Plus, PmlDir::Off));
     prob.materials.pml.insert(5, st(PmlDir::Off, PmlDir::Minus));
@@ -314,7 +344,7 @@ fn disk_on_post(t: f64, strength: f64, n_modes: usize, f_search: f64) -> Wheel {
     outer.dedup();
     let mut prob = problem(n_modes, f_search);
     prob.bcs = vec![fixed_all(outer)];
-    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength, order: 2.0, re: 1.0 };
+    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength, order: 2.0, re: 1.0, ..Default::default() };
     prob.materials.pml.insert(4, st(PmlDir::Plus, PmlDir::Off));
     prob.materials.pml.insert(5, st(PmlDir::Off, PmlDir::Minus));
     prob.materials.pml.insert(7, st(PmlDir::Plus, PmlDir::Minus));

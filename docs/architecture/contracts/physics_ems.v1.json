@@ -2,7 +2,7 @@
   "bc_kinds": [
     {
       "applies": "domain",
-      "doc": "Absorbing layer by coordinate stretching in the region (x and z on a cross-section, x, y and z in 3D). Outer walls not otherwise described are perfect electric conductors.",
+      "doc": "Absorbing layer by coordinate stretching in the region (Cartesian, cylindrical, or spherical; kappa-polynomial or rational profile). Outer walls not otherwise described are perfect electric conductors.",
       "kind": "pml",
       "name": "Perfectly matched layer",
       "params": [
@@ -92,6 +92,244 @@
           "name": "re",
           "required": false,
           "unit": ""
+        },
+        {
+          "doc": "coordinate topology of the absorbing layer",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "cartesian",
+              "cylindrical",
+              "spherical"
+            ],
+            "type": "choice"
+          },
+          "label": "Coordinate system",
+          "name": "coord",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "origin [x, y, z] in wafer coordinates for cylindrical or spherical layers",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Center",
+          "name": "center",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "unit cylinder axis [ax, ay, az] in wafer coordinates",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Cylinder axis",
+          "name": "axis",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "inner interface radius for cylindrical or spherical shells",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Inner radius",
+          "name": "r_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "radial shell thickness for cylindrical layers",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Radial thickness",
+          "name": "r_thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "enable radial coordinate stretching in cylindrical layers",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Absorb radially",
+          "name": "radial_on",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region the layer absorbs towards",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb axially",
+          "name": "axial",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "axial coordinate along cylinder axis where endcap stretching starts",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Axial start",
+          "name": "z_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "axial endcap thickness for cylindrical layers",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Axial thickness",
+          "name": "z_thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "shell thickness for spherical layers (or fallback radial/axial thickness)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Shell thickness",
+          "name": "thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "coordinate-stretching law along normalized depth t in [0, 1]",
+          "kind": {
+            "default": "kappa_polynomial",
+            "options": [
+              "kappa_polynomial",
+              "rational"
+            ],
+            "type": "choice"
+          },
+          "label": "Stretching profile",
+          "name": "profile",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "peak real evanescent stretch kappa_max >= 1 for kappa_polynomial",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 1.0,
+            "type": "number"
+          },
+          "label": "Maximum real stretch",
+          "name": "kappa_max",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "pole parameter c in [0, 1) for rational stretching",
+          "kind": {
+            "default": 0.9,
+            "max": 0.999999,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Rational curvature",
+          "name": "curvature",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "calibrate strength and profile automatically from study wavelength and target_reflection",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Auto-scale parameters",
+          "name": "auto_scale",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "target normal-incidence amplitude reflection R_0 when auto_scale is enabled",
+          "kind": {
+            "default": 1e-6,
+            "max": 0.5,
+            "min": 1e-15,
+            "type": "number"
+          },
+          "label": "Target reflection",
+          "name": "target_reflection",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional explicit lower [x, y, z] slab bounds for Cartesian layers",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Slab lower bounds",
+          "name": "bounds_lo",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional explicit upper [x, y, z] slab bounds for Cartesian layers",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Slab upper bounds",
+          "name": "bounds_hi",
+          "required": false,
+          "unit": "m"
         }
       ]
     },
@@ -756,7 +994,7 @@
           "oneOf": [
             {
               "additionalProperties": false,
-              "description": "Absorbing layer by coordinate stretching in the region (x and z on a cross-section, x, y and z in 3D). Outer walls not otherwise described are perfect electric conductors.",
+              "description": "Absorbing layer by coordinate stretching in the region (Cartesian, cylindrical, or spherical; kappa-polynomial or rational profile). Outer walls not otherwise described are perfect electric conductors.",
               "properties": {
                 "kind": {
                   "const": "pml"
@@ -768,10 +1006,131 @@
                 "params": {
                   "additionalProperties": false,
                   "properties": {
+                    "auto_scale": {
+                      "default": false,
+                      "description": "Auto-scale parameters. calibrate strength and profile automatically from study wavelength and target_reflection",
+                      "type": "boolean"
+                    },
+                    "axial": {
+                      "default": "off",
+                      "description": "Absorb axially. which side of the region the layer absorbs towards",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "axis": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "description": "Cylinder axis. unit cylinder axis [ax, ay, az] in wafer coordinates",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "bounds_hi": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Slab upper bounds [m]. optional explicit upper [x, y, z] slab bounds for Cartesian layers",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "bounds_lo": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Slab lower bounds [m]. optional explicit lower [x, y, z] slab bounds for Cartesian layers",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "center": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Center [m]. origin [x, y, z] in wafer coordinates for cylindrical or spherical layers",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "coord": {
+                      "default": "auto",
+                      "description": "Coordinate system. coordinate topology of the absorbing layer",
+                      "enum": [
+                        "auto",
+                        "cartesian",
+                        "cylindrical",
+                        "spherical"
+                      ],
+                      "type": "string"
+                    },
+                    "curvature": {
+                      "default": 0.9,
+                      "description": "Rational curvature. pole parameter c in [0, 1) for rational stretching",
+                      "maximum": 0.999999,
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "kappa_max": {
+                      "default": 1.0,
+                      "description": "Maximum real stretch. peak real evanescent stretch kappa_max >= 1 for kappa_polynomial",
+                      "minimum": 1.0,
+                      "type": "number"
+                    },
                     "order": {
                       "default": 2.0,
                       "description": "Order",
                       "type": "number"
+                    },
+                    "profile": {
+                      "default": "kappa_polynomial",
+                      "description": "Stretching profile. coordinate-stretching law along normalized depth t in [0, 1]",
+                      "enum": [
+                        "kappa_polynomial",
+                        "rational"
+                      ],
+                      "type": "string"
+                    },
+                    "r_in": {
+                      "default": 0.0,
+                      "description": "Inner radius [m]. inner interface radius for cylindrical or spherical shells",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "r_thickness": {
+                      "default": 0.0,
+                      "description": "Radial thickness [m]. radial shell thickness for cylindrical layers",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "radial_on": {
+                      "default": true,
+                      "description": "Absorb radially. enable radial coordinate stretching in cylindrical layers",
+                      "type": "boolean"
                     },
                     "re": {
                       "default": 1.0,
@@ -781,6 +1140,19 @@
                     "strength": {
                       "default": 3.0,
                       "description": "Strength. stretch s = re - j strength t^order",
+                      "type": "number"
+                    },
+                    "target_reflection": {
+                      "default": 1e-6,
+                      "description": "Target reflection. target normal-incidence amplitude reflection R_0 when auto_scale is enabled",
+                      "maximum": 0.5,
+                      "minimum": 1e-15,
+                      "type": "number"
+                    },
+                    "thickness": {
+                      "default": 0.0,
+                      "description": "Shell thickness [m]. shell thickness for spherical layers (or fallback radial/axial thickness)",
+                      "minimum": 0.0,
                       "type": "number"
                     },
                     "x": {
@@ -812,6 +1184,17 @@
                         "minus"
                       ],
                       "type": "string"
+                    },
+                    "z_in": {
+                      "default": 0.0,
+                      "description": "Axial start [m]. axial coordinate along cylinder axis where endcap stretching starts",
+                      "type": "number"
+                    },
+                    "z_thickness": {
+                      "default": 0.0,
+                      "description": "Axial thickness [m]. axial endcap thickness for cylindrical layers",
+                      "minimum": 0.0,
+                      "type": "number"
                     }
                   },
                   "required": [],

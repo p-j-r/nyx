@@ -1,20 +1,51 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
-//! Heat transfer on P1/P2 simplices, stationary and transient: `rho Cp dT/dt - div(k grad T) = Q`, `T = T0`, `-n.q = q0`,
-//! `-n.q = h (Text - T)`. Three stages (ADR 9): `assemble_heat`, `solve_heat_states`, `heat_fields`; `solve_heat` runs them.
+//! Heat transfer on P1/P2 simplices and native mixed cells (`Quad`, `Prism`, `Hex`), stationary and transient:
+//! `rho Cp dT/dt - div(k grad T) = Q`, `T = T0`, `-n.q = q0`, `-n.q = h (Text - T)`, plus stationary
+//! `far_field` Robin / Bayliss-Turkel and domain-applied static `infinite_element` conditions.
+//! Three stages (ADR 9): `assemble_heat`, `solve_heat_states`, `heat_fields`; `solve_heat` runs them.
 
-use crate::common::{cell_tensor_gradient, components, minmax, plane_tensors};
+use crate::common::{
+    assemble_boundary_load_mixed, assemble_boundary_mass_mixed, assemble_farfield_robin_mixed,
+    assemble_ie_outer_robin_mixed, assemble_laplace_ie_mixed, assemble_source_mixed, cell_tensor_gradient,
+    cell_tensor_mixed, cell_values_mixed, check_boundary_labels_mixed, classify_ie_outer_facets_mixed, components,
+    farfield_centroid_mixed, minmax, plane_tensors, plane_tensors_mixed, resolve_ie_domains_mixed,
+    sample_mixed_gradients_on_simplex, solve_spd_mixed,
+};
 use crate::problem::{BcKind, Problem, Study};
 use femcore::expr::eval_at;
 use femcore::fem::*;
+use femcore::fem_mixed::{assemble_mass_mixed, LagrangeSpace, MixedLagrangeDofMap};
 use femcore::fields::{node_average, CellFields};
 use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::driver::{dense_gen_eigh as gen_eigh, DirectSolver};
 use femcore::material::M3;
+use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::{LinearSolver, TensorKind};
-use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
-use std::collections::BTreeMap;
+use nyx_physics::{
+    cell_fields_of, discretise, discretise_mixed, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar,
+    Solution, SolveResult,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
+
+fn check_transient_heat_guards(spec: &Problem) -> Result<(), String> {
+    if matches!(spec.study, Study::HeatTransient { .. }) {
+        if spec.has_infinite_element() {
+            return Err(
+                "infinite_element cannot be used with heat_transient: frequency-independent spatial coordinate stretching distorts volumetric heat capacity (rho * Cp * det(J_IE)) across transient diffusion timescales; use unstretched (s_u = 1) geometrically graded layers of diffusion-length thickness d = sqrt(4 * D_max * t_end * ln(1/R_0)) instead"
+                    .into(),
+            );
+        }
+        if spec.bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. })) {
+            return Err(
+                "far_field asymptotic Laplace Robin boundary condition is only valid for stationary heat transfer (heat_stationary), not heat_transient; use unstretched geometrically graded diffusion-length layers d = sqrt(4 * D_max * t_end * ln(1/R_0))"
+                    .into(),
+            );
+        }
+    }
+    Ok(())
+}
 
 /// Stage 1 of heat transfer: conductivity matrix, load, Dirichlet dofs and the conductivity tensors (for the flux).
 pub struct HeatSystem {
@@ -27,20 +58,62 @@ pub struct HeatSystem {
 }
 
 pub fn assemble_heat(mesh: &Discretisation, spec: &Problem) -> Result<HeatSystem, String> {
+    check_transient_heat_guards(spec)?;
     let order = spec.order;
-    check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
+    check_boundary_labels(
+        mesh,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
     let ktensor = plane_tensors(mesh, spec.materials.cell_tensor(mesh, TensorKind::Conductivity, None)?);
-    let mut k = if spec.materials.has_tensor(TensorKind::Conductivity) {
+    let k_scalar: Vec<f64> = ktensor.iter().map(|t| t[0][0]).collect();
+
+    let mut ie_rat_facets = Vec::new();
+    let mut ie_exp_facets = Vec::new();
+    let mut ie_map_opt = None;
+    let mut mixed_opt = None;
+    let mut dof_map_opt = None;
+
+    let mut k = if spec.has_infinite_element() {
+        let mixed = MixedDiscretisation::from_simplex_mesh(mesh)?;
+        let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+        let dof_map = MixedLagrangeDofMap::new(&mixed, space);
+        let ie_map = resolve_ie_domains_mixed(&mixed, spec)?;
+        let (rf, ef) = classify_ie_outer_facets_mixed(&mixed, &ie_map);
+        let km = assemble_laplace_ie_mixed(&mixed, &dof_map, &k_scalar, Some(&ktensor), &ie_map);
+        ie_rat_facets = rf;
+        ie_exp_facets = ef;
+        ie_map_opt = Some(ie_map);
+        mixed_opt = Some(mixed);
+        dof_map_opt = Some(dof_map);
+        km
+    } else if spec.materials.has_tensor(TensorKind::Conductivity) {
         assemble_laplace_tensor(mesh, order, &ktensor)
     } else {
-        assemble_laplace(mesh, order, &ktensor.iter().map(|t| t[0][0]).collect::<Vec<_>>())
+        assemble_laplace(mesh, order, &k_scalar)
     };
+
     let n = k.nrows();
     let q = spec.materials.cell_values(mesh, "Q", Some(0.0))?;
     let mut f = if q.iter().any(|&x| x != 0.0) { assemble_source(mesh, order, &q) } else { vec![0.0; n] };
     let mut tfix: BTreeMap<i32, f64> = BTreeMap::new();
     let mut has_convection = false;
     for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            if !(1..=2).contains(ff_order) {
+                return Err(format!("far_field condition 'order' must be 1 or 2, got {ff_order}"));
+            }
+            if !decay_power.is_finite() || *decay_power <= 0.0 {
+                return Err(format!("far_field condition 'decay_power' must be positive, got {decay_power}"));
+            }
+            if let Some(c) = center {
+                if c.iter().any(|x| !x.is_finite()) {
+                    return Err("far_field condition 'center' has a NaN or infinite coordinate".into());
+                }
+            }
+        }
         for &lab in &bc.labels {
             match &bc.kind {
                 BcKind::Temperature(t) => {
@@ -56,11 +129,82 @@ pub fn assemble_heat(mesh: &Discretisation, spec: &Problem) -> Result<HeatSystem
                     let l = assemble_boundary_load(mesh, &[lab], h * text, order);
                     f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
                 }
+                BcKind::FarField { .. } | BcKind::InfiniteElement(_) => {}
                 other => return Err(format!("'{}' is not a heat-transfer boundary condition", other.name())),
             }
         }
     }
-    let (fixed, vals) = if tfix.is_empty() { (vec![], vec![]) } else { dirichlet_constraints(mesh, &tfix, order) };
+
+    let ref_labels: Vec<i32> = tfix.keys().copied().collect();
+    let k_perm = FarFieldPermittivity::Tensor(&ktensor);
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !tfix.contains_key(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid(mesh, &ref_labels));
+                let k_far = assemble_farfield_robin(mesh, &ff_labs, order, *ff_order, *decay_power, c, 1.0, k_perm);
+                let ones = vec![1.0; n];
+                let row_sums = k_far.matvec(&ones);
+                if row_sums.iter().any(|&v| v > 0.0) {
+                    has_convection = true;
+                }
+                k = k.add_scaled(&k_far, 1.0);
+                let t_inf = spec.farfield_t_inf;
+                if t_inf != 0.0 {
+                    for (fi, &rs) in f.iter_mut().zip(&row_sums) {
+                        *fi += rs * t_inf;
+                    }
+                }
+            }
+        }
+    }
+
+    if !ie_exp_facets.is_empty() {
+        if let (Some(mixed), Some(dof_map), Some(ie_map)) = (&mixed_opt, &dof_map_opt, &ie_map_opt) {
+            let k_ie_rob = assemble_ie_outer_robin_mixed(mixed, dof_map, &ie_exp_facets, ie_map, 1.0, k_perm);
+            let ones = vec![1.0; n];
+            let row_sums = k_ie_rob.matvec(&ones);
+            if row_sums.iter().any(|&v| v > 0.0) {
+                has_convection = true;
+            }
+            k = k.add_scaled(&k_ie_rob, 1.0);
+            let t_inf = spec.farfield_t_inf;
+            if t_inf != 0.0 {
+                for (fi, &rs) in f.iter_mut().zip(&row_sums) {
+                    *fi += rs * t_inf;
+                }
+            }
+        }
+    }
+
+    let (mut fixed, mut vals) =
+        if tfix.is_empty() { (vec![], vec![]) } else { dirichlet_constraints(mesh, &tfix, order) };
+
+    if !ie_rat_facets.is_empty() {
+        if let (Some(mixed), Some(dof_map)) = (&mixed_opt, &dof_map_opt) {
+            let fixed_set: BTreeSet<usize> = fixed.iter().copied().collect();
+            let mut ie_dofs = BTreeSet::new();
+            let mut fbuf = Vec::new();
+            for &f_idx in &ie_rat_facets {
+                dof_map.facet_dofs(mixed, f_idx, &mut fbuf);
+                for &d in &fbuf {
+                    if !fixed_set.contains(&d) {
+                        ie_dofs.insert(d);
+                    }
+                }
+            }
+            if !ie_dofs.is_empty() {
+                let mut pairs: Vec<(usize, f64)> = fixed.into_iter().zip(vals).collect();
+                for d in ie_dofs {
+                    pairs.push((d, spec.farfield_t_inf));
+                }
+                pairs.sort_by_key(|p| p.0);
+                fixed = pairs.iter().map(|p| p.0).collect();
+                vals = pairs.iter().map(|p| p.1).collect();
+            }
+        }
+    }
+
     if fixed.is_empty() && !has_convection {
         return Err("heat transfer needs a fixed-temperature or convection boundary (an all-insulated body has no unique solution)".into());
     }
@@ -101,6 +245,7 @@ pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem
             Ok(HeatStates { times: vec![], temps: vec![t], log })
         }
         Study::HeatTransient { t_end, n_out, t0: t0_expr } => {
+            check_transient_heat_guards(spec)?;
             if *t_end <= 0.0 || *n_out < 1 {
                 return Err("end time must be positive and at least one output time is needed".into());
             }
@@ -272,5 +417,295 @@ pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, 
         log: st.log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: sys.k.nrows(),
+    })
+}
+
+fn heat_fields_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    t_mixed: &[f64],
+    ktensor: &[M3],
+    order: usize,
+) -> (Vec<Field>, CellFields, Vec<f64>) {
+    let t_simplex = proj.project_lagrange_blocks(mixed, dof_map, t_mixed, 1, order);
+    let scale = vec![-1.0; mixed.n_cells()];
+    let qcell = sample_mixed_gradients_on_simplex(mixed, dof_map, proj, t_mixed, Some(ktensor), &scale, order);
+    let q = node_average(simplex, &qcell, simplex.dim, order);
+    let qc = components(&q, simplex.dim);
+    let names = femcore::section::component_names(simplex.dim);
+    let fields = vec![Field::scalar("T", "K", t_simplex.clone()), Field::vector("q", "W/m^2", names, &qc)];
+    let mut cf = CellFields::new(simplex, order);
+    cf.push_real("T", "K", cell_values_at_nodes(simplex, &t_simplex, order));
+    cf.push_components("q", names, "W/m^2", &qcell);
+    (fields, cf, t_simplex)
+}
+
+/// Solves stationary or transient heat transfer natively on a mixed mesh (`Quad`, `Prism`, `Hex`)
+/// and/or with domain-applied static Infinite Elements (`BcKind::InfiniteElement`), preserving the
+/// pure-simplex fast path when `mesh.is_pure_simplex() && !spec.has_infinite_element()`.
+pub fn solve_heat_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String> {
+    check_transient_heat_guards(spec)?;
+    if mesh.is_pure_simplex() && !spec.has_infinite_element() {
+        let d = discretise(mesh).map_err(|e| e.to_string())?;
+        return solve_heat(&d, spec);
+    }
+
+    let t0 = Instant::now();
+    let order = spec.order;
+    let mixed = discretise_mixed(mesh).map_err(|e| e.to_string())?;
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, &mixed).map_err(|e| e.to_string())?;
+    let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+    let dof_map = MixedLagrangeDofMap::new(&mixed, space);
+
+    check_boundary_labels_mixed(
+        &mixed,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
+    let ie_map = resolve_ie_domains_mixed(&mixed, spec)?;
+    let ktensor =
+        plane_tensors_mixed(&mixed, cell_tensor_mixed(&spec.materials, &mixed, TensorKind::Conductivity, None)?);
+    let k_scalar: Vec<f64> = ktensor.iter().map(|t| t[0][0]).collect();
+    let has_aniso_k = spec.materials.has_tensor(TensorKind::Conductivity);
+
+    let mut k =
+        assemble_laplace_ie_mixed(&mixed, &dof_map, &k_scalar, has_aniso_k.then_some(ktensor.as_slice()), &ie_map);
+    let n = dof_map.n_dofs;
+    let q = cell_values_mixed(&spec.materials, &mixed, "Q", Some(0.0))?;
+    let mut f = if q.iter().any(|&x| x != 0.0) { assemble_source_mixed(&mixed, &dof_map, &q) } else { vec![0.0; n] };
+
+    let mut tfix: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut has_convection = false;
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            if !(1..=2).contains(ff_order) {
+                return Err(format!("far_field condition 'order' must be 1 or 2, got {ff_order}"));
+            }
+            if !decay_power.is_finite() || *decay_power <= 0.0 {
+                return Err(format!("far_field condition 'decay_power' must be positive, got {decay_power}"));
+            }
+            if let Some(c) = center {
+                if c.iter().any(|x| !x.is_finite()) {
+                    return Err("far_field condition 'center' has a NaN or infinite coordinate".into());
+                }
+            }
+        }
+        for &lab in &bc.labels {
+            match &bc.kind {
+                BcKind::Temperature(t) => {
+                    tfix.insert(lab, *t);
+                }
+                BcKind::Flux(q0) => {
+                    let l = assemble_boundary_load_mixed(&mixed, &dof_map, &[lab], *q0);
+                    f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                }
+                BcKind::Convection { h, text } => {
+                    has_convection |= *h != 0.0;
+                    k = k.add_scaled(&assemble_boundary_mass_mixed(&mixed, &dof_map, &[lab], *h), 1.0);
+                    let l = assemble_boundary_load_mixed(&mixed, &dof_map, &[lab], h * text);
+                    f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                }
+                BcKind::FarField { .. } | BcKind::InfiniteElement(_) => {}
+                other => return Err(format!("'{}' is not a heat-transfer boundary condition", other.name())),
+            }
+        }
+    }
+
+    let ref_labels: Vec<i32> = tfix.keys().copied().collect();
+    let k_perm = FarFieldPermittivity::Tensor(&ktensor);
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !tfix.contains_key(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid_mixed(&mixed, &ref_labels));
+                let k_far =
+                    assemble_farfield_robin_mixed(&mixed, &dof_map, &ff_labs, *ff_order, *decay_power, c, 1.0, k_perm);
+                let ones = vec![1.0; n];
+                let row_sums = k_far.matvec(&ones);
+                if row_sums.iter().any(|&v| v > 0.0) {
+                    has_convection = true;
+                }
+                k = k.add_scaled(&k_far, 1.0);
+                let t_inf = spec.farfield_t_inf;
+                if t_inf != 0.0 {
+                    for (fi, &rs) in f.iter_mut().zip(&row_sums) {
+                        *fi += rs * t_inf;
+                    }
+                }
+            }
+        }
+    }
+
+    let (ie_rat_facets, ie_exp_facets) = classify_ie_outer_facets_mixed(&mixed, &ie_map);
+    if !ie_exp_facets.is_empty() {
+        let k_ie_rob = assemble_ie_outer_robin_mixed(&mixed, &dof_map, &ie_exp_facets, &ie_map, 1.0, k_perm);
+        let ones = vec![1.0; n];
+        let row_sums = k_ie_rob.matvec(&ones);
+        if row_sums.iter().any(|&v| v > 0.0) {
+            has_convection = true;
+        }
+        k = k.add_scaled(&k_ie_rob, 1.0);
+        let t_inf = spec.farfield_t_inf;
+        if t_inf != 0.0 {
+            for (fi, &rs) in f.iter_mut().zip(&row_sums) {
+                *fi += rs * t_inf;
+            }
+        }
+    }
+
+    let (mut fixed, mut vals) = dof_map.dirichlet_constraints(&mixed, &tfix);
+    if !ie_rat_facets.is_empty() {
+        let fixed_set: BTreeSet<usize> = fixed.iter().copied().collect();
+        let mut ie_dofs = BTreeSet::new();
+        let mut fbuf = Vec::new();
+        for &f_idx in &ie_rat_facets {
+            dof_map.facet_dofs(&mixed, f_idx, &mut fbuf);
+            for &d in &fbuf {
+                if !fixed_set.contains(&d) {
+                    ie_dofs.insert(d);
+                }
+            }
+        }
+        if !ie_dofs.is_empty() {
+            let mut pairs: Vec<(usize, f64)> = fixed.into_iter().zip(vals).collect();
+            for d in ie_dofs {
+                pairs.push((d, spec.farfield_t_inf));
+            }
+            pairs.sort_by_key(|p| p.0);
+            fixed = pairs.iter().map(|p| p.0).collect();
+            vals = pairs.iter().map(|p| p.1).collect();
+        }
+    }
+
+    if fixed.is_empty() && !has_convection {
+        return Err("heat transfer needs a fixed-temperature or convection boundary (an all-insulated body has no unique solution)".into());
+    }
+
+    let mut log = Vec::new();
+    let (times, temps_mixed) = match &spec.study {
+        Study::HeatStationary => {
+            let (t_sol, note) = solve_spd_mixed(spec.solver, &k, &f, &fixed, &vals)?;
+            log.extend(note);
+            (vec![], vec![t_sol])
+        }
+        Study::HeatTransient { t_end, n_out, t0: t0_expr } => {
+            if *t_end <= 0.0 || *n_out < 1 {
+                return Err("end time must be positive and at least one output time is needed".into());
+            }
+            let rho = cell_values_mixed(&spec.materials, &mixed, "rho", Some(1.0))?;
+            let cp = cell_values_mixed(&spec.materials, &mixed, "Cp", Some(1.0))?;
+            let rcp: Vec<f64> = rho.iter().zip(&cp).map(|(a, b)| a * b).collect();
+            let m = assemble_mass_mixed(&mixed, &dof_map, &rcp);
+            let times: Vec<f64> = (0..=*n_out).map(|j| t_end * j as f64 / *n_out as f64).collect();
+            let free = free_dofs(n, &fixed);
+            let kff = k.submatrix(&free, &free);
+            let mff = m.submatrix(&free, &free);
+            let kfx = k.submatrix(&free, &fixed);
+            let kx = if fixed.is_empty() { vec![0.0; free.len()] } else { kfx.matvec(&vals) };
+            let rhs0: Vec<f64> = free.iter().enumerate().map(|(a, &i)| f[i] - kx[a]).collect();
+            let ts = DirectSolver::new(&kff, true)?.solve(&rhs0);
+            let coords = dof_map.dof_coordinates(&mixed);
+            let mut y0 = eval_at(t0_expr, &coords, mixed.dim).map_err(|e| format!("initial temperature: {e}"))?;
+            for (&i, &v) in fixed.iter().zip(&vals) {
+                y0[i] = v;
+            }
+            let y0f: Vec<f64> = free.iter().enumerate().map(|(a, &i)| y0[i] - ts[a]).collect();
+            let mut out = vec![vec![0.0; n]; times.len()];
+            for row in out.iter_mut() {
+                for (&i, &v) in fixed.iter().zip(&vals) {
+                    row[i] = v;
+                }
+            }
+            let dense_limit = 2500;
+            if free.len() <= dense_limit {
+                let (lam, vecs) = gen_eigh(&kff.to_dense(), &mff.to_dense(), free.len())?;
+                let myf = mff.matvec(&y0f);
+                let c: Vec<f64> = vecs.iter().map(|v| v.iter().zip(&myf).map(|(a, b)| a * b).sum()).collect();
+                for (j, &t) in times.iter().enumerate() {
+                    for (a, &i) in free.iter().enumerate() {
+                        out[j][i] = ts[a];
+                    }
+                    for (idx, v) in vecs.iter().enumerate() {
+                        let w = (-lam[idx] * t).exp() * c[idx];
+                        for (a, &i) in free.iter().enumerate() {
+                            out[j][i] += w * v[a];
+                        }
+                    }
+                }
+                log.push(format!(
+                    "exact semi-discrete solution (dense eigendecomposition, {} free mixed-cell dofs)",
+                    free.len()
+                ));
+            } else {
+                let sub = 8usize;
+                let dt = times[1] / sub as f64;
+                let a1 = mff.scaled(1.0 / dt).add_scaled(&kff, 1.0);
+                let a2 = mff.scaled(1.5 / dt).add_scaled(&kff, 1.0);
+                let s1 = DirectSolver::new(&a1, true)?;
+                let s2 = DirectSolver::new(&a2, true)?;
+                let mut yprev = y0f.clone();
+                let my0 = mff.matvec(&y0f);
+                let mut y = s1.solve(&my0.iter().map(|v| v / dt).collect::<Vec<_>>());
+                for (a, &i) in free.iter().enumerate() {
+                    out[0][i] = ts[a] + y0f[a];
+                }
+                for s in 1..=sub * n_out {
+                    if s > 1 {
+                        let my = mff.matvec(&y);
+                        let mp = mff.matvec(&yprev);
+                        let rhs: Vec<f64> = my.iter().zip(&mp).map(|(a, b)| (2.0 * a - 0.5 * b) / dt).collect();
+                        let ynew = s2.solve(&rhs);
+                        yprev = std::mem::replace(&mut y, ynew);
+                    }
+                    if s % sub == 0 {
+                        for (a, &i) in free.iter().enumerate() {
+                            out[s / sub][i] = ts[a] + y[a];
+                        }
+                    }
+                }
+                log.push(format!("BDF2, {} steps ({} free mixed-cell dofs)", sub * n_out, free.len()));
+            }
+            (times, out)
+        }
+        Study::Electrostatic | Study::Magnetostatic { .. } => {
+            return Err("heat transfer supports the stationary and transient studies".into());
+        }
+    };
+
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut solutions = Vec::with_capacity(temps_mixed.len());
+    for (j, row) in temps_mixed.iter().enumerate() {
+        let (fields, cell_fields, t_simplex) =
+            heat_fields_mixed(&mixed, &dof_map, &simplex, &proj, row, &ktensor, order);
+        let (a, b) = minmax(&t_simplex);
+        lo = lo.min(a);
+        hi = hi.max(b);
+        let (label, value) = match times.get(j) {
+            Some(&t) => (format!("t = {:.6} s", t).replace(".000000", ""), Some(t)),
+            None => ("stationary".to_string(), None),
+        };
+        solutions.push(Solution {
+            label,
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            value,
+            ..Default::default()
+        });
+    }
+
+    Ok(SolveResult {
+        physics: "dfs".into(),
+        study: spec.study.kind().into(),
+        order: order as u8,
+        dim: mixed.dim as u8,
+        solutions,
+        scalars: vec![("T min (K)".into(), Scalar::Num(lo)), ("T max (K)".into(), Scalar::Num(hi))],
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: n,
     })
 }

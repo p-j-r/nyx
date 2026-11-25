@@ -20,6 +20,7 @@ pub mod bloch;
 pub mod cavity;
 pub mod driven;
 pub mod ibc;
+pub mod mixed_ops;
 pub mod modes;
 pub mod modes_complex;
 pub mod optical;
@@ -28,19 +29,29 @@ pub mod problem;
 pub mod rom;
 
 pub use axisym::{
-    assemble_axisym, assemble_axisym_with_bcs, axisym_fields_cells, power_along_theta, solve_axisym_modes,
-    solve_axisym_pairs, solve_axisymmetric, AxiAssembly, AxiMaterial, AxiModes,
+    assemble_axisym, assemble_axisym_mixed, assemble_axisym_with_bcs, axisym_fields_cells, power_along_theta,
+    solve_axisym_modes, solve_axisym_pairs, solve_axisymmetric, solve_axisymmetric_mixed, AxiAssembly, AxiMaterial,
+    AxiModes,
 };
-pub use bloch::{assemble_bloch, bloch_fields_cells, solve_bloch, solve_bloch_eigen, BlochAssembly, BlochSolve};
-pub use cavity::{assemble_emw_eigen, emw_eigen_fields, solve_cavity, solve_emw_modes, EmwAssembly, EmwSolve};
-pub use driven::{assemble_emw_driven, solve_driven, DrivenAssembly};
+pub use bloch::{
+    assemble_bloch, assemble_bloch_mixed, bloch_fields_cells, solve_bloch, solve_bloch_eigen, solve_bloch_mixed,
+    BlochAssembly, BlochSolve,
+};
+pub use cavity::{
+    assemble_emw_eigen, assemble_emw_eigen_mixed, emw_eigen_fields, solve_cavity, solve_cavity_mixed,
+    solve_cavity_mixed_ams, solve_emw_modes, EmwAssembly, EmwSolve, MixedCavityMasks,
+};
+pub use driven::{assemble_emw_driven, assemble_emw_driven_mixed, solve_driven, solve_driven_mixed, DrivenAssembly};
+pub use mixed_ops::{eigs_mixed_curl_curl_ams, solve_mixed_curl_curl_iterative, EmPmlTable};
 pub use modes::{
-    assemble_modes, assemble_modes_with_bcs, mode_fields, mode_fields_cells, n_unknowns, solve_mode_pairs, solve_modes,
-    solve_modes_tensor, solve_waveguide, EpsCell, ModeAssembly, Modes, C0,
+    assemble_modes, assemble_modes_mixed, assemble_modes_with_bcs, mode_fields, mode_fields_cells, n_unknowns,
+    solve_mode_pairs, solve_modes, solve_modes_tensor, solve_waveguide, solve_waveguide_mixed, EpsCell, ModeAssembly,
+    Modes, C0,
 };
 pub use modes_complex::{
-    assemble_modes_complex, assemble_modes_complex_with_bcs, mode_fields_complex, mode_fields_complex_cells,
-    solve_mode_pairs_complex, solve_modes_complex, solve_waveguide_complex, ModeAssemblyC, ModesC,
+    assemble_modes_complex, assemble_modes_complex_mixed, assemble_modes_complex_with_bcs, mode_fields_complex,
+    mode_fields_complex_cells, solve_mode_pairs_complex, solve_modes_complex, solve_waveguide_complex,
+    solve_waveguide_complex_mixed, ModeAssemblyC, ModesC,
 };
 pub use optical::{solve_optical, solve_optical_wafer};
 pub use ports::{
@@ -185,7 +196,7 @@ impl Physics for Ems {
             BcDesc {
                 kind: "pml".into(),
                 name: "Perfectly matched layer".into(),
-                doc: "Absorbing layer by coordinate stretching in the region (x and z on a cross-section, x, y and z in 3D). Outer walls not otherwise described are perfect electric conductors.".into(),
+                doc: "Absorbing layer by coordinate stretching in the region (Cartesian, cylindrical, or spherical; kappa-polynomial or rational profile). Outer walls not otherwise described are perfect electric conductors.".into(),
                 applies: Applies::Domain,
                 params: vec![
                     dir("x", "Absorb along x"),
@@ -194,6 +205,126 @@ impl Physics for Ems {
                     ParamDesc::number("strength", "Strength", "", 3.0, "stretch s = re - j strength t^order"),
                     ParamDesc::number("order", "Order", "", 2.0, ""),
                     ParamDesc::number("re", "Real part", "", 1.0, ""),
+                    ParamDesc::choice(
+                        "coord",
+                        "Coordinate system",
+                        &["auto", "cartesian", "cylindrical", "spherical"],
+                        "auto",
+                        "coordinate topology of the absorbing layer",
+                    ),
+                    ParamDesc::vector(
+                        "center",
+                        "Center",
+                        "m",
+                        3,
+                        "origin [x, y, z] in wafer coordinates for cylindrical or spherical layers",
+                    )
+                    .default_vector(vec![0.0, 0.0, 0.0]),
+                    ParamDesc::vector(
+                        "axis",
+                        "Cylinder axis",
+                        "",
+                        3,
+                        "unit cylinder axis [ax, ay, az] in wafer coordinates",
+                    )
+                    .default_vector(vec![0.0, 0.0, 1.0]),
+                    ParamDesc::number(
+                        "r_in",
+                        "Inner radius",
+                        "m",
+                        0.0,
+                        "inner interface radius for cylindrical or spherical shells",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::number(
+                        "r_thickness",
+                        "Radial thickness",
+                        "m",
+                        0.0,
+                        "radial shell thickness for cylindrical layers",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::boolean(
+                        "radial_on",
+                        "Absorb radially",
+                        true,
+                        "enable radial coordinate stretching in cylindrical layers",
+                    ),
+                    dir("axial", "Absorb axially"),
+                    ParamDesc::number(
+                        "z_in",
+                        "Axial start",
+                        "m",
+                        0.0,
+                        "axial coordinate along cylinder axis where endcap stretching starts",
+                    ),
+                    ParamDesc::number(
+                        "z_thickness",
+                        "Axial thickness",
+                        "m",
+                        0.0,
+                        "axial endcap thickness for cylindrical layers",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::number(
+                        "thickness",
+                        "Shell thickness",
+                        "m",
+                        0.0,
+                        "shell thickness for spherical layers (or fallback radial/axial thickness)",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::choice(
+                        "profile",
+                        "Stretching profile",
+                        &["kappa_polynomial", "rational"],
+                        "kappa_polynomial",
+                        "coordinate-stretching law along normalized depth t in [0, 1]",
+                    ),
+                    ParamDesc::number(
+                        "kappa_max",
+                        "Maximum real stretch",
+                        "",
+                        1.0,
+                        "peak real evanescent stretch kappa_max >= 1 for kappa_polynomial",
+                    )
+                    .range(Some(1.0), None),
+                    ParamDesc::number(
+                        "curvature",
+                        "Rational curvature",
+                        "",
+                        0.9,
+                        "pole parameter c in [0, 1) for rational stretching",
+                    )
+                    .range(Some(0.0), Some(0.999_999)),
+                    ParamDesc::boolean(
+                        "auto_scale",
+                        "Auto-scale parameters",
+                        false,
+                        "calibrate strength and profile automatically from study wavelength and target_reflection",
+                    ),
+                    ParamDesc::number(
+                        "target_reflection",
+                        "Target reflection",
+                        "",
+                        1e-6,
+                        "target normal-incidence amplitude reflection R_0 when auto_scale is enabled",
+                    )
+                    .range(Some(1e-15), Some(0.5)),
+                    ParamDesc::vector(
+                        "bounds_lo",
+                        "Slab lower bounds",
+                        "m",
+                        3,
+                        "optional explicit lower [x, y, z] slab bounds for Cartesian layers",
+                    ),
+                    ParamDesc::vector(
+                        "bounds_hi",
+                        "Slab upper bounds",
+                        "m",
+                        3,
+                        "optional explicit upper [x, y, z] slab bounds for Cartesian layers",
+                    ),
                 ],
             },
             BcDesc {
@@ -440,24 +571,40 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             mesh.dim(),
             mesh.n_cells()
         ));
-        let d = discretise(mesh)?;
         // a layer along y has no meaning in the plane of a cross-section (x-z)
-        if d.dim == 2 {
+        if mesh.dim() == 2 {
             if let Some((dom, _)) = problem.materials.pml.iter().find(|(_, p)| p.y != femcore::props::PmlDir::Off) {
                 return Err(Error::invalid(format!("the perfectly matched layer of domain {dom} absorbs along y, which is out of the plane of a 2D cross-section (x-z): use z for the direction of the surface normal")));
             }
         }
-        if d.dim == 3 && matches!(problem.study, Study::Cavity { .. } | Study::Driven { .. }) {
-            validate_port_contacts_3d(&d, problem).map_err(Error::invalid)?;
+        let mixed = discretise_mixed(mesh)?;
+        let use_mixed = !mixed.is_pure_simplex() || (mesh.dim() == 2 && !mixed.edge_nodes.is_empty());
+        if use_mixed {
+            if mixed.dim == 3 && matches!(problem.study, Study::Cavity { .. } | Study::Driven { .. }) {
+                mixed_ops::validate_port_contacts_3d_mixed(&mixed, problem).map_err(Error::invalid)?;
+            }
+            match problem.study {
+                Study::Modes { .. } => solve_waveguide_mixed(mesh, &mixed, problem),
+                Study::AxisymmetricModes { .. } => solve_axisymmetric_mixed(mesh, &mixed, problem),
+                Study::Cavity { .. } => solve_cavity_mixed(mesh, &mixed, problem),
+                Study::Bloch { .. } => solve_bloch_mixed(mesh, &mixed, problem),
+                Study::Driven { .. } => solve_driven_mixed(mesh, &mixed, problem),
+            }
+            .map_err(Error::from_kernel)?
+        } else {
+            let d = discretise(mesh)?;
+            if d.dim == 3 && matches!(problem.study, Study::Cavity { .. } | Study::Driven { .. }) {
+                validate_port_contacts_3d(&d, problem).map_err(Error::invalid)?;
+            }
+            match problem.study {
+                Study::Modes { .. } => solve_waveguide(&d, problem),
+                Study::AxisymmetricModes { .. } => solve_axisymmetric(&d, problem),
+                Study::Cavity { .. } => solve_cavity(&d, problem),
+                Study::Bloch { .. } => solve_bloch(&d, problem),
+                Study::Driven { .. } => solve_driven(&d, problem),
+            }
+            .map_err(Error::from_kernel)?
         }
-        match problem.study {
-            Study::Modes { .. } => solve_waveguide(&d, problem),
-            Study::AxisymmetricModes { .. } => solve_axisymmetric(&d, problem),
-            Study::Cavity { .. } => solve_cavity(&d, problem),
-            Study::Bloch { .. } => solve_bloch(&d, problem),
-            Study::Driven { .. } => solve_driven(&d, problem),
-        }
-        .map_err(Error::from_kernel)?
     };
     check_result_finite(&result)?;
     result.log.extend(progress.log().into_iter().skip(first_line));

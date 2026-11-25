@@ -54,6 +54,10 @@ pub enum Ty {
     Steps,
     /// the serde form of `PatternKind` (`{"Linear": {"step": [..]}}` or `{"Polar": {...}}`)
     Pattern,
+    /// `"Inward"` or `"Outward"`
+    PmlMode,
+    /// `"Auto"`, `"Cartesian"`, `"Cylindrical"` or `"Spherical"`
+    PmlCoord,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,8 +120,8 @@ const SWEEP_AXIS_DOC: &str = "the axis of the sweep";
 pub fn all() -> Vec<OpDesc> {
     use Group::{Boundary, Build, Labels, Shape};
     use Ty::{
-        Axis, Expr, Exprs, Feature, Features, Keep, Naming, Pattern, Pins, Points, Regions, Rings, Selector, Sides,
-        Steps, Text, TextList,
+        Axis, Expr, Exprs, Feature, Features, Keep, Naming, Pattern, Pins, PmlCoord, PmlMode, Points, Regions, Rings,
+        Selector, Sides, Steps, Text, TextList,
     };
     let d = |kind, title, doc, group, dims, fields| OpDesc { kind, title, doc, group, dims, fields };
     vec![
@@ -214,13 +218,18 @@ pub fn all() -> Vec<OpDesc> {
             opt("pins", Pins, "label pins: { sel (selector text), id }", json!([])),
             opt("naming", Naming, "how boundary faces against the void are named", json!("Feature")),
         ]),
-        d("Pml", "Absorbing layers", "Absorbing layers of `thickness` around a window on some sides; splits every matching region into the physical part and one piece per side combination.", Boundary, &[2, 3], vec![
-            req("window", Feature, "the feature that bounds the physical window"),
+        d("Pml", "Absorbing layers", "Absorbing layers around a window (`mode = \"Inward\"`) or extruded outward from the physical exterior (`mode = \"Outward\"`, `window` omitted); splits or extrudes matching regions into `<region>.pml_<piece>` sub-domains across Cartesian, Cylindrical, or Spherical topologies.", Boundary, &[2, 3], vec![
+            opt("window", Feature, "the feature that bounds the physical window (required when mode is Inward; omitted for Outward)", Value::Null),
             opt("sides", Sides, "sides that get a layer (empty: all)", json!([])),
-            req("thickness", Expr, "layer thickness"),
-            req("layers", Expr, "number of element layers across it"),
-            req("grading", Expr, "order of the polynomial profile"),
-            opt("regions", TextList, "regions to split (empty: all)", json!([])),
+            opt("thickness", Expr, "layer thickness in metres (or \"auto\" / -1)", json!("auto")),
+            opt("layers", Expr, "number of element layers across it (or \"auto\" / -1)", json!("auto")),
+            opt("grading", Expr, "order of the polynomial profile", json!(2.0)),
+            opt("regions", TextList, "regions to split or extrude (empty: all)", json!([])),
+            opt("mode", PmlMode, "growth mode: Inward (around window) or Outward (exterior boundary extrusion)", json!("Inward")),
+            opt("coord", PmlCoord, "coordinate topology: Auto, Cartesian, Cylindrical, or Spherical", json!("Auto")),
+            opt("center", Exprs(3), "optional centre [x, y, z] for Cylindrical or Spherical shells", Value::Null),
+            opt("axis", Axis, "optional axis (X, Y, or Z) for Cylindrical shells", Value::Null),
+            opt("layer_grading", Expr, "geometric mesh layer grading ratio (>= 1; 1 is uniform)", Value::Null),
         ]),
         d("Cut", "Cut by a plane", "Keeps one side of the plane normal . p = offset. The cut face is named <feature>.cut and tagged `symmetry`.", Boundary, &[2, 3], vec![
             req("normal", Exprs(3), "plane normal"),
@@ -353,6 +362,10 @@ fn ty_schema(t: Ty) -> Value {
         }),
         Ty::Pattern => json!({ "type": "object", "minProperties": 1, "maxProperties": 1,
             "description": "{\"Linear\": {\"step\": [dx, dy, dz]}} | {\"Polar\": {axis, center, total_deg}}" }),
+        Ty::PmlMode => json!({ "enum": ["Inward", "Outward", "inward", "outward"] }),
+        Ty::PmlCoord => {
+            json!({ "enum": ["Auto", "Cartesian", "Cylindrical", "Spherical", "auto", "cartesian", "cylindrical", "spherical"] })
+        }
     }
 }
 
@@ -465,6 +478,17 @@ fn convert(list: &FeatureList, f: &FieldDesc, v: &Value, kind: &str) -> GeomResu
                 Value::Array(arr)
             }
         }
+        Ty::Exprs(3) if kind == "Pml" && f.name == "center" => {
+            if let Some(arr) = v.as_array() {
+                if arr.len() == 2 {
+                    json!([arr[0], 0.0, arr[1]])
+                } else {
+                    v.clone()
+                }
+            } else {
+                v.clone()
+            }
+        }
         _ => v.clone(),
     })
 }
@@ -505,6 +529,20 @@ pub fn build_op(list: &FeatureList, kind: &str, args: &Value) -> GeomResult<Op> 
             _ => {
                 out.insert(f.name.into(), f.default.clone());
             }
+        }
+    }
+    if kind == "Pml" {
+        let has_window = out.get("window").is_some_and(|w| !w.is_null());
+        let mode_given = given.get("mode").is_some_and(|m| !m.is_null());
+        if !has_window && !mode_given {
+            out.insert("mode".into(), json!("Outward"));
+        }
+        let is_inward = out.get("mode").and_then(Value::as_str).is_some_and(|m| m.eq_ignore_ascii_case("inward"));
+        if is_inward && !has_window {
+            return Err(inv(
+                "Pml needs `window` when `mode` is \"Inward\" (or omit `window` / set `mode: \"Outward\"` for exterior absorbing layers)"
+                    .into(),
+            ));
         }
     }
     let mut tagged = Map::new();

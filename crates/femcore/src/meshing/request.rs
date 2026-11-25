@@ -1,16 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
+// Copyright (C) 2026 p-j-r
 //! A mesh asked for and reported in data (ADR 54): the serialisable request that the engine, the MCP tools and the window can build, run
-//! with [`mesh_request`], and the report that comes back, with JSON Schemas for both (draft 2020-12). Nothing here is new meshing: a request
-//! names a `MeshPlan` (simple or adaptive, inline or structured absorbing layers), optionally the waves of a study (`Sizing`, points per
-//! wavelength), and runs `mesh_for_sizing` or `mesh_model`, in 2D and 3D alike.
+//! with [`mesh_request`] or zero-eager-split [`mesh_request_native`], and the report that comes back, with JSON Schemas for both
+//! (draft 2020-12).
 
 use crate::adapt::drive::AdaptReport;
+use crate::mesh::cells::CellType;
+use crate::mesh::mixed::MixedDiscretisation;
+use crate::mesh::Mesh;
 use crate::meshing::geomdrive::{GeomMeshOpts, MeshedGeom};
 use crate::meshing::physics_size::PhysicsSizing;
-use crate::meshing::pml_geom::PmlMode;
-use crate::meshing::{mesh_for_sizing, Adaptive, MeshPlan, Mesher, Sizing};
+use crate::meshing::pml_geom::{mixed_cell_scaled_jacobian_min, PmlMode, PmlReport};
+use crate::meshing::{Adaptive, MeshPlan, Mesher, NativeMeshTuple, Sizing};
+use geom::eval::Evaluated;
+use geom::labels::LabelMap;
 use geom::model::FeatureList;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 /// Which mesher makes the cells.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,6 +36,20 @@ pub enum MesherRequest {
         #[serde(default)]
         max_cells: Option<usize>,
     },
+}
+
+/// How absorbing layers are meshed in a [`MeshRequest`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PmlModeRequest {
+    /// Physics-controlled default: builds structured native `Quad`/`Prism`/`Hex` layers whenever
+    /// `!ev.pml_regions().is_empty()`, and does nothing otherwise.
+    #[default]
+    Auto,
+    /// Structured mapped/swept absorbing layers (`Quad` in 2D; `Prism` + `Hex` in 3D).
+    Structured,
+    /// Legacy unstructured inline simplices inside CAD-sliced absorbing domains.
+    Inline,
 }
 
 fn one() -> f64 {
@@ -51,7 +72,7 @@ pub struct WavesRequest {
     /// points per shortest wavelength; absent: 12 for order 1, 6 for order 2 and above
     #[serde(default)]
     pub points_per_wavelength: Option<f64>,
-    /// factor on the element size inside absorbing layers (at least 1)
+    /// factor on the element size inside inline absorbing layers (at least 1; ignored when structured PML is active)
     #[serde(default = "relax")]
     pub pml_relax: f64,
     /// factor on the search frequency of an eigenfrequency study
@@ -68,14 +89,16 @@ pub struct MeshRequest {
     #[serde(default)]
     pub max_dev: Option<f64>,
     pub mesher: MesherRequest,
-    /// `true`: the absorbing layers of the model are rebuilt as structured layers (quadrilaterals, prisms, hexahedra, cut into simplices);
-    /// `false`: they are meshed inline like any region
+    /// how absorbing layers are meshed (`"auto"` [default], `"structured"`, or `"inline"`)
     #[serde(default)]
-    pub structured_pml: bool,
+    pub pml_mode: PmlModeRequest,
+    /// legacy boolean alias (`true` -> `Structured`, `false` -> `Inline` when `pml_mode == Auto`) kept for backward compatibility
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_pml: Option<bool>,
     /// the waves of the study the mesh is for
     #[serde(default)]
     pub waves: Option<WavesRequest>,
-    /// 3D: quadratic (isoparametric) geometry for the cells on a curved surface (ADR 82)
+    /// 3D / curvilinear shells: quadratic (isoparametric) geometry for the cells on a curved surface (ADR 82)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub curved: bool,
     /// 3D sheet mesher: target number of cells across narrow coplanar gaps; absent: disabled
@@ -113,7 +136,42 @@ pub struct MeshRequest {
     pub corner_grading: bool,
 }
 
+impl Default for MeshRequest {
+    fn default() -> Self {
+        MeshRequest {
+            h: 0.1,
+            max_dev: None,
+            mesher: MesherRequest::Simple,
+            pml_mode: PmlModeRequest::Auto,
+            structured_pml: None,
+            waves: None,
+            curved: false,
+            gap_cells: None,
+            z_coarsen: false,
+            max_cells: None,
+            dz_min: None,
+            max_z_slabs: None,
+            z_growth_ratio: None,
+            max_steiner_multiplier: None,
+            strict_mesh: false,
+            singular_edges: None,
+            quarter_point_xi: None,
+            corner_grading: false,
+        }
+    }
+}
+
 impl MeshRequest {
+    /// Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true | false)` when
+    /// `pml_mode` was left at its default `Auto`.
+    pub fn resolved_pml_mode(&self) -> PmlModeRequest {
+        match (self.pml_mode, self.structured_pml) {
+            (PmlModeRequest::Auto, Some(true)) => PmlModeRequest::Structured,
+            (PmlModeRequest::Auto, Some(false)) => PmlModeRequest::Inline,
+            (mode, _) => mode,
+        }
+    }
+
     /// The plan this request names.
     pub fn plan(&self) -> MeshPlan {
         let mut opts = GeomMeshOpts::new(self.h);
@@ -134,9 +192,15 @@ impl MeshRequest {
             opts,
             mesher: match self.mesher {
                 MesherRequest::Simple => Mesher::Simple,
-                MesherRequest::Adaptive { scale, grade, max_cells } => Mesher::Adaptive(Adaptive { scale, grade, max_cells }),
+                MesherRequest::Adaptive { scale, grade, max_cells } => {
+                    Mesher::Adaptive(Adaptive { scale, grade, max_cells })
+                }
             },
-            pml: if self.structured_pml { PmlMode::Structured } else { PmlMode::Inline },
+            pml: match self.resolved_pml_mode() {
+                PmlModeRequest::Auto => PmlMode::Auto,
+                PmlModeRequest::Structured => PmlMode::Structured,
+                PmlModeRequest::Inline => PmlMode::Inline,
+            },
         }
     }
 }
@@ -172,12 +236,21 @@ pub struct MeshReport {
     pub cells: usize,
     /// labelled boundary facets (3D: also the faces between regions)
     pub facets: usize,
+    /// uncut element counts by shape (`"tri"`, `"quad"`, `"tet"`, `"prism"`, `"hex"`)
+    #[serde(default)]
+    pub element_counts: BTreeMap<String, usize>,
     pub domains: Vec<DomainReport>,
     #[serde(default)]
     pub adaptation: Option<AdaptSummary>,
-    /// layers per side of the structured absorbing layers, `[axis][side]` (x, y, z); absent for inline layers
+    /// layers per side of the structured absorbing layers, `[axis][side]` (x, z in 2D; x, y, z in 3D); absent for inline layers
     #[serde(default)]
     pub structured_layers: Option<Vec<[usize; 2]>>,
+    /// minimum normalized scaled Jacobian across all generated PML cells (curved and straight); absent when no structured PML cells exist
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_pml_scaled_jacobian: Option<f64>,
+    /// absorbing-layer quality and resolution warnings (e.g. `< 5` layers); absent when none
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pml_warnings: Vec<String>,
     /// the curved edges of a 3D mesh made with `curved` (ADR 82); absent for a straight-sided mesh
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub curved: Option<CurvedSummary>,
@@ -223,94 +296,340 @@ impl CurvedSummary {
     }
 }
 
-fn summarise(g: &MeshedGeom, req: &MeshRequest, report: Option<&AdaptReport>, sizes: &[Option<f64>]) -> MeshReport {
-    let m = &g.mesh;
-    let domains = g
-        .labels
-        .domains
-        .iter()
-        .map(|d| DomainReport { id: d.id, name: d.name.clone(), cells: m.cell_labels.iter().filter(|&&l| l == d.id).count(), wave_size: sizes.get(d.region as usize).copied().flatten() })
-        .filter(|d| d.cells > 0 || d.wave_size.is_some())
-        .collect();
-    let adaptation = report.and_then(|r| {
-        let (first, last) = (r.iters.first()?, r.iters.last()?);
-        Some(AdaptSummary { iterations: r.iters.len(), converged: r.converged, capped: r.capped, q_min: last.q_min, cells_start: first.n_triangles, cells_end: last.n_triangles })
-    });
-    let structured_layers = if req.structured_pml && !g.eval.pml_regions().is_empty() {
-        let mut layers = vec![[0usize; 2]; m.dim];
-        for p in g.eval.pml_regions() {
-            let nz: Vec<usize> = (0..3).filter(|&a| p.sides[a] != 0).collect();
-            if nz.len() == 1 {
-                let axis = if m.dim == 2 { [0usize, 2].iter().position(|&a| a == nz[0]) } else { Some(nz[0]) };
-                if let Some(a) = axis {
-                    layers[a][(p.sides[nz[0]] > 0) as usize] = (p.layers.round() as usize).max(1);
+fn cell_type_key(t: CellType) -> &'static str {
+    match t {
+        CellType::Tri => "tri",
+        CellType::Quad => "quad",
+        CellType::Tet => "tet",
+        CellType::Prism => "prism",
+        CellType::Hex => "hex",
+    }
+}
+
+fn collect_pml_warnings(ev: &Evaluated) -> Vec<String> {
+    let mut min_layers: Option<usize> = None;
+    for p in ev.pml_regions() {
+        let n = (p.layers.round() as usize).max(1);
+        if n < 5 {
+            min_layers = Some(min_layers.map_or(n, |cur| cur.min(n)));
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(n) = min_layers {
+        out.push(format!(
+            "absorbing layer uses {n} (< 5) layer(s); at least 5-6 layers are recommended to suppress discretization reflection"
+        ));
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn summarise_native_mesh(
+    mesh: &Mesh,
+    labels: &LabelMap,
+    eval: &Evaluated,
+    plan: &MeshPlan,
+    adapt: Option<&AdaptReport>,
+    pml_rep: Option<&PmlReport>,
+    sizes: &[Option<f64>],
+    base_warnings: &[String],
+) -> MeshReport {
+    let (dim, vertices, cells, facets, cell_labels, element_counts) = match mesh {
+        Mesh::D2(cm) => {
+            let mut counts = BTreeMap::new();
+            for (ct, cnt) in cm.counts() {
+                if cnt > 0 {
+                    counts.insert(cell_type_key(ct).to_string(), cnt);
                 }
             }
+            (2, cm.n_points(), cm.n_cells(), cm.n_facets(), &cm.label, counts)
         }
-        Some(layers)
+        Mesh::D3(cm) => {
+            let mut counts = BTreeMap::new();
+            for (ct, cnt) in cm.counts() {
+                if cnt > 0 {
+                    counts.insert(cell_type_key(ct).to_string(), cnt);
+                }
+            }
+            (3, cm.n_points(), cm.n_cells(), cm.n_facets(), &cm.label, counts)
+        }
+    };
+
+    let domains = labels
+        .domains
+        .iter()
+        .map(|d| DomainReport {
+            id: d.id,
+            name: d.name.clone(),
+            cells: cell_labels.iter().filter(|&&l| l == d.id).count(),
+            wave_size: sizes.get(d.region as usize).copied().flatten(),
+        })
+        .filter(|d| d.cells > 0 || d.wave_size.is_some())
+        .collect();
+
+    let adaptation = adapt.and_then(|r| {
+        let (first, last) = (r.iters.first()?, r.iters.last()?);
+        Some(AdaptSummary {
+            iterations: r.iters.len(),
+            converged: r.converged,
+            capped: r.capped,
+            q_min: last.q_min,
+            cells_start: first.n_triangles,
+            cells_end: last.n_triangles,
+        })
+    });
+
+    let use_structured = plan.pml.is_structured(!eval.pml_regions().is_empty());
+    let structured_layers = if use_structured {
+        if let Some(pr) = pml_rep {
+            if dim == 2 {
+                Some(pr.layers.to_vec())
+            } else {
+                Some(pr.layers3.to_vec())
+            }
+        } else {
+            let mut layers = vec![[0usize; 2]; dim];
+            for p in eval.pml_regions() {
+                let nz: Vec<usize> = (0..3).filter(|&a| p.sides[a] != 0).collect();
+                if nz.len() == 1 {
+                    let axis = if dim == 2 {
+                        [0usize, 2].iter().position(|&a| a == nz[0])
+                    } else {
+                        Some(nz[0])
+                    };
+                    if let Some(a) = axis {
+                        layers[a][(p.sides[nz[0]] > 0) as usize] = (p.layers.round() as usize).max(1);
+                    }
+                }
+            }
+            Some(layers)
+        }
     } else {
         None
     };
-    // diagnostics from the mesher (Ruppert vertex cap / sliver audit) and size rules a 3D mesh cannot honour (ADR 83)
-    let mut warnings = g.warnings.clone();
-    if m.dim == 3 {
-        let has_sheets = g.eval.complex().has_sheets();
-        for rule in g.eval.size_rules() {
-            let name = g.eval.list.features.iter().find(|f| f.id == rule.feature).map_or(String::new(), |f| f.name.clone());
+
+    let min_pml_scaled_jacobian = pml_rep.and_then(|pr| pr.min_pml_scaled_jacobian);
+    let pml_warnings = collect_pml_warnings(eval);
+
+    let mut warnings = base_warnings.to_vec();
+    if dim == 3 {
+        let has_sheets = eval.complex().has_sheets();
+        for rule in eval.size_rules() {
+            let name = eval
+                .list
+                .features
+                .iter()
+                .find(|f| f.id == rule.feature)
+                .map_or(String::new(), |f| f.name.clone());
             let what = match rule.entities.kind {
                 geom::select::EntityKind::Edges if !has_sheets => Some("crease edges"),
                 geom::select::EntityKind::Vertices => Some("vertices"),
                 _ => None,
             };
             if let Some(w) = what {
-                warnings.push(format!("size rule '{name}' selects {w}, which a 3D mesh has no size for: it is ignored (select regions or faces)"));
+                warnings.push(format!(
+                    "size rule '{name}' selects {w}, which a 3D mesh has no size for: it is ignored (select regions or faces)"
+                ));
             } else if rule.min_layers.is_some() {
-                warnings.push(format!("size rule '{name}': min_layers has no effect in the 3D lattice mesher and is ignored"));
+                warnings.push(format!(
+                    "size rule '{name}': min_layers has no effect in the 3D lattice mesher and is ignored"
+                ));
             } else if rule.entities.kind == geom::select::EntityKind::Regions && rule.max_dev.is_some() {
-                warnings.push(format!("size rule '{name}': max_deviation applies to curved faces, not to regions, and is ignored here (select the faces)"));
+                warnings.push(format!(
+                    "size rule '{name}': max_deviation applies to curved faces, not to regions, and is ignored here (select the faces)"
+                ));
             }
         }
     }
-    let curved = (m.dim == 3 && m.has_curved()).then(|| {
-        let use_qp = m.has_qp() || req.singular_edges.as_deref() == Some("quarter_point");
-        let cells: Vec<usize> = (0..m.n_cells()).filter(|&c| m.cell_is_curved(c)).collect();
-        let min_sj = cells
-            .iter()
-            .map(|&c| {
-                if use_qp && (m.cell_is_qp(c) || !m.has_qp()) {
-                    crate::meshing::curve3::scaled_jacobian_min_interior_q8(m, c)
-                } else {
-                    crate::meshing::curve3::scaled_jacobian_min(m, c)
-                }
-            })
-            .fold(f64::INFINITY, f64::min);
-        CurvedSummary { edges: m.edge_node_list().len(), cells: cells.len(), min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 } }
-    });
-    MeshReport { dim: m.dim, vertices: m.n_points(), cells: m.n_cells(), facets: m.n_facets(), domains, adaptation, structured_layers, curved, warnings }
+
+    let curved = match mesh {
+        Mesh::D3(cm) if !cm.edge_nodes.is_empty() => {
+            if let Ok(md) = MixedDiscretisation::from_cell_mesh(cm) {
+                let want_qp = !cm.qp_edges.is_empty()
+                    || plan.opts.singular_edges.as_deref() == Some("quarter_point");
+                let curved_cells: Vec<usize> =
+                    (0..cm.n_cells()).filter(|&c| md.cell_is_curved(c)).collect();
+                let mut tmp_tet_mesh: Option<crate::mesh::SimplexMesh> = None;
+                let min_sj = curved_cells
+                    .iter()
+                    .map(|&c| {
+                        if cm.types[c] == CellType::Tet && (want_qp || md.cell_is_qp(c)) {
+                            let sm = tmp_tet_mesh.get_or_insert_with(|| {
+                                let pts: Vec<f64> = cm.points.iter().flatten().copied().collect();
+                                let mut tet_cells = Vec::new();
+                                let mut tet_labels = Vec::new();
+                                for ci in 0..cm.n_cells() {
+                                    if cm.types[ci] == CellType::Tet {
+                                        tet_cells.extend_from_slice(cm.cell(ci));
+                                        tet_labels.push(cm.label[ci]);
+                                    }
+                                }
+                                let mut s = crate::mesh::SimplexMesh::new(
+                                    3,
+                                    pts,
+                                    tet_cells,
+                                    tet_labels,
+                                    Vec::new(),
+                                    Vec::new(),
+                                );
+                                s.set_edge_nodes(&cm.edge_nodes);
+                                if !cm.qp_edges.is_empty() {
+                                    s.set_qp_edges(&cm.qp_edges);
+                                }
+                                s
+                            });
+                            if c < sm.n_cells() && (sm.cell_is_qp(c) || !sm.has_qp()) {
+                                crate::meshing::curve3::scaled_jacobian_min_interior_q8(sm, c)
+                            } else {
+                                mixed_cell_scaled_jacobian_min(cm, &md, c)
+                            }
+                        } else if cm.types[c] == CellType::Tet {
+                            // Exact parity with `curve3::scaled_jacobian_min` (`det J / det_straight` on 10 nodes + q6)
+                            let vs = cm.cell(c);
+                            let v = [
+                                cm.points[vs[0] as usize],
+                                cm.points[vs[1] as usize],
+                                cm.points[vs[2] as usize],
+                                cm.points[vs[3] as usize],
+                            ];
+                            let mut x = crate::fem::CurvedTet::straight(v).x;
+                            const TET_E: [(usize, usize); 6] =
+                                [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+                            for (k, &(i, j)) in TET_E.iter().enumerate() {
+                                if let Some(q) = cm.edge_node(vs[i], vs[j]) {
+                                    x[4 + k] = q;
+                                }
+                            }
+                            let ct = crate::fem::CurvedTet::new(x);
+                            let det_s = crate::fem::CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
+                            if det_s == 0.0 || !det_s.is_finite() {
+                                1.0
+                            } else {
+                                let rule = crate::fem::quad_rule_collapsed(6);
+                                let mut m_min = f64::INFINITY;
+                                for l in &rule.lam {
+                                    m_min = m_min.min(ct.jacobian(&[l[0], l[1], l[2], l[3]]).1 / det_s);
+                                }
+                                for (i, j) in TET_E {
+                                    let mut l = [0.0; 4];
+                                    l[i] = 0.5;
+                                    l[j] = 0.5;
+                                    m_min = m_min.min(ct.jacobian(&l).1 / det_s);
+                                }
+                                for i in 0..4 {
+                                    let mut l = [0.0; 4];
+                                    l[i] = 1.0;
+                                    m_min = m_min.min(ct.jacobian(&l).1 / det_s);
+                                }
+                                m_min
+                            }
+                        } else {
+                            mixed_cell_scaled_jacobian_min(cm, &md, c)
+                        }
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                Some(CurvedSummary {
+                    edges: md.edge_nodes.len(),
+                    cells: curved_cells.len(),
+                    min_scaled_jacobian: if min_sj.is_finite() { min_sj } else { 1.0 },
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    MeshReport {
+        dim,
+        vertices,
+        cells,
+        facets,
+        element_counts,
+        domains,
+        adaptation,
+        structured_layers,
+        min_pml_scaled_jacobian,
+        pml_warnings,
+        curved,
+        warnings,
+    }
 }
 
 /// Meshes `list` as `req` asks (any dimension) and reports what came out.
 pub fn mesh_request(list: &FeatureList, req: &MeshRequest) -> Result<(MeshedGeom, MeshReport), String> {
     let plan = req.plan();
-    let (g, adapt) = match &req.waves {
+    let (g, adapt, pml_rep) = match &req.waves {
         Some(w) => {
-            let sz = PhysicsSizing { points_per_wavelength: w.points_per_wavelength, pml_relax: w.pml_relax, eigen_headroom: w.eigen_headroom };
-            mesh_for_sizing(list, &plan, &w.sizing, &sz)?
+            let pml_relax = if req.resolved_pml_mode() == PmlModeRequest::Inline {
+                w.pml_relax
+            } else {
+                1.0
+            };
+            let sz = PhysicsSizing {
+                points_per_wavelength: w.points_per_wavelength,
+                pml_relax,
+                eigen_headroom: w.eigen_headroom,
+            };
+            crate::meshing::mesh_for_sizing_with_pml_report(list, &plan, &w.sizing, &sz)?
         }
         None => {
             let ev = crate::meshing::geomdrive::evaluate(list)?;
-            crate::meshing::mesh_evaluated_report(ev, &plan)?
+            crate::meshing::mesh_evaluated_with_pml_report(ev, &plan)?
         }
     };
     let sizes: Vec<Option<f64>> = match &req.waves {
         Some(w) => {
-            let sz = PhysicsSizing { points_per_wavelength: w.points_per_wavelength, pml_relax: w.pml_relax, eigen_headroom: w.eigen_headroom };
-            crate::meshing::wave_sizes_by_region(&g.eval, &g.labels, &w.sizing, &sz)?.into_iter().map(|h| h.is_finite().then_some(h)).collect()
+            let use_structured = plan.pml.is_structured(!g.eval.pml_regions().is_empty());
+            let sz = PhysicsSizing {
+                points_per_wavelength: w.points_per_wavelength,
+                pml_relax: if use_structured { 1.0 } else { w.pml_relax },
+                eigen_headroom: w.eigen_headroom,
+            };
+            crate::meshing::wave_sizes_by_region(&g.eval, &g.labels, &w.sizing, &sz)?
+                .into_iter()
+                .map(|h| h.is_finite().then_some(h))
+                .collect()
         }
         None => vec![],
     };
-    let report = summarise(&g, req, adapt.as_ref(), &sizes);
+    let ex = g.into_exchange_mesh()?;
+    let report = summarise_native_mesh(
+        &ex,
+        &g.labels,
+        &g.eval,
+        &plan,
+        adapt.as_ref(),
+        pml_rep.as_ref(),
+        &sizes,
+        &g.warnings,
+    );
     Ok((g, report))
+}
+
+/// Meshes `list` as `req` asks directly into an uncut mixed-cell [`Mesh`] (`Quad`, `Prism`, and `Hex`
+/// preserved with zero eager simplex splitting).
+pub fn mesh_request_native(list: &FeatureList, req: &MeshRequest) -> Result<NativeMeshTuple, String> {
+    let plan = req.plan();
+    match &req.waves {
+        Some(w) => {
+            let pml_relax = if req.resolved_pml_mode() == PmlModeRequest::Inline {
+                w.pml_relax
+            } else {
+                1.0
+            };
+            let sz = PhysicsSizing {
+                points_per_wavelength: w.points_per_wavelength,
+                pml_relax,
+                eigen_headroom: w.eigen_headroom,
+            };
+            crate::meshing::mesh_for_sizing_native(list, &plan, &w.sizing, &sz)
+        }
+        None => {
+            let ev = crate::meshing::geomdrive::evaluate(list)?;
+            crate::meshing::mesh_evaluated_native_report(ev, &plan)
+        }
+    }
 }
 
 /// JSON Schema of [`MeshRequest`].
@@ -350,8 +669,23 @@ pub fn request_schema() -> Value {
     props.insert("h".into(), json!({ "type": "number", "exclusiveMinimum": 0, "description": "global element size (m)" }));
     props.insert("max_dev".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "largest distance of a chord from a curved edge or face (m); default h / 50" }));
     props.insert("mesher".into(), mesher_schema);
-    props.insert("structured_pml".into(), json!({ "type": "boolean", "default": false }));
-    props.insert("curved".into(), json!({ "type": "boolean", "default": false, "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface" }));
+    props.insert(
+        "pml_mode".into(),
+        json!({
+            "type": "string",
+            "enum": ["auto", "structured", "inline"],
+            "default": "auto",
+            "description": "how absorbing layers are meshed ('auto' [default], 'structured', or 'inline')"
+        }),
+    );
+    props.insert(
+        "structured_pml".into(),
+        json!({
+            "type": ["boolean", "null"],
+            "description": "legacy alias for pml_mode (true -> 'structured', false -> 'inline')"
+        }),
+    );
+    props.insert("curved".into(), json!({ "type": "boolean", "default": false, "description": "3D / curvilinear shells: quadratic (isoparametric) geometry for the cells on a curved surface" }));
     props.insert("gap_cells".into(), json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "3D sheet mesher: target number of cells across narrow coplanar gaps" }));
     props.insert("z_coarsen".into(), json!({ "type": "boolean", "default": false, "description": "3D sheet mesher: conforming pure-tetrahedral vertical coarsening away from sheet planes" }));
     props.insert("max_cells".into(), json!({ "type": ["integer", "null"], "minimum": 1, "description": "maximum number of cells allowed before aborting meshing" }));
@@ -389,6 +723,10 @@ pub fn report_schema() -> Value {
             "vertices": { "type": "integer", "minimum": 0 },
             "cells": { "type": "integer", "minimum": 0 },
             "facets": { "type": "integer", "minimum": 0 },
+            "element_counts": {
+                "type": "object",
+                "additionalProperties": { "type": "integer", "minimum": 0 }
+            },
             "domains": { "type": "array", "items": {
                 "type": "object", "required": ["id", "name", "cells"], "additionalProperties": false,
                 "properties": {
@@ -407,6 +745,8 @@ pub fn report_schema() -> Value {
                     "cells_end": { "type": "integer", "minimum": 0 }
                 } },
             "structured_layers": { "type": ["array", "null"], "items": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 } },
+            "min_pml_scaled_jacobian": { "type": ["number", "null"] },
+            "pml_warnings": { "type": "array", "items": { "type": "string" } },
             "curved": { "type": ["object", "null"], "required": ["edges", "cells", "min_scaled_jacobian"], "additionalProperties": false,
                 "description": "the curved edges of a 3D mesh made with `curved`; absent for a straight-sided mesh",
                 "properties": { "edges": { "type": "integer", "minimum": 0 }, "cells": { "type": "integer", "minimum": 0 }, "min_scaled_jacobian": { "type": "number" } } },

@@ -4,6 +4,7 @@
 //! `SimplexMesh::from_cells_split` always did, so the numbers of every solution are unchanged).
 
 use crate::mesh::cells::{CellMesh, CellType};
+use crate::mesh::mixed::MixedDiscretisation;
 use crate::mesh::SimplexMesh;
 
 /// A mesh in 2D (a cross-section, the x-z plane of the wafer frame) or in 3D.
@@ -31,7 +32,7 @@ fn cells_of<const D: usize>(m: &SimplexMesh) -> CellMesh<D> {
     for f in 0..m.n_facets() {
         out.push_facet(m.facet(f), m.facet_labels[f]);
     }
-    if D == 3 {
+    if m.has_curved() {
         out.set_edge_nodes(m.edge_node_list().into_iter().map(|(pr, p)| {
             let mut q = [0.0; D];
             q.copy_from_slice(&p[..D]);
@@ -91,11 +92,27 @@ impl Mesh {
         }
     }
 
+    /// Whether every cell is a simplex (`Tri` in 2D, `Tet` in 3D) and every facet has `dim` vertices.
+    pub fn is_pure_simplex(&self) -> bool {
+        match self {
+            Mesh::D2(m) => m.is_pure_simplex(),
+            Mesh::D3(m) => m.is_pure_simplex(),
+        }
+    }
+
     /// The numbering of unknowns a kernel assembles on. Cells that are not simplices are cut (`SimplexMesh::from_cells_split`).
     pub fn discretise(&self) -> Result<SimplexMesh, String> {
         match self {
             Mesh::D2(m) => SimplexMesh::from_cells(m),
             Mesh::D3(m) => SimplexMesh::from_cells(m),
+        }
+    }
+
+    /// Native mixed-cell discretisation (`Tri`+`Quad` in 2D, `Tet`+`Prism`+`Hex` in 3D) without splitting structured cells.
+    pub fn discretise_mixed(&self) -> Result<MixedDiscretisation, String> {
+        match self {
+            Mesh::D2(m) => MixedDiscretisation::from_cell_mesh(m),
+            Mesh::D3(m) => MixedDiscretisation::from_cell_mesh(m),
         }
     }
 }

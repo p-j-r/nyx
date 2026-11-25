@@ -108,9 +108,28 @@
       },
       "type": "array"
     },
+    "element_counts": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "object"
+    },
     "facets": {
       "minimum": 0,
       "type": "integer"
+    },
+    "min_pml_scaled_jacobian": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "pml_warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "structured_layers": {
       "items": {

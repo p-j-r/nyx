@@ -10,11 +10,11 @@
         "op": {
           "Rect": {
             "max": [
-              0.04,
+              0.032,
               0.01
             ],
             "min": [
-              0.0,
+              0.008,
               0.0
             ]
           }
@@ -44,44 +44,6 @@
       },
       {
         "id": 3,
-        "name": "pml_left_box",
-        "op": {
-          "Rect": {
-            "max": [
-              0.008,
-              0.01
-            ],
-            "min": [
-              0.0,
-              0.0
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 4,
-        "name": "pml_right_box",
-        "op": {
-          "Rect": {
-            "max": [
-              0.04,
-              0.01
-            ],
-            "min": [
-              0.032,
-              0.0
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 5,
         "name": "regions",
         "op": {
           "Overlay": {
@@ -99,20 +61,29 @@
                 "kind": "Material",
                 "name": "slab",
                 "pinned_id": null
-              },
-              {
-                "input": 3,
-                "kind": "Material",
-                "name": "pml_left",
-                "pinned_id": null
-              },
-              {
-                "input": 4,
-                "kind": "Material",
-                "name": "pml_right",
-                "pinned_id": null
               }
             ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "pml",
+        "op": {
+          "Pml": {
+            "grading": 2.0,
+            "layer_grading": 2.0,
+            "layers": 6.0,
+            "mode": "Outward",
+            "regions": [],
+            "sides": [
+              "XMin",
+              "XMax"
+            ],
+            "thickness": 0.008
           }
         },
         "origin": "Code",
@@ -131,34 +102,58 @@
       "bcs": [
         {
           "kind": "pml",
-          "on": "pml_left",
+          "on": "air.pml_xmin",
           "params": {
+            "bounds_hi": [
+              0.008,
+              0.0,
+              0.01
+            ],
+            "bounds_lo": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 4.0,
-            "x": "minus"
+            "x": "minus",
+            "y": "off",
+            "z": "off"
           }
         },
         {
           "kind": "pml",
-          "on": "pml_right",
+          "on": "air.pml_xmax",
           "params": {
+            "bounds_hi": [
+              0.04,
+              0.0,
+              0.01
+            ],
+            "bounds_lo": [
+              0.032,
+              0.0,
+              0.0
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 4.0,
-            "x": "plus"
+            "x": "plus",
+            "y": "off",
+            "z": "off"
           }
         }
       ],
       "format": 1,
       "materials": {
-        "air": {
-          "eps_r": 1.0,
-          "mu_r": 1.0
-        },
-        "pml_left": {
-          "eps_r": 1.0,
-          "mu_r": 1.0
-        },
-        "pml_right": {
+        "air*": {
           "eps_r": 1.0,
           "mu_r": 1.0
         },

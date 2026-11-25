@@ -122,7 +122,19 @@ pub fn to_rust(l: &FeatureList) -> String {
                     format!("m.overlay_full(&[{}], &[{}])", r.join(", "), p.join(", "))
                 }
             }
-            Op::Pml { window, sides, thickness, layers, grading, regions } if regions.is_empty() => {
+            Op::Pml {
+                window: Some(window),
+                sides,
+                thickness,
+                layers,
+                grading,
+                regions,
+                mode: PmlGrowMode::Inward,
+                coord: PmlCoordKind::Auto,
+                center: None,
+                axis: None,
+                layer_grading: None,
+            } if regions.is_empty() => {
                 let sd: Vec<String> = sides.iter().map(|s| format!("Side::{s:?}")).collect();
                 format!("m.pml({n}, f{window}, &[{}], {}, {}, {})", sd.join(", "), e(thickness), e(layers), e(grading))
             }

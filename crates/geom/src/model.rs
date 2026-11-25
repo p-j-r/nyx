@@ -25,6 +25,67 @@ fn default_zero_expr() -> Expr {
     Expr::Num(0.0)
 }
 
+fn default_auto_expr() -> Expr {
+    Expr::Text("auto".to_string())
+}
+
+fn default_pml_grading() -> Expr {
+    Expr::Num(2.0)
+}
+
+/// Whether an absorbing layer slices inward from an oversized CAD domain around a `window` (legacy mode)
+/// or extrudes outward from the physical exterior boundary (primary zero-padding mode).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PmlGrowMode {
+    /// Legacy inward CAD-slicing mode around an interior `window` feature (default when omitted in saved JSON).
+    #[default]
+    #[serde(alias = "inward")]
+    Inward,
+    /// Outward boundary-extruded absorbing layer attached to the exterior physical boundary.
+    #[serde(alias = "outward")]
+    Outward,
+}
+
+impl PmlGrowMode {
+    pub fn is_inward(&self) -> bool {
+        matches!(self, PmlGrowMode::Inward)
+    }
+}
+
+/// Coordinate system topology for an absorbing layer (`Op::Pml`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PmlCoordKind {
+    /// Infer coordinate system automatically from the window / outer host primitive.
+    #[default]
+    #[serde(alias = "auto")]
+    Auto,
+    #[serde(alias = "cartesian")]
+    Cartesian,
+    #[serde(alias = "cylindrical")]
+    Cylindrical,
+    #[serde(alias = "spherical")]
+    Spherical,
+}
+
+impl PmlCoordKind {
+    pub fn is_auto(&self) -> bool {
+        matches!(self, PmlCoordKind::Auto)
+    }
+}
+
+/// Topological role of a single absorbing-layer sub-domain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PmlRole {
+    #[default]
+    Face,
+    Edge,
+    Corner,
+    RadialShell,
+    EndCap,
+    CornerAnnulus,
+    SphericalShell,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Axis {
     X,
@@ -290,15 +351,32 @@ pub enum Op {
         #[serde(default)]
         naming: NameScheme,
     },
-    /// absorbing layers of `thickness` around the window `window` on `sides` (empty: all); splits every matching region
-    /// (`regions` empty: all) into the physical part and one `<region>.pml_<sides>` piece per side combination
+    /// absorbing layers of `thickness` around the window `window` (or outward from the physical envelope when `mode == Outward`
+    /// and `window` is `None`) on `sides` (empty: all); splits or extrudes every matching region (`regions` empty: all) into
+    /// the physical part and one `<region>.pml_<piece>` piece per active side / shell combination
     Pml {
-        window: FeatureId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<FeatureId>,
+        #[serde(default)]
         sides: Vec<Side>,
+        #[serde(default = "default_auto_expr")]
         thickness: Expr,
+        #[serde(default = "default_auto_expr")]
         layers: Expr,
+        #[serde(default = "default_pml_grading")]
         grading: Expr,
+        #[serde(default)]
         regions: Vec<String>,
+        #[serde(default, skip_serializing_if = "PmlGrowMode::is_inward")]
+        mode: PmlGrowMode,
+        #[serde(default, skip_serializing_if = "PmlCoordKind::is_auto")]
+        coord: PmlCoordKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        center: Option<[Expr; 3]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<Axis>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layer_grading: Option<Expr>,
     },
     /// keeps one side of the plane `normal . p = offset`; the cut face is named `<feature>.cut` and tagged `symmetry`
     Cut {
@@ -392,7 +470,16 @@ impl Op {
                 PatternKind::Linear { step } => step.iter().chain([n]).collect(),
                 PatternKind::Polar { center, total_deg, .. } => center.iter().chain([total_deg, n]).collect(),
             },
-            Op::Pml { thickness, layers, grading, .. } => vec![thickness, layers, grading],
+            Op::Pml { thickness, layers, grading, center, layer_grading, .. } => {
+                let mut v = vec![thickness, layers, grading];
+                if let Some(c) = center {
+                    v.extend(c.iter());
+                }
+                if let Some(lg) = layer_grading {
+                    v.push(lg);
+                }
+                v
+            }
             Op::Cut { normal, offset, .. } => normal.iter().chain([offset]).collect(),
             Op::Periodic { translation, .. } => translation.iter().collect(),
             Op::Size { h, max_deviation, min_layers, .. } => {
@@ -412,7 +499,7 @@ impl Op {
             Op::Union { ids } | Op::Intersect { ids } => ids.clone(),
             Op::Difference { a, b } => std::iter::once(*a).chain(b.iter().copied()).collect(),
             Op::Overlay { regions, .. } => regions.iter().map(|r| r.input).collect(),
-            Op::Pml { window, .. } => vec![*window],
+            Op::Pml { window, .. } => window.iter().copied().filter(|&w| w != 0).collect(),
             _ => vec![],
         }
     }
@@ -918,14 +1005,63 @@ impl Model {
         self.push(
             name,
             Op::Pml {
-                window,
+                window: Some(window),
                 sides: sides.to_vec(),
                 thickness: thickness.into(),
                 layers: layers.into(),
                 grading: grading.into(),
                 regions: vec![],
+                mode: PmlGrowMode::Inward,
+                coord: PmlCoordKind::Auto,
+                center: None,
+                axis: None,
+                layer_grading: None,
             },
         )
+    }
+
+    /// Outward boundary-extruded absorbing layer attached to the exterior physical boundary (no dummy `window` needed).
+    pub fn pml_outward(
+        &mut self,
+        name: &str,
+        coord: PmlCoordKind,
+        sides: &[Side],
+        thickness: impl Into<Expr>,
+        layers: impl Into<Expr>,
+        layer_grading: impl Into<Expr>,
+    ) -> FeatureId {
+        self.push(
+            name,
+            Op::Pml {
+                window: None,
+                sides: sides.to_vec(),
+                thickness: thickness.into(),
+                layers: layers.into(),
+                grading: default_pml_grading(),
+                regions: vec![],
+                mode: PmlGrowMode::Outward,
+                coord,
+                center: None,
+                axis: None,
+                layer_grading: Some(layer_grading.into()),
+            },
+        )
+    }
+
+    /// Outward boundary-extruded absorbing layer on all applicable exterior boundaries with default `layer_grading = 2.0`.
+    pub fn absorbing_layer(
+        &mut self,
+        name: &str,
+        coord: PmlCoordKind,
+        thickness: impl Into<Expr>,
+        layers: impl Into<Expr>,
+    ) -> FeatureId {
+        self.pml_outward(name, coord, &[], thickness, layers, 2.0)
+    }
+
+    /// Physics-driven outward boundary-extruded absorbing layer (`coord = Auto`, `thickness = "auto"`, `layers = "auto"`).
+    pub fn absorbing_layer_auto(&mut self, name: &str) -> FeatureId {
+        self.pml_outward(name, PmlCoordKind::Auto, &[], "auto", "auto", 2.0)
     }
     pub fn cut(&mut self, name: &str, normal: (f64, f64, f64), offset: impl Into<Expr>, keep: Keep) -> FeatureId {
         self.push(name, Op::Cut { normal: e3(normal), offset: offset.into(), keep })

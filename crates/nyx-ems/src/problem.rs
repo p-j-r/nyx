@@ -12,11 +12,13 @@
 use crate::ibc::resolve_jj_l_and_ej;
 use crate::Ems;
 use femcore::material::{bcs_surface_impedance, FilmModel};
-use femcore::props::{Materials, Periodic, Pml, PmlDir, TensorKind};
+use femcore::props::{Materials, Periodic, Pml, PmlCoord, PmlDir, PmlProfile, TensorKind};
 use nyx_physics::decode::{
     domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec, Params,
 };
-use nyx_physics::{Ctx, Discretisation, Error, MaterialAssign, Physics, ProblemSpec, TlsInterfaces};
+use nyx_physics::{
+    Ctx, Discretisation, Error, MaterialAssign, MixedDiscretisation, Physics, ProblemSpec, TlsInterfaces,
+};
 use std::collections::BTreeMap;
 
 /// Allowed values for the midplane `symmetry` parameter on `modes`, `cavity`, and `bloch`.
@@ -123,6 +125,67 @@ pub fn symmetry_facet_flags(mesh: &Discretisation, symmetry: Symmetry) -> Result
     let exterior = mesh.exterior_facets();
     for f in 0..nf {
         if !exterior[f] {
+            continue;
+        }
+        let fv = mesh.facet(f);
+        if let Some(is_pec) = x_rule {
+            if fv.iter().all(|&v| mesh.point(v as usize)[x_idx].abs() <= tol) {
+                if is_pec {
+                    sym_pec[f] = true;
+                } else {
+                    sym_pmc[f] = true;
+                }
+            }
+        }
+        if let Some(is_pec) = z_rule {
+            if fv.iter().all(|&v| mesh.point(v as usize)[z_idx].abs() <= tol) {
+                if is_pec {
+                    sym_pec[f] = true;
+                } else {
+                    sym_pmc[f] = true;
+                }
+            }
+        }
+    }
+    Ok((sym_pec, sym_pmc))
+}
+
+/// Auto-detects exterior facets lying on `x = 0` and/or `z = 0` on a native [`MixedDiscretisation`].
+pub fn symmetry_facet_flags_mixed(
+    mesh: &MixedDiscretisation,
+    symmetry: Symmetry,
+) -> Result<(Vec<bool>, Vec<bool>), String> {
+    let nf = mesh.n_facets();
+    let mut sym_pec = vec![false; nf];
+    let mut sym_pmc = vec![false; nf];
+    if symmetry == Symmetry::None {
+        return Ok((sym_pec, sym_pmc));
+    }
+    let (lo, hi) = mesh.bbox();
+    let extent = (0..mesh.dim).map(|k| hi[k] - lo[k]).fold(0.0, f64::max).max(1e-300);
+    let tol = 1e-6 * extent;
+    let x_idx = 0usize;
+    let z_idx = if mesh.dim == 2 { 1usize } else { 2usize };
+    let x_rule = symmetry.x_is_pec();
+    let z_rule = symmetry.z_is_pec();
+    if x_rule.is_some() && !(lo[x_idx].abs() <= tol || hi[x_idx].abs() <= tol) {
+        return Err(format!(
+            "symmetry '{}' requires an exterior boundary on x = 0 (mesh x spans [{:.3e}, {:.3e}])",
+            symmetry.as_str(),
+            lo[x_idx],
+            hi[x_idx]
+        ));
+    }
+    if z_rule.is_some() && !(lo[z_idx].abs() <= tol || hi[z_idx].abs() <= tol) {
+        return Err(format!(
+            "symmetry '{}' requires an exterior boundary on z = 0 (mesh z spans [{:.3e}, {:.3e}])",
+            symmetry.as_str(),
+            lo[z_idx],
+            hi[z_idx]
+        ));
+    }
+    for f in 0..nf {
+        if !mesh.exterior_facets[f] {
             continue;
         }
         let fv = mesh.facet(f);
@@ -668,13 +731,159 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         let p = Params::new(&r.params, &d.params);
         match r.kind.as_str() {
             "pml" => {
+                let x_dir = pml_dir(&p.text("x"));
+                let y_dir = pml_dir(&p.text("y"));
+                let z_dir = pml_dir(&p.text("z"));
+                let coord_text = p.text("coord");
+                let resolved_coord = match coord_text.as_str() {
+                    "cartesian" => "cartesian",
+                    "cylindrical" => "cylindrical",
+                    "spherical" => "spherical",
+                    "auto" => {
+                        if x_dir != PmlDir::Off || y_dir != PmlDir::Off || z_dir != PmlDir::Off {
+                            "cartesian"
+                        } else if p.has("r_thickness")
+                            || p.has("z_thickness")
+                            || p.has("axial")
+                            || p.has("radial_on")
+                            || p.has("axis")
+                        {
+                            "cylindrical"
+                        } else if p.has("thickness") || p.has("r_in") || p.has("center") {
+                            if matches!(study, Study::Modes { .. }) {
+                                "cylindrical"
+                            } else {
+                                "spherical"
+                            }
+                        } else {
+                            "cartesian"
+                        }
+                    }
+                    other => {
+                        return Err(Error::invalid(format!(
+                            "pml: unknown coord '{other}' (expected 'auto', 'cartesian', 'cylindrical', or 'spherical')"
+                        )));
+                    }
+                };
+                let center_vec = p.vector("center");
+                if center_vec.len() != 3 {
+                    return Err(Error::invalid("pml: 'center' must have 3 components"));
+                }
+                let center = [center_vec[0], center_vec[1], center_vec[2]];
+
+                let coord = match resolved_coord {
+                    "cartesian" => PmlCoord::Cartesian,
+                    "cylindrical" => {
+                        let axis_vec = if p.has("axis") {
+                            p.vector("axis")
+                        } else if matches!(study, Study::Modes { .. }) {
+                            vec![0.0, 1.0, 0.0]
+                        } else {
+                            vec![0.0, 0.0, 1.0]
+                        };
+                        if axis_vec.len() != 3 {
+                            return Err(Error::invalid("pml: 'axis' must have 3 components"));
+                        }
+                        let anorm =
+                            (axis_vec[0] * axis_vec[0] + axis_vec[1] * axis_vec[1] + axis_vec[2] * axis_vec[2]).sqrt();
+                        if !(anorm > 0.0 && anorm.is_finite()) {
+                            return Err(Error::invalid("pml: 'axis' must be a non-zero finite vector"));
+                        }
+                        let axis = [axis_vec[0] / anorm, axis_vec[1] / anorm, axis_vec[2] / anorm];
+                        let r_in = p.number("r_in");
+                        let r_thickness =
+                            if p.has("r_thickness") { p.number("r_thickness") } else { p.number("thickness") };
+                        let radial_on = p.boolean("radial_on");
+                        let axial = pml_dir(&p.text("axial"));
+                        let z_in = p.number("z_in");
+                        let z_thickness =
+                            if p.has("z_thickness") { p.number("z_thickness") } else { p.number("thickness") };
+                        if r_in < 0.0 || r_thickness < 0.0 || z_thickness < 0.0 {
+                            return Err(Error::invalid("pml: cylindrical radii and thicknesses must be non-negative"));
+                        }
+                        PmlCoord::Cylindrical { center, axis, r_in, r_thickness, radial_on, axial, z_in, z_thickness }
+                    }
+                    "spherical" => {
+                        let r_in = p.number("r_in");
+                        let thickness =
+                            if p.has("thickness") { p.number("thickness") } else { p.number("r_thickness") };
+                        if r_in < 0.0 || thickness < 0.0 {
+                            return Err(Error::invalid("pml: spherical r_in and thickness must be non-negative"));
+                        }
+                        PmlCoord::Spherical { center, r_in, thickness }
+                    }
+                    _ => unreachable!(),
+                };
+
+                let profile_text = p.text("profile");
+                let profile = match profile_text.as_str() {
+                    "kappa_polynomial" => {
+                        let kappa_max = p.number("kappa_max");
+                        if !(kappa_max >= 1.0 && kappa_max.is_finite()) {
+                            return Err(Error::invalid(format!(
+                                "pml: kappa_max must satisfy kappa_max >= 1.0 (got {kappa_max})"
+                            )));
+                        }
+                        PmlProfile::KappaPolynomial { kappa_max }
+                    }
+                    "rational" => {
+                        let curvature = p.number("curvature");
+                        if !((0.0..1.0).contains(&curvature) && curvature.is_finite()) {
+                            return Err(Error::invalid(format!(
+                                "pml: curvature must satisfy 0.0 <= curvature < 1.0 (got {curvature})"
+                            )));
+                        }
+                        PmlProfile::Rational { curvature }
+                    }
+                    other => {
+                        return Err(Error::invalid(format!(
+                            "pml: unknown profile '{other}' (expected 'kappa_polynomial' or 'rational')"
+                        )));
+                    }
+                };
+
+                let bounds = if p.has("bounds_lo") || p.has("bounds_hi") {
+                    if !(p.has("bounds_lo") && p.has("bounds_hi")) {
+                        return Err(Error::invalid(
+                            "pml: both 'bounds_lo' and 'bounds_hi' must be given when explicit slab bounds are specified",
+                        ));
+                    }
+                    let lo_v = p.vector("bounds_lo");
+                    let hi_v = p.vector("bounds_hi");
+                    if lo_v.len() != 3 || hi_v.len() != 3 {
+                        return Err(Error::invalid("pml: 'bounds_lo' and 'bounds_hi' must have 3 components"));
+                    }
+                    let lo = [lo_v[0], lo_v[1], lo_v[2]];
+                    let hi = [hi_v[0], hi_v[1], hi_v[2]];
+                    if (0..3).any(|k| lo[k] > hi[k]) {
+                        return Err(Error::invalid("pml: bounds_lo must be <= bounds_hi on every axis"));
+                    }
+                    Some((lo, hi))
+                } else {
+                    None
+                };
+
+                let auto_scale = p.boolean("auto_scale");
+                let target_reflection = p.number("target_reflection");
+                if !(target_reflection > 0.0 && target_reflection < 1.0 && target_reflection.is_finite()) {
+                    return Err(Error::invalid(format!(
+                        "pml: target_reflection must lie in (0, 1) (got {target_reflection})"
+                    )));
+                }
+
                 let layer = Pml {
-                    x: pml_dir(&p.text("x")),
-                    y: pml_dir(&p.text("y")),
-                    z: pml_dir(&p.text("z")),
+                    x: x_dir,
+                    y: y_dir,
+                    z: z_dir,
                     strength: p.number("strength"),
                     order: p.number("order"),
                     re: p.number("re"),
+                    coord,
+                    bounds,
+                    profile,
+                    auto_scale,
+                    target_reflection,
+                    ..Default::default()
                 };
                 for l in r.labels {
                     materials.pml.insert(l, layer.clone());

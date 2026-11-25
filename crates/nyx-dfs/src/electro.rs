@@ -3,17 +3,25 @@
 //! Electrostatics on P1/P2 simplices: `-div(eps0 eps_r grad V) = rho_v`, `V = V0` on fixed-potential boundaries, `n.D = -rho_s` on
 //! charged ones. Three stages (ADR 9): `assemble_electrostatics`, `solve_potential`, `electrostatics_fields`; `solve_electrostatics` runs them.
 
-use crate::common::{cell_gradient, components, minmax, norm_of, plane_tensors};
+use crate::common::{
+    assemble_boundary_load_mixed, assemble_farfield_robin_mixed, assemble_ie_outer_robin_mixed,
+    assemble_laplace_ie_mixed, assemble_source_mixed, cell_gradient, cell_tensor_mixed, cell_values_mixed,
+    check_boundary_labels_mixed, classify_ie_outer_facets_mixed, components, farfield_centroid_mixed,
+    farfield_positive_measure_mixed, minmax, norm_of, plane_tensors, plane_tensors_mixed, resolve_ie_domains_mixed,
+    sample_mixed_gradients_on_simplex, solve_spd_mixed,
+};
 use crate::problem::{BcKind, Problem};
 use femcore::fem::*;
+use femcore::fem_mixed::{LagrangeSpace, MixedLagrangeDofMap};
 use femcore::fields::{node_average, CellFields};
 use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::driver::{dense_eigh, DirectSolver};
 use femcore::material::{self, M3};
+use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::{LinearSolver, TensorKind};
 use nyx_physics::{
-    cell_fields_of, CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Scalar, Solution, SolveResult,
-    TlsMeta,
+    cell_fields_of, discretise, discretise_mixed, CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Mesh,
+    MixedToSimplexProjector, Scalar, Solution, SolveResult, TlsMeta,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -416,7 +424,13 @@ fn assemble_open_robin(
 
 fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
     let order = spec.order;
-    check_boundary_labels(m_work, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
+    check_boundary_labels(
+        m_work,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
     let eps = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
     let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
     let coeff: Vec<f64> = eps.iter().map(|e| EPS0 * e).collect();
@@ -430,7 +444,25 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
         t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
         t
     });
-    let mut k = if let Some(ref t) = tensor_perm {
+    let mut ie_rat_facets = Vec::new();
+    let mut ie_exp_facets = Vec::new();
+    let mut ie_map_opt = None;
+    let mut mixed_opt = None;
+    let mut dof_map_opt = None;
+    let mut k = if spec.has_infinite_element() {
+        let mixed = MixedDiscretisation::from_simplex_mesh(m_work)?;
+        let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+        let dof_map = MixedLagrangeDofMap::new(&mixed, space);
+        let ie_map = resolve_ie_domains_mixed(&mixed, spec)?;
+        let (rf, ef) = classify_ie_outer_facets_mixed(&mixed, &ie_map);
+        let km = assemble_laplace_ie_mixed(&mixed, &dof_map, &coeff, tensor_perm.as_deref(), &ie_map);
+        ie_rat_facets = rf;
+        ie_exp_facets = ef;
+        ie_map_opt = Some(ie_map);
+        mixed_opt = Some(mixed);
+        dof_map_opt = Some(dof_map);
+        km
+    } else if let Some(ref t) = tensor_perm {
         if m_work.dim == 3 && m_work.has_curved() {
             assemble_laplace_tensor_curved_3d(m_work, order, t)?
         } else {
@@ -493,13 +525,13 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
                         f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
                     }
                 }
-                BcKind::FarField { .. } => {}
+                BcKind::FarField { .. } | BcKind::InfiniteElement(_) => {}
                 other => return Err(format!("'{}' is not an electrostatics boundary condition", other.name())),
             }
         }
     }
-    let has_open = !open_origins.is_empty();
-    if has_open {
+    let mut has_open = !open_origins.is_empty() || !ie_rat_facets.is_empty() || !ie_exp_facets.is_empty();
+    if !open_origins.is_empty() {
         let k_open = assemble_open_robin(m_work, order, &open_origins, tensor_perm.as_deref(), &coeff)?;
         k = k.add_scaled(&k_open, 1.0);
     }
@@ -524,7 +556,38 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
             }
         }
     }
-    let (fixed, vals) = dirichlet_constraints(m_work, &volt, order);
+    if !ie_exp_facets.is_empty() {
+        if let (Some(mixed), Some(dof_map), Some(ie_map)) = (&mixed_opt, &dof_map_opt, &ie_map_opt) {
+            let k_ie_rob = assemble_ie_outer_robin_mixed(mixed, dof_map, &ie_exp_facets, ie_map, EPS0, eps_ff);
+            k = k.add_scaled(&k_ie_rob, 1.0);
+            has_open = true;
+        }
+    }
+    let (mut fixed, mut vals) = dirichlet_constraints(m_work, &volt, order);
+    if !ie_rat_facets.is_empty() {
+        if let (Some(mixed), Some(dof_map)) = (&mixed_opt, &dof_map_opt) {
+            let fixed_set: BTreeSet<usize> = fixed.iter().copied().collect();
+            let mut ie_dofs = BTreeSet::new();
+            let mut fbuf = Vec::new();
+            for &f_idx in &ie_rat_facets {
+                dof_map.facet_dofs(mixed, f_idx, &mut fbuf);
+                for &d in &fbuf {
+                    if !fixed_set.contains(&d) {
+                        ie_dofs.insert(d);
+                    }
+                }
+            }
+            if !ie_dofs.is_empty() {
+                let mut pairs: Vec<(usize, f64)> = fixed.into_iter().zip(vals).collect();
+                for d in ie_dofs {
+                    pairs.push((d, 0.0));
+                }
+                pairs.sort_by_key(|p| p.0);
+                fixed = pairs.iter().map(|p| p.0).collect();
+                vals = pairs.iter().map(|p| p.1).collect();
+            }
+        }
+    }
     Ok(ElectroAssembly { k, f, fixed, vals, volt, has_open })
 }
 
@@ -1143,7 +1206,12 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
             }
         }
     }
-    let bg_dofs: BTreeSet<usize> = boundary_dofs(m_work, &bg_labels, order).into_iter().collect();
+    let mut bg_dofs: BTreeSet<usize> = boundary_dofs(m_work, &bg_labels, order).into_iter().collect();
+    for &d in &asm.fixed {
+        if !term_dofs.iter().any(|td| td.contains(&d)) {
+            bg_dofs.insert(d);
+        }
+    }
     if n_term == 1 && bg_dofs.is_empty() && !asm.has_open && !has_positive_farfield {
         return Err(
             "electrostatics with a single terminal needs at least one ground, potential, open, or far_field reference boundary".into()
@@ -1478,6 +1546,460 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         study: spec.study.kind().into(),
         order: order as u8,
         dim: m_work.dim as u8,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: n,
+    })
+}
+
+fn electrostatics_fields_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    order: usize,
+    v_mixed: &[f64],
+) -> (Vec<Field>, CellFields, Vec<f64>) {
+    let v_simplex = proj.project_lagrange_blocks(mixed, dof_map, v_mixed, 1, order);
+    let scale = vec![-1.0; mixed.n_cells()];
+    let ecell = sample_mixed_gradients_on_simplex(mixed, dof_map, proj, v_mixed, None, &scale, order);
+    let e = node_average(simplex, &ecell, simplex.dim, order);
+    let ec = components(&e, simplex.dim);
+    let names = femcore::section::component_names(simplex.dim);
+    let fields = vec![Field::scalar("V", "V", v_simplex.clone()), Field::vector("E", "V/m", names, &ec)];
+    let mut cf = CellFields::new(simplex, order);
+    cf.push_real("V", "V", cell_values_at_nodes(simplex, &v_simplex, order));
+    cf.push_components("E", names, "V/m", &ecell);
+    (fields, cf, v_simplex)
+}
+
+/// Solves electrostatics natively on a mixed mesh (`Tri`/`Quad` in 2D, `Tet`/`Prism`/`Hex` in 3D)
+/// and/or with domain-applied static Infinite Elements (`BcKind::InfiniteElement`), preserving the
+/// pure-simplex fast path when `mesh.is_pure_simplex() && !spec.has_infinite_element()`.
+pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String> {
+    if mesh.is_pure_simplex() && !spec.has_infinite_element() {
+        let d = discretise(mesh).map_err(|e| e.to_string())?;
+        return solve_electrostatics(&d, spec);
+    }
+    match spec.formulation.as_str() {
+        "" | "volumetric_fem" | "auto" => {}
+        "planar_bem" => {
+            let d = discretise(mesh).map_err(|e| e.to_string())?;
+            return crate::planar_bem::solve_planar_bem(&d, spec);
+        }
+        other => return Err(format!("unknown electrostatics formulation '{other}'")),
+    }
+
+    let t0 = Instant::now();
+    let order = spec.order;
+    let mixed = discretise_mixed(mesh).map_err(|e| e.to_string())?;
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, &mixed).map_err(|e| e.to_string())?;
+    let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+    let dof_map = MixedLagrangeDofMap::new(&mixed, space);
+
+    check_boundary_labels_mixed(
+        &mixed,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
+    let ie_map = resolve_ie_domains_mixed(&mixed, spec)?;
+    let eps = cell_values_mixed(&spec.materials, &mixed, "eps_r", Some(1.0))?;
+    let rho = cell_values_mixed(&spec.materials, &mixed, "rho_v", Some(0.0))?;
+    let coeff: Vec<f64> = eps.iter().map(|e| EPS0 * e).collect();
+    let eps_tensors_rel: Option<Vec<M3>> = if spec.materials.has_tensor(TensorKind::Permittivity) {
+        Some(plane_tensors_mixed(
+            &mixed,
+            cell_tensor_mixed(&spec.materials, &mixed, TensorKind::Permittivity, Some(1.0))?,
+        ))
+    } else {
+        None
+    };
+    let tensor_perm: Option<Vec<M3>> = eps_tensors_rel.as_ref().map(|tr| {
+        let mut t = tr.clone();
+        t.iter_mut().for_each(|m| m.iter_mut().for_each(|r| r.iter_mut().for_each(|x| *x *= EPS0)));
+        t
+    });
+
+    let mut k = assemble_laplace_ie_mixed(&mixed, &dof_map, &coeff, tensor_perm.as_deref(), &ie_map);
+    let n = dof_map.n_dofs;
+    let mut f =
+        if rho.iter().any(|&r| r != 0.0) { assemble_source_mixed(&mixed, &dof_map, &rho) } else { vec![0.0; n] };
+
+    let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
+    let (lo, hi) = mixed.bbox();
+    let default_origin = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])];
+    let mut open_origins: BTreeMap<i32, [f64; 3]> = BTreeMap::new();
+    let mut terminals: Vec<(String, Vec<i32>)> = Vec::new();
+
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            if !(1..=2).contains(ff_order) {
+                return Err(format!("far_field condition 'order' must be 1 or 2, got {ff_order}"));
+            }
+            if !decay_power.is_finite() || *decay_power <= 0.0 {
+                return Err(format!("far_field condition 'decay_power' must be positive, got {decay_power}"));
+            }
+            if let Some(c) = center {
+                if c.iter().any(|x| !x.is_finite()) {
+                    return Err("far_field condition 'center' has a NaN or infinite coordinate".into());
+                }
+            }
+        }
+        if let BcKind::Terminal(name) = &bc.kind {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err("terminal condition requires a non-empty 'name'".into());
+            }
+            if let Some((_, labs)) = terminals.iter_mut().find(|(n, _)| n == name) {
+                for &l in &bc.labels {
+                    if !labs.contains(&l) {
+                        labs.push(l);
+                    }
+                }
+            } else {
+                terminals.push((name.to_string(), bc.labels.clone()));
+            }
+        }
+        for &lab in &bc.labels {
+            match &bc.kind {
+                BcKind::Potential(v) => {
+                    volt.insert(lab, *v);
+                }
+                BcKind::Ground => {
+                    volt.insert(lab, 0.0);
+                }
+                BcKind::Terminal(name) => {
+                    if name.trim().is_empty() {
+                        return Err("terminal condition requires a non-empty 'name'".into());
+                    }
+                    volt.entry(lab).or_insert(0.0);
+                }
+                BcKind::Open { origin } => {
+                    if mixed.dim != 3 {
+                        return Err(
+                            "open boundary condition (spherical 1/r asymptotic Robin) requires a 3D mesh".into()
+                        );
+                    }
+                    let r0 = origin.unwrap_or(default_origin);
+                    if r0.iter().any(|x| !x.is_finite()) {
+                        return Err("open boundary 'origin' must be finite".into());
+                    }
+                    open_origins.insert(lab, r0);
+                }
+                BcKind::SurfaceCharge(s) => {
+                    if *s != 0.0 {
+                        let l = assemble_boundary_load_mixed(&mixed, &dof_map, &[lab], *s);
+                        f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    }
+                }
+                BcKind::FarField { .. } | BcKind::InfiniteElement(_) => {}
+                other => return Err(format!("'{}' is not an electrostatics boundary condition", other.name())),
+            }
+        }
+    }
+
+    let eps_ff = match &eps_tensors_rel {
+        Some(tr) => FarFieldPermittivity::Tensor(tr),
+        None => FarFieldPermittivity::Scalar(&eps),
+    };
+    let mut has_open = !open_origins.is_empty();
+    for (&lab, &r0) in &open_origins {
+        let k_open = assemble_farfield_robin_mixed(&mixed, &dof_map, &[lab], 1, 1.0, r0, EPS0, eps_ff);
+        k = k.add_scaled(&k_open, 1.0);
+    }
+
+    let ref_labels: Vec<i32> = volt.keys().copied().collect();
+    let mut has_positive_farfield = false;
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !volt.contains_key(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid_mixed(&mixed, &ref_labels));
+                if farfield_positive_measure_mixed(&mixed, &ff_labs, c) > 0.0 {
+                    has_positive_farfield = true;
+                }
+                let k_far =
+                    assemble_farfield_robin_mixed(&mixed, &dof_map, &ff_labs, *ff_order, *decay_power, c, EPS0, eps_ff);
+                k = k.add_scaled(&k_far, 1.0);
+            }
+        }
+    }
+
+    let (ie_rat_facets, ie_exp_facets) = classify_ie_outer_facets_mixed(&mixed, &ie_map);
+    if !ie_exp_facets.is_empty() {
+        let k_ie_rob = assemble_ie_outer_robin_mixed(&mixed, &dof_map, &ie_exp_facets, &ie_map, EPS0, eps_ff);
+        k = k.add_scaled(&k_ie_rob, 1.0);
+        has_open = true;
+    }
+    if !ie_rat_facets.is_empty() {
+        has_open = true;
+    }
+
+    if volt.is_empty() && !has_open && !has_positive_farfield {
+        return Err("electrostatics needs at least one potential, ground or terminal boundary".into());
+    }
+
+    let mut ie_zero_dofs = BTreeSet::new();
+    if !ie_rat_facets.is_empty() {
+        let mut fbuf = Vec::new();
+        for &f_idx in &ie_rat_facets {
+            dof_map.facet_dofs(&mixed, f_idx, &mut fbuf);
+            ie_zero_dofs.extend(fbuf.iter().copied());
+        }
+    }
+
+    let tls = build_tls_meta(&simplex, spec);
+
+    if terminals.is_empty() {
+        let (mut fixed, mut vals) = dof_map.dirichlet_constraints(&mixed, &volt);
+        if !ie_zero_dofs.is_empty() {
+            let fixed_set: BTreeSet<usize> = fixed.iter().copied().collect();
+            let mut pairs: Vec<(usize, f64)> = fixed.into_iter().zip(vals).collect();
+            for &d in &ie_zero_dofs {
+                if !fixed_set.contains(&d) {
+                    pairs.push((d, 0.0));
+                }
+            }
+            pairs.sort_by_key(|p| p.0);
+            fixed = pairs.iter().map(|p| p.0).collect();
+            vals = pairs.iter().map(|p| p.1).collect();
+        }
+        let (v_mixed, solver_note) = solve_spd_mixed(spec.solver, &k, &f, &fixed, &vals)?;
+        let (fields, cell_fields, v_simplex) =
+            electrostatics_fields_mixed(&mixed, &dof_map, &simplex, &proj, order, &v_mixed);
+        let en = norm_of(&components(&fields[1].values, mixed.dim));
+        let kv = k.matvec(&v_mixed);
+        let w = 0.5 * v_mixed.iter().zip(&kv).map(|(a, b)| a * b).sum::<f64>();
+        let (vmin, vmax) = minmax(&v_simplex);
+        let mut scalars = vec![
+            ("stored energy W_e (J; per metre in 2D)".to_string(), Scalar::Num(w)),
+            ("max |E| (V/m)".into(), Scalar::Num(minmax(&en).1)),
+            ("V min (V)".into(), Scalar::Num(vmin)),
+            ("V max (V)".into(), Scalar::Num(vmax)),
+        ];
+        let mut dv: Vec<f64> = volt.values().map(|x| (x * 1e12).round() / 1e12).collect();
+        dv.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        dv.dedup();
+        if dv.len() == 2 {
+            scalars.push((
+                "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
+                Scalar::Num(2.0 * w / (dv[1] - dv[0]).powi(2)),
+            ));
+        } else if dv.len() == 1 && (has_open || has_positive_farfield) && dv[0].abs() > 1e-12 {
+            scalars.push((
+                "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
+                Scalar::Num(2.0 * w / dv[0].powi(2)),
+            ));
+        }
+        scalars.push(tls.scalar());
+        return Ok(SolveResult {
+            physics: "dfs".into(),
+            study: spec.study.kind().into(),
+            order: order as u8,
+            dim: mixed.dim as u8,
+            solutions: vec![Solution {
+                label: "stationary".into(),
+                fields,
+                cell_fields: cell_fields_of(&cell_fields),
+                ..Default::default()
+            }],
+            scalars,
+            log: solver_note.into_iter().collect(),
+            seconds: t0.elapsed().as_secs_f64(),
+            dofs: n,
+        });
+    }
+
+    // Multi-RHS terminal capacitance matrix extraction on MixedDiscretisation:
+    let n_term = terminals.len();
+    let term_dofs: Vec<BTreeSet<usize>> =
+        terminals.iter().map(|(_, labs)| dof_map.boundary_dofs(&mixed, labs).into_iter().collect()).collect();
+    let mut bg_labels = Vec::new();
+    for bc in &spec.bcs {
+        if matches!(bc.kind, BcKind::Ground | BcKind::Potential(_)) {
+            for &l in &bc.labels {
+                if !bg_labels.contains(&l) {
+                    bg_labels.push(l);
+                }
+            }
+        }
+    }
+    let mut bg_dofs: BTreeSet<usize> = dof_map.boundary_dofs(&mixed, &bg_labels).into_iter().collect();
+    for &d in &ie_zero_dofs {
+        if !term_dofs.iter().any(|td| td.contains(&d)) {
+            bg_dofs.insert(d);
+        }
+    }
+    if n_term == 1 && bg_dofs.is_empty() && !has_open && !has_positive_farfield {
+        return Err(
+            "electrostatics with a single terminal needs at least one ground, potential, open, or far_field reference boundary".into()
+        );
+    }
+
+    let mut all_fixed_set = bg_dofs.clone();
+    for td in &term_dofs {
+        all_fixed_set.extend(td.iter().copied());
+    }
+    let fixed: Vec<usize> = all_fixed_set.into_iter().collect();
+    let free = free_dofs(n, &fixed);
+    let n_free = free.len();
+
+    let vals_list: Vec<Vec<f64>> = (0..n_term)
+        .map(|j| {
+            fixed.iter().map(|&d| if term_dofs[j].contains(&d) && !bg_dofs.contains(&d) { 1.0 } else { 0.0 }).collect()
+        })
+        .collect();
+
+    let mut v_all = vec![vec![0.0; n]; n_term];
+    for j in 0..n_term {
+        for (&d, &val) in fixed.iter().zip(&vals_list[j]) {
+            v_all[j][d] = val;
+        }
+    }
+
+    let mut log = Vec::new();
+    if n_free > 0 {
+        let kff = k.submatrix(&free, &free);
+        let kfx = k.submatrix(&free, &fixed);
+        let rhs_list: Vec<Vec<f64>> = vals_list
+            .iter()
+            .map(|vals| {
+                let kx = kfx.matvec(vals);
+                free.iter().enumerate().map(|(a, &i)| f[i] - kx[a]).collect()
+            })
+            .collect();
+        let solver = DirectSolver::new(&kff, true)?;
+        let sols = solver.solve_many(&rhs_list);
+        for j in 0..n_term {
+            for (a, &i) in free.iter().enumerate() {
+                v_all[j][i] = sols[j][a];
+            }
+        }
+        log.push(format!(
+            "direct Cholesky: 1 factorization ({n_free} free mixed-cell dofs) served {n_term} terminal right-hand side(s)"
+        ));
+    } else {
+        log.push(format!("0 free dofs: {n_term} terminal right-hand side(s) determined by boundary constraints"));
+    }
+
+    let kv_all: Vec<Vec<f64>> = v_all.iter().map(|v| k.matvec(v)).collect();
+    let mut c_raw = vec![vec![0.0; n_term]; n_term];
+    for i in 0..n_term {
+        for j in 0..n_term {
+            c_raw[i][j] = femcore::linalg::vecops::dotu(&v_all[i], &kv_all[j]);
+        }
+    }
+    let raw_asym = if n_term <= 1 {
+        0.0
+    } else {
+        let mut diff_sq = 0.0;
+        let mut norm_sq = 0.0;
+        for i in 0..n_term {
+            for j in 0..n_term {
+                let d = c_raw[i][j] - c_raw[j][i];
+                diff_sq += d * d;
+                norm_sq += c_raw[i][j] * c_raw[i][j];
+            }
+        }
+        if norm_sq > 0.0 {
+            (diff_sq / norm_sq).sqrt()
+        } else {
+            0.0
+        }
+    };
+    let mut maxwell_matrix_f = vec![vec![0.0; n_term]; n_term];
+    for i in 0..n_term {
+        for j in i..n_term {
+            let sym = 0.5 * (c_raw[i][j] + c_raw[j][i]);
+            maxwell_matrix_f[i][j] = sym;
+            maxwell_matrix_f[j][i] = sym;
+        }
+    }
+
+    let mut mutual_matrix_f = vec![vec![0.0; n_term]; n_term];
+    for i in 0..n_term {
+        let mut sum_row = 0.0;
+        for col in 0..n_term {
+            sum_row += maxwell_matrix_f[i][col];
+            if i != col {
+                mutual_matrix_f[i][col] = -maxwell_matrix_f[i][col];
+            }
+        }
+        mutual_matrix_f[i][i] = sum_row;
+    }
+
+    let ec_matrix_hz = invert_spd_ec_matrix(&maxwell_matrix_f)?;
+
+    let mut solutions = Vec::with_capacity(n_term);
+    let mut scalars = Vec::new();
+    for j in 0..n_term {
+        let (fields, cell_fields, v_simplex) =
+            electrostatics_fields_mixed(&mixed, &dof_map, &simplex, &proj, order, &v_all[j]);
+        if j == 0 {
+            let en = norm_of(&components(&fields[1].values, mixed.dim));
+            let w = 0.5 * maxwell_matrix_f[0][0];
+            let (vmin, vmax) = minmax(&v_simplex);
+            scalars.push(("stored energy W_e (J; per metre in 2D)".to_string(), Scalar::Num(w)));
+            scalars.push(("max |E| (V/m)".into(), Scalar::Num(minmax(&en).1)));
+            scalars.push(("V min (V)".into(), Scalar::Num(vmin)));
+            scalars.push(("V max (V)".into(), Scalar::Num(vmax)));
+            if n_term == 1 {
+                scalars.push((
+                    "capacitance C = 2 W_e / dV^2 (F; per metre in 2D)".into(),
+                    Scalar::Num(maxwell_matrix_f[0][0]),
+                ));
+            }
+        }
+        solutions.push(Solution {
+            label: format!("terminal {}", terminals[j].0),
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            value: Some(maxwell_matrix_f[j][j]),
+            ..Default::default()
+        });
+    }
+
+    for i in 0..n_term {
+        for j in 0..n_term {
+            let name_key = format!("C_{}_{} (F)", terminals[i].0, terminals[j].0);
+            let idx_key = format!("C_{i}_{j} (F)");
+            scalars.push((name_key.clone(), Scalar::Num(maxwell_matrix_f[i][j])));
+            if idx_key != name_key {
+                scalars.push((idx_key, Scalar::Num(maxwell_matrix_f[i][j])));
+            }
+        }
+    }
+    for i in 0..n_term {
+        for j in 0..n_term {
+            let name_key = format!("E_C_{}_{} (Hz)", terminals[i].0, terminals[j].0);
+            let idx_key = format!("E_C_{i}_{j} (Hz)");
+            scalars.push((name_key.clone(), Scalar::Num(ec_matrix_hz[i][j])));
+            if idx_key != name_key {
+                scalars.push((idx_key, Scalar::Num(ec_matrix_hz[i][j])));
+            }
+        }
+    }
+
+    scalars.push(("maxwell_raw_asymmetry_rel".into(), Scalar::Num(raw_asym)));
+    let cap_data = CapacitanceMatrixData {
+        terminals: terminals.into_iter().map(|(n, _)| n).collect(),
+        maxwell_matrix_f,
+        mutual_matrix_f,
+        ec_matrix_hz,
+        ..Default::default()
+    };
+    scalars.push(cap_data.scalar());
+    scalars.push(tls.scalar());
+
+    Ok(SolveResult {
+        physics: "dfs".into(),
+        study: spec.study.kind().into(),
+        order: order as u8,
+        dim: mixed.dim as u8,
         solutions,
         scalars,
         log,

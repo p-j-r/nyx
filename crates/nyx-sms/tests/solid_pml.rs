@@ -26,9 +26,19 @@ fn pml_with_unit_stretch_reproduces_the_real_solver() {
     let mesh = common::rect(1.0, 0.1, 30, 3);
     let real = solve_solid(&mesh, &bar_spec(Plane::Stress, 4)).unwrap();
     let mut s = bar_spec(Plane::Stress, 4);
-    s.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.0 });
+    s.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.0,
+            order: 0.0,
+            re: 1.0,
+            clamp_outer: false,
+            ..Default::default()
+        },
+    );
     let pml = solve_solid(&mesh, &s).unwrap();
     for (a, b) in freqs(&real).iter().zip(freqs(&pml)) {
         assert!((a / b - 1.0).abs() < 1e-8, "{a} vs {b}");
@@ -46,9 +56,19 @@ fn real_stretch_equals_a_longer_bar() {
         femcore::mesh::SimplexMesh::new(2, long.points, long.cells, long.cell_labels, long.facets, long.facet_labels);
     let reference = solve_solid(&long, &bar_spec(Plane::Strain, 4)).unwrap();
     let mut s = bar_spec(Plane::Strain, 4);
-    s.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.5 });
+    s.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.0,
+            order: 0.0,
+            re: 1.5,
+            clamp_outer: false,
+            ..Default::default()
+        },
+    );
     let r = solve_solid(&short, &s).unwrap();
     for (a, b) in freqs(&reference).iter().zip(freqs(&r)) {
         assert!((a / b - 1.0).abs() < 1e-8, "{a} vs {b}");
@@ -65,9 +85,19 @@ fn complex_stretch_gives_the_analytic_complex_axial_frequencies() {
     s.materials.default.insert("nu".into(), 0.0);
     // roller: uz = 0 on the long sides, so only axial motion exists
     s.bcs.push(Bc { labels: vec![2, 3], kind: BcKind::Fixed { fixed: [false, false, true], values: [0.0; 3] } });
-    s.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.1, order: 0.0, re: 1.0 });
+    s.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.1,
+            order: 0.0,
+            re: 1.0,
+            clamp_outer: false,
+            ..Default::default()
+        },
+    );
     let r = solve_solid(&mesh, &s).unwrap();
     let cs = (e / rho).sqrt();
     let q = r.scalar("Q1").unwrap();
@@ -118,7 +148,7 @@ fn beam_on_a_pml_substrate_loses_energy_but_keeps_its_frequency() {
     outer.dedup();
     let mut s = bar_spec(Plane::Strain, 4);
     s.bcs = vec![Bc { labels: outer, kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } }];
-    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0 };
+    let st = |x, z| Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0, ..Default::default() };
     s.materials.pml.insert(3, st(PmlDir::Minus, PmlDir::Off));
     s.materials.pml.insert(4, st(PmlDir::Plus, PmlDir::Off));
     s.materials.pml.insert(5, st(PmlDir::Off, PmlDir::Minus));

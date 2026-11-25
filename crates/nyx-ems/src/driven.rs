@@ -18,23 +18,36 @@
 //! and an isometric QR image-space basis $\mathbf{U} \in \mathbb{R}^{n_{\text{red}}\times s}$ for microsecond
 //! full-space residual certification across all sweep frequencies.
 
-use crate::cavity::{assemble_maxwell, basis3, gradient_full, safe_curved_jacobian, Ned3};
+use crate::cavity::{assemble_maxwell_with_pml, basis3, gradient_full, safe_curved_jacobian, Ned3};
 use crate::ibc::{assemble_ibc_and_jj_3d, reduce_real_csr, reduce_real_vec, AssembledJjPort, SheetCellKind, MU0};
+use crate::mixed_ops::{
+    assemble_ibc_and_jj_3d_mixed, assemble_lumped_ports_3d_mixed, assemble_maxwell_mixed, assemble_waveports_3d_mixed,
+    axes_of_3d_periodic_mixed, iso_mu_inv_c3, match_vertices_mixed, simplex_cell_materials_3d,
+    symmetry_facet_flags_mixed, validate_port_contacts_3d_mixed, vertex_keys_mixed, EmPmlTable, MixedCellMaterials,
+};
 use crate::modes::C0;
 use crate::ports::{
     assemble_lumped_ports_3d, assemble_waveports_3d, validate_port_contacts_3d, AssembledLumpedPort, AssembledWavePort,
 };
-use crate::problem::{Problem, Study};
+use crate::problem::{symmetry_facet_flags, Problem, Study};
 use crate::rom::build_tls_meta;
+use femcore::edge_mixed::{
+    build_ams_p1_from_masks, build_ams_p2_from_masks, eval_cell_basis_3d, ned_mixed_periodic_relations, NedEvalScratch,
+    NedMixed,
+};
 use femcore::fem::{geometry, CurvedTet};
+use femcore::fem_mixed::IsoparametricCell;
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::ams::{assemble_shifted_curl_curl, AmsFgmresOptions, AmsFgmresSolver, AmsP2Topology};
 use femcore::linalg::blr::{BlrOptions, ShiftedBlrLu};
 use femcore::linalg::csr::{c, CCsr, Coo, RCsr, C};
 use femcore::linalg::direct::{FactorBackend, ShiftedSolver};
 use femcore::linalg::driver::{thin_svd_c64, DirectSolver};
-use femcore::pml::cell_stretches;
-use nyx_physics::{cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Scalar, Solution, SolveResult};
+use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
+use nyx_physics::{
+    cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution,
+    SolveResult,
+};
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
 use std::time::Instant;
@@ -196,8 +209,14 @@ pub struct DrivenAssembly {
     pub waveports: Vec<AssembledWavePort>,
     pub jj_ports: Vec<AssembledJjPort>,
     pub cell_sheet: Vec<Option<SheetCellKind>>,
-    pub mu_inv: Vec<[C; 3]>,
+    pub mu_inv: Vec<C3>,
+    pub mur_phys: Vec<f64>,
     pub has_sheets: bool,
+    pub has_pml: bool,
+    pub k_pml_red: CCsr,
+    pub m_pml_red: CCsr,
+    pub m_phys_red: RCsr,
+    pub m_pml_phys_red: RCsr,
 }
 
 impl DrivenAssembly {
@@ -285,34 +304,11 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
     let eps_phys_re: Vec<[[f64; 3]; 3]> = tens.iter().map(|(re, _)| *re).collect();
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let has_pml = problem.materials.has_pml();
-    let stretch = if has_pml { Some(cell_stretches(mesh, &problem.materials.pml)) } else { None };
-    let mut eps: Vec<C3> = Vec::with_capacity(mesh.n_cells());
-    let mut mu_inv: Vec<[C; 3]> = Vec::with_capacity(mesh.n_cells());
-    for ci in 0..mesh.n_cells() {
-        let (sx, sy, sz) =
-            stretch.as_ref().map_or((c(1.0, 0.0), c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1], s[ci][2]));
-        let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
-        let pml_here = stretch.is_some()
-            && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
-        let (t_re, t_im) = tens[ci];
-        let (sv, det) = ([sx, sy, sz], sx * sy * sz);
-        let mut e = [[c(0.0, 0.0); 3]; 3];
-        for a in 0..3 {
-            for b in 0..3 {
-                let ec = c(t_re[a][b], -t_im[a][b]);
-                e[a][b] = if pml_here { det * ec / (sv[a] * sv[b]) } else { ec };
-            }
-        }
-        eps.push(e);
-        let one = c(1.0, 0.0);
-        let mu0 = c(1.0 / mur[ci], 0.0);
-        mu_inv.push([
-            mu0 / if pml_here { lam[0] } else { one },
-            mu0 / if pml_here { lam[1] } else { one },
-            mu0 / if pml_here { lam[2] } else { one },
-        ]);
-    }
+    let (eps, mu_inv) = simplex_cell_materials_3d(mesh, problem)?;
+    let f0 = 0.5 * (f_min + f_max);
+    let pml_table = EmPmlTable::from_simplex(mesh, &problem.materials, f0, false, solver == "ams_fgmres");
+    let pml_cells = pml_table.pml_cells_mask();
+    let has_pml = pml_table.has_any();
 
     let mut matches = vec![];
     for p in &problem.periodic {
@@ -321,9 +317,8 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     let vkey = vertex_keys(mesh, &matches);
     let ned = Ned3::new(mesh, order, vkey);
     let n = ned.n_dofs();
-    let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
+    let (k, m) = assemble_maxwell_with_pml(mesh, &ned, &eps, &mu_inv, has_pml.then_some(&pml_table));
 
-    let f0 = 0.5 * (f_min + f_max);
     let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty();
     let mut ibc_jj = if has_sheets {
         Some(assemble_ibc_and_jj_3d(mesh, &ned, &problem.pec, &problem.surface_impedance, &problem.lumped_jj, f0)?)
@@ -354,6 +349,7 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
 
+    let (sym_pec, sym_pmc) = symmetry_facet_flags(mesh, problem.symmetry)?;
     let mut fixed_set = BTreeSet::new();
     let mut ext_pec_verts = BTreeSet::new();
     let mut cond_verts = BTreeSet::new();
@@ -362,11 +358,13 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         let label = mesh.facet_labels[f];
         if exterior[f]
             && !periodic_labels.contains(&label)
-            && !problem.pmc.contains(&label)
-            && !ibc_labels.contains(&label)
-            && !jj_labels.contains(&label)
-            && !lp_labels.contains(&label)
-            && !wp_labels.contains(&label)
+            && (sym_pec[f]
+                || (!problem.pmc.contains(&label)
+                    && !sym_pmc[f]
+                    && !ibc_labels.contains(&label)
+                    && !jj_labels.contains(&label)
+                    && !lp_labels.contains(&label)
+                    && !wp_labels.contains(&label)))
         {
             let fv = mesh.facet(f);
             for d in ned.boundary_dofs(mesh, [fv[0], fv[1], fv[2]]) {
@@ -670,6 +668,45 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         None
     };
 
+    let (k_pml_red, m_pml_red, m_phys_red, m_pml_phys_red) = if has_pml {
+        let zero_c3 = [[c(0.0, 0.0); 3]; 3];
+        let mut eps_pml_only = Vec::with_capacity(mesh.n_cells());
+        let mut mui_pml_only = Vec::with_capacity(mesh.n_cells());
+        let mut eps_phys_only = Vec::with_capacity(mesh.n_cells());
+        let mut eps_pml_unstr = Vec::with_capacity(mesh.n_cells());
+        let mut mui_zero = Vec::with_capacity(mesh.n_cells());
+        for ci in 0..mesh.n_cells() {
+            let mut er_c = zero_c3;
+            for a in 0..3 {
+                for b in 0..3 {
+                    er_c[a][b] = c(eps_phys_re[ci][a][b], 0.0);
+                }
+            }
+            mui_zero.push(zero_c3);
+            if pml_cells[ci] {
+                eps_pml_only.push(eps[ci]);
+                mui_pml_only.push(mu_inv[ci]);
+                eps_phys_only.push(zero_c3);
+                eps_pml_unstr.push(er_c);
+            } else {
+                eps_pml_only.push(zero_c3);
+                mui_pml_only.push(zero_c3);
+                eps_phys_only.push(er_c);
+                eps_pml_unstr.push(zero_c3);
+            }
+        }
+        let (kp, mp) = assemble_maxwell_with_pml(mesh, &ned, &eps_pml_only, &mui_pml_only, Some(&pml_table));
+        let (_, m_ph) = assemble_maxwell_with_pml(mesh, &ned, &eps_phys_only, &mui_zero, None);
+        let (_, m_pm_u) = assemble_maxwell_with_pml(mesh, &ned, &eps_pml_unstr, &mui_zero, None);
+        (
+            femcore::periodic::congruence(&pmat, &kp),
+            femcore::periodic::congruence(&pmat, &mp),
+            femcore::periodic::congruence(&pmat, &m_ph).real_part(),
+            femcore::periodic::congruence(&pmat, &m_pm_u).real_part(),
+        )
+    } else {
+        (CCsr::zeros(0, 0), CCsr::zeros(0, 0), RCsr::zeros(0, 0), RCsr::zeros(0, 0))
+    };
     Ok(DrivenAssembly {
         order,
         n,
@@ -695,7 +732,13 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         jj_ports,
         cell_sheet,
         mu_inv,
+        mur_phys: mur,
         has_sheets,
+        has_pml,
+        k_pml_red,
+        m_pml_red,
+        m_phys_red,
+        m_pml_phys_red,
     })
 }
 
@@ -1442,11 +1485,11 @@ fn build_driven_solution(
     let h_prefactor = c(0.0, 1.0 / (omega * MU0));
     let mut h_field = vec![[c(0.0, 0.0); 3]; nc * nloc];
     for ci in 0..nc {
-        let mui = asm.mu_inv[ci];
+        let mui = c(1.0 / asm.mur_phys[ci], 0.0);
         for a in 0..nloc {
             let idx = ci * nloc + a;
             let ce = curl_e[idx];
-            h_field[idx] = [ce[0] * mui[0] * h_prefactor, ce[1] * mui[1] * h_prefactor, ce[2] * mui[2] * h_prefactor];
+            h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
         }
     }
     for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
@@ -1457,11 +1500,80 @@ fn build_driven_solution(
     Solution { label, fields, cell_fields: cell_fields_of(&cells), value: Some(freq_hz), eigenvalue: None }
 }
 
-/// Solves a 3D `Study::Driven` frequency sweep via Hermite Tangential Galerkin PROM (`prom_tol = Some(tol)`)
-/// or direct point-by-point HDM factorizations (`prom_tol = None`).
-pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
-    let t0 = Instant::now();
-    let asm = assemble_emw_driven(mesh, problem)?;
+/// Evaluates `(P_pml_watts, layer_fraction)` at `freq_hz` for unscaled reduced field `x_red`.
+fn compute_driven_pml_metrics(asm: &DrivenAssembly, freq_hz: f64, x_red: &[C]) -> (f64, f64) {
+    if !asm.has_pml || x_red.is_empty() {
+        return (0.0, 0.0);
+    }
+    let omega = (2.0 * PI * freq_hz).max(1e-300);
+    let k0_2 = (omega / C0).powi(2);
+    let kx = asm.k_pml_red.matvec(x_red);
+    let mx = asm.m_pml_red.matvec(x_red);
+    let mut quad_im = 0.0_f64;
+    for i in 0..x_red.len() {
+        quad_im += (x_red[i].conj() * (kx[i] - mx[i] * k0_2)).im;
+    }
+    let p_pml_w = (quad_im / (omega * MU0)).max(0.0);
+
+    let quad_real = |mat: &RCsr| -> f64 {
+        let mut acc = 0.0;
+        for i in 0..mat.nrows() {
+            let xi = x_red[i];
+            let (cols, vals) = mat.row(i);
+            let mut rs = c(0.0, 0.0);
+            for (&col, &v) in cols.iter().zip(vals) {
+                rs += x_red[col as usize] * v;
+            }
+            acc += (xi.conj() * rs).re;
+        }
+        acc.max(0.0)
+    };
+    let u_phys = quad_real(&asm.m_phys_red);
+    let u_pml = quad_real(&asm.m_pml_phys_red);
+    let u_tot = u_phys + u_pml;
+    let layer_fraction = if u_tot > 0.0 { (u_pml / u_tot).clamp(0.0, 1.0) } else { 0.0 };
+    (p_pml_w, layer_fraction)
+}
+
+/// Partitions `freqs_hz` into `[start..end)` sub-bands with `f_end / f_start <= 3.0` (`~2.5x` per band when `f_max / f_min > 3.0`).
+#[allow(clippy::single_range_in_vec_init)]
+fn partition_prom_subbands(freqs_hz: &[f64]) -> Vec<std::ops::Range<usize>> {
+    let n = freqs_hz.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if freqs_hz[n - 1] <= 3.0 * freqs_hz[0] {
+        return vec![0..n];
+    }
+    let mut bands = Vec::new();
+    let mut start = 0usize;
+    while start < n {
+        let f_cap = 2.5 * freqs_hz[start];
+        let mut end = start + 1;
+        while end < n && freqs_hz[end] <= f_cap {
+            end += 1;
+        }
+        // Absorb trailing sliver if remaining span is <= 1.2x so the final sub-band is never degenerate.
+        if end < n && freqs_hz[n - 1] <= 3.0 * freqs_hz[start] {
+            end = n;
+        }
+        bands.push(start..end);
+        start = end;
+    }
+    bands
+}
+
+struct DrivenSweepCoreOut {
+    driven_data: DrivenPortData,
+    symbolic_count: usize,
+    backend_name: String,
+    rom_sweep_seconds: f64,
+    s21_min_db: f64,
+    f_res_hz: f64,
+    rep_x_red: Vec<C>,
+}
+
+fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, String> {
     let freqs_hz: Vec<f64> = if let Some(fs) = asm.freqs_hz.as_ref().filter(|v| !v.is_empty()) {
         fs.to_vec()
     } else {
@@ -1482,8 +1594,8 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
     let mut y_matrix = Vec::with_capacity(n_points);
 
     let mut hdm_solves = 0usize;
-    let symbolic_count;
-    let backend_name: String;
+    let mut symbolic_count = 0usize;
+    let mut backend_name = "None".to_string();
     let mut rom_dim = 0usize;
     let mut anchor_freqs_hz = Vec::new();
     let mut max_residual = 0.0_f64;
@@ -1492,166 +1604,190 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
     let mut rep_x_red: Vec<C> = vec![c(0.0, 0.0); asm.nred];
 
     if let Some(tol) = asm.prom_tol {
-        let mut prom = DrivenProm::new(&asm);
+        let bands = partition_prom_subbands(&freqs_hz);
+        let n_bands = bands.len().max(1);
+        let total_max_solves = asm.max_hdm_solves.max(1);
         let mut solver: Option<DrivenLinearSolver> = None;
-        let max_solves = asm.max_hdm_solves.max(1);
-
-        // Initial greedy anchors: [f_min, f_mid, f_max] merged with optional seed_freqs_hz
-        let mut base_indices: Vec<usize> = if n_points == 1 || (asm.f_max - asm.f_min).abs() <= 1e-12 * asm.f_min {
-            vec![0]
-        } else if n_points == 2 {
-            vec![0, 1]
-        } else {
-            vec![0, (n_points - 1) / 2, n_points - 1]
-        };
-        base_indices.dedup();
-
-        let mut initial_anchors: Vec<(Option<usize>, f64)> =
-            base_indices.iter().map(|&idx| (Some(idx), freqs_hz[idx])).collect();
-        for &sf in &asm.seed_freqs_hz {
-            let mut best_k = 0usize;
-            let mut best_diff = f64::INFINITY;
-            for (k, &fk) in freqs_hz.iter().enumerate() {
-                let diff = (fk - sf).abs();
-                if diff < best_diff {
-                    best_diff = diff;
-                    best_k = k;
-                }
-            }
-            if best_diff <= 1e-9 * sf.max(1.0) {
-                if !initial_anchors.iter().any(|&(oi, _)| oi == Some(best_k)) {
-                    initial_anchors.push((Some(best_k), freqs_hz[best_k]));
-                }
-            } else if !initial_anchors.iter().any(|&(_, f)| (f - sf).abs() <= 1e-9 * sf.max(1.0)) {
-                initial_anchors.push((None, sf));
-            }
-        }
-
-        let mut anchor_indices: Vec<usize> = Vec::new();
-        for (opt_idx, f_anchor) in initial_anchors.into_iter().take(max_solves) {
-            femcore::progress::check()?;
-            prom.add_hermite_anchor(2.0 * PI * f_anchor, &mut solver)?;
-            hdm_solves += 1;
-            anchor_freqs_hz.push(f_anchor);
-            if let Some(idx) = opt_idx {
-                anchor_indices.push(idx);
-            }
-        }
-
+        let mut min_s_metric = f64::INFINITY;
         const SWEEP_CHUNK: usize = 32;
-        let mut xr_all: Vec<Vec<Vec<C>>>;
 
-        loop {
-            femcore::progress::check()?;
-            let t_sweep = Instant::now();
-            let dim_now = prom.dim();
+        for (bi, band) in bands.iter().enumerate() {
+            let b_freqs = &freqs_hz[band.clone()];
+            let b_omegas = &omegas[band.clone()];
+            let nb_pts = b_freqs.len();
+            let remaining = total_max_solves.saturating_sub(hdm_solves).max(1);
+            let bands_left = (n_bands - bi).max(1);
+            let max_solves_band =
+                if n_bands == 1 { total_max_solves } else { (remaining.div_ceil(bands_left)).max(3.min(remaining)) };
+
+            let mut prom = DrivenProm::new(asm);
+            let mut band_solves = 0usize;
+
+            let mut base_indices: Vec<usize> =
+                if nb_pts == 1 || (b_freqs[nb_pts - 1] - b_freqs[0]).abs() <= 1e-12 * b_freqs[0] {
+                    vec![0]
+                } else if nb_pts == 2 {
+                    vec![0, 1]
+                } else {
+                    vec![0, (nb_pts - 1) / 2, nb_pts - 1]
+                };
+            base_indices.dedup();
+
+            let mut initial_anchors: Vec<(Option<usize>, f64)> =
+                base_indices.iter().map(|&idx| (Some(idx), b_freqs[idx])).collect();
+            for &sf in &asm.seed_freqs_hz {
+                if n_bands > 1 && (sf < b_freqs[0] - 1e-9 || sf > b_freqs[nb_pts - 1] + 1e-9) {
+                    continue;
+                }
+                let mut best_k = 0usize;
+                let mut best_diff = f64::INFINITY;
+                for (k, &fk) in b_freqs.iter().enumerate() {
+                    let diff = (fk - sf).abs();
+                    if diff < best_diff {
+                        best_diff = diff;
+                        best_k = k;
+                    }
+                }
+                if best_diff <= 1e-9 * sf.max(1.0) {
+                    if !initial_anchors.iter().any(|&(oi, _)| oi == Some(best_k)) {
+                        initial_anchors.push((Some(best_k), b_freqs[best_k]));
+                    }
+                } else if !initial_anchors.iter().any(|&(_, f)| (f - sf).abs() <= 1e-9 * sf.max(1.0)) {
+                    initial_anchors.push((None, sf));
+                }
+            }
+
+            let mut anchor_indices: Vec<usize> = Vec::new();
+            for (opt_idx, f_anchor) in initial_anchors.into_iter().take(max_solves_band) {
+                femcore::progress::check()?;
+                prom.add_hermite_anchor(2.0 * PI * f_anchor, &mut solver)?;
+                band_solves += 1;
+                hdm_solves += 1;
+                anchor_freqs_hz.push(f_anchor);
+                if let Some(idx) = opt_idx {
+                    anchor_indices.push(idx);
+                }
+            }
+
+            let mut xr_band: Vec<Vec<Vec<C>>>;
+            let band_worst_res;
+            loop {
+                femcore::progress::check()?;
+                let t_sweep = Instant::now();
+                let dim_now = prom.dim();
+                let prom_ref = &prom;
+                let sweep_chunks = femcore::par::map_chunks(b_omegas, SWEEP_CHUNK, |chunk| {
+                    chunk
+                        .iter()
+                        .map(|&w| match prom_ref.solve_reduced_and_residual(w) {
+                            Some(pair) => pair,
+                            None => (vec![vec![c(0.0, 0.0); dim_now]; p_ports], f64::INFINITY),
+                        })
+                        .collect::<Vec<_>>()
+                });
+                xr_band = Vec::with_capacity(nb_pts);
+                let mut worst_res = 0.0_f64;
+                let mut worst_cand_res = -1.0_f64;
+                let mut worst_cand_idx = None;
+                for (k, (xr_k, res_k)) in sweep_chunks.into_iter().flatten().enumerate() {
+                    if res_k > worst_res {
+                        worst_res = res_k;
+                    }
+                    if !anchor_indices.contains(&k) && res_k > worst_cand_res {
+                        worst_cand_res = res_k;
+                        worst_cand_idx = Some(k);
+                    }
+                    xr_band.push(xr_k);
+                }
+                rom_sweep_seconds += t_sweep.elapsed().as_secs_f64();
+
+                if worst_res <= tol || band_solves >= max_solves_band || hdm_solves >= total_max_solves {
+                    band_worst_res = worst_res;
+                    break;
+                }
+                let Some(next_idx) = worst_cand_idx else {
+                    band_worst_res = worst_res;
+                    break;
+                };
+                anchor_indices.push(next_idx);
+                prom.add_hermite_anchor(b_omegas[next_idx], &mut solver)?;
+                band_solves += 1;
+                hdm_solves += 1;
+                anchor_freqs_hz.push(b_freqs[next_idx]);
+            }
+
+            max_residual = max_residual.max(band_worst_res);
+            rom_dim += prom.dim();
+
+            if bi + 1 == n_bands {
+                symbolic_count = solver.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
+                backend_name = solver.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
+                // FR-33: Drop sparse factor buffers immediately after anchor solves finish, before post-sweep & 3D CellFields.
+                drop(solver.take());
+            }
+
+            let t_post = Instant::now();
+            let indices: Vec<usize> = (0..nb_pts).collect();
             let prom_ref = &prom;
-            let sweep_chunks = femcore::par::map_chunks(&omegas, SWEEP_CHUNK, |chunk| {
+            let xr_ref = &xr_band;
+            let b_dim = prom.dim();
+            let post_chunks = femcore::par::map_chunks(&indices, SWEEP_CHUNK, |chunk| {
                 chunk
                     .iter()
-                    .map(|&w| match prom_ref.solve_reduced_and_residual(w) {
-                        Some(pair) => pair,
-                        None => (vec![vec![c(0.0, 0.0); dim_now]; p_ports], f64::INFINITY),
+                    .map(|&k| {
+                        let w = b_omegas[k];
+                        let xr_k = &xr_ref[k];
+                        let mut z_wave_k = Vec::with_capacity(p_ports);
+                        let mut z_circ_k = Vec::with_capacity(p_ports);
+                        let mut z0_pairs_k = Vec::with_capacity(p_ports);
+                        for port in &asm.ports {
+                            let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm.waveports);
+                            let z_circ_p = port.circuit_z0(z_wave_p, &asm.waveports);
+                            z_wave_k.push(z_wave_p);
+                            z_circ_k.push(z_circ_p);
+                            z0_pairs_k.push([z_circ_p, 0.0]);
+                        }
+                        let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
+                        for p in 0..p_ports {
+                            let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
+                            for q in 0..p_ports {
+                                let mut v_pq = c(0.0, 0.0);
+                                for i in 0..b_dim {
+                                    v_pq += xr_k[q][i] * prom_ref.b_r[i][p];
+                                }
+                                let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
+                                s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
+                            }
+                        }
+                        let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
+                        let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
+                        (z0_pairs_k, s_out, z_out, y_out, metric)
                     })
                     .collect::<Vec<_>>()
             });
-            xr_all = Vec::with_capacity(n_points);
-            let mut worst_res = 0.0_f64;
-            let mut worst_cand_res = -1.0_f64;
-            let mut worst_cand_idx = None;
-            for (k, (xr_k, res_k)) in sweep_chunks.into_iter().flatten().enumerate() {
-                if res_k > worst_res {
-                    worst_res = res_k;
+            let mut band_best_local = None;
+            for (k_loc, (z0_pairs_k, s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate() {
+                if metric < min_s_metric {
+                    min_s_metric = metric;
+                    rep_freq_idx = band.start + k_loc;
+                    band_best_local = Some(k_loc);
                 }
-                if !anchor_indices.contains(&k) && res_k > worst_cand_res {
-                    worst_cand_res = res_k;
-                    worst_cand_idx = Some(k);
-                }
-                xr_all.push(xr_k);
+                z0_ohm.push(z0_pairs_k);
+                s_matrix.push(s_out);
+                z_matrix.push(z_out);
+                y_matrix.push(y_out);
             }
-            rom_sweep_seconds = t_sweep.elapsed().as_secs_f64();
-            max_residual = worst_res;
-
-            if worst_res <= tol || hdm_solves >= max_solves {
-                break;
+            if let Some(kl) = band_best_local {
+                rep_x_red = prom.reconstruct_unscaled(&xr_band[kl][0]);
             }
-            let Some(next_idx) = worst_cand_idx else {
-                break;
-            };
-            anchor_indices.push(next_idx);
-            prom.add_hermite_anchor(omegas[next_idx], &mut solver)?;
-            hdm_solves += 1;
-            anchor_freqs_hz.push(freqs_hz[next_idx]);
+            rom_sweep_seconds += t_post.elapsed().as_secs_f64();
         }
 
         if asm.strict_prom_tol && max_residual > tol {
             return Err(format!(
-                "PROM did not converge to prom_tol = {tol:.3e} within max_hdm_solves = {max_solves} (max_prom_residual = {max_residual:.3e})"
+                "PROM did not converge to prom_tol = {tol:.3e} within max_hdm_solves = {total_max_solves} (max_prom_residual = {max_residual:.3e})"
             ));
         }
-
-        rom_dim = prom.dim();
-        symbolic_count = solver.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
-        backend_name = solver.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
-        // FR-33: Drop sparse factor buffers immediately after anchor solves finish, before post-sweep & 3D CellFields.
-        drop(solver);
-
-        // Extract S, Z, Y across all n_points from reduced coordinates X_r(omega_k) using deterministic fixed-chunk Rayon
-        let t_post = Instant::now();
-        let indices: Vec<usize> = (0..n_points).collect();
-        let asm_ref = &asm;
-        let prom_ref = &prom;
-        let xr_ref = &xr_all;
-        let omegas_ref = &omegas;
-        let post_chunks = femcore::par::map_chunks(&indices, SWEEP_CHUNK, |chunk| {
-            chunk
-                .iter()
-                .map(|&k| {
-                    let w = omegas_ref[k];
-                    let xr_k = &xr_ref[k];
-                    let mut z_wave_k = Vec::with_capacity(p_ports);
-                    let mut z_circ_k = Vec::with_capacity(p_ports);
-                    let mut z0_pairs_k = Vec::with_capacity(p_ports);
-                    for port in &asm_ref.ports {
-                        let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm_ref.waveports);
-                        let z_circ_p = port.circuit_z0(z_wave_p, &asm_ref.waveports);
-                        z_wave_k.push(z_wave_p);
-                        z_circ_k.push(z_circ_p);
-                        z0_pairs_k.push([z_circ_p, 0.0]);
-                    }
-
-                    let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
-                    for p in 0..p_ports {
-                        let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
-                        for q in 0..p_ports {
-                            let mut v_pq = c(0.0, 0.0);
-                            for i in 0..rom_dim {
-                                v_pq += xr_k[q][i] * prom_ref.b_r[i][p];
-                            }
-                            let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
-                            s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
-                        }
-                    }
-                    let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
-                    let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
-                    (z0_pairs_k, s_out, z_out, y_out, metric)
-                })
-                .collect::<Vec<_>>()
-        });
-        let mut min_s_metric = f64::INFINITY;
-        for (k, (z0_pairs_k, s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate() {
-            if metric < min_s_metric {
-                min_s_metric = metric;
-                rep_freq_idx = k;
-            }
-            z0_ohm.push(z0_pairs_k);
-            s_matrix.push(s_out);
-            z_matrix.push(z_out);
-            y_matrix.push(y_out);
-        }
-        rom_sweep_seconds += t_post.elapsed().as_secs_f64();
-        rep_x_red = prom.reconstruct_unscaled(&xr_all[rep_freq_idx][0]);
-        drop(prom);
     } else {
         // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic factorization across all frequencies
         let mut solver: Option<DrivenLinearSolver> = None;
@@ -1659,7 +1795,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         for (k, &w) in omegas.iter().enumerate() {
             femcore::progress::check()?;
             let a_mat = asm.assemble_matrix_at(w);
-            DrivenLinearSolver::build_or_update(&mut solver, &asm, w, &a_mat)?;
+            DrivenLinearSolver::build_or_update(&mut solver, asm, w, &a_mat)?;
             let s_ref = solver.as_ref().unwrap();
             hdm_solves += 1;
             anchor_freqs_hz.push(freqs_hz[k]);
@@ -1733,25 +1869,59 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         max_residual,
     };
 
+    Ok(DrivenSweepCoreOut {
+        driven_data,
+        symbolic_count,
+        backend_name,
+        rom_sweep_seconds,
+        s21_min_db,
+        f_res_hz,
+        rep_x_red,
+    })
+}
+
+/// Solves a 3D `Study::Driven` frequency sweep via Hermite Tangential Galerkin PROM (`prom_tol = Some(tol)`)
+/// or direct point-by-point HDM factorizations (`prom_tol = None`).
+pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let asm = assemble_emw_driven(mesh, problem)?;
+    let out = run_driven_sweep_core(&asm)?;
+    let (p_pml_w, layer_fraction) = compute_driven_pml_metrics(&asm, out.f_res_hz, &out.rep_x_red);
+
     let rep_sol = build_driven_solution(
         mesh,
         &asm,
-        f_res_hz,
-        &rep_x_red,
-        format!("driven ({}): {:.6} GHz", asm.ports[0].name, f_res_hz / 1e9),
+        out.f_res_hz,
+        &out.rep_x_red,
+        format!("driven ({}): {:.6} GHz", asm.ports[0].name, out.f_res_hz / 1e9),
     );
+
+    let n_points = out.driven_data.freqs_hz.len();
+    let p_ports = asm.ports.len();
+    let hdm_solves = out.driven_data.hdm_solves;
+    let rom_dim = out.driven_data.rom_dim;
+    let max_residual = out.driven_data.max_residual;
 
     let (axes, left_handed) = femcore::section::axes_of_3d_periodic(&problem.periodic, mesh);
     let mut scalars = vec![
-        driven_data.scalar(),
+        out.driven_data.scalar(),
         ("hdm_solves".into(), Scalar::Num(hdm_solves as f64)),
-        ("symbolic_count".into(), Scalar::Num(symbolic_count as f64)),
+        ("symbolic_count".into(), Scalar::Num(out.symbolic_count as f64)),
         ("rom_dim".into(), Scalar::Num(rom_dim as f64)),
         ("max_prom_residual".into(), Scalar::Num(max_residual)),
-        ("rom_sweep_seconds".into(), Scalar::Num(rom_sweep_seconds)),
-        ("S21_min_dB".into(), Scalar::Num(s21_min_db)),
-        ("f_res_Hz".into(), Scalar::Num(f_res_hz)),
-        FieldFrame { lateral: axes[0], normal: axes[1], propagation: axes[2], left_handed, outside: vec![] }.scalar(),
+        ("rom_sweep_seconds".into(), Scalar::Num(out.rom_sweep_seconds)),
+        ("S21_min_dB".into(), Scalar::Num(out.s21_min_db)),
+        ("f_res_Hz".into(), Scalar::Num(out.f_res_hz)),
+        ("P_pml (W)".into(), Scalar::Num(p_pml_w)),
+        ("layer fraction 1".into(), Scalar::Num(layer_fraction)),
+        FieldFrame {
+            lateral: axes[0],
+            normal: axes[1],
+            propagation: axes[2],
+            left_handed,
+            outside: crate::optical::absorbing_domains(problem),
+        }
+        .scalar(),
     ];
     if asm.has_sheets {
         scalars.push(build_tls_meta(mesh, problem).scalar());
@@ -1764,11 +1934,11 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         n_points,
         p_ports,
         asm.solver,
-        backend_name,
+        out.backend_name,
         hdm_solves,
         rom_dim,
         max_residual,
-        rom_sweep_seconds
+        out.rom_sweep_seconds
     )];
 
     Ok(SolveResult {
@@ -1782,4 +1952,525 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         dofs: asm.n,
         seconds: t0.elapsed().as_secs_f64(),
     })
+}
+
+// ------------------------------------------------------------------ Native 3D MixedDiscretisation (`Tet + Prism + Hex`) driven solver
+
+/// Solves a 3D `Study::Driven` sweep natively on `Tet + Prism + Hex` (`MixedDiscretisation`).
+pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let (asm, ned_mixed) = assemble_emw_driven_mixed(mixed, problem)?;
+    let out = run_driven_sweep_core(&asm)?;
+    let (p_pml_w, layer_fraction) = compute_driven_pml_metrics(&asm, out.f_res_hz, &out.rep_x_red);
+
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
+    let rep_sol = build_driven_solution_mixed(
+        mixed,
+        &ned_mixed,
+        &simplex,
+        &proj,
+        &asm,
+        out.f_res_hz,
+        &out.rep_x_red,
+        format!("driven ({}): {:.6} GHz", asm.ports[0].name, out.f_res_hz / 1e9),
+    );
+
+    let n_points = out.driven_data.freqs_hz.len();
+    let p_ports = asm.ports.len();
+    let hdm_solves = out.driven_data.hdm_solves;
+    let rom_dim = out.driven_data.rom_dim;
+    let max_residual = out.driven_data.max_residual;
+
+    let (axes, left_handed) = axes_of_3d_periodic_mixed(&problem.periodic, mixed);
+    let mut scalars = vec![
+        out.driven_data.scalar(),
+        ("hdm_solves".into(), Scalar::Num(hdm_solves as f64)),
+        ("symbolic_count".into(), Scalar::Num(out.symbolic_count as f64)),
+        ("rom_dim".into(), Scalar::Num(rom_dim as f64)),
+        ("max_prom_residual".into(), Scalar::Num(max_residual)),
+        ("rom_sweep_seconds".into(), Scalar::Num(out.rom_sweep_seconds)),
+        ("S21_min_dB".into(), Scalar::Num(out.s21_min_db)),
+        ("f_res_Hz".into(), Scalar::Num(out.f_res_hz)),
+        ("P_pml (W)".into(), Scalar::Num(p_pml_w)),
+        ("layer fraction 1".into(), Scalar::Num(layer_fraction)),
+        FieldFrame {
+            lateral: axes[0],
+            normal: axes[1],
+            propagation: axes[2],
+            left_handed,
+            outside: crate::optical::absorbing_domains(problem),
+        }
+        .scalar(),
+    ];
+    if asm.has_sheets {
+        scalars.push(build_tls_meta(&simplex, problem).scalar());
+    }
+
+    let log = vec![format!(
+        "driven mixed sweep [{:.4}..{:.4} GHz, {} points, {} port(s), solver={}, backend={}]: {} HDM solve(s), ROM dim {}, max residual {:.2e}, ROM sweep {:.4} s",
+        asm.f_min / 1e9,
+        asm.f_max / 1e9,
+        n_points,
+        p_ports,
+        asm.solver,
+        out.backend_name,
+        hdm_solves,
+        rom_dim,
+        max_residual,
+        out.rom_sweep_seconds
+    )];
+
+    Ok(SolveResult {
+        physics: "ems".into(),
+        study: "driven".into(),
+        order: asm.order as u8,
+        dim: 3,
+        solutions: vec![rep_sol],
+        scalars,
+        log,
+        dofs: asm.n,
+        seconds: t0.elapsed().as_secs_f64(),
+    })
+}
+
+pub fn assemble_emw_driven_mixed(
+    mesh: &MixedDiscretisation,
+    problem: &Problem,
+) -> Result<(DrivenAssembly, NedMixed), String> {
+    if mesh.dim != 3 {
+        return Err("the driven study of EM waves needs a 3D mesh".into());
+    }
+    let Study::Driven {
+        f_min: study_f_min,
+        f_max: study_f_max,
+        n_points: study_n_points,
+        freqs_hz,
+        prom_tol,
+        max_hdm_solves,
+        strict_prom_tol,
+        seed_freqs_hz,
+        solver,
+        blr_tol,
+    } = problem.study.clone()
+    else {
+        return Err("assemble_emw_driven_mixed requires a Driven study".into());
+    };
+    let (f_min, f_max, n_points) = if let Some(fs) = freqs_hz.as_ref().filter(|v| !v.is_empty()) {
+        (fs[0], fs[fs.len() - 1], fs.len())
+    } else {
+        (study_f_min, study_f_max, study_n_points)
+    };
+    if problem.lumped_ports.is_empty() && problem.waveports.is_empty() {
+        return Err("driven study requires at least one 'lumped_port' or 'waveport' boundary condition".into());
+    }
+    validate_port_contacts_3d_mixed(mesh, problem)?;
+    let order = if problem.order == 1 { 1 } else { 2 };
+    let mats = MixedCellMaterials::from_problem(mesh, problem)?;
+    let f0 = 0.5 * (f_min + f_max);
+    let pml_table = EmPmlTable::from_mixed(mesh, &problem.materials, f0, false, solver == "ams_fgmres");
+    let pml_cells = pml_table.pml_cells_mask();
+    let has_pml = pml_table.has_any();
+
+    let mut matches = Vec::with_capacity(problem.periodic.len());
+    for p in &problem.periodic {
+        matches.push(match_vertices_mixed(mesh, p)?);
+    }
+    let vkey = vertex_keys_mixed(mesh, &matches);
+    let ned = NedMixed::with_vkey(mesh, order, vkey);
+    let n = ned.n_dofs;
+    let (k, m) = assemble_maxwell_mixed(mesh, &ned, &mats.eps_0, &mats.mu_inv_0, has_pml.then_some(&pml_table));
+
+    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty();
+    let mut ibc_jj = if has_sheets {
+        Some(assemble_ibc_and_jj_3d_mixed(
+            mesh,
+            &ned,
+            &problem.pec,
+            &problem.surface_impedance,
+            &problem.lumped_jj,
+            f0,
+        )?)
+    } else {
+        None
+    };
+
+    let (mut lumped_ports, _) = assemble_lumped_ports_3d_mixed(mesh, &ned, &problem.pec, &problem.lumped_ports)?;
+    let (mut waveports, _) = assemble_waveports_3d_mixed(mesh, &ned, problem, f_min, f_max)?;
+
+    let periodic_labels: Vec<i32> =
+        problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let (sym_pec, sym_pmc) = symmetry_facet_flags_mixed(mesh, problem.symmetry)?;
+
+    let nv = mesh.n_points();
+    let ne = mesh.n_edges();
+    let mut fixed_set = BTreeSet::new();
+    let mut fixed_verts = vec![false; nv];
+    let mut fixed_edges = vec![false; ne];
+    let mut fixed_quad_faces = vec![false; mesh.n_quad_faces()];
+    let mut mark_facet = |f: usize, fv: &[u32], ft: FacetType| {
+        for &v in fv {
+            fixed_verts[v as usize] = true;
+        }
+        let le: &[(usize, usize)] = match ft {
+            FacetType::Edge2 => &[(0, 1)],
+            FacetType::Tri3 => &TRI_EDGES,
+            FacetType::Quad4 => &QUAD_EDGES,
+        };
+        for &(i, j) in le {
+            if let Some(eid) = mesh.edge_index(fv[i], fv[j]) {
+                fixed_edges[eid] = true;
+            }
+        }
+        if ft == FacetType::Quad4 {
+            if let Some(qf) = mesh.quad_face_index([fv[0], fv[1], fv[2], fv[3]]) {
+                fixed_quad_faces[qf] = true;
+            }
+        }
+        let _ = f;
+    };
+    for f in 0..mesh.n_facets() {
+        let label = mesh.facet_labels[f];
+        if mesh.exterior_facets[f]
+            && !periodic_labels.contains(&label)
+            && (sym_pec[f]
+                || (!problem.pmc.contains(&label)
+                    && !sym_pmc[f]
+                    && !ibc_labels.contains(&label)
+                    && !jj_labels.contains(&label)
+                    && !lp_labels.contains(&label)
+                    && !wp_labels.contains(&label)))
+        {
+            for d in ned.facet_dofs(mesh, f) {
+                fixed_set.insert(d);
+            }
+            mark_facet(f, mesh.facet(f), mesh.facet_type(f));
+        }
+    }
+    if let Some((_, ref pec_fcs, _, _)) = ibc_jj {
+        for &f in pec_fcs {
+            for d in ned.facet_dofs(mesh, f) {
+                fixed_set.insert(d);
+            }
+            mark_facet(f, mesh.facet(f), mesh.facet_type(f));
+        }
+    }
+
+    let fixed: Vec<usize> = fixed_set.into_iter().collect();
+    let mut relations = Vec::new();
+    for (p, mt) in problem.periodic.iter().zip(&matches) {
+        relations.extend(ned_mixed_periodic_relations(mesh, &ned, &mt.src_facets, &mt.map, p.phase)?);
+    }
+    let red = femcore::periodic::Reduction::build(n, &relations, &fixed);
+    let pmat = red.prolong();
+    let nred = red.n_reduced();
+    if nred == 0 {
+        return Err("driven study has no free degrees of freedom after PEC constraints".into());
+    }
+
+    let mut k_tot_full = k;
+    let mut m_tot_full = m;
+    let mut c_tot_r_full = RCsr::zeros(n, n);
+
+    let (jj_ports, cell_sheet) = if let Some((ref mut ij, _, _, _)) = ibc_jj {
+        if ij.k_ibc_full.nnz() > 0 {
+            k_tot_full = k_tot_full.add_scaled(&ij.k_ibc_full.to_complex(), c(1.0, 0.0));
+        }
+        if ij.k_jj_full.nnz() > 0 {
+            k_tot_full = k_tot_full.add_scaled(&ij.k_jj_full.to_complex(), c(1.0, 0.0));
+        }
+        if ij.m_jj_full.nnz() > 0 {
+            m_tot_full = m_tot_full.add_scaled(&ij.m_jj_full.to_complex(), c(1.0, 0.0));
+        }
+        if ij.c_ibc_full.nnz() > 0 {
+            c_tot_r_full = c_tot_r_full.add_scaled(&ij.c_ibc_full, 1.0);
+        }
+        for port in &mut ij.jj_ports {
+            port.b_red = reduce_real_vec(&red, &port.b_full);
+            port.k_jj_red = reduce_real_csr(&red, &pmat, &port.k_jj_red);
+            port.m_jj_red = reduce_real_csr(&red, &pmat, &port.m_jj_red);
+        }
+        (std::mem::take(&mut ij.jj_ports), std::mem::take(&mut ij.cell_sheet))
+    } else {
+        (Vec::new(), vec![None; mesh.n_cells()])
+    };
+
+    for lp in &mut lumped_ports {
+        lp.b_red = reduce_real_vec(&red, &lp.b_full);
+        if lp.c_port_full.nnz() > 0 {
+            c_tot_r_full = c_tot_r_full.add_scaled(&lp.c_port_full, 1.0);
+        }
+    }
+    for wp in &mut waveports {
+        wp.b_red = reduce_real_vec(&red, &wp.b_full);
+        wp.w_red = reduce_real_csr(&red, &pmat, &wp.w_full);
+    }
+
+    let k_tot_red = femcore::periodic::congruence(&pmat, &k_tot_full);
+    let m_tot_red = femcore::periodic::congruence(&pmat, &m_tot_full);
+    let c_tot_red = if c_tot_r_full.nnz() > 0 {
+        femcore::periodic::congruence(&pmat, &c_tot_r_full.to_complex())
+    } else {
+        CCsr::zeros(nred, nred)
+    };
+
+    let (k_pml_red, m_pml_red, m_phys_red, m_pml_phys_red) = if has_pml {
+        let zero_c3 = [[c(0.0, 0.0); 3]; 3];
+        let mut eps_pml_only = Vec::with_capacity(mesh.n_cells());
+        let mut mui_pml_only = Vec::with_capacity(mesh.n_cells());
+        let mut eps_phys_only = Vec::with_capacity(mesh.n_cells());
+        let mut eps_pml_unstr = Vec::with_capacity(mesh.n_cells());
+        let mut mui_zero = Vec::with_capacity(mesh.n_cells());
+        for ci in 0..mesh.n_cells() {
+            let mut er_c = zero_c3;
+            for a in 0..3 {
+                for b in 0..3 {
+                    er_c[a][b] = c(mats.eps_phys_re[ci][a][b], 0.0);
+                }
+            }
+            mui_zero.push(zero_c3);
+            if pml_cells[ci] {
+                eps_pml_only.push(mats.eps_0[ci]);
+                mui_pml_only.push(mats.mu_inv_0[ci]);
+                eps_phys_only.push(zero_c3);
+                eps_pml_unstr.push(er_c);
+            } else {
+                eps_pml_only.push(zero_c3);
+                mui_pml_only.push(zero_c3);
+                eps_phys_only.push(er_c);
+                eps_pml_unstr.push(zero_c3);
+            }
+        }
+        let (kp, mp) = assemble_maxwell_mixed(mesh, &ned, &eps_pml_only, &mui_pml_only, Some(&pml_table));
+        let (_, m_ph) = assemble_maxwell_mixed(mesh, &ned, &eps_phys_only, &mui_zero, None);
+        let (_, m_pm_u) = assemble_maxwell_mixed(mesh, &ned, &eps_pml_unstr, &mui_zero, None);
+        (
+            femcore::periodic::congruence(&pmat, &kp),
+            femcore::periodic::congruence(&pmat, &mp),
+            femcore::periodic::congruence(&pmat, &m_ph).real_part(),
+            femcore::periodic::congruence(&pmat, &m_pm_u).real_part(),
+        )
+    } else {
+        (CCsr::zeros(0, 0), CCsr::zeros(0, 0), RCsr::zeros(0, 0), RCsr::zeros(0, 0))
+    };
+
+    let omega_mid = 2.0 * PI * f0;
+    let k0_mid = (omega_mid / C0).max(1.0);
+    let k0_mid2 = k0_mid * k0_mid;
+    let wp_betas_mid: Vec<f64> = waveports.iter().map(|wp| wp.beta_and_derivs(omega_mid).0).collect();
+
+    let mut d_ruiz = vec![1.0_f64; nred];
+    for _ in 0..8 {
+        let mut rmax = vec![0.0_f64; nred];
+        for i in 0..nred {
+            let di = d_ruiz[i];
+            let mut m_val = 0.0_f64;
+            let (ck, vk) = k_tot_red.row(i);
+            for (&j, &v) in ck.iter().zip(vk) {
+                m_val = m_val.max(di * v.norm() * d_ruiz[j as usize]);
+            }
+            if c_tot_red.nnz() > 0 {
+                let (cc, vc) = c_tot_red.row(i);
+                for (&j, &v) in cc.iter().zip(vc) {
+                    m_val = m_val.max(di * k0_mid * v.norm() * d_ruiz[j as usize]);
+                }
+            }
+            let (cm, vm) = m_tot_red.row(i);
+            for (&j, &v) in cm.iter().zip(vm) {
+                m_val = m_val.max(di * k0_mid2 * v.norm() * d_ruiz[j as usize]);
+            }
+            for (w_idx, wp) in waveports.iter().enumerate() {
+                if wp.w_red.nnz() > 0 {
+                    let bw = wp_betas_mid[w_idx];
+                    let (cw, vw) = wp.w_red.row(i);
+                    for (&j, &v) in cw.iter().zip(vw) {
+                        m_val = m_val.max(di * bw * v.abs() * d_ruiz[j as usize]);
+                    }
+                }
+            }
+            rmax[i] = m_val;
+        }
+        for i in 0..nred {
+            if rmax[i] > 1e-300 {
+                d_ruiz[i] = (d_ruiz[i] / rmax[i].sqrt()).clamp(1e-14, 1e14);
+            }
+        }
+    }
+
+    let scale_sym_c = |mat: &CCsr| -> CCsr {
+        if mat.nnz() == 0 {
+            return CCsr::zeros(nred, nred);
+        }
+        let mut out = mat.clone();
+        for i in 0..nred {
+            let di = d_ruiz[i];
+            let range = out.row_range(i);
+            let cols: Vec<u32> = out.indices()[range.clone()].to_vec();
+            let vals = &mut out.values_mut()[range];
+            for (v, &col) in vals.iter_mut().zip(&cols) {
+                *v *= di * d_ruiz[col as usize];
+            }
+        }
+        out
+    };
+
+    let mut terms_hat = Vec::with_capacity(3 + waveports.len());
+    terms_hat.push(scale_sym_c(&k_tot_red));
+    terms_hat.push(scale_sym_c(&c_tot_red));
+    terms_hat.push(scale_sym_c(&m_tot_red));
+    for wp in &waveports {
+        terms_hat.push(scale_sym_c(&wp.w_red.to_complex()));
+    }
+
+    let mut ports = Vec::with_capacity(lumped_ports.len() + waveports.len());
+    for lp in &lumped_ports {
+        let b_hat: Vec<f64> = lp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
+        ports.push(DrivenPortEntry { name: lp.bc.name.clone(), kind: DrivenPortKind::Lumped { z0: lp.bc.z0 }, b_hat });
+    }
+    for (wave_index, wp) in waveports.iter().enumerate() {
+        let b_hat: Vec<f64> = wp.b_red.iter().zip(&d_ruiz).map(|(&b, &d)| b * d).collect();
+        ports.push(DrivenPortEntry { name: wp.bc.name.clone(), kind: DrivenPortKind::Wave { wave_index }, b_hat });
+    }
+
+    let ams_data = if solver == "ams_fgmres" && problem.periodic.is_empty() {
+        if !fixed_verts.iter().any(|&v| v) && nv > 0 {
+            fixed_verts[0] = true;
+        }
+        if !fixed_verts.iter().all(|&v| v) {
+            if order == 1 {
+                let p1 = build_ams_p1_from_masks(mesh, &ned.vkey, &fixed_edges, &fixed_verts);
+                (p1.free_edges == red.roots)
+                    .then_some(DrivenAmsTopology::P1 { g_red: p1.gradient_p1, edge_vecs: p1.edge_vectors })
+            } else {
+                let mut fixed_dofs = vec![false; n];
+                for &d in &fixed {
+                    fixed_dofs[d] = true;
+                }
+                let p2 =
+                    build_ams_p2_from_masks(mesh, &ned, &fixed_dofs, &fixed_edges, &fixed_verts, &fixed_quad_faces);
+                (p2.free_dofs_p2 == red.roots).then_some(DrivenAmsTopology::P2(p2.topology))
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let _ = iso_mu_inv_c3;
+    Ok((
+        DrivenAssembly {
+            order,
+            n,
+            nred,
+            ned: Ned3::empty(order),
+            red,
+            f_min,
+            f_max,
+            n_points,
+            freqs_hz,
+            prom_tol,
+            max_hdm_solves,
+            strict_prom_tol,
+            seed_freqs_hz,
+            solver,
+            blr_tol,
+            d_ruiz,
+            terms_hat,
+            ams_data,
+            ports,
+            lumped_ports,
+            waveports,
+            jj_ports,
+            cell_sheet,
+            mu_inv: mats.mu_inv_0,
+            mur_phys: mats.mur_phys,
+            has_sheets,
+            has_pml,
+            k_pml_red,
+            m_pml_red,
+            m_phys_red,
+            m_pml_phys_red,
+        },
+        ned,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_driven_solution_mixed(
+    mixed: &MixedDiscretisation,
+    ned: &NedMixed,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    asm: &DrivenAssembly,
+    freq_hz: f64,
+    x_red: &[C],
+    label: String,
+) -> Solution {
+    let x = asm.red.expand(x_red);
+    let isos: Vec<IsoparametricCell> = (0..mixed.n_cells()).map(|ci| IsoparametricCell::from_mesh(mixed, ci)).collect();
+    let nsc = simplex.n_cells();
+    let nloc = 10usize;
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut cu = Vec::new();
+
+    let sampled = proj.sample_simplex_cell_nodes(mixed, 2, |mc, xi| {
+        eval_cell_basis_3d(mixed, ned, mc, &isos[mc], xi, &mut scratch, &mut w, &mut cu);
+        let cdofs = ned.cell_dofs(mc);
+        let mut val = [c(0.0, 0.0); 3];
+        let mut cval = [c(0.0, 0.0); 3];
+        for (s, &gd) in cdofs.iter().enumerate() {
+            let coef = x[gd];
+            for kk in 0..3 {
+                val[kk] += coef * w[s][kk];
+                cval[kk] += coef * cu[s][kk];
+            }
+        }
+        (val, cval)
+    });
+    let e: Vec<[C; 3]> = sampled.iter().map(|p| p.0).collect();
+    let curl_e: Vec<[C; 3]> = sampled.iter().map(|p| p.1).collect();
+
+    let big =
+        e.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+    let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+    let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+    let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
+    let avg = |vals: Vec<f64>| node_average(simplex, &vals.iter().map(|v| v * s).collect::<Vec<f64>>(), 1, 2);
+
+    let fields = vec![
+        Field::scalar("|E|", "a.u.", avg(mag)),
+        Field::scalar("Re Ex", "a.u.", avg(e.iter().map(|v| (v[0] * rot).re).collect())),
+        Field::scalar("Re Ey", "a.u.", avg(e.iter().map(|v| (v[1] * rot).re).collect())),
+        Field::scalar("Re Ez", "a.u.", avg(e.iter().map(|v| (v[2] * rot).re).collect())),
+    ];
+
+    let mut cells = CellFields::new(simplex, 2);
+    for (k, name) in ["Ex", "Ey", "Ez"].iter().enumerate() {
+        let z: Vec<C> = e.iter().map(|v| v[k]).collect();
+        cells.push_complex(*name, "V/m", z.iter().map(|v| v.re).collect(), z.iter().map(|v| v.im).collect());
+    }
+
+    let omega = (2.0 * PI * freq_hz).max(1e-300);
+    let h_prefactor = c(0.0, 1.0 / (omega * MU0));
+    let mut h_field = vec![[c(0.0, 0.0); 3]; nsc * nloc];
+    for sc in 0..nsc {
+        let mc = proj.parent_cell(sc);
+        let mui = c(1.0 / asm.mur_phys[mc], 0.0);
+        for a in 0..nloc {
+            let idx = sc * nloc + a;
+            let ce = curl_e[idx];
+            h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
+        }
+    }
+    for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
+        let z: Vec<C> = h_field.iter().map(|v| v[k]).collect();
+        cells.push_complex(*name, "A/m", z.iter().map(|v| v.re).collect(), z.iter().map(|v| v.im).collect());
+    }
+
+    Solution { label, fields, cell_fields: cell_fields_of(&cells), value: Some(freq_hz), eigenvalue: None }
 }

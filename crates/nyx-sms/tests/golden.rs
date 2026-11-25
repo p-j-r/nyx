@@ -103,7 +103,17 @@ fn golden_solid_eigenfrequencies_with_a_pml() {
         s.materials.default.insert(k.into(), v);
     }
     clamped_left(&mut s);
-    s.materials.pml.insert(1, Pml { x: PmlDir::Plus, strength: 0.1, order: 0.0, ..Pml::default() });
+    s.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            strength: 0.1,
+            order: 0.0,
+            clamp_outer: false,
+            stabilization: PmlStabilization::Off,
+            ..Pml::default()
+        },
+    );
     golden(&dir(), "solid_eigen_pml_x", &solve(&mesh, &s), 1e-7);
 }
 
@@ -116,6 +126,16 @@ fn golden_solid_eigenfrequencies_with_a_pml_along_z() {
     s.materials.aniso.insert(1, sapphire());
     s.materials.default.insert("rho".into(), 3980.0);
     s.bcs.push(Bc { labels: vec![3], kind: BcKind::Fixed { fixed: [true, true, true], values: [0.0; 3] } });
-    s.materials.pml.insert(1, Pml { z: PmlDir::Minus, strength: 0.1, order: 0.0, ..Pml::default() });
+    s.materials.pml.insert(
+        1,
+        Pml {
+            z: PmlDir::Minus,
+            strength: 0.1,
+            order: 0.0,
+            clamp_outer: false,
+            stabilization: PmlStabilization::Off,
+            ..Pml::default()
+        },
+    );
     golden(&dir(), "solid_eigen_pml_z", &solve(&mesh, &s), 1e-7);
 }

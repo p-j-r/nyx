@@ -20,18 +20,27 @@ use crate::ibc::{
     ruiz_unscale_and_rayleigh_damped, AssembledJjPort, PerturbativeIbcEvaluator, PerturbativeIbcTri, SheetCellKind,
     EPS0, MU0,
 };
+use crate::mixed_ops::{
+    add_maxwell_point_c3, assemble_ibc_and_jj_3d_mixed_cavity, assemble_lumped_ports_3d_mixed, assemble_maxwell_mixed,
+    axes_of_3d_periodic_mixed, eigs_mixed_curl_curl_ams, gradient_mixed_full, iso_mu_inv_c3, match_vertices_mixed,
+    nodal_relations_mixed_3d, scalar_nullspace_count_mixed, simplex_cell_materials_3d, symmetry_facet_flags_mixed,
+    validate_port_contacts_3d_mixed, vertex_keys_mixed, EmPmlTable, MixedCellMaterials,
+};
 use crate::modes::C0;
 use crate::ports::{assemble_lumped_ports_3d, validate_port_contacts_3d, AssembledLumpedPort};
 use crate::problem::{symmetry_facet_flags, Problem, Study};
-use crate::rom::{build_circuit_rom, build_tls_meta, compute_mode_energy_and_scale};
+use crate::rom::{build_circuit_rom, build_circuit_rom_mixed, build_tls_meta, compute_mode_energy_and_scale};
+use femcore::edge_mixed::{eval_cell_basis_3d, ned_mixed_periodic_relations, nedelec_nloc, NedEvalScratch, NedMixed};
 use femcore::fem::*;
+use femcore::fem_mixed::{quad_rule_mixed, IsoparametricCell};
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::RCsr as Csr;
 use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::EigOpts;
-use femcore::pml::cell_stretches;
-use femcore::props::PmlDir;
-use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
+use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
+use nyx_physics::{
+    cell_fields_of, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
+};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -69,6 +78,18 @@ fn sorted3(a: u32, b: u32, c: u32) -> [u32; 3] {
 }
 
 impl Ned3 {
+    pub(crate) fn empty(order: usize) -> Ned3 {
+        Ned3 {
+            order,
+            n_edges: 0,
+            n_faces: 0,
+            faces: Vec::new(),
+            face_id: HashMap::new(),
+            cell_dofs: Vec::new(),
+            vkey: Vec::new(),
+        }
+    }
+
     pub fn new(mesh: &Discretisation, order: usize, vkey: Vec<u32>) -> Ned3 {
         let mut face_id: HashMap<[u32; 3], u32> = HashMap::new();
         let mut faces: Vec<[u32; 3]> = vec![];
@@ -308,52 +329,30 @@ pub(crate) fn safe_curved_jacobian(ct: &CurvedTet, lam: &[f64; 4], gs: &[[f64; 3
 /// Adds the contribution of one quadrature point (weight `wq`, basis values `w` and curls `cu`) to the element matrix: the curl-curl
 /// matrix for `which == 0`, the mass matrix otherwise. The same arithmetic serves straight and curved cells.
 #[allow(clippy::too_many_arguments)]
-fn add_point(
-    which: usize,
-    nb: usize,
-    ke: &mut [C],
-    w: &[[f64; 3]],
-    cu: &[[f64; 3]],
-    wq: f64,
-    eps: &C3,
-    mu_inv: &[C; 3],
-) {
-    for i in 0..nb {
-        if which == 0 {
-            let ci_ = cu[i];
-            for j in 0..nb {
-                let cj = cu[j];
-                let mut acc = c(0.0, 0.0);
-                for a in 0..3 {
-                    acc += mu_inv[a] * (ci_[a] * cj[a]);
-                }
-                ke[i * nb + j] += acc * wq;
-            }
-        } else {
-            let wi = w[i];
-            for j in 0..nb {
-                let wj = w[j];
-                let mut acc = c(0.0, 0.0);
-                for a in 0..3 {
-                    for b in 0..3 {
-                        acc += eps[a][b] * (wi[a] * wj[b]);
-                    }
-                }
-                ke[i * nb + j] += acc * wq;
-            }
-        }
-    }
+fn add_point(which: usize, nb: usize, ke: &mut [C], w: &[[f64; 3]], cu: &[[f64; 3]], wq: f64, eps: &C3, mu_inv: &C3) {
+    add_maxwell_point_c3(which, nb, ke, w, cu, wq, eps, mu_inv);
 }
 
-/// The curl-curl matrix `K` (weights `1/mu` per axis) and the mass matrix `M` (permittivity tensor)
-/// over all dofs.
-pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &[[C; 3]]) -> (CCsr, CCsr) {
+/// The curl-curl matrix `K` (symmetric `3x3` `mu_inv` tensor) and the mass matrix `M` (`eps` tensor) over all dofs.
+pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &[C3]) -> (CCsr, CCsr) {
+    assemble_maxwell_with_pml(mesh, ned, eps, mu_inv, None)
+}
+
+/// Like [`assemble_maxwell`], evaluating curvilinear PML `pml_jacobian` + `pullback_maxwell` at each Gauss point inside PML cells.
+pub fn assemble_maxwell_with_pml(
+    mesh: &Discretisation,
+    ned: &Ned3,
+    eps: &[C3],
+    mu_inv: &[C3],
+    pml: Option<&EmPmlTable>,
+) -> (CCsr, CCsr) {
     let geo = geometry(mesh);
     let quad = quad_rule(3, 4);
     // cells with a curved edge (ADR 82) are integrated with the geometry of their ten nodes; every other cell keeps the affine path.
     // On Barsoum quarter-point (`has_qp()`, FR-32) meshes, use degree-8 collapsed Gauss-Jacobi quadrature matching `apply_quarter_point_nodes`.
     let curved_cell: Vec<bool> = (0..mesh.n_cells()).map(|ci| mesh.cell_is_curved(ci)).collect();
     let cquad = quad_rule_collapsed(if mesh.has_qp() { 8 } else { CURVED_QUAD_DEGREE });
+    let cshape2: Vec<(Vec<f64>, Vec<f64>)> = cquad.lam.iter().map(|l| shape(&[l[0], l[1], l[2], l[3]], 2)).collect();
     let nb = ned.nb();
     let n = ned.n_dofs();
     let nc = mesh.n_cells();
@@ -369,16 +368,50 @@ pub fn assemble_maxwell(mesh: &Discretisation, ned: &Ned3, eps: &[C3], mu_inv: &
                         gs[b][k] = geo.g[ci * 12 + b * 3 + k];
                     }
                 }
+                let is_pml = pml.is_some_and(|p| p.is_pml(ci));
                 ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
                 if curved_cell[ci] {
-                    // quadratic geometry (ADR 82): gradients of the barycentric functions and the weight at every point
-                    let ct = CurvedTet::new(mesh.cell_geometry_nodes(ci));
+                    let nodes10 = mesh.cell_geometry_nodes(ci);
+                    let ct = CurvedTet::new(nodes10);
                     for q in 0..cquad.w.len() {
                         let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
                         let (gq, det) = ct.jacobian(&lam);
                         basis3(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
                         let wq = cquad.w[q] * det.abs() / 6.0;
-                        add_point(which, nb, &mut ke, &w, &cu, wq, &eps[ci], &mu_inv[ci]);
+                        let (ep, mui) = if let Some(p) = pml.filter(|_| is_pml) {
+                            let nv10 = &cshape2[q].0;
+                            let mut xq = [0.0; 3];
+                            for a in 0..10 {
+                                for k in 0..3 {
+                                    xq[k] += nv10[a] * nodes10[a][k];
+                                }
+                            }
+                            p.eval_3d(ci, eps[ci], mu_inv[ci], xq)
+                        } else {
+                            (eps[ci], mu_inv[ci])
+                        };
+                        add_point(which, nb, &mut ke, &w, &cu, wq, &ep, &mui);
+                    }
+                } else if let Some(p) = pml.filter(|_| is_pml) {
+                    let vs = mesh.cell(ci);
+                    let pts = [
+                        mesh.point(vs[0] as usize),
+                        mesh.point(vs[1] as usize),
+                        mesh.point(vs[2] as usize),
+                        mesh.point(vs[3] as usize),
+                    ];
+                    for q in 0..cquad.w.len() {
+                        let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
+                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        let wq = cquad.w[q] * geo.vol[ci];
+                        let mut xq = [0.0; 3];
+                        for b in 0..4 {
+                            for k in 0..3 {
+                                xq[k] += lam[b] * pts[b][k];
+                            }
+                        }
+                        let (ep, mui) = p.eval_3d(ci, eps[ci], mu_inv[ci], xq);
+                        add_point(which, nb, &mut ke, &w, &cu, wq, &ep, &mui);
                     }
                 } else {
                     for q in 0..quad.w.len() {
@@ -537,7 +570,7 @@ pub struct EmwAssembly {
     pub ibc_warnings: Vec<String>,
     pub cell_sheet: Vec<Option<SheetCellKind>>,
     pub periodic_node_relations: Vec<(usize, usize, C)>,
-    pub mu_inv: Vec<[C; 3]>,
+    pub mu_inv: Vec<C3>,
     pub pml_cells: Vec<bool>,
     pub eps_phys_re: Vec<[[f64; 3]; 3]>,
     pub d_omega_eps: Vec<[[f64; 3]; 3]>,
@@ -566,46 +599,12 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     let eps_phys_re: Vec<[[f64; 3]; 3]> = tens.iter().map(|(re, _)| *re).collect();
     let d_omega_eps = problem.cell_d_omega_eps(mesh)?;
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let has_pml = problem.materials.has_pml();
-    let pml_cells: Vec<bool> = (0..mesh.n_cells())
-        .map(|ci| {
-            problem
-                .materials
-                .pml
-                .get(&mesh.cell_labels[ci])
-                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
-        })
-        .collect();
-    let stretch = if has_pml { Some(cell_stretches(mesh, &problem.materials.pml)) } else { None };
-    let mut eps: Vec<C3> = Vec::with_capacity(mesh.n_cells());
-    let mut mu_inv: Vec<[C; 3]> = Vec::with_capacity(mesh.n_cells());
-    for ci in 0..mesh.n_cells() {
-        let (sx, sy, sz) =
-            stretch.as_ref().map_or((c(1.0, 0.0), c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1], s[ci][2]));
-        // PML: eps' = Lambda eps, mu' = Lambda mu with Lambda = diag(sy sz / sx, sx sz / sy, sx sy / sz)
-        let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
-        let pml_here = stretch.is_some()
-            && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
-        let (t_re, t_im) = tens[ci];
-        // a stretch S = diag(sx, sy, sz) turns eps into det(S) eps_ab / (s_a s_b): the diagonal gets `lam`, off-diagonal terms of an
-        // anisotropic crystal are scaled consistently
-        let (sv, det) = ([sx, sy, sz], sx * sy * sz);
-        let mut e = [[c(0.0, 0.0); 3]; 3];
-        for a in 0..3 {
-            for b in 0..3 {
-                let ec = c(t_re[a][b], -t_im[a][b]);
-                e[a][b] = if pml_here { det * ec / (sv[a] * sv[b]) } else { ec };
-            }
-        }
-        eps.push(e);
-        let one = c(1.0, 0.0);
-        let mu0 = c(1.0 / mur[ci], 0.0);
-        mu_inv.push([
-            mu0 / if pml_here { lam[0] } else { one },
-            mu0 / if pml_here { lam[1] } else { one },
-            mu0 / if pml_here { lam[2] } else { one },
-        ]);
-    }
+    let (eps, mu_inv) = simplex_cell_materials_3d(mesh, problem)?;
+    let (lo, hi) = mesh.bbox();
+    let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
+    let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
+    let pml_table = EmPmlTable::from_simplex(mesh, &problem.materials, f0, true, false);
+    let pml_cells = pml_table.pml_cells_mask();
     let mut tl = Instant::now();
     // periodic pairs
     let mut matches = vec![];
@@ -621,13 +620,9 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     let vkey = vertex_keys(mesh, &matches);
     let ned = Ned3::new(mesh, order, vkey);
     let n = ned.n_dofs();
-    let (k, m) = assemble_maxwell(mesh, &ned, &eps, &mu_inv);
+    let (k, m) = assemble_maxwell_with_pml(mesh, &ned, &eps, &mu_inv, pml_table.has_any().then_some(&pml_table));
     lap(&mut tl, "emw3d: numbering and assembly");
 
-    // shift: the requested frequency; without one, the frequency of a wave that fits the cavity
-    let (lo, hi) = mesh.bbox();
-    let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
-    let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
     let sigma = (2.0 * PI * f0 / C0).powi(2);
 
     let has_cqed =
@@ -831,11 +826,11 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     let m0_red = to_real(&m0_c_red);
     let (k_phys_red, m_phys_red, m0_full) = if pml_cells.iter().any(|&p| p) {
         let mut eps_phys_c: Vec<C3> = Vec::with_capacity(mesh.n_cells());
-        let mut mu_phys_c: Vec<[C; 3]> = Vec::with_capacity(mesh.n_cells());
+        let mut mu_phys_c: Vec<C3> = Vec::with_capacity(mesh.n_cells());
         for ci in 0..mesh.n_cells() {
             if pml_cells[ci] {
                 eps_phys_c.push([[c(0.0, 0.0); 3]; 3]);
-                mu_phys_c.push([c(0.0, 0.0); 3]);
+                mu_phys_c.push([[c(0.0, 0.0); 3]; 3]);
             } else {
                 let mut e = [[c(0.0, 0.0); 3]; 3];
                 for a in 0..3 {
@@ -844,8 +839,7 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
                     }
                 }
                 eps_phys_c.push(e);
-                let mui = c(1.0 / mur[ci], 0.0);
-                mu_phys_c.push([mui, mui, mui]);
+                mu_phys_c.push(iso_mu_inv_c3(mur[ci]));
             }
         }
         let (kp, mp) = assemble_maxwell(mesh, &ned, &eps_phys_c, &mu_phys_c);
@@ -1689,6 +1683,1041 @@ pub(crate) fn compute_3d_mode_metrics(
                 let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
                 basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                 eval_point(&w, &cu, quad.w[q] * geo.vol[ci]);
+            }
+        }
+    }
+
+    let vg_raw = if compute_vg && u_em > 0.0 { p_y / u_em } else { 0.0 };
+    let vg = if vg_raw.abs() <= 1e-9 * C0 { 0.0 } else { vg_raw };
+    let comp_tot = comp_e[0] + comp_e[1] + comp_e[2];
+    let comp_shares =
+        if comp_tot > 0.0 { [comp_e[0] / comp_tot, comp_e[1] / comp_tot, comp_e[2] / comp_tot] } else { [0.0; 3] };
+    let dom_tot: f64 = dom_e.iter().sum();
+    let domain_shares = domains
+        .iter()
+        .enumerate()
+        .map(|(d, &label)| (label, if dom_tot > 0.0 { dom_e[d] / dom_tot } else { 0.0 }))
+        .collect();
+    let u_all = u_e_phys + u_e_pml;
+    let layer_fraction = if any_pml && u_all > 0.0 { (u_e_pml / u_all).clamp(0.0, 1.0) } else { 0.0 };
+    Mode3dMetrics { vg, comp_shares, domain_shares, layer_fraction }
+}
+
+// ------------------------------------------------------------------ Native 3D MixedDiscretisation (`Tet + Prism + Hex`) cavity solver
+
+/// Masks of constrained DOFs, edges, vertices, and quad faces on a 3D `MixedDiscretisation` for `Ams` / `AmsP2`.
+pub struct MixedCavityMasks {
+    pub fixed_dofs: Vec<bool>,
+    pub fixed_edges: Vec<bool>,
+    pub fixed_verts: Vec<bool>,
+    pub fixed_quad_faces: Vec<bool>,
+}
+
+/// Solves a 3D `Cavity` study natively on `Tet + Prism + Hex` (`MixedDiscretisation`), projecting Stage-3 display fields onto `SimplexMesh`.
+pub fn solve_cavity_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let (asm, ned_mixed, _) = assemble_emw_eigen_mixed(mixed, problem, false)?;
+    let solved = solve_emw_modes(&asm)?;
+    let mut r = emw_eigen_fields_mixed(mesh, mixed, &ned_mixed, problem, &asm, &solved)?;
+    r.seconds = t0.elapsed().as_secs_f64();
+    Ok(r)
+}
+
+/// Solves a 3D `Cavity` study natively on `Tet + Prism + Hex` via iterative Jacobi-Davidson preconditioned by `Ams` (`P1`) or `AmsP2` (`P2`),
+/// enforcing the `Rational -> KappaPolynomial { kappa_max: 2.0 }` PML conditioning safeguard.
+pub fn solve_cavity_mixed_ams(
+    mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    problem: &Problem,
+) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let (asm, ned_mixed, masks) = assemble_emw_eigen_mixed(mixed, problem, true)?;
+    if !problem.periodic.is_empty() {
+        return Err(
+            "solve_cavity_mixed_ams requires non-periodic boundaries (use solve_cavity_mixed for Floquet cells)".into(),
+        );
+    }
+    let pairs = eigs_mixed_curl_curl_ams(
+        mixed,
+        &ned_mixed,
+        &masks.fixed_dofs,
+        &masks.fixed_edges,
+        &masks.fixed_verts,
+        &masks.fixed_quad_faces,
+        &asm.kc,
+        &asm.mc,
+        c(asm.sigma, 0.0),
+        asm.n_modes,
+        1e-9,
+        120,
+    )?;
+    let mut freqs = Vec::with_capacity(pairs.values.len());
+    for (i, &l) in pairs.values.iter().enumerate() {
+        if pairs.residuals.get(i).is_some_and(|r| *r > 1e-4) {
+            continue;
+        }
+        let mut f = l.sqrt() * (C0 / (2.0 * PI));
+        if f.re < 0.0 {
+            f = -f;
+        }
+        if f.re <= 1e-3 * asm.f0 {
+            continue;
+        }
+        freqs.push((f, i));
+    }
+    freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
+    let solved = EmwSolve { freqs, vectors: pairs.vectors, dim: pairs.dim, converged: pairs.converged };
+    let mut r = emw_eigen_fields_mixed(mesh, mixed, &ned_mixed, problem, &asm, &solved)?;
+    r.seconds = t0.elapsed().as_secs_f64();
+    Ok(r)
+}
+
+/// Stage 1 on a 3D `MixedDiscretisation` (`Tet + Prism + Hex`).
+pub fn assemble_emw_eigen_mixed(
+    mesh: &MixedDiscretisation,
+    problem: &Problem,
+    is_iterative: bool,
+) -> Result<(EmwAssembly, NedMixed, MixedCavityMasks), String> {
+    if mesh.dim != 3 {
+        return Err("the cavity study of EM waves needs a 3D mesh".into());
+    }
+    let Study::Cavity { n_modes, f_search } = problem.study.clone() else {
+        return Err("EM waves on a 3D mesh use the cavity study".into());
+    };
+    validate_port_contacts_3d_mixed(mesh, problem)?;
+    let order = if problem.order == 1 { 1 } else { 2 };
+    let mats = MixedCellMaterials::from_problem(mesh, problem)?;
+    let (lo, hi) = mesh.bbox();
+    let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
+    let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
+    let sigma = (2.0 * PI * f0 / C0).powi(2);
+
+    let pml_table = EmPmlTable::from_mixed(mesh, &problem.materials, f0, true, is_iterative);
+    let pml_cells = pml_table.pml_cells_mask();
+
+    let mut tl = Instant::now();
+    let mut matches = Vec::with_capacity(problem.periodic.len());
+    let mut y_periodic_ky = None;
+    for p in &problem.periodic {
+        let mt = match_vertices_mixed(mesh, p)?;
+        let sn = (mt.shift[0] * mt.shift[0] + mt.shift[1] * mt.shift[1] + mt.shift[2] * mt.shift[2]).sqrt();
+        if sn > 0.0 && mt.shift[1].abs() > 0.99 * sn && y_periodic_ky.is_none() {
+            y_periodic_ky = Some(p.phase / mt.shift[1]);
+        }
+        matches.push(mt);
+    }
+    let vkey = vertex_keys_mixed(mesh, &matches);
+    let ned = NedMixed::with_vkey(mesh, order, vkey);
+    let n = ned.n_dofs;
+    let (k, m) =
+        assemble_maxwell_mixed(mesh, &ned, &mats.eps_0, &mats.mu_inv_0, pml_table.has_any().then_some(&pml_table));
+    lap(&mut tl, "emw3d(mixed): numbering and assembly");
+
+    let has_cqed =
+        !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty() || !problem.lumped_ports.is_empty();
+    let has_sheets = has_cqed || !problem.pec.is_empty();
+    let mut ibc_jj = if has_sheets {
+        Some(assemble_ibc_and_jj_3d_mixed_cavity(
+            mesh,
+            &ned,
+            &problem.pec,
+            &problem.surface_impedance,
+            &problem.lumped_jj,
+            f0,
+        )?)
+    } else {
+        None
+    };
+    let (mut lumped_ports, lp_facets) =
+        assemble_lumped_ports_3d_mixed(mesh, &ned, &problem.pec, &problem.lumped_ports)?;
+
+    let periodic_labels: Vec<i32> =
+        problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let direct_ibc_labels: Vec<i32> =
+        ibc_jj.as_ref().map_or_else(Vec::new, |(ij, _, _, _)| ij.direct_ibc_labels.clone());
+    let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let (sym_pec_facets, sym_pmc_facets) = symmetry_facet_flags_mixed(mesh, problem.symmetry)?;
+
+    let mut fixed_set = std::collections::BTreeSet::new();
+    let mut ext_pec_vertex = std::collections::BTreeSet::new();
+    let mut pec_edge = std::collections::BTreeSet::new();
+    let mut pec_quad_face = std::collections::BTreeSet::new();
+
+    let mark_facet_topology =
+        |f: usize, pec_e: &mut std::collections::BTreeSet<usize>, pec_q: &mut std::collections::BTreeSet<usize>| {
+            let fv = mesh.facet(f);
+            let le: &[(usize, usize)] = match mesh.facet_type(f) {
+                FacetType::Edge2 => &[(0, 1)],
+                FacetType::Tri3 => &TRI_EDGES,
+                FacetType::Quad4 => &QUAD_EDGES,
+            };
+            for &(i, j) in le {
+                pec_e.insert(mesh.edge_index(fv[i], fv[j]).unwrap());
+            }
+            if mesh.facet_type(f) == FacetType::Quad4 {
+                pec_q.insert(mesh.quad_face_index([fv[0], fv[1], fv[2], fv[3]]).unwrap());
+            }
+        };
+
+    for f in 0..mesh.n_facets() {
+        let label = mesh.facet_labels[f];
+        let is_ext_pec = mesh.exterior_facets[f]
+            && !periodic_labels.contains(&label)
+            && (sym_pec_facets[f]
+                || (!problem.pmc.contains(&label)
+                    && !sym_pmc_facets[f]
+                    && !direct_ibc_labels.contains(&label)
+                    && !jj_labels.contains(&label)
+                    && !lp_labels.contains(&label)));
+        if is_ext_pec {
+            for d in ned.facet_dofs(mesh, f) {
+                fixed_set.insert(d);
+            }
+            for &v in mesh.facet(f) {
+                ext_pec_vertex.insert(v as usize);
+            }
+            mark_facet_topology(f, &mut pec_edge, &mut pec_quad_face);
+        }
+    }
+
+    let mut cond_dsu_edges: Vec<(usize, usize)> = Vec::new();
+    let mut cond_vertices = std::collections::BTreeSet::new();
+    let need_gt_r = !lumped_ports.is_empty()
+        || ibc_jj
+            .as_ref()
+            .is_some_and(|(ij, _, _, _)| ij.jj_ports.iter().any(|p| p.bc.formulation != "distributed_sheet"));
+    let gt_r_opt = if need_gt_r { Some(gradient_mixed_full(mesh, &ned).transpose()) } else { None };
+    let nv = mesh.n_points();
+    let ne = mesh.n_edges();
+
+    if let Some((ref ij, ref pec_fcs, ref ibc_fcs, ref jj_fcs)) = ibc_jj {
+        for &f in pec_fcs {
+            for d in ned.facet_dofs(mesh, f) {
+                fixed_set.insert(d);
+            }
+            let fv = mesh.facet(f);
+            for &v in fv {
+                cond_vertices.insert(v as usize);
+            }
+            let le: &[(usize, usize)] = match mesh.facet_type(f) {
+                FacetType::Edge2 => &[(0, 1)],
+                FacetType::Tri3 => &TRI_EDGES,
+                FacetType::Quad4 => &QUAD_EDGES,
+            };
+            for &(i, j) in le {
+                cond_dsu_edges.push((fv[i] as usize, fv[j] as usize));
+            }
+            mark_facet_topology(f, &mut pec_edge, &mut pec_quad_face);
+        }
+        for &f in ibc_fcs {
+            let fv = mesh.facet(f);
+            for &v in fv {
+                cond_vertices.insert(v as usize);
+            }
+            let le: &[(usize, usize)] = match mesh.facet_type(f) {
+                FacetType::Edge2 => &[(0, 1)],
+                FacetType::Tri3 => &TRI_EDGES,
+                FacetType::Quad4 => &QUAD_EDGES,
+            };
+            for &(i, j) in le {
+                cond_dsu_edges.push((fv[i] as usize, fv[j] as usize));
+            }
+            mark_facet_topology(f, &mut pec_edge, &mut pec_quad_face);
+        }
+        for (port, p_fcs) in ij.jj_ports.iter().zip(jj_fcs) {
+            if port.bc.formulation == "distributed_sheet" {
+                for &f in p_fcs {
+                    let fv = mesh.facet(f);
+                    for &v in fv {
+                        cond_vertices.insert(v as usize);
+                    }
+                    let le: &[(usize, usize)] = match mesh.facet_type(f) {
+                        FacetType::Edge2 => &[(0, 1)],
+                        FacetType::Tri3 => &TRI_EDGES,
+                        FacetType::Quad4 => &QUAD_EDGES,
+                    };
+                    for &(i, j) in le {
+                        cond_dsu_edges.push((fv[i] as usize, fv[j] as usize));
+                    }
+                    mark_facet_topology(f, &mut pec_edge, &mut pec_quad_face);
+                }
+            }
+        }
+    }
+
+    // FR-26: Bridge only true electrode seam vertices on `rank1` `lumped_jj` and `lumped_port` sheets.
+    let pec_ibc_verts = cond_vertices.clone();
+    let register_rank1_port_mixed =
+        |p_fcs: &[usize],
+         b_full: &[f64],
+         gt_r: &Csr,
+         cond_vertices: &mut std::collections::BTreeSet<usize>,
+         cond_dsu_edges: &mut Vec<(usize, usize)>,
+         pec_edge: &mut std::collections::BTreeSet<usize>,
+         pec_quad_face: &mut std::collections::BTreeSet<usize>| {
+            let gt_b = gt_r.matvec(b_full);
+            let b_max = gt_b.iter().copied().map(f64::abs).fold(0.0_f64, f64::max);
+            let mut port_verts = std::collections::BTreeSet::new();
+            for &f in p_fcs {
+                for &v in mesh.facet(f) {
+                    port_verts.insert(v as usize);
+                }
+            }
+            let mut term_verts: Vec<usize> = Vec::new();
+            for v in port_verts {
+                let is_term = (b_max > 0.0 && gt_b[v].abs() > 1e-8 * b_max)
+                    || ext_pec_vertex.contains(&v)
+                    || pec_ibc_verts.contains(&v)
+                    || cond_vertices.contains(&v);
+                if is_term {
+                    term_verts.push(v);
+                }
+            }
+            for &v in &term_verts {
+                cond_vertices.insert(v);
+            }
+            for win in term_verts.windows(2) {
+                cond_dsu_edges.push((win[0], win[1]));
+            }
+            if order == 2 && b_max > 0.0 {
+                for e in 0..ne {
+                    if gt_b[nv + e].abs() > 1e-8 * b_max {
+                        pec_edge.insert(e);
+                    }
+                }
+                for qf in 0..mesh.n_quad_faces() {
+                    if gt_b[nv + ne + qf].abs() > 1e-8 * b_max {
+                        pec_quad_face.insert(qf);
+                    }
+                }
+            }
+        };
+    if let Some(ref gt_r) = gt_r_opt {
+        if let Some((ref ij, _, _, ref jj_fcs)) = ibc_jj {
+            for (port, p_fcs) in ij.jj_ports.iter().zip(jj_fcs) {
+                if port.bc.formulation != "distributed_sheet" {
+                    register_rank1_port_mixed(
+                        p_fcs,
+                        &port.b_full,
+                        gt_r,
+                        &mut cond_vertices,
+                        &mut cond_dsu_edges,
+                        &mut pec_edge,
+                        &mut pec_quad_face,
+                    );
+                }
+            }
+        }
+        for (lp, p_fcs) in lumped_ports.iter().zip(&lp_facets) {
+            register_rank1_port_mixed(
+                p_fcs,
+                &lp.b_full,
+                gt_r,
+                &mut cond_vertices,
+                &mut cond_dsu_edges,
+                &mut pec_edge,
+                &mut pec_quad_face,
+            );
+        }
+    }
+
+    let fixed: Vec<usize> = fixed_set.iter().copied().collect();
+    let mut relations = Vec::new();
+    for (p, mt) in problem.periodic.iter().zip(&matches) {
+        relations.extend(ned_mixed_periodic_relations(mesh, &ned, &mt.src_facets, &mt.map, p.phase)?);
+    }
+    let red = femcore::periodic::Reduction::build(n, &relations, &fixed);
+    let pmat = red.prolong();
+    let nred = red.n_reduced();
+    if n_modes < 1 || n_modes + 1 >= nred {
+        return Err("number of modes must be between 1 and the number of free dofs".into());
+    }
+
+    let k0_c_red = femcore::periodic::congruence(&pmat, &k);
+    let m0_c_red = femcore::periodic::congruence(&pmat, &m);
+    let k0_red = to_real(&k0_c_red);
+    let m0_red = to_real(&m0_c_red);
+    let (k_phys_red, m_phys_red, m0_full) = if pml_cells.iter().any(|&p| p) {
+        let mut eps_phys_c: Vec<C3> = Vec::with_capacity(mesh.n_cells());
+        let mut mu_phys_c: Vec<C3> = Vec::with_capacity(mesh.n_cells());
+        for ci in 0..mesh.n_cells() {
+            if pml_cells[ci] {
+                eps_phys_c.push([[c(0.0, 0.0); 3]; 3]);
+                mu_phys_c.push([[c(0.0, 0.0); 3]; 3]);
+            } else {
+                let mut e = [[c(0.0, 0.0); 3]; 3];
+                for a in 0..3 {
+                    for b in 0..3 {
+                        e[a][b] = c(mats.eps_phys_re[ci][a][b], 0.0);
+                    }
+                }
+                eps_phys_c.push(e);
+                mu_phys_c.push(iso_mu_inv_c3(mats.mur_phys[ci]));
+            }
+        }
+        let (kp, mp) = assemble_maxwell_mixed(mesh, &ned, &eps_phys_c, &mu_phys_c, None);
+        let kp_r = to_real(&femcore::periodic::congruence(&pmat, &kp));
+        let mp_r = to_real(&femcore::periodic::congruence(&pmat, &mp));
+        let mf = if has_cqed { to_real(&mp) } else { Csr::zeros(0, 0) };
+        (kp_r, mp_r, mf)
+    } else {
+        (k0_red.clone(), m0_red.clone(), if has_cqed { to_real(&m) } else { Csr::zeros(0, 0) })
+    };
+
+    let mut c_port_all_full = Csr::zeros(n, n);
+    let mut c_port_active_full = Csr::zeros(n, n);
+    for lp in &mut lumped_ports {
+        lp.b_red = reduce_real_vec(&red, &lp.b_full);
+        if lp.c_port_full.nnz() > 0 {
+            c_port_all_full = c_port_all_full.add_scaled(&lp.c_port_full, 1.0);
+            if lp.bc.complex_damping {
+                c_port_active_full = c_port_active_full.add_scaled(&lp.c_port_full, 1.0);
+            }
+        }
+    }
+    let c_port_red = reduce_real_csr(&red, &pmat, &c_port_all_full);
+    let c_port_active_red = reduce_real_csr(&red, &pmat, &c_port_active_full);
+
+    let k0_f0 = 2.0 * PI * f0 / C0;
+    let (kc, kc_no_damp, mc, k_ibc_red, c_ibc_red, c_damp_red, jj_ports, pert_ibc_tris, ibc_warnings, cell_sheet) =
+        if let Some((ref mut ij, _, _, _)) = ibc_jj {
+            let mut k_tot_no_damp = k.clone();
+            let mut k_tot = k.clone();
+            let mut m_tot = m.clone();
+            if ij.k_ibc_full.nnz() > 0 {
+                k_tot_no_damp = k_tot_no_damp.add_scaled(&to_complex(&ij.k_ibc_full), c(1.0, 0.0));
+            }
+            if ij.kc_ibc_full.nnz() > 0 {
+                k_tot = k_tot.add_scaled(&ij.kc_ibc_full, c(1.0, 0.0));
+            }
+            if ij.k_jj_full.nnz() > 0 {
+                let kjj_c = to_complex(&ij.k_jj_full);
+                k_tot_no_damp = k_tot_no_damp.add_scaled(&kjj_c, c(1.0, 0.0));
+                k_tot = k_tot.add_scaled(&kjj_c, c(1.0, 0.0));
+            }
+            if c_port_active_full.nnz() > 0 {
+                k_tot = k_tot.add_scaled(&to_complex(&c_port_active_full), c(0.0, k0_f0));
+            }
+            if ij.m_jj_full.nnz() > 0 {
+                m_tot = m_tot.add_scaled(&to_complex(&ij.m_jj_full), c(1.0, 0.0));
+            }
+            let kc_no_damp =
+                if has_cqed { femcore::periodic::congruence(&pmat, &k_tot_no_damp) } else { k0_c_red.clone() };
+            let kc = if has_cqed { femcore::periodic::congruence(&pmat, &k_tot) } else { k0_c_red };
+            let mc = if has_cqed { femcore::periodic::congruence(&pmat, &m_tot) } else { m0_c_red };
+            let k_ibc_red = reduce_real_csr(&red, &pmat, &ij.k_ibc_full);
+            let c_ibc_red = reduce_real_csr(&red, &pmat, &ij.c_ibc_full);
+            let c_damp_red = if c_port_active_red.nnz() > 0 {
+                c_ibc_red.add_scaled(&c_port_active_red, 1.0)
+            } else {
+                c_ibc_red.clone()
+            };
+            for port in &mut ij.jj_ports {
+                port.b_red = reduce_real_vec(&red, &port.b_full);
+                port.k_jj_red = reduce_real_csr(&red, &pmat, &port.k_jj_red);
+                port.m_jj_red = reduce_real_csr(&red, &pmat, &port.m_jj_red);
+            }
+            (
+                kc,
+                kc_no_damp,
+                mc,
+                k_ibc_red,
+                c_ibc_red,
+                c_damp_red,
+                std::mem::take(&mut ij.jj_ports),
+                std::mem::take(&mut ij.pert_ibc_tris),
+                std::mem::take(&mut ij.warnings),
+                std::mem::take(&mut ij.cell_sheet),
+            )
+        } else {
+            let kc_no_damp = k0_c_red.clone();
+            let kc = if c_port_active_full.nnz() > 0 {
+                let k_tot = k.add_scaled(&to_complex(&c_port_active_full), c(0.0, k0_f0));
+                femcore::periodic::congruence(&pmat, &k_tot)
+            } else {
+                k0_c_red
+            };
+            (
+                kc,
+                kc_no_damp,
+                m0_c_red,
+                Csr::zeros(nred, nred),
+                Csr::zeros(nred, nred),
+                c_port_active_red,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                vec![None; mesh.n_cells()],
+            )
+        };
+
+    // Exact scalar nullspace G_1 (`order == 1`) or G_2 (`order == 2`, `Order2Tensor`: vertices + edges + quad faces + hex bubbles).
+    let n_nodes = scalar_nullspace_count_mixed(mesh, order);
+    let mut periodic_node_relations = Vec::new();
+    for (p, mt) in problem.periodic.iter().zip(&matches) {
+        periodic_node_relations.extend(nodal_relations_mixed_3d(mesh, order, mt, p.phase)?);
+    }
+    let mut node_rel = periodic_node_relations.clone();
+    let mut pec_vertex = ext_pec_vertex.clone();
+    if !cond_vertices.is_empty() {
+        let mut parent: Vec<usize> = (0..nv).collect();
+        let find = |p: &mut [usize], mut i: usize| -> usize {
+            while p[i] != i {
+                p[i] = p[p[i]];
+                i = p[i];
+            }
+            i
+        };
+        for &(a, b) in &cond_dsu_edges {
+            let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+            if ra != rb {
+                parent[ra.max(rb)] = ra.min(rb);
+            }
+        }
+        let mut comp_touches_ext = std::collections::BTreeSet::new();
+        for &v in &cond_vertices {
+            if ext_pec_vertex.contains(&v) {
+                comp_touches_ext.insert(find(&mut parent, v));
+            }
+        }
+        for &v in &cond_vertices {
+            let root = find(&mut parent, v);
+            if comp_touches_ext.contains(&root) {
+                pec_vertex.insert(v);
+            } else if v != root {
+                node_rel.push((v, root, c(1.0, 0.0)));
+            }
+        }
+    }
+
+    let mut node_fixed: Vec<usize> = pec_vertex.iter().copied().collect();
+    if order == 2 {
+        node_fixed.extend(pec_edge.iter().map(|&e| nv + e));
+        node_fixed.extend(pec_quad_face.iter().map(|&qf| nv + ne + qf));
+    }
+    if pec_vertex.is_empty()
+        && nv > 0
+        && problem.periodic.iter().all(|p| (femcore::periodic::phase_factor(p.phase) - c(1.0, 0.0)).norm() < 1e-9)
+    {
+        let mut comp_dsu: Vec<usize> = (0..nv).collect();
+        let find_c = |p: &mut [usize], mut i: usize| -> usize {
+            while p[i] != i {
+                p[i] = p[p[i]];
+                i = p[i];
+            }
+            i
+        };
+        for &(a, b) in &mesh.edges {
+            let (ra, rb) = (find_c(&mut comp_dsu, a as usize), find_c(&mut comp_dsu, b as usize));
+            if ra != rb {
+                comp_dsu[ra.max(rb)] = ra.min(rb);
+            }
+        }
+        for &(d, s, _) in &node_rel {
+            if d < nv && s < nv {
+                let (rd, rs) = (find_c(&mut comp_dsu, d), find_c(&mut comp_dsu, s));
+                if rd != rs {
+                    comp_dsu[rd.max(rs)] = rd.min(rs);
+                }
+            }
+        }
+        let mut pinned_roots = std::collections::BTreeSet::new();
+        for v in 0..nv {
+            let r = find_c(&mut comp_dsu, v);
+            if pinned_roots.insert(r) && !node_fixed.contains(&v) {
+                node_fixed.push(v);
+            }
+        }
+        node_fixed.sort_unstable();
+        node_fixed.dedup();
+    }
+
+    let nred_nodes = femcore::periodic::Reduction::build(n_nodes, &node_rel, &node_fixed);
+    let g_full = to_complex(&gradient_mixed_full(mesh, &ned));
+    let g_nodes = femcore::periodic::ccsr_mul(&g_full, &nred_nodes.prolong());
+    let g_red = {
+        let (mut indptr, mut indices, mut data) = (vec![0usize], vec![], vec![]);
+        for &r in &red.roots {
+            for q in g_nodes.indptr()[r]..g_nodes.indptr()[r + 1] {
+                indices.push(g_nodes.indices()[q] as usize);
+                data.push(g_nodes.values()[q]);
+            }
+            indptr.push(indices.len());
+        }
+        CCsr::from_raw(nred, nred_nodes.n_reduced(), indptr, indices, data)
+    };
+    let g_h = femcore::periodic::ccsr_adjoint(&g_red);
+    if g_h.nrows() > 0 {
+        let check_orth = |name: &str, b_red: &[f64]| -> Result<(), String> {
+            let bnorm = b_red.iter().map(|&v| v * v).sum::<f64>().sqrt();
+            if bnorm <= 1e-300 {
+                return Ok(());
+            }
+            let b_c: Vec<C> = b_red.iter().map(|&v| c(v, 0.0)).collect();
+            let gtb = g_h.matvec(&b_c);
+            let err = gtb.iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt() / bnorm;
+            if err > 1e-10 {
+                return Err(format!(
+                    "cavity null-space orthogonality violation on port '{name}': ||G_red^T b_red||_2 / ||b_red||_2 = {err:.3e} > 1e-10"
+                ));
+            }
+            Ok(())
+        };
+        for port in &jj_ports {
+            if port.bc.formulation != "distributed_sheet" {
+                check_orth(&port.bc.name, &port.b_red)?;
+            }
+        }
+        for lp in &lumped_ports {
+            check_orth(&lp.bc.name, &lp.b_red)?;
+        }
+    }
+    lap(&mut tl, "emw3d(mixed): reduction and gradient matrix");
+
+    let mut fixed_dofs = vec![false; n];
+    for &d in &fixed {
+        fixed_dofs[d] = true;
+    }
+    let mut fixed_edges = vec![false; ne];
+    for &e in &pec_edge {
+        fixed_edges[e] = true;
+    }
+    let mut fixed_verts = vec![false; nv];
+    for &v in &pec_vertex {
+        fixed_verts[v] = true;
+    }
+    let mut fixed_quad_faces = vec![false; mesh.n_quad_faces()];
+    for &qf in &pec_quad_face {
+        fixed_quad_faces[qf] = true;
+    }
+    let masks = MixedCavityMasks { fixed_dofs, fixed_edges, fixed_verts, fixed_quad_faces };
+
+    let dummy_ned = Ned3 {
+        order,
+        n_edges: 0,
+        n_faces: 0,
+        faces: Vec::new(),
+        face_id: HashMap::new(),
+        cell_dofs: Vec::new(),
+        vkey: Vec::new(),
+    };
+
+    Ok((
+        EmwAssembly {
+            order,
+            n,
+            nred,
+            ned: dummy_ned,
+            red,
+            kc,
+            kc_no_damp,
+            mc,
+            g_red,
+            g_h,
+            f0,
+            sigma,
+            n_modes,
+            f_search,
+            has_cqed,
+            k0_red,
+            k_phys_red,
+            k_ibc_red,
+            c_ibc_red,
+            c_port_red,
+            c_damp_red,
+            m0_full,
+            m0_red,
+            m_phys_red,
+            jj_ports,
+            lumped_ports,
+            pert_ibc_tris,
+            ibc_warnings,
+            cell_sheet,
+            periodic_node_relations,
+            mu_inv: mats.mu_inv_0,
+            pml_cells,
+            eps_phys_re: mats.eps_phys_re,
+            d_omega_eps: mats.d_omega_eps,
+            mur_phys: mats.mur_phys,
+            y_periodic_ky,
+        },
+        ned,
+        masks,
+    ))
+}
+
+/// Stage 3 on a 3D `MixedDiscretisation`: evaluates native `NedMixed` fields and projects them onto `SimplexMesh` via `MixedToSimplexProjector`.
+pub fn emw_eigen_fields_mixed(
+    mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    ned: &NedMixed,
+    problem: &Problem,
+    asm: &EmwAssembly,
+    solved: &EmwSolve,
+) -> Result<SolveResult, String> {
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
+    let (order, n, nred, f0, f_search) = (asm.order, asm.n, asm.nred, asm.f0, asm.f_search);
+    let (freqs, vectors, dim, converged) = (&solved.freqs, &solved.vectors, solved.dim, solved.converged);
+    let isos: Vec<IsoparametricCell> = (0..mixed.n_cells()).map(|ci| IsoparametricCell::from_mesh(mixed, ci)).collect();
+    let nsc = simplex.n_cells();
+    let nloc = 10usize;
+    let has_sheets = asm.has_cqed || !problem.pec.is_empty();
+    let (axes, left_handed) = axes_of_3d_periodic_mixed(&problem.periodic, mixed);
+
+    let mut solutions = Vec::with_capacity(freqs.len());
+    let mut scalars = Vec::new();
+    let mut mode_energy_rows = Vec::with_capacity(freqs.len());
+    let mut max_equip_err = 0.0_f64;
+    let pert_eval = if !asm.pert_ibc_tris.is_empty() {
+        Some(PerturbativeIbcEvaluator::new_mixed(mixed, ned, &asm.mur_phys, &asm.pert_ibc_tris)?)
+    } else {
+        None
+    };
+    let mut out_freqs: Vec<(C, usize)> = Vec::with_capacity(freqs.len());
+
+    for (j, &(f_raw, i)) in freqs.iter().enumerate() {
+        let x = asm.red.expand(&vectors[i]);
+        let mut scratch = NedEvalScratch::new();
+        let mut w = Vec::new();
+        let mut cu = Vec::new();
+        let sampled = proj.sample_simplex_cell_nodes(mixed, 2, |mc, xi| {
+            eval_cell_basis_3d(mixed, ned, mc, &isos[mc], xi, &mut scratch, &mut w, &mut cu);
+            let cdofs = ned.cell_dofs(mc);
+            let mut val = [c(0.0, 0.0); 3];
+            let mut cval = [c(0.0, 0.0); 3];
+            for (s, &gd) in cdofs.iter().enumerate() {
+                let coef = x[gd];
+                for kk in 0..3 {
+                    val[kk] += coef * w[s][kk];
+                    cval[kk] += coef * cu[s][kk];
+                }
+            }
+            (val, cval)
+        });
+        let e: Vec<[C; 3]> = sampled.iter().map(|p| p.0).collect();
+        let curl_e: Vec<[C; 3]> = sampled.iter().map(|p| p.1).collect();
+
+        let big =
+            e.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+        let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+        let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+        let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
+        let avg = |vals: Vec<f64>| node_average(&simplex, &vals.iter().map(|x| x * s).collect::<Vec<f64>>(), 1, 2);
+        let fields = vec![
+            Field::scalar("|E|", "a.u.", avg(mag.clone())),
+            Field::scalar("Re Ex", "a.u.", avg(e.iter().map(|v| (v[0] * rot).re).collect())),
+            Field::scalar("Re Ey", "a.u.", avg(e.iter().map(|v| (v[1] * rot).re).collect())),
+            Field::scalar("Re Ez", "a.u.", avg(e.iter().map(|v| (v[2] * rot).re).collect())),
+        ];
+
+        let (s_e, mut energy_row, mut equip_err) = compute_mode_energy_and_scale(f_raw, &vectors[i], rot, asm);
+        let mut f = f_raw;
+        if let Some(ref pe) = pert_eval {
+            let scale_phys = rot * s_e;
+            let x_phys: Vec<C> = x.iter().map(|&z| z * scale_phys).collect();
+            let (sum_lk_ktilde2, sum_rs_ktilde2) = pe.eval_mode(&x_phys);
+            let omega_0 = (2.0 * PI * f_raw.re).max(1e-300);
+            let k0_0 = omega_0 / C0;
+            let du_kin_0 = (EPS0 / (4.0 * k0_0 * k0_0)) * sum_lk_ktilde2;
+            let u_mag_0 = (energy_row.u_mag_vol_j + energy_row.u_kin_ibc_j + energy_row.u_ind_jj_j.iter().sum::<f64>())
+                .max(1e-300);
+            let alpha_kin = (du_kin_0 / u_mag_0).max(0.0);
+            let inv_scale = 1.0 / (1.0 + alpha_kin);
+            let f_re_new = f_raw.re * inv_scale.sqrt();
+            energy_row.u_mag_vol_j *= inv_scale;
+            energy_row.u_kin_ibc_j = (energy_row.u_kin_ibc_j + du_kin_0) * inv_scale;
+            for u in &mut energy_row.u_ind_jj_j {
+                *u *= inv_scale;
+            }
+            let u_mag_tot = energy_row.u_mag_vol_j + energy_row.u_kin_ibc_j + energy_row.u_ind_jj_j.iter().sum::<f64>();
+            equip_err = (energy_row.u_elec_j - u_mag_tot).abs() / energy_row.u_elec_j.max(1e-300);
+            let p_cond = (0.5 * inv_scale / (omega_0 * omega_0 * MU0 * MU0)) * sum_rs_ktilde2;
+            let u_tot = (energy_row.u_elec_j + u_mag_tot).max(1e-300);
+            let df_im = p_cond / (4.0 * PI * u_tot);
+            f = c(f_re_new, f_raw.im + df_im);
+            energy_row.freq_hz = f.re;
+            energy_row.q_factor = (f.im.abs() > 1e-12 * f.re.abs().max(1.0)).then(|| f.re / (2.0 * f.im.abs()));
+        }
+        out_freqs.push((f, i));
+        max_equip_err = max_equip_err.max(equip_err);
+
+        let mut cells = CellFields::new(&simplex, 2);
+        let (e_scale, e_unit) = if asm.has_cqed { (rot * s_e, "V/m") } else { (rot * s, "a.u.") };
+        for (k, name) in ["Ex", "Ey", "Ez"].iter().enumerate() {
+            let z: Vec<C> = e.iter().map(|v| v[k] * e_scale).collect();
+            cells.push_complex(*name, e_unit, z.iter().map(|x| x.re).collect(), z.iter().map(|x| x.im).collect());
+        }
+
+        let omega_m = (2.0 * PI * f.re).max(1e-300);
+        let h_prefactor = c(0.0, 1.0 / (omega_m * MU0)) * e_scale;
+        let mut h_field = vec![[c(0.0, 0.0); 3]; nsc * nloc];
+        for sc in 0..nsc {
+            let mc = proj.parent_cell(sc);
+            let mui = c(1.0 / asm.mur_phys[mc], 0.0);
+            for a in 0..nloc {
+                let idx = sc * nloc + a;
+                let ce = curl_e[idx];
+                h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
+            }
+        }
+        for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
+            let z: Vec<C> = h_field.iter().map(|v| v[k]).collect();
+            cells.push_complex(*name, "A/m", z.iter().map(|x| x.re).collect(), z.iter().map(|x| x.im).collect());
+        }
+
+        if has_sheets {
+            let mut k_field = vec![[c(0.0, 0.0); 3]; nsc * nloc];
+            for sc in 0..nsc {
+                let mc = proj.parent_cell(sc);
+                let Some(sheet_kind) = asm.cell_sheet[mc] else { continue };
+                match sheet_kind {
+                    SheetCellKind::Ibc { inv_l_eff, g_eff, n_hat } => {
+                        let y_s = c(g_eff, -inv_l_eff / omega_m);
+                        for a in 0..nloc {
+                            let idx = sc * nloc + a;
+                            let ep = [e[idx][0] * e_scale, e[idx][1] * e_scale, e[idx][2] * e_scale];
+                            let en = ep[0] * n_hat[0] + ep[1] * n_hat[1] + ep[2] * n_hat[2];
+                            let e_par = [ep[0] - en * n_hat[0], ep[1] - en * n_hat[1], ep[2] - en * n_hat[2]];
+                            k_field[idx] = [e_par[0] * y_s, e_par[1] * y_s, e_par[2] * y_s];
+                        }
+                    }
+                    SheetCellKind::Jj { port_index, d_hat, width_m } => {
+                        let v_p = energy_row.v_mj[port_index];
+                        let i_p = energy_row.i_mj[port_index];
+                        let cj = asm.jj_ports[port_index].bc.c_j;
+                        let i_tot = c(i_p[0], i_p[1]) + c(0.0, omega_m * cj) * c(v_p[0], v_p[1]);
+                        let k_amp = i_tot / width_m.max(1e-300);
+                        for a in 0..nloc {
+                            k_field[sc * nloc + a] = [k_amp * d_hat[0], k_amp * d_hat[1], k_amp * d_hat[2]];
+                        }
+                    }
+                    SheetCellKind::Pec { n_hat } => {
+                        for a in 0..nloc {
+                            let idx = sc * nloc + a;
+                            let hm = h_field[idx];
+                            k_field[idx] = [
+                                n_hat[1] * hm[2] - n_hat[2] * hm[1],
+                                n_hat[2] * hm[0] - n_hat[0] * hm[2],
+                                n_hat[0] * hm[1] - n_hat[1] * hm[0],
+                            ];
+                        }
+                    }
+                }
+            }
+            for (k, name) in ["Kx", "Ky", "Kz"].iter().enumerate() {
+                let z: Vec<C> = k_field.iter().map(|v| v[k]).collect();
+                cells.push_complex(*name, "A/m", z.iter().map(|x| x.re).collect(), z.iter().map(|x| x.im).collect());
+            }
+        }
+
+        mode_energy_rows.push(energy_row);
+        let m_metrics = compute_3d_mode_metrics_mixed(
+            mixed,
+            ned,
+            &isos,
+            &x,
+            c(0.0, 0.0),
+            omega_m,
+            &asm.pml_cells,
+            &asm.eps_phys_re,
+            &asm.d_omega_eps,
+            &asm.mur_phys,
+            asm.y_periodic_ky.is_some(),
+        );
+
+        if f.im.abs() > 1e-12 * f.re.abs().max(1.0) {
+            let q = f.re / (2.0 * f.im.abs());
+            solutions.push(Solution {
+                label: format!("mode {}: {:.6e} {:+.3e}i Hz (Q = {:.3e})", j + 1, f.re, f.im, q),
+                fields,
+                cell_fields: cell_fields_of(&cells),
+                value: Some(f.re),
+                eigenvalue: Some([f.re, f.im]),
+            });
+            scalars.push((format!("f{} (Hz)", j + 1), Scalar::Text(format!("{:.8e} {:+.4e}i", f.re, f.im))));
+            scalars.push((format!("Q{}", j + 1), Scalar::Num(q)));
+        } else {
+            solutions.push(Solution {
+                label: format!("mode {}: {:.6} GHz", j + 1, f.re / 1e9),
+                fields,
+                cell_fields: cell_fields_of(&cells),
+                value: Some(f.re),
+                eigenvalue: Some([f.re, f.im]),
+            });
+            scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(f.re)));
+        }
+        scalars.push((format!("f re {} (Hz)", j + 1), Scalar::Num(f.re)));
+        scalars.push((format!("f im {} (Hz)", j + 1), Scalar::Num(f.im)));
+        scalars.push((format!("layer fraction {}", j + 1), Scalar::Num(m_metrics.layer_fraction)));
+        scalars.push((format!("Ex share {}", j + 1), Scalar::Num(m_metrics.comp_shares[0])));
+        scalars.push((format!("Ey share {}", j + 1), Scalar::Num(m_metrics.comp_shares[1])));
+        scalars.push((format!("Ez share {}", j + 1), Scalar::Num(m_metrics.comp_shares[2])));
+        for &(label, share) in &m_metrics.domain_shares {
+            scalars.push((format!("share in domain {label} {}", j + 1), Scalar::Num(share)));
+        }
+        if let Some(ky) = asm.y_periodic_ky {
+            let k0_m = (2.0 * PI * f.re / C0).max(1e-300);
+            scalars.push((format!("n_B {}", j + 1), Scalar::Num(ky / k0_m)));
+            scalars.push((format!("v_g {} (m/s)", j + 1), Scalar::Num(m_metrics.vg)));
+            if m_metrics.vg.abs() > 1e-9 * C0 {
+                scalars.push((format!("n_g {}", j + 1), Scalar::Num(C0 / m_metrics.vg)));
+            }
+        }
+    }
+
+    if solutions.is_empty() {
+        return Err("no eigenfrequencies converged near the shift".into());
+    }
+    let mut log = vec![format!(
+        "Nedelec mixed order {order}, {n} dofs ({nred} after constraints), shift {:.4e} Hz, Krylov dimension {dim}{}",
+        f0,
+        if converged { "" } else { " (not every pair converged; those are omitted)" }
+    )];
+    if !problem.periodic.is_empty() {
+        log.push(format!("{} Floquet-periodic pair(s)", problem.periodic.len()));
+    }
+    if f_search <= 0.0 {
+        log.push("no search frequency given: modes nearest the fundamental of a box of this size".into());
+    }
+    if !asm.pert_ibc_tris.is_empty() {
+        log.push(format!("surface_impedance perturbative mode active on {} triangle(s)", asm.pert_ibc_tris.len()));
+    }
+    log.extend(asm.ibc_warnings.iter().cloned());
+    scalars.push(
+        nyx_physics::FieldFrame {
+            lateral: axes[0],
+            normal: axes[1],
+            propagation: axes[2],
+            left_handed,
+            outside: crate::optical::absorbing_domains(problem),
+        }
+        .scalar(),
+    );
+    if asm.has_cqed {
+        let rom = build_circuit_rom_mixed(
+            mixed,
+            ned,
+            problem,
+            asm,
+            vectors,
+            &out_freqs,
+            mode_energy_rows,
+            pert_eval.as_ref(),
+        )?;
+        scalars.push(rom.scalar());
+        scalars.push(("equipartition_error".into(), Scalar::Num(max_equip_err)));
+    }
+    if has_sheets {
+        let tls = build_tls_meta(&simplex, problem);
+        scalars.push(tls.scalar());
+    }
+    log.push(format!(
+        "polarization axes: lateral {}, normal {}, propagation {}",
+        ["x", "y", "z"][axes[0]],
+        ["x", "y", "z"][axes[1]],
+        ["x", "y", "z"][axes[2]]
+    ));
+    Ok(SolveResult {
+        physics: "ems".into(),
+        study: "cavity".into(),
+        order: 2,
+        dim: 3,
+        solutions,
+        scalars,
+        log,
+        dofs: n,
+        seconds: 0.0,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_3d_mode_metrics_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    isos: &[IsoparametricCell],
+    x: &[C],
+    ky_envelope: C,
+    omega: f64,
+    pml_cells: &[bool],
+    eps_phys_re: &[[[f64; 3]; 3]],
+    d_omega_eps: &[[[f64; 3]; 3]],
+    mur_phys: &[f64],
+    compute_vg: bool,
+) -> Mode3dMetrics {
+    let any_pml = pml_cells.iter().any(|&p| p);
+    let mut domains: Vec<i32> =
+        (0..mesh.n_cells()).filter(|&ci| !pml_cells[ci]).map(|ci| mesh.cell_labels[ci]).collect();
+    domains.sort_unstable();
+    domains.dedup();
+    let j_ky = c(0.0, 1.0) * ky_envelope;
+
+    let mut p_y = 0.0_f64;
+    let mut u_em = 0.0_f64;
+    let mut comp_e = [0.0_f64; 3];
+    let mut dom_e = vec![0.0_f64; domains.len()];
+    let mut u_e_phys = 0.0_f64;
+    let mut u_e_pml = 0.0_f64;
+
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut cu = Vec::new();
+
+    for ci in 0..mesh.n_cells() {
+        let iso = &isos[ci];
+        let deg = if iso.curved { CURVED_QUAD_DEGREE } else { 4 };
+        let rule = quad_rule_mixed(iso.cell_type, deg);
+        let nb = nedelec_nloc(iso.cell_type, ned.order);
+        let cdofs = ned.cell_dofs(ci);
+        let is_pml = pml_cells[ci];
+        let d_idx =
+            if is_pml { usize::MAX } else { domains.binary_search(&mesh.cell_labels[ci]).unwrap_or(usize::MAX) };
+        let er = &eps_phys_re[ci];
+        let de = &d_omega_eps[ci];
+        let mur = mur_phys[ci];
+        let inv_om_mu = c(0.0, 1.0 / (omega * MU0 * mur));
+
+        for (xi, &w_ref) in rule.pts.iter().zip(&rule.w) {
+            let jac = eval_cell_basis_3d(mesh, ned, ci, iso, xi, &mut scratch, &mut w, &mut cu);
+            let wq = w_ref * jac.det.abs();
+            let mut eq = [c(0.0, 0.0); 3];
+            let mut cq = [c(0.0, 0.0); 3];
+            for s in 0..nb {
+                let cf = x[cdofs[s]];
+                for k in 0..3 {
+                    eq[k] += cf * w[s][k];
+                    cq[k] += cf * cu[s][k];
+                }
+            }
+            let mut e_eps_e = 0.0_f64;
+            for a in 0..3 {
+                for b in 0..3 {
+                    e_eps_e += er[a][b] * (eq[a].conj() * eq[b]).re;
+                }
+            }
+            if is_pml {
+                u_e_pml += e_eps_e * wq;
+            } else {
+                u_e_phys += e_eps_e * wq;
+                for k in 0..3 {
+                    comp_e[k] += er[k][k].abs() * eq[k].norm_sqr() * wq;
+                }
+                if d_idx != usize::MAX {
+                    dom_e[d_idx] += e_eps_e * wq;
+                }
+                if compute_vg {
+                    let curl_k = [cq[0] - j_ky * eq[2], cq[1], cq[2] + j_ky * eq[0]];
+                    let hq = [curl_k[0] * inv_om_mu, curl_k[1] * inv_om_mu, curl_k[2] * inv_om_mu];
+                    p_y += 0.5 * (eq[2].conj() * hq[0] - eq[0].conj() * hq[2]).re * wq;
+                    let mut e_de_e = 0.0_f64;
+                    for a in 0..3 {
+                        for b in 0..3 {
+                            e_de_e += de[a][b] * (eq[a].conj() * eq[b]).re;
+                        }
+                    }
+                    let h_mu_h = mur * (hq[0].norm_sqr() + hq[1].norm_sqr() + hq[2].norm_sqr());
+                    u_em += 0.25 * (EPS0 * e_de_e + MU0 * h_mu_h) * wq;
+                }
             }
         }
     }

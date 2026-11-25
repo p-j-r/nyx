@@ -61,9 +61,18 @@ fn real_stretch_equals_a_wider_guide() {
     let (a, b, f) = (15e-3, 10e-3, 15e9);
     let mesh = common::parts_mesh(&[common::part(0.0, 0.0, a, b, 2, None)], (a / 24.0).min(b / 12.0));
     let mut s = spec(f, 0.9, 4);
-    s.materials
-        .pml
-        .insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 0.0, re: 1.5 });
+    s.materials.pml.insert(
+        2,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.0,
+            order: 0.0,
+            re: 1.5,
+            ..Default::default()
+        },
+    );
     s.materials.set(1, "eps_r", 1.0);
     s.materials.set(2, "eps_r", 1.0);
     let r = common::solve(&mesh, &s).unwrap();
@@ -78,9 +87,18 @@ fn complex_constant_stretch_gives_the_analytic_complex_index() {
     let (a, b, f) = (15e-3, 10e-3, 15e9);
     let mesh = common::parts_mesh(&[common::part(0.0, 0.0, a, b, 2, None)], (a / 24.0).min(b / 12.0));
     let mut s = spec(f, 0.9, 4);
-    s.materials
-        .pml
-        .insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.3, order: 0.0, re: 1.0 });
+    s.materials.pml.insert(
+        2,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.3,
+            order: 0.0,
+            re: 1.0,
+            ..Default::default()
+        },
+    );
     let r = common::solve(&mesh, &s).unwrap();
     let sx = c(1.0, -0.3);
     let kc = c(std::f64::consts::PI / a, 0.0) / sx;
@@ -112,12 +130,30 @@ fn pml_terminated_slab_keeps_the_guided_mode_and_absorbs_the_rest() {
     let mut pml = spec(f, 1.9, 6);
     pml.materials.default.insert("eps_r".into(), 1.0);
     pml.materials.set(2, "eps_r", 4.0);
-    pml.materials
-        .pml
-        .insert(3, Pml { x: PmlDir::Minus, y: PmlDir::Off, z: PmlDir::Off, strength: 4.0, order: 2.0, re: 1.0 });
-    pml.materials
-        .pml
-        .insert(4, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 4.0, order: 2.0, re: 1.0 });
+    pml.materials.pml.insert(
+        3,
+        Pml {
+            x: PmlDir::Minus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 4.0,
+            order: 2.0,
+            re: 1.0,
+            ..Default::default()
+        },
+    );
+    pml.materials.pml.insert(
+        4,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 4.0,
+            order: 2.0,
+            re: 1.0,
+            ..Default::default()
+        },
+    );
     let with = common::solve(&mesh, &pml).unwrap();
     // reference: the same box without PML (PEC walls), real solver
     let mut plain = spec(f, 1.9, 6);

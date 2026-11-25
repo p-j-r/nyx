@@ -385,7 +385,7 @@ fn curved_bodies_inside_a_host_are_exact_and_conflicts_are_refused() {
     });
     assert!(e.contains("'s1'") && e.contains("'s2'") && e.contains("intersect"), "{e}");
     let e = refuse(&|m| {
-        let s = m.sphere("alone", (0.0, 0.0, 0.0), 1.0);
+        let s = m.torus("alone", (0.0, 0.0, 0.0), 1.0, 0.25);
         vec![("a", s)]
     });
     assert!(e.contains("prismatic host"), "{e}");

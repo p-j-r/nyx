@@ -187,3 +187,222 @@ fn the_model_serialises_with_the_new_field_names_and_reads_the_old_ones() {
     // the Rust form of a model uses the plain builder
     assert!(m.list.to_rust().contains("m.extrude(\"wg\""));
 }
+
+#[test]
+fn outward_absorbing_layers_cover_all_seven_canonical_topologies() {
+    use std::f64::consts::PI;
+
+    // 1. Topology #1: 2D Planar Cartesian (layered wafer + rib inside, no dummy window)
+    let mut m = section();
+    m.absorbing_layer("pml", PmlCoordKind::Auto, 0.5, 6.0);
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert_eq!(ev.pml_regions().len(), 10); // air (5) + sub (5); rib does not touch outer boundary
+    assert!(ev.pml_regions().iter().all(|p| {
+        p.mode == PmlGrowMode::Outward
+            && p.coord == PmlCoordKind::Cartesian
+            && p.layer_grading == 2.0
+            && matches!(p.role, PmlRole::Face | PmlRole::Corner)
+    }));
+    let lm = ev.label_map().unwrap();
+    assert!(lm.domain("air.pml_xmin_zmax").is_some());
+    assert!(lm.domain("sub.pml_xmax_zmin").is_some());
+    assert!(lm.domain("rib.pml_zmax").is_none());
+
+    // 2. Topology #2: 2D Planar Cylindrical (concentric fiber in homogeneous cladding)
+    let mut m = Model::new_2d();
+    let clad = m.circle("clad", (0.5, -0.25), 2.0);
+    let core = m.circle("core", (0.5, -0.25), 0.4);
+    m.overlay(&[("clad", clad), ("core", core)]);
+    m.absorbing_layer_auto("pml");
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert_eq!(ev.pml_regions().len(), 1);
+    let p = &ev.pml_regions()[0];
+    assert_eq!(ev.regions()[p.region as usize].name, "clad.pml_radial");
+    assert_eq!(p.coord, PmlCoordKind::Cylindrical);
+    assert_eq!(p.mode, PmlGrowMode::Outward);
+    assert_eq!(p.role, PmlRole::RadialShell);
+    assert!(close(p.r_in, 2.0));
+    assert!(close(p.center[0], 0.5) && close(p.center[2], -0.25));
+    assert!(p.thickness > 0.0 && p.layers >= 5.0);
+
+    // 3. Topology #3: 2D Axisymmetric Spherical (semicircle centered at x = 0 in x >= 0)
+    let mut m = Model::new_2d();
+    let air = m.circle("air", (0.0, 0.3), 1.5);
+    let resonator = m.circle("res", (0.0, 0.3), 0.5);
+    m.overlay(&[("air", air), ("res", resonator)]);
+    m.cut("axis", (1.0, 0.0, 0.0), 0.0, Keep::Above);
+    m.absorbing_layer_auto("pml");
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert_eq!(ev.pml_regions().len(), 1);
+    let p = &ev.pml_regions()[0];
+    assert_eq!(ev.regions()[p.region as usize].name, "air.pml_spherical");
+    assert_eq!(p.coord, PmlCoordKind::Spherical);
+    assert_eq!(p.role, PmlRole::SphericalShell);
+    assert!(close(p.r_in, 1.5));
+    assert_eq!(p.center, [0.0, 0.0, 0.3]);
+    assert_eq!(p.axis, [0.0, 0.0, 1.0]);
+
+    // 4. Topology #4: 2D Axisymmetric Cylindrical / Cartesian (Rect touching x = 0 auto-omits XMin)
+    let mut m = Model::new_2d();
+    let sub = m.rect("sub", (0.0, -1.0), (2.0, 0.0));
+    let air = m.rect("air", (0.0, 0.0), (2.0, 1.0));
+    m.overlay(&[("sub", sub), ("air", air)]);
+    m.absorbing_layer("pml", PmlCoordKind::Cylindrical, 0.4, 6.0);
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    // No piece has sides[0] == -1 (XMin is the symmetry axis r = 0)
+    assert!(ev.pml_regions().iter().all(|p| p.sides[0] != -1));
+    assert!(ev.pml_regions().iter().any(|p| p.role == PmlRole::RadialShell && p.sides == [1, 0, 0]));
+    assert!(ev.pml_regions().iter().any(|p| p.role == PmlRole::EndCap && p.sides == [0, 0, 1]));
+    assert!(ev.pml_regions().iter().any(|p| p.role == PmlRole::CornerAnnulus && p.sides == [1, 0, 1]));
+
+    // 5. Topology #5: 3D Spherical (standalone 3D Sphere host + interior primitives)
+    let mut m = Model::new_3d();
+    let air = m.sphere("air", (0.0, 0.0, 0.0), 3.0);
+    let box_in = m.box_("chip", (-0.5, -0.5, -0.2), (0.5, 0.5, 0.2));
+    m.overlay(&[("air", air), ("chip", box_in)]);
+    m.absorbing_layer("pml", PmlCoordKind::Auto, 0.5, 6.0);
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    let v_sphere = 4.0 / 3.0 * PI * 27.0;
+    let v_box = 1.0 * 1.0 * 0.4;
+    assert!(close(ev.volume(0), v_sphere - v_box));
+    assert!(close(ev.volume(1), v_box));
+    assert!(ev
+        .surfaces_for_stuffing()
+        .iter()
+        .any(|s| matches!(s.surface, geom::stack::Surface::Sphere { r, .. } if close(r, 3.0))));
+    assert_eq!(ev.pml_regions().len(), 1);
+    let p = &ev.pml_regions()[0];
+    assert_eq!(ev.regions()[p.region as usize].name, "air.pml_spherical");
+    assert_eq!(p.coord, PmlCoordKind::Spherical);
+    assert_eq!(p.role, PmlRole::SphericalShell);
+    assert!(close(p.r_in, 3.0));
+
+    // 6. Topology #6: 3D Cartesian (6 faces + 12 edges + 8 corners = 26 sub-domains)
+    let mut m = Model::new_3d();
+    let air = m.box_("air", (-1.0, -1.0, -1.0), (1.0, 1.0, 1.0));
+    m.overlay(&[("air", air)]);
+    m.absorbing_layer_auto("pml");
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert_eq!(ev.pml_regions().len(), 26);
+    assert_eq!(ev.pml_regions().iter().filter(|p| p.role == PmlRole::Face).count(), 6);
+    assert_eq!(ev.pml_regions().iter().filter(|p| p.role == PmlRole::Edge).count(), 12);
+    assert_eq!(ev.pml_regions().iter().filter(|p| p.role == PmlRole::Corner).count(), 8);
+
+    // 7. Topology #7: 3D Cylindrical (layered wafer cylinder: radial barrel + 2 endcaps + 2 corner annuli)
+    let mut m = Model::new_3d();
+    let sub = m.cylinder("sub", (0.0, 0.0, -2.0), 4.0, 2.0);
+    let air = m.cylinder("air", (0.0, 0.0, 0.0), 4.0, 2.0);
+    let disk = m.cylinder("disk", (0.0, 0.0, 0.0), 1.5, 0.3);
+    m.overlay(&[("sub", sub), ("air", air), ("disk", disk)]);
+    m.absorbing_layer_auto("pml");
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    // sub gets radial, zmin, radial_zmin (3); air gets radial, zmax, radial_zmax (3); disk gets 0 -> total 6
+    assert_eq!(ev.pml_regions().len(), 6);
+    assert!(ev.pml_regions().iter().all(|p| p.coord == PmlCoordKind::Cylindrical && close(p.r_in, 4.0)));
+    assert_eq!(ev.pml_regions().iter().filter(|p| p.role == PmlRole::RadialShell).count(), 2);
+    assert_eq!(ev.pml_regions().iter().filter(|p| p.role == PmlRole::EndCap).count(), 2);
+    assert_eq!(ev.pml_regions().iter().filter(|p| p.role == PmlRole::CornerAnnulus).count(), 2);
+}
+
+#[test]
+fn inward_curvilinear_pmls_slice_exact_volumes_in_2d_and_3d() {
+    use std::f64::consts::PI;
+
+    // 3D Inward Cylindrical PML: radial shell + 2 endcaps + 2 corner annuli
+    let mut m = Model::new_3d();
+    let outer = m.cylinder("outer", (0.0, 0.0, -1.5), 2.5, 3.0);
+    let win = m.cylinder("win", (0.0, 0.0, -1.0), 2.0, 2.0);
+    m.overlay(&[("air", outer)]);
+    m.pml("pml", win, &[], 0.5, 6.0, 2.0);
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert_eq!(ev.pml_regions().len(), 5);
+    assert!(close(ev.volume(0), PI * 4.0 * 2.0));
+    let barrel = ev.pml_regions().iter().find(|p| p.role == PmlRole::RadialShell).unwrap();
+    assert!(close(ev.volume(barrel.region), PI * (6.25 - 4.0) * 2.0));
+    let cap = ev.pml_regions().iter().find(|p| p.role == PmlRole::EndCap).unwrap();
+    assert!(close(ev.volume(cap.region), PI * 4.0 * 0.5));
+    let rim = ev.pml_regions().iter().find(|p| p.role == PmlRole::CornerAnnulus).unwrap();
+    assert!(close(ev.volume(rim.region), PI * (6.25 - 4.0) * 0.5));
+
+    // 3D Inward Spherical PML
+    let mut m = Model::new_3d();
+    let outer = m.sphere("outer", (0.0, 0.0, 0.0), 2.5);
+    let win = m.sphere("win", (0.0, 0.0, 0.0), 2.0);
+    m.overlay(&[("air", outer)]);
+    m.pml("pml", win, &[], 0.5, 6.0, 2.0);
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert_eq!(ev.pml_regions().len(), 1);
+    assert_eq!(ev.pml_regions()[0].role, PmlRole::SphericalShell);
+    assert!(close(ev.volume(0), 4.0 / 3.0 * PI * 8.0));
+    assert!(close(ev.volume(ev.pml_regions()[0].region), 4.0 / 3.0 * PI * (2.5f64.powi(3) - 8.0)));
+}
+
+#[test]
+fn ray_invariance_guard_rejects_spherical_on_layered_wafer_and_cylindrical_on_piercing_waveguide() {
+    // 1. 3D Spherical PML on a horizontally layered wafer (d_R eps != 0) -> rejected, recommends Cylindrical / Cartesian
+    let mut m = Model::new_3d();
+    let sub = m.box_("sub", (-2.0, -2.0, -2.0), (2.0, 2.0, 0.0));
+    let air = m.box_("air", (-2.0, -2.0, 0.0), (2.0, 2.0, 2.0));
+    m.overlay(&[("sub", sub), ("air", air)]);
+    m.absorbing_layer("pml", PmlCoordKind::Spherical, 0.5, 6.0);
+    let err = m.eval(Tier::Complex).err().expect("Spherical PML on layered wafer must fail").0;
+    assert!(
+        err.contains("Spherical PML") && err.contains("Cylindrical") && err.contains("Cartesian"),
+        "unexpected error: {err}"
+    );
+
+    // 2. 2D Axisymmetric Spherical PML with horizontal substrate interface crossing semicircle -> rejected
+    let mut m = Model::new_2d();
+    let air = m.circle("air", (0.0, 0.0), 2.0);
+    let sub_rect = m.rect("sub_r", (-3.0, -3.0), (3.0, -0.4));
+    let sub = m.intersect("sub", &[air, sub_rect]);
+    m.overlay(&[("air", air), ("sub", sub)]);
+    m.cut("axis", (1.0, 0.0, 0.0), 0.0, Keep::Above);
+    m.absorbing_layer_auto("pml");
+    let err = m.eval(Tier::Complex).err().expect("2D-axi Spherical PML across horizontal layer must fail").0;
+    assert!(err.contains("Spherical PML") && err.contains("Cylindrical"), "unexpected error: {err}");
+
+    // 3. 3D Cylindrical PML with an extruded waveguide piercing the barrel wall r = R_in (d_r eps != 0) -> rejected
+    let mut m = Model::new_3d();
+    let sub = m.cylinder("sub", (0.0, 0.0, -1.0), 2.0, 1.0);
+    let air = m.cylinder("air", (0.0, 0.0, 0.0), 2.0, 1.0);
+    let wg_box = m.box_("wg_box", (-0.25, -3.0, 0.0), (0.25, 3.0, 0.22));
+    let wg = m.intersect("wg", &[air, wg_box]);
+    m.overlay(&[("sub", sub), ("air", air), ("wg", wg)]);
+    m.absorbing_layer_auto("pml");
+    let err = m.eval(Tier::Complex).err().expect("Cylindrical PML with piercing waveguide must fail").0;
+    assert!(err.contains("Cylindrical PML") && err.contains("Cartesian"), "unexpected error: {err}");
+
+    // 4. 3D Cylindrical PML with a conductive Op::Sheet CPW trace piercing the barrel wall -> rejected
+    let mut m = Model::new_3d();
+    let sub = m.cylinder("sub", (0.0, 0.0, -1.0), 2.0, 1.0);
+    let air = m.cylinder("air", (0.0, 0.0, 0.0), 2.0, 1.0);
+    let trace_p = m.rect("trace_p", (-0.1, -2.5), (0.1, 2.5));
+    m.sheet("cpw_trace", trace_p, 0.0);
+    m.overlay(&[("sub", sub), ("air", air)]);
+    m.absorbing_layer_auto("pml");
+    let err = m.eval(Tier::Complex).err().expect("Cylindrical PML with piercing Sheet must fail").0;
+    assert!(err.contains("Cylindrical PML") && err.contains("Sheet 'cpw_trace'"), "unexpected error: {err}");
+}
+
+#[test]
+fn pml_serde_backward_and_outward_round_trip() {
+    let mut m = Model::new_3d();
+    let b = m.box_("air", (-1.0, -1.0, -1.0), (1.0, 1.0, 1.0));
+    m.overlay(&[("air", b)]);
+    m.absorbing_layer_auto("pml");
+    let json_text = serde_json::to_string(&m.list).unwrap();
+    assert!(json_text.contains("\"mode\":\"Outward\""), "{json_text}");
+    assert!(!json_text.contains("\"window\""), "Outward mode with None window omits window key: {json_text}");
+    let back: FeatureList = serde_json::from_str(&json_text).unwrap();
+    assert_eq!(back, m.list);
+}

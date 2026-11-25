@@ -1,0 +1,167 @@
+{
+  "active": "ems",
+  "format": 1,
+  "geometry": {
+    "dim": 2,
+    "features": [
+      {
+        "id": 1,
+        "name": "air_disk",
+        "op": {
+          "Circle": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "r": 2.4999999999999998e-6
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 2,
+        "name": "sphere_disk",
+        "op": {
+          "Circle": {
+            "center": [
+              0.0,
+              0.0
+            ],
+            "r": 1.5e-6
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 3,
+        "name": "regions",
+        "op": {
+          "Overlay": {
+            "naming": "Feature",
+            "pins": [],
+            "regions": [
+              {
+                "input": 1,
+                "kind": "Material",
+                "name": "air",
+                "pinned_id": null
+              },
+              {
+                "input": 2,
+                "kind": "Material",
+                "name": "sphere",
+                "pinned_id": null
+              }
+            ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "half_plane",
+        "op": {
+          "Cut": {
+            "keep": "Above",
+            "normal": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "offset": 0.0
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 5,
+        "name": "pml",
+        "op": {
+          "Pml": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "coord": "Spherical",
+            "grading": 2.0,
+            "layer_grading": 2.0,
+            "layers": 5.0,
+            "mode": "Outward",
+            "regions": [],
+            "sides": [],
+            "thickness": 8e-7
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      }
+    ],
+    "format": 1,
+    "params": []
+  },
+  "mesh": {
+    "h": 4e-7
+  },
+  "physics": [
+    {
+      "bcs": [
+        {
+          "kind": "pml",
+          "on": "air.pml_spherical",
+          "params": {
+            "auto_scale": true,
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "coord": "spherical",
+            "kappa_max": 2.0,
+            "order": 2.0,
+            "profile": "kappa_polynomial",
+            "r_in": 2.4999999999999998e-6,
+            "re": 1.0,
+            "strength": 10.299776472364018,
+            "target_reflection": 1e-6,
+            "thickness": 8e-7,
+            "x": "plus",
+            "y": "off",
+            "z": "plus"
+          }
+        }
+      ],
+      "format": 1,
+      "materials": {
+        "air*": {
+          "eps_r": 1.0,
+          "mu_r": 1.0
+        },
+        "sphere": {
+          "eps_r": 9.0,
+          "mu_r": 1.0
+        }
+      },
+      "order": 2,
+      "physics": "ems",
+      "study": {
+        "kind": "axisymmetric_modes",
+        "params": {
+          "azimuthal_order": 4,
+          "f_search": 120000000000000.0,
+          "n_modes": 4
+        }
+      }
+    }
+  ],
+  "title": "Axisymmetric dielectric sphere with outward spherical PML shell (EM waves, axisymmetric modes)"
+}

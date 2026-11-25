@@ -5,10 +5,10 @@
 //! (`meshing::mesh_model`, `mesher::extrude_y`): restructure phase 2 replaces the mesh types and moves those modules, and rewrites this
 //! one function. Names and labels come from `geom` (`LabelMap`), which numbers domains from 1 in overlay order.
 
-use crate::project::MeshSettings;
+use crate::project::{MeshSettings, PmlModeRequest};
 use geom::eval::Evaluated;
 use geom::labels::LabelMap;
-use geom::model::FeatureList;
+use geom::model::{FeatureList, PmlGrowMode};
 use geom::select::{EntityKind, Selector};
 use nyx_physics::{Error, LabelResolver, Mesh, Sizing};
 use serde_json::{json, Value};
@@ -31,6 +31,66 @@ pub struct MeshedModel {
 }
 
 impl MeshedModel {
+    /// From an uncut mixed-cell exchange [`Mesh`] (`Quad`, `Prism`, `Hex` preserved) without eager simplex splitting.
+    /// The simplex view [`MeshedModel::solver_mesh`] is built lazily on first display/export access.
+    pub fn from_exchange(
+        mesh: Mesh,
+        eval: Arc<Evaluated>,
+        labels: LabelMap,
+        swept: bool,
+    ) -> Result<MeshedModel, Error> {
+        let top = match &mesh {
+            Mesh::D2(cm) => cm.facet_label.iter().copied().max().unwrap_or(0),
+            Mesh::D3(cm) => cm.facet_label.iter().copied().max().unwrap_or(0),
+        };
+        let (ends, ends_3d) = if swept && eval.list.dim == 2 {
+            (Some((top - 1, top)), None)
+        } else if swept && eval.list.dim == 3 {
+            if let Mesh::D3(cm) = &mesh {
+                if !cm.points.is_empty() {
+                    let mut lo_y = f64::INFINITY;
+                    let mut hi_y = f64::NEG_INFINITY;
+                    for p in &cm.points {
+                        lo_y = lo_y.min(p[1]);
+                        hi_y = hi_y.max(p[1]);
+                    }
+                    let tol = 1e-8 * (hi_y - lo_y).abs().max(1e-30);
+                    let mut ymin_l = Vec::new();
+                    let mut ymax_l = Vec::new();
+                    for f in 0..cm.n_facets() {
+                        let fv = cm.facet(f);
+                        if fv.iter().all(|&v| (cm.points[v as usize][1] - lo_y).abs() <= tol) {
+                            ymin_l.push(cm.facet_label[f]);
+                        } else if fv.iter().all(|&v| (cm.points[v as usize][1] - hi_y).abs() <= tol) {
+                            ymax_l.push(cm.facet_label[f]);
+                        }
+                    }
+                    ymin_l.sort_unstable();
+                    ymin_l.dedup();
+                    ymax_l.sort_unstable();
+                    ymax_l.dedup();
+                    (None, Some((ymin_l, ymax_l)))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+        Ok(MeshedModel {
+            mesh: Arc::new(mesh),
+            eval,
+            labels,
+            ends,
+            ends_3d,
+            report: None,
+            amr_adapted: false,
+            solver: std::sync::OnceLock::new(),
+        })
+    }
+
     /// From the mesh the mesher made (the solver mesh of femcore) to the exchange mesh the physics are given.
     pub fn new(
         mesh: femcore::mesh::SimplexMesh,
@@ -38,43 +98,10 @@ impl MeshedModel {
         labels: LabelMap,
         swept: bool,
     ) -> Result<MeshedModel, Error> {
-        let top = mesh.facet_labels.iter().copied().max().unwrap_or(0);
-        let (ends, ends_3d) = if swept && eval.list.dim == 2 {
-            (Some((top - 1, top)), None)
-        } else if swept && eval.list.dim == 3 && mesh.dim == 3 && mesh.n_points() > 0 {
-            let (lo, hi) = mesh.bbox();
-            let tol = 1e-8 * (hi[1] - lo[1]).abs().max(1e-30);
-            let mut ymin_l = Vec::new();
-            let mut ymax_l = Vec::new();
-            for f in 0..mesh.n_facets() {
-                let fv = mesh.facet(f);
-                if fv.iter().all(|&v| (mesh.point(v as usize)[1] - lo[1]).abs() <= tol) {
-                    ymin_l.push(mesh.facet_labels[f]);
-                } else if fv.iter().all(|&v| (mesh.point(v as usize)[1] - hi[1]).abs() <= tol) {
-                    ymax_l.push(mesh.facet_labels[f]);
-                }
-            }
-            ymin_l.sort_unstable();
-            ymin_l.dedup();
-            ymax_l.sort_unstable();
-            ymax_l.dedup();
-            (None, Some((ymin_l, ymax_l)))
-        } else {
-            (None, None)
-        };
         let exchange = Mesh::from_solver_mesh(&mesh).map_err(Error::Invalid)?;
-        let solver = std::sync::OnceLock::new();
-        let _ = solver.set(Arc::new(mesh));
-        Ok(MeshedModel {
-            mesh: Arc::new(exchange),
-            eval,
-            labels,
-            ends,
-            ends_3d,
-            report: None,
-            amr_adapted: false,
-            solver,
-        })
+        let model = Self::from_exchange(exchange, eval, labels, swept)?;
+        let _ = model.solver.set(Arc::new(mesh));
+        Ok(model)
     }
 
     /// The same, with the report the mesher made of it.
@@ -352,11 +379,13 @@ pub(crate) fn build_mesh_request(
             return Err(Error::invalid("`quarter_point_xi` must be in [0.25, 0.50]"));
         }
     }
+    let pml_mode = s.resolved_pml_mode();
+    let pml_relax = if pml_mode == PmlModeRequest::Inline { 1.5 } else { 1.0 };
     let waves = match (s.physics_sizing, sizing) {
         (true, Some(sz)) => Some(WavesRequest {
             sizing: sz.clone(),
             points_per_wavelength: s.points_per_wavelength,
-            pml_relax: 1.5,
+            pml_relax,
             eigen_headroom: sz.headroom.max(1.0),
         }),
         _ => None,
@@ -378,6 +407,7 @@ pub(crate) fn build_mesh_request(
         h: s.h,
         max_dev: s.max_dev,
         mesher,
+        pml_mode,
         structured_pml: s.structured_pml,
         waves,
         curved: s.curved,
@@ -397,7 +427,7 @@ pub(crate) fn build_mesh_request(
 
 impl Mesher for FemcoreMesher {
     fn mesh(&self, geometry: &FeatureList, s: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error> {
-        use femcore::meshing::request::mesh_request;
+        use femcore::meshing::request::mesh_request_native;
         let req = build_mesh_request(s, sizing)?;
         if let Some(layers) = &s.sweep {
             if geometry.dim == 3 {
@@ -407,6 +437,15 @@ impl Mesher for FemcoreMesher {
                     return Err(Error::invalid("the adaptation scale must be positive"));
                 }
                 let ev = femcore::meshing::geomdrive::evaluate(geometry).map_err(mesh_error)?;
+                let pml_mode = s.resolved_pml_mode();
+                if pml_mode == PmlModeRequest::Inline && ev.pml_regions().iter().any(|p| p.mode == PmlGrowMode::Outward)
+                {
+                    return Err(Error::invalid(
+                        "outward absorbing layers have no inline CAD cells; use PmlMode::Auto or PmlMode::Structured",
+                    ));
+                }
+                let use_structured_pml = pml_mode != PmlModeRequest::Inline && !ev.pml_regions().is_empty();
+                let pml_relax = if pml_mode == PmlModeRequest::Inline { 1.5 } else { 1.0 };
                 let labels = ev.label_map().map_err(|e| Error::invalid(e.to_string()))?;
                 let ls = resolve_sweep_layers(layers, &labels)?;
                 let nr = ev.regions().len();
@@ -414,7 +453,7 @@ impl Mesher for FemcoreMesher {
                     (true, Some(sz)) => {
                         let ps = femcore::meshing::physics_size::PhysicsSizing {
                             points_per_wavelength: s.points_per_wavelength,
-                            pml_relax: 1.5,
+                            pml_relax,
                             eigen_headroom: sz.headroom.max(1.0),
                         };
                         let names: Vec<&str> = labels.domains.iter().map(|d| d.name.as_str()).collect();
@@ -426,7 +465,13 @@ impl Mesher for FemcoreMesher {
                     }
                     _ => vec![f64::INFINITY; nr],
                 };
-                let sizes = femcore::meshing::geomdrive3::Sizes3 { region_h, skip: vec![] };
+                let mut skip = vec![false; nr];
+                if use_structured_pml {
+                    for p in ev.pml_regions() {
+                        skip[p.region as usize] = true;
+                    }
+                }
+                let sizes = femcore::meshing::geomdrive3::Sizes3 { region_h, skip };
                 let mesh = femcore::meshing::mesher::sweep_model_3d(
                     &ev,
                     &labels,
@@ -437,22 +482,43 @@ impl Mesher for FemcoreMesher {
                     &ls,
                 )
                 .map_err(mesh_error)?;
-                return MeshedModel::new(mesh, Arc::new(ev), labels, true);
+                let ev_arc = Arc::new(ev);
+                if use_structured_pml {
+                    let g = femcore::meshing::geomdrive::MeshedGeom {
+                        mesh,
+                        cells: None,
+                        labels: labels.clone(),
+                        eval: ev_arc.clone(),
+                        warnings: vec![],
+                    };
+                    return match femcore::meshing::pml_geom3::structured_pml_3d_native_with_curved(g, s.curved)
+                        .map_err(mesh_error)?
+                    {
+                        femcore::meshing::pml_geom3::Native3::Unchanged(g, _) => {
+                            MeshedModel::new(g.mesh, g.eval, g.labels, true)
+                        }
+                        femcore::meshing::pml_geom3::Native3::Cells(cells, _) => {
+                            MeshedModel::from_exchange(Mesh::D3(cells), ev_arc, labels, true)
+                        }
+                    };
+                }
+                return MeshedModel::new(mesh, ev_arc, labels, true);
             }
         }
         // the stage a job reports while it meshes (its log gets the mesher's laps below it)
         let _stage = femcore::progress::stage(format!("meshing the geometry (element size {} m)", s.h));
-        let (g, report) = mesh_request(geometry, &req).map_err(mesh_error)?;
-        let (mut mesh, eval, labels) = (g.mesh, g.eval, g.labels);
+        let (mesh, labels, eval, _adapt, report, _warnings) =
+            mesh_request_native(geometry, &req).map_err(mesh_error)?;
         if let Some(layers) = &s.sweep {
             let ls = resolve_sweep_layers(layers, &labels)?;
+            let mut sm = mesh.discretise().map_err(Error::Invalid)?;
             // numbered in the order of their coordinates, so that opposite side walls of a periodic cell are cut the same way
             // and a Floquet condition can pair them (`sort_nodes`)
-            mesh = femcore::meshing::geomdrive::sort_nodes(&mesh);
-            mesh = femcore::meshing::mesher::extrude_y_with_remap(&mesh, &ls, 0.0).map_err(mesh_error)?;
-            return MeshedModel::new(mesh, eval, labels, true);
+            sm = femcore::meshing::geomdrive::sort_nodes(&sm);
+            sm = femcore::meshing::mesher::extrude_y_with_remap(&sm, &ls, 0.0).map_err(mesh_error)?;
+            return MeshedModel::new(sm, eval, labels, true);
         }
-        Ok(MeshedModel::new(mesh, eval, labels, false)?.with_report(report))
+        Ok(MeshedModel::from_exchange(mesh, eval, labels, false)?.with_report(report))
     }
 }
 

@@ -10,18 +10,27 @@
 //! solved directly near `sigma = n_target + (m - 1) * (lambda_0 / Lambda)` via `eigs_quadratic_complex`.
 
 use crate::cavity::{
-    assemble_complex, basis3, compute_3d_mode_metrics, ned_relations, vertex_keys, Ned3, C3, CURVED_QUAD_DEGREE,
+    assemble_complex, basis3, compute_3d_mode_metrics, compute_3d_mode_metrics_mixed, ned_relations, vertex_keys, Ned3,
+    C3, CURVED_QUAD_DEGREE,
 };
 use crate::ibc::{assemble_ibc_and_jj_3d, MU0};
+use crate::mixed_ops::{
+    add_bloch_point_c3, assemble_bloch_matrices_mixed, assemble_ibc_and_jj_3d_mixed, match_vertices_mixed,
+    simplex_cell_materials_3d, symmetry_facet_flags_mixed, vertex_keys_mixed, EmPmlTable, MixedCellMaterials,
+};
 use crate::modes::C0;
 use crate::problem::{symmetry_facet_flags, Problem, Study};
-use femcore::fem::{geometry, quad_rule, quad_rule_collapsed, CurvedTet};
+use femcore::edge_mixed::{eval_cell_basis_3d, ned_mixed_periodic_relations, NedEvalScratch, NedMixed};
+use femcore::fem::{geometry, quad_rule, quad_rule_collapsed, shape, CurvedTet};
+use femcore::fem_mixed::IsoparametricCell;
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::{c, CCsr, C};
 use femcore::linalg::driver::eigs_quadratic_complex;
-use femcore::pml::cell_stretches;
-use femcore::props::PmlDir;
-use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
+use femcore::mesh::mixed::MixedDiscretisation;
+use femcore::props::{PmlCoord, PmlDir};
+use nyx_physics::{
+    cell_fields_of, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
+};
 use std::f64::consts::PI;
 use std::time::Instant;
 
@@ -53,7 +62,7 @@ pub struct BlochAssembly {
     pub brillouin_zone: i64,
     pub sigma: f64,
     pub n_modes: usize,
-    pub mu_inv: Vec<[C; 3]>,
+    pub mu_inv: Vec<C3>,
     pub pml_cells: Vec<bool>,
     pub eps_phys_re: Vec<[[f64; 3]; 3]>,
     pub d_omega_eps: Vec<[[f64; 3]; 3]>,
@@ -79,81 +88,20 @@ pub fn solve_bloch(mesh: &Discretisation, problem: &Problem) -> Result<SolveResu
     Ok(r)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn add_bloch_point(
-    which: usize,
-    nb: usize,
-    ke: &mut [C],
-    w: &[[f64; 3]],
-    cu: &[[f64; 3]],
-    wq: f64,
-    inv_k0: f64,
-    inv_k0_2: f64,
-    eps: &C3,
-    mu_inv: &[C; 3],
-) {
-    match which {
-        0 => {
-            for i in 0..nb {
-                let ci_ = cu[i];
-                let wi = w[i];
-                for j in 0..nb {
-                    let cj = cu[j];
-                    let wj = w[j];
-                    let k_curl =
-                        mu_inv[0] * (ci_[0] * cj[0]) + mu_inv[1] * (ci_[1] * cj[1]) + mu_inv[2] * (ci_[2] * cj[2]);
-                    let mut m_eps = c(0.0, 0.0);
-                    for a in 0..3 {
-                        for b in 0..3 {
-                            m_eps += eps[a][b] * (wi[a] * wj[b]);
-                        }
-                    }
-                    ke[i * nb + j] += (k_curl * inv_k0_2 - m_eps) * wq;
-                }
-            }
-        }
-        1 => {
-            // A1 = (j / k0) int [ (y_hat x N_i) . mu_r^-1 (curl N_j) - (curl N_i) . mu_r^-1 (y_hat x N_j) ] dOmega
-            // with y_hat x N = (N_z, 0, -N_x)
-            let pref = c(0.0, inv_k0 * wq);
-            for i in 0..nb {
-                let wi = w[i];
-                let ci_ = cu[i];
-                for j in 0..nb {
-                    let wj = w[j];
-                    let cj = cu[j];
-                    let term =
-                        mu_inv[0] * (wi[2] * cj[0] - ci_[0] * wj[2]) + mu_inv[2] * (ci_[2] * wj[0] - wi[0] * cj[2]);
-                    ke[i * nb + j] += pref * term;
-                }
-            }
-        }
-        _ => {
-            // A2 = int (y_hat x N_i) . mu_r^-1 (y_hat x N_j) dOmega
-            for i in 0..nb {
-                let wi = w[i];
-                for j in 0..nb {
-                    let wj = w[j];
-                    let term = mu_inv[0] * (wi[2] * wj[2]) + mu_inv[2] * (wi[0] * wj[0]);
-                    ke[i * nb + j] += term * wq;
-                }
-            }
-        }
-    }
-}
-
-/// Assembles `(A0, A1, A2)` over all full Nedelec DOFs on straight and curved tetrahedra.
+/// Assembles `(A0, A1, A2)` over all full Nedelec DOFs on straight and curved tetrahedra with quadrature-point PML pullback.
 fn assemble_bloch_matrices(
     mesh: &Discretisation,
     ned: &Ned3,
     k0: f64,
     eps: &[C3],
-    mu_inv: &[[C; 3]],
+    mu_inv: &[C3],
+    pml: Option<&EmPmlTable>,
 ) -> (CCsr, CCsr, CCsr) {
     let geo = geometry(mesh);
     let quad = quad_rule(3, 4);
     let curved_cell: Vec<bool> = (0..mesh.n_cells()).map(|ci| mesh.cell_is_curved(ci)).collect();
     let cquad = quad_rule_collapsed(CURVED_QUAD_DEGREE);
+    let cshape2: Vec<(Vec<f64>, Vec<f64>)> = cquad.lam.iter().map(|l| shape(&[l[0], l[1], l[2], l[3]], 2)).collect();
     let nb = ned.nb();
     let n = ned.n_dofs();
     let nc = mesh.n_cells();
@@ -171,22 +119,57 @@ fn assemble_bloch_matrices(
                         gs[b][k] = geo.g[ci * 12 + b * 3 + k];
                     }
                 }
+                let is_pml = pml.is_some_and(|p| p.is_pml(ci));
                 ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
                 if curved_cell[ci] {
-                    let ct = CurvedTet::new(mesh.cell_geometry_nodes(ci));
+                    let nodes10 = mesh.cell_geometry_nodes(ci);
+                    let ct = CurvedTet::new(nodes10);
                     for q in 0..cquad.w.len() {
                         let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
                         let (gq, det) = ct.jacobian(&lam);
                         basis3(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
                         let wq = cquad.w[q] * det.abs() / 6.0;
-                        add_bloch_point(which, nb, &mut ke, &w, &cu, wq, inv_k0, inv_k0_2, &eps[ci], &mu_inv[ci]);
+                        let (ep, mui) = if let Some(p) = pml.filter(|_| is_pml) {
+                            let nv10 = &cshape2[q].0;
+                            let mut xq = [0.0; 3];
+                            for a in 0..10 {
+                                for k in 0..3 {
+                                    xq[k] += nv10[a] * nodes10[a][k];
+                                }
+                            }
+                            p.eval_3d(ci, eps[ci], mu_inv[ci], xq)
+                        } else {
+                            (eps[ci], mu_inv[ci])
+                        };
+                        add_bloch_point_c3(which, nb, &mut ke, &w, &cu, wq, inv_k0, inv_k0_2, &ep, &mui);
+                    }
+                } else if let Some(p) = pml.filter(|_| is_pml) {
+                    let vs = mesh.cell(ci);
+                    let pts = [
+                        mesh.point(vs[0] as usize),
+                        mesh.point(vs[1] as usize),
+                        mesh.point(vs[2] as usize),
+                        mesh.point(vs[3] as usize),
+                    ];
+                    for q in 0..cquad.w.len() {
+                        let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
+                        basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                        let wq = cquad.w[q] * geo.vol[ci];
+                        let mut xq = [0.0; 3];
+                        for b in 0..4 {
+                            for k in 0..3 {
+                                xq[k] += lam[b] * pts[b][k];
+                            }
+                        }
+                        let (ep, mui) = p.eval_3d(ci, eps[ci], mu_inv[ci], xq);
+                        add_bloch_point_c3(which, nb, &mut ke, &w, &cu, wq, inv_k0, inv_k0_2, &ep, &mui);
                     }
                 } else {
                     for q in 0..quad.w.len() {
                         let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
                         basis3(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
                         let wq = quad.w[q] * geo.vol[ci];
-                        add_bloch_point(which, nb, &mut ke, &w, &cu, wq, inv_k0, inv_k0_2, &eps[ci], &mu_inv[ci]);
+                        add_bloch_point_c3(which, nb, &mut ke, &w, &cu, wq, inv_k0, inv_k0_2, &eps[ci], &mu_inv[ci]);
                     }
                 }
                 coo.push_block(&ned.cell_dofs[ci], &ned.cell_dofs[ci], &ke);
@@ -211,9 +194,11 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
     if n_modes < 1 {
         return Err("at least one mode is needed".into());
     }
-    if let Some((dom, _)) = problem.materials.pml.iter().find(|(_, p)| p.y != PmlDir::Off) {
+    if let Some((dom, _)) = problem.materials.pml.iter().find(|(_, p)| {
+        p.y != PmlDir::Off || matches!(p.coord, PmlCoord::Spherical { thickness, .. } if thickness > 0.0)
+    }) {
         return Err(format!(
-            "the bloch study is periodic along y and cannot use a y-absorbing PML (domain {dom}); use x or z for transverse radiation"
+            "the bloch study is periodic along y and cannot use a y-absorbing PML (domain {dom}); use x or z (or a cylindrical radial shell around y) for transverse radiation"
         ));
     }
 
@@ -256,43 +241,9 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
     let eps_phys_re: Vec<[[f64; 3]; 3]> = tens.iter().map(|(re, _)| *re).collect();
     let d_omega_eps = problem.cell_d_omega_eps(mesh)?;
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let has_pml = problem.materials.has_pml();
-    let pml_cells: Vec<bool> = (0..mesh.n_cells())
-        .map(|ci| {
-            problem
-                .materials
-                .pml
-                .get(&mesh.cell_labels[ci])
-                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
-        })
-        .collect();
-    let stretch = if has_pml { Some(cell_stretches(mesh, &problem.materials.pml)) } else { None };
-    let mut eps: Vec<C3> = Vec::with_capacity(mesh.n_cells());
-    let mut mu_inv: Vec<[C; 3]> = Vec::with_capacity(mesh.n_cells());
-    for ci in 0..mesh.n_cells() {
-        let (sx, sy, sz) =
-            stretch.as_ref().map_or((c(1.0, 0.0), c(1.0, 0.0), c(1.0, 0.0)), |s| (s[ci][0], s[ci][1], s[ci][2]));
-        let lam = [sy * sz / sx, sx * sz / sy, sx * sy / sz];
-        let pml_here = stretch.is_some()
-            && (sx.re != 1.0 || sx.im != 0.0 || sy.re != 1.0 || sy.im != 0.0 || sz.re != 1.0 || sz.im != 0.0);
-        let (t_re, t_im) = tens[ci];
-        let (sv, det) = ([sx, sy, sz], sx * sy * sz);
-        let mut e = [[c(0.0, 0.0); 3]; 3];
-        for a in 0..3 {
-            for b in 0..3 {
-                let ec = c(t_re[a][b], -t_im[a][b]);
-                e[a][b] = if pml_here { det * ec / (sv[a] * sv[b]) } else { ec };
-            }
-        }
-        eps.push(e);
-        let one = c(1.0, 0.0);
-        let mu0 = c(1.0 / mur[ci], 0.0);
-        mu_inv.push([
-            mu0 / if pml_here { lam[0] } else { one },
-            mu0 / if pml_here { lam[1] } else { one },
-            mu0 / if pml_here { lam[2] } else { one },
-        ]);
-    }
+    let (eps, mu_inv) = simplex_cell_materials_3d(mesh, problem)?;
+    let pml_table = EmPmlTable::from_simplex(mesh, &problem.materials, freq, true, false);
+    let pml_cells = pml_table.pml_cells_mask();
 
     let mut tl = Instant::now();
     let vkey = vertex_keys(mesh, &matches);
@@ -300,7 +251,8 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
     let n = ned.n_dofs();
     let k0 = 2.0 * PI * freq / C0;
     let lambda0 = C0 / freq;
-    let (mut a0_full, a1_full, a2_full) = assemble_bloch_matrices(mesh, &ned, k0, &eps, &mu_inv);
+    let (mut a0_full, a1_full, a2_full) =
+        assemble_bloch_matrices(mesh, &ned, k0, &eps, &mu_inv, pml_table.has_any().then_some(&pml_table));
     lap(&mut tl, "bloch3d: numbering and assembly");
 
     let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty();
@@ -602,6 +554,375 @@ pub fn bloch_fields_cells(
     let log = vec![
         format!(
             "3D Bloch Nedelec order {}, {} dofs ({} after constraints), f = {:.4e} Hz, pitch = {:.4e} m, shift n_B = {:.6} (BZ {}), Krylov dim {}{}",
+            asm.order,
+            asm.n,
+            asm.nred,
+            asm.freq,
+            asm.period_y,
+            asm.sigma,
+            asm.brillouin_zone,
+            solved.dim,
+            if solved.converged { "" } else { " (not every pair converged; those are omitted)" }
+        ),
+        "polarization axes: lateral x, normal z, propagation y".into(),
+    ];
+
+    Ok(SolveResult {
+        physics: "ems".into(),
+        study: "bloch".into(),
+        order: 2,
+        dim: 3,
+        solutions,
+        scalars,
+        log,
+        dofs: asm.n,
+        seconds: 0.0,
+    })
+}
+
+// ------------------------------------------------------------------ Native 3D MixedDiscretisation (`Tet + Prism + Hex`) Bloch solver
+
+/// Solves a 3D `Study::Bloch` problem natively on `Tet + Prism + Hex` (`MixedDiscretisation`).
+pub fn solve_bloch_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let (asm, ned_mixed) = assemble_bloch_mixed(mixed, problem)?;
+    let solved = solve_bloch_eigen(&asm)?;
+    let mut r = bloch_fields_cells_mixed(mesh, mixed, &ned_mixed, problem, &asm, &solved)?;
+    r.seconds = t0.elapsed().as_secs_f64();
+    Ok(r)
+}
+
+pub fn assemble_bloch_mixed(
+    mesh: &MixedDiscretisation,
+    problem: &Problem,
+) -> Result<(BlochAssembly, NedMixed), String> {
+    if mesh.dim != 3 {
+        return Err("the bloch study of EM waves needs a 3D mesh".into());
+    }
+    let Study::Bloch { freq, n_target, n_modes, brillouin_zone } = problem.study.clone() else {
+        return Err("assemble_bloch_mixed requires a Bloch study".into());
+    };
+    if !(freq > 0.0 && freq.is_finite()) {
+        return Err("bloch frequency must be positive and finite".into());
+    }
+    if n_modes < 1 {
+        return Err("at least one mode is needed".into());
+    }
+    if let Some((dom, _)) = problem.materials.pml.iter().find(|(_, p)| {
+        p.y != PmlDir::Off || matches!(p.coord, PmlCoord::Spherical { thickness, .. } if thickness > 0.0)
+    }) {
+        return Err(format!(
+            "the bloch study is periodic along y and cannot use a y-absorbing PML (domain {dom}); use x or z (or a cylindrical radial shell around y) for transverse radiation"
+        ));
+    }
+
+    let mut matches = Vec::with_capacity(problem.periodic.len());
+    let mut is_y_pair = Vec::with_capacity(problem.periodic.len());
+    let mut period_y: Option<f64> = None;
+    for p in &problem.periodic {
+        let mt = match_vertices_mixed(mesh, p)?;
+        let sn = (mt.shift[0] * mt.shift[0] + mt.shift[1] * mt.shift[1] + mt.shift[2] * mt.shift[2]).sqrt();
+        if sn <= 0.0 {
+            return Err("periodic pair has zero translation vector".into());
+        }
+        if mt.shift[1].abs() > 0.99 * sn {
+            let ly = mt.shift[1].abs();
+            if let Some(prev) = period_y {
+                if (ly - prev).abs() > 1e-6 * prev.max(1e-30) {
+                    return Err(format!("conflicting y-periodic pitches in bloch study ({prev:.6e} m vs {ly:.6e} m)"));
+                }
+            } else {
+                period_y = Some(ly);
+            }
+            is_y_pair.push(true);
+        } else {
+            if mt.shift[1].abs() > 1e-6 * sn {
+                return Err(
+                    "transverse periodic pairs in the bloch study must have zero translation along the y propagation axis"
+                        .into(),
+                );
+            }
+            is_y_pair.push(false);
+        }
+        matches.push(mt);
+    }
+    let period_y = period_y.ok_or_else(|| {
+        "the bloch study requires a periodic boundary condition along the y propagation axis".to_string()
+    })?;
+
+    let order = if problem.order == 1 { 1 } else { 2 };
+    let mats = MixedCellMaterials::from_problem(mesh, problem)?;
+    let pml_table = EmPmlTable::from_mixed(mesh, &problem.materials, freq, true, false);
+    let pml_cells = pml_table.pml_cells_mask();
+
+    let mut tl = Instant::now();
+    let vkey = vertex_keys_mixed(mesh, &matches);
+    let ned = NedMixed::with_vkey(mesh, order, vkey);
+    let n = ned.n_dofs;
+    let k0 = 2.0 * PI * freq / C0;
+    let lambda0 = C0 / freq;
+    let (mut a0_full, a1_full, a2_full) = assemble_bloch_matrices_mixed(
+        mesh,
+        &ned,
+        k0,
+        &mats.eps_0,
+        &mats.mu_inv_0,
+        pml_table.has_any().then_some(&pml_table),
+    );
+    lap(&mut tl, "bloch3d(mixed): numbering and assembly");
+
+    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty();
+    let ibc_jj = if has_sheets {
+        Some(assemble_ibc_and_jj_3d_mixed(mesh, &ned, &problem.pec, &problem.surface_impedance, &[], freq)?)
+    } else {
+        None
+    };
+    if let Some((ref ij, _, _, _)) = ibc_jj {
+        if ij.kc_ibc_full.nnz() > 0 {
+            a0_full = a0_full.add_scaled(&ij.kc_ibc_full, c(1.0 / (k0 * k0), 0.0));
+        }
+    }
+
+    let periodic_labels: Vec<i32> =
+        problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let (sym_pec_facets, sym_pmc_facets) = symmetry_facet_flags_mixed(mesh, problem.symmetry)?;
+
+    let mut fixed_set = std::collections::BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        let label = mesh.facet_labels[f];
+        let is_ext_pec = mesh.exterior_facets[f]
+            && !periodic_labels.contains(&label)
+            && (sym_pec_facets[f]
+                || (!problem.pmc.contains(&label) && !sym_pmc_facets[f] && !ibc_labels.contains(&label)));
+        if is_ext_pec {
+            for d in ned.facet_dofs(mesh, f) {
+                fixed_set.insert(d);
+            }
+        }
+    }
+    if let Some((_, ref pec_fcs, _, _)) = ibc_jj {
+        for &f in pec_fcs {
+            for d in ned.facet_dofs(mesh, f) {
+                fixed_set.insert(d);
+            }
+        }
+    }
+    let fixed: Vec<usize> = fixed_set.into_iter().collect();
+
+    let mut relations = Vec::new();
+    for ((p, mt), &y_axis) in problem.periodic.iter().zip(&matches).zip(&is_y_pair) {
+        let phase_eff = if y_axis { 0.0 } else { p.phase };
+        relations.extend(ned_mixed_periodic_relations(mesh, &ned, &mt.src_facets, &mt.map, phase_eff)?);
+    }
+    let red = femcore::periodic::Reduction::build(n, &relations, &fixed);
+    let pmat = red.prolong();
+    let nred = red.n_reduced();
+    if nred == 0 || n_modes >= 2 * nred {
+        return Err("number of modes exceeds the reduced Bloch degree-of-freedom count".into());
+    }
+
+    let a0_red = femcore::periodic::congruence(&pmat, &a0_full);
+    let a1_red = femcore::periodic::congruence(&pmat, &a1_full);
+    let a2_red = femcore::periodic::congruence(&pmat, &a2_full);
+    lap(&mut tl, "bloch3d(mixed): periodic congruence reduction");
+
+    let (lo, _) = mesh.bbox();
+    let y_min = lo[1];
+    let sigma = n_target + (brillouin_zone - 1) as f64 * (lambda0 / period_y);
+
+    Ok((
+        BlochAssembly {
+            order,
+            n,
+            nred,
+            ned: Ned3::empty(order),
+            red,
+            a0_red,
+            a1_red,
+            a2_red,
+            freq,
+            k0,
+            lambda0,
+            period_y,
+            y_min,
+            n_target,
+            brillouin_zone,
+            sigma,
+            n_modes,
+            mu_inv: mats.mu_inv_0,
+            pml_cells,
+            eps_phys_re: mats.eps_phys_re,
+            d_omega_eps: mats.d_omega_eps,
+            mur_phys: mats.mur_phys,
+        },
+        ned,
+    ))
+}
+
+pub fn bloch_fields_cells_mixed(
+    mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    ned: &NedMixed,
+    problem: &Problem,
+    asm: &BlochAssembly,
+    solved: &BlochSolve,
+) -> Result<SolveResult, String> {
+    if solved.modes.is_empty() {
+        return Err("no Bloch modes converged near the target index".into());
+    }
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
+    let isos: Vec<IsoparametricCell> = (0..mixed.n_cells()).map(|ci| IsoparametricCell::from_mesh(mixed, ci)).collect();
+    let nsc = simplex.n_cells();
+    let nloc = 10usize;
+    let omega = (2.0 * PI * asm.freq).max(1e-300);
+
+    let mut solutions = Vec::with_capacity(solved.modes.len());
+    let mut scalars = Vec::new();
+
+    for (j, &(n_b, vec_idx)) in solved.modes.iter().enumerate() {
+        let x = asm.red.expand(&solved.vectors[vec_idx]);
+        let k_y = n_b * asm.k0;
+        let j_ky = c(0.0, 1.0) * k_y;
+
+        let mut scratch = NedEvalScratch::new();
+        let mut w = Vec::new();
+        let mut cu = Vec::new();
+        let sampled = proj.sample_simplex_cell_nodes(mixed, 2, |mc, xi| {
+            let jac = eval_cell_basis_3d(mixed, ned, mc, &isos[mc], xi, &mut scratch, &mut w, &mut cu);
+            let cdofs = ned.cell_dofs(mc);
+            let mut val = [c(0.0, 0.0); 3];
+            let mut cval = [c(0.0, 0.0); 3];
+            for (s, &gd) in cdofs.iter().enumerate() {
+                let coef = x[gd];
+                for kk in 0..3 {
+                    val[kk] += coef * w[s][kk];
+                    cval[kk] += coef * cu[s][kk];
+                }
+            }
+            let dy = jac.x[1] - asm.y_min;
+            let phase_y = (-j_ky * dy).exp();
+            let ep = [val[0] * phase_y, val[1] * phase_y, val[2] * phase_y];
+            let ck = [(cval[0] - j_ky * val[2]) * phase_y, cval[1] * phase_y, (cval[2] + j_ky * val[0]) * phase_y];
+            (ep, ck)
+        });
+        let e_phys: Vec<[C; 3]> = sampled.iter().map(|p| p.0).collect();
+        let curl_k_phys: Vec<[C; 3]> = sampled.iter().map(|p| p.1).collect();
+
+        let big =
+            e_phys
+                .iter()
+                .flat_map(|v| v.iter())
+                .cloned()
+                .fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+        let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+        let mag: Vec<f64> =
+            e_phys.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+        let mag_xz: Vec<f64> = e_phys.iter().map(|v| (v[0].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+        let mag_y: Vec<f64> = e_phys.iter().map(|v| v[1].norm()).collect();
+        let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
+        let avg = |vals: Vec<f64>| node_average(&simplex, &vals.iter().map(|v| v * s).collect::<Vec<f64>>(), 1, 2);
+
+        let fields = vec![
+            Field::scalar("|E|", "a.u.", avg(mag)),
+            Field::scalar("|Exz|", "a.u.", avg(mag_xz)),
+            Field::scalar("|Ey|", "a.u.", avg(mag_y)),
+            Field::scalar("Re Ex", "a.u.", avg(e_phys.iter().map(|v| (v[0] * rot).re).collect())),
+            Field::scalar("Re Ey", "a.u.", avg(e_phys.iter().map(|v| (v[1] * rot).re).collect())),
+            Field::scalar("Re Ez", "a.u.", avg(e_phys.iter().map(|v| (v[2] * rot).re).collect())),
+        ];
+
+        let e_scale = rot * s;
+        let mut cells = CellFields::new(&simplex, 2);
+        for (k, name) in ["Ex", "Ey", "Ez"].iter().enumerate() {
+            let z: Vec<C> = e_phys.iter().map(|v| v[k] * e_scale).collect();
+            cells.push_complex(*name, "a.u.", z.iter().map(|v| v.re).collect(), z.iter().map(|v| v.im).collect());
+        }
+
+        let h_prefactor = c(0.0, 1.0 / (omega * MU0)) * e_scale;
+        let mut h_phys = vec![[c(0.0, 0.0); 3]; nsc * nloc];
+        for sc in 0..nsc {
+            let mc = proj.parent_cell(sc);
+            let mui = c(1.0 / asm.mur_phys[mc], 0.0);
+            for a in 0..nloc {
+                let idx = sc * nloc + a;
+                let ck = curl_k_phys[idx];
+                h_phys[idx] = [ck[0] * mui * h_prefactor, ck[1] * mui * h_prefactor, ck[2] * mui * h_prefactor];
+            }
+        }
+        for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
+            let z: Vec<C> = h_phys.iter().map(|v| v[k]).collect();
+            cells.push_complex(*name, "A/m", z.iter().map(|v| v.re).collect(), z.iter().map(|v| v.im).collect());
+        }
+
+        let m_metrics = compute_3d_mode_metrics_mixed(
+            mixed,
+            ned,
+            &isos,
+            &x,
+            k_y,
+            omega,
+            &asm.pml_cells,
+            &asm.eps_phys_re,
+            &asm.d_omega_eps,
+            &asm.mur_phys,
+            true,
+        );
+
+        let mode_num = j + 1;
+        let lossy = n_b.im.abs() > 1e-12 * n_b.re.abs().max(1.0);
+        let label = if lossy {
+            format!("mode {mode_num}: n_B = {:.6} {:+.3e}i", n_b.re, n_b.im)
+        } else {
+            format!("mode {mode_num}: n_B = {:.6}", n_b.re)
+        };
+        solutions.push(Solution {
+            label,
+            fields,
+            cell_fields: cell_fields_of(&cells),
+            value: Some(n_b.re),
+            eigenvalue: Some([n_b.re, n_b.im]),
+        });
+
+        scalars.push((format!("n_B re {mode_num}"), Scalar::Num(n_b.re)));
+        scalars.push((format!("n_B im {mode_num}"), Scalar::Num(n_b.im)));
+        if lossy {
+            scalars.push((format!("n_B {mode_num}"), Scalar::Text(format!("{:.8} {:+.4e}i", n_b.re, n_b.im))));
+        } else {
+            scalars.push((format!("n_B {mode_num}"), Scalar::Num(n_b.re)));
+        }
+        let alpha_db_cm = ALPHA_DB_PER_CM_FROM_NEG_IM_KY * (-k_y.im);
+        scalars.push((format!("alpha {mode_num} (dB/cm)"), Scalar::Num(alpha_db_cm)));
+        scalars.push((format!("k_y re {mode_num} (rad/m)"), Scalar::Num(k_y.re)));
+        scalars.push((format!("k_y im {mode_num} (rad/m)"), Scalar::Num(k_y.im)));
+        scalars.push((format!("phase {mode_num} (rad)"), Scalar::Num(k_y.re * asm.period_y)));
+        scalars.push((format!("v_g {mode_num} (m/s)"), Scalar::Num(m_metrics.vg)));
+        if m_metrics.vg.abs() > 1e-9 * C0 {
+            scalars.push((format!("n_g {mode_num}"), Scalar::Num(C0 / m_metrics.vg)));
+        }
+        scalars.push((format!("Ex share {mode_num}"), Scalar::Num(m_metrics.comp_shares[0])));
+        scalars.push((format!("Ey share {mode_num}"), Scalar::Num(m_metrics.comp_shares[1])));
+        scalars.push((format!("Ez share {mode_num}"), Scalar::Num(m_metrics.comp_shares[2])));
+        for &(dom_label, share) in &m_metrics.domain_shares {
+            scalars.push((format!("share in domain {dom_label} {mode_num}"), Scalar::Num(share)));
+        }
+        scalars.push((format!("layer fraction {mode_num}"), Scalar::Num(m_metrics.layer_fraction)));
+    }
+
+    scalars.push(
+        nyx_physics::FieldFrame {
+            lateral: 0,
+            normal: 2,
+            propagation: 1,
+            left_handed: true,
+            outside: crate::optical::absorbing_domains(problem),
+        }
+        .scalar(),
+    );
+
+    let log = vec![
+        format!(
+            "3D Bloch Nedelec mixed order {}, {} dofs ({} after constraints), f = {:.4e} Hz, pitch = {:.4e} m, shift n_B = {:.6} (BZ {}), Krylov dim {}{}",
             asm.order,
             asm.n,
             asm.nred,

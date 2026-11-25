@@ -395,16 +395,89 @@ pub fn curve_boundary_edges(mesh: &mut CellMesh<3>, dom: &dyn Domain3) -> CurveR
     report
 }
 
-/// The same for a solver mesh (after an adaptation, say): replaces its curved edges.
+/// The same for a solver mesh (after an adaptation, say): curves edges of active `dom` regions while
+/// leaving any skipped/PML cells and pre-existing lockstep PML `edge_nodes` untouched.
 pub fn curve_solver_mesh(mesh: &mut SimplexMesh, dom: &dyn Domain3) -> CurveReport {
     if mesh.dim != 3 {
         return CurveReport::default();
     }
-    let cells: Vec<[u32; 4]> = (0..mesh.n_cells()).map(|c| [mesh.cell(c)[0], mesh.cell(c)[1], mesh.cell(c)[2], mesh.cell(c)[3]]).collect();
-    let facets: Vec<[u32; 3]> = (0..mesh.n_facets()).map(|f| [mesh.facet(f)[0], mesh.facet(f)[1], mesh.facet(f)[2]]).collect();
+    let active_labels: std::collections::HashSet<i32> = (0..dom.n_regions() as u32)
+        .filter(|&r| {
+            let (lo, hi) = dom.region_box(r);
+            lo[0] <= hi[0] && lo[1] <= hi[1] && lo[2] <= hi[2]
+        })
+        .map(|r| dom.region_label(r))
+        .collect();
+    let has_skipped = !active_labels.is_empty()
+        && (0..mesh.n_cells()).any(|c| !active_labels.contains(&mesh.cell_labels[c]));
+
+    if !has_skipped {
+        let cells: Vec<[u32; 4]> =
+            (0..mesh.n_cells()).map(|c| [mesh.cell(c)[0], mesh.cell(c)[1], mesh.cell(c)[2], mesh.cell(c)[3]]).collect();
+        let facets: Vec<[u32; 3]> =
+            (0..mesh.n_facets()).map(|f| [mesh.facet(f)[0], mesh.facet(f)[1], mesh.facet(f)[2]]).collect();
+        let pts = mesh.points.clone();
+        let qp_backup = mesh.qp_edge_list();
+        let (nodes, report) = curve_edges(
+            &|v| [pts[3 * v as usize], pts[3 * v as usize + 1], pts[3 * v as usize + 2]],
+            &cells,
+            &facets,
+            dom,
+        );
+        mesh.set_edge_nodes(&nodes);
+        if !qp_backup.is_empty() {
+            mesh.set_qp_edges(&qp_backup);
+        }
+        return report;
+    }
+
+    let mut phys_v = vec![false; mesh.n_points()];
+    let mut skipped_edges: std::collections::BTreeSet<[u32; 2]> = std::collections::BTreeSet::new();
+    let mut cells: Vec<[u32; 4]> = Vec::new();
+    for c in 0..mesh.n_cells() {
+        let cv = mesh.cell(c);
+        let arr = [cv[0], cv[1], cv[2], cv[3]];
+        if active_labels.contains(&mesh.cell_labels[c]) {
+            for &v in &arr {
+                phys_v[v as usize] = true;
+            }
+            cells.push(arr);
+        } else {
+            for &(i, j) in &EDGES {
+                skipped_edges.insert(pair(arr[i], arr[j]));
+            }
+        }
+    }
+    if cells.is_empty() {
+        return CurveReport::default();
+    }
+    let facets: Vec<[u32; 3]> = (0..mesh.n_facets())
+        .filter_map(|f| {
+            let fv = mesh.facet(f);
+            let tri = [fv[0], fv[1], fv[2]];
+            tri.iter().all(|&v| phys_v[v as usize]).then_some(tri)
+        })
+        .collect();
+    let existing = mesh.edge_node_list();
+    let qp_backup = mesh.qp_edge_list();
     let pts = mesh.points.clone();
-    let (nodes, report) = curve_edges(&|v| [pts[3 * v as usize], pts[3 * v as usize + 1], pts[3 * v as usize + 2]], &cells, &facets, dom);
-    mesh.set_edge_nodes(&nodes);
+    let (phys_nodes, report) = curve_edges(
+        &|v| [pts[3 * v as usize], pts[3 * v as usize + 1], pts[3 * v as usize + 2]],
+        &cells,
+        &facets,
+        dom,
+    );
+    let mut merged: std::collections::BTreeMap<[u32; 2], [f64; 3]> = phys_nodes.into_iter().collect();
+    for (pr, q) in existing {
+        if skipped_edges.contains(&pr) {
+            merged.insert(pr, q);
+        }
+    }
+    let final_nodes: Vec<([u32; 2], [f64; 3])> = merged.into_iter().collect();
+    mesh.set_edge_nodes(&final_nodes);
+    if !qp_backup.is_empty() {
+        mesh.set_qp_edges(&qp_backup);
+    }
     report
 }
 

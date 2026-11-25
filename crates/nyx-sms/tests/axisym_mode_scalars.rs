@@ -142,9 +142,18 @@ fn a_lossy_mode_has_numeric_frequency_parts_and_shares_outside_the_layer() {
     let parts = [common::part(4.0, 0.0, 6.0, 0.4, 1, Some(0.1)), common::part(6.0, 0.0, 7.0, 0.4, 2, Some(0.1))];
     let mesh = common::parts_mesh(&parts, 0.1);
     let mut sp = problem(4, 0.0, &[1, 2]);
-    sp.materials
-        .pml
-        .insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 });
+    sp.materials.pml.insert(
+        2,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 3.0,
+            order: 2.0,
+            re: 1.0,
+            ..Default::default()
+        },
+    );
     let (r, _) = solve_solid_axisym(&mesh, &sp, 0.0).unwrap();
     let mut lossy = 0;
     for (j, s) in r.solutions.iter().enumerate() {

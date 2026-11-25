@@ -87,3 +87,54 @@ nyx.analyse(analysis="capacitance_matrix", physics="dfs")
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn monty_script_drives_outward_absorbing_layers_and_pml_diagnostics() {
+    let script = r#"
+nyx.project_new(title="Monty Outward PML", dim=2)
+nyx.add_circle(name="clad_c", center=[0.0, 0.0], r=2.0e-6)
+nyx.add_circle(name="core_c", center=[0.0, 0.0], r=1.0e-6)
+nyx.add_overlay(
+    name="regions",
+    regions=[
+        {"name": "cladding", "input": "clad_c"},
+        {"name": "core", "input": "core_c"},
+    ],
+)
+nyx.add_absorbing_layer(
+    name="pml",
+    coord="Cylindrical",
+    thickness=0.8e-6,
+    layers=5,
+    grading=2.0,
+    layer_grading=2.0,
+)
+nyx.set_mesh(h=0.4e-6, pml_mode="auto")
+nyx.add_physics(
+    physics="ems",
+    study="modes",
+    order=2,
+    study_params={"freq": 299792458.0 / 1.55e-6, "n_target": 2.4, "n_modes": 2},
+)
+nyx.set_material(physics="ems", region="core", material={"eps_r": 12.0, "mu_r": 1.0})
+nyx.set_material(physics="ems", region="cladding*", material={"eps_r": 1.0, "mu_r": 1.0})
+nyx.add_pml_conditions(physics="ems", auto_scale=True)
+nyx.mesh_build()
+nyx.pml_diagnostics()
+"#;
+
+    let root = temp_root("pml_e2e");
+    let mut e = Engine::new();
+    let opts = Options { root: root.clone(), worker: Some(worker()) };
+    let limits = Limits::default();
+    host::check(&mut e, "pml_e2e.nys", script, &limits, &opts)
+        .expect("Monty static check must accept add_absorbing_layer, set_mesh(pml_mode=...), add_pml_conditions, and pml_diagnostics");
+
+    let out = host::run(&mut e, "pml_e2e.nys", script, &limits, &opts).unwrap();
+    let v = &out.value;
+    assert!(v["element_counts"]["quad"].as_u64().unwrap_or(0) > 0, "expected structured Quad elements: {v}");
+    assert!(v["min_pml_scaled_jacobian"].as_f64().unwrap_or(0.0) > 0.5, "expected positive PML Jacobian: {v}");
+    assert_eq!(v["s_dist_bounds"], serde_json::json!([0.0, 1.0]), "{v}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -1667,13 +1667,13 @@
       2,
       3
     ],
-    "doc": "Absorbing layers of `thickness` around a window on some sides; splits every matching region into the physical part and one piece per side combination.",
+    "doc": "Absorbing layers around a window (`mode = \"Inward\"`) or extruded outward from the physical exterior (`mode = \"Outward\"`, `window` omitted); splits or extrudes matching regions into `<region>.pml_<piece>` sub-domains across Cartesian, Cylindrical, or Spherical topologies.",
     "fields": [
       {
         "default": null,
-        "doc": "the feature that bounds the physical window",
+        "doc": "the feature that bounds the physical window (required when mode is Inward; omitted for Outward)",
         "name": "window",
-        "required": true,
+        "required": false,
         "type": "Feature"
       },
       {
@@ -1684,32 +1684,67 @@
         "type": "Sides"
       },
       {
-        "default": null,
-        "doc": "layer thickness",
+        "default": "auto",
+        "doc": "layer thickness in metres (or \"auto\" / -1)",
         "name": "thickness",
-        "required": true,
+        "required": false,
         "type": "Expr"
       },
       {
-        "default": null,
-        "doc": "number of element layers across it",
+        "default": "auto",
+        "doc": "number of element layers across it (or \"auto\" / -1)",
         "name": "layers",
-        "required": true,
+        "required": false,
         "type": "Expr"
       },
       {
-        "default": null,
+        "default": 2.0,
         "doc": "order of the polynomial profile",
         "name": "grading",
-        "required": true,
+        "required": false,
         "type": "Expr"
       },
       {
         "default": [],
-        "doc": "regions to split (empty: all)",
+        "doc": "regions to split or extrude (empty: all)",
         "name": "regions",
         "required": false,
         "type": "TextList"
+      },
+      {
+        "default": "Inward",
+        "doc": "growth mode: Inward (around window) or Outward (exterior boundary extrusion)",
+        "name": "mode",
+        "required": false,
+        "type": "PmlMode"
+      },
+      {
+        "default": "Auto",
+        "doc": "coordinate topology: Auto, Cartesian, Cylindrical, or Spherical",
+        "name": "coord",
+        "required": false,
+        "type": "PmlCoord"
+      },
+      {
+        "default": null,
+        "doc": "optional centre [x, y, z] for Cylindrical or Spherical shells",
+        "name": "center",
+        "required": false,
+        "type": "Exprs(3)"
+      },
+      {
+        "default": null,
+        "doc": "optional axis (X, Y, or Z) for Cylindrical shells",
+        "name": "axis",
+        "required": false,
+        "type": "Axis"
+      },
+      {
+        "default": null,
+        "doc": "geometric mesh layer grading ratio (>= 1; 1 is uniform)",
+        "name": "layer_grading",
+        "required": false,
+        "type": "Expr"
       }
     ],
     "group": "boundary",
@@ -1717,7 +1752,49 @@
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "axis": {
+          "default": null,
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "optional axis (X, Y, or Z) for Cylindrical shells"
+        },
+        "center": {
+          "default": null,
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "optional centre [x, y, z] for Cylindrical or Spherical shells",
+          "type": "array"
+        },
+        "coord": {
+          "default": "Auto",
+          "enum": [
+            "Auto",
+            "Cartesian",
+            "Cylindrical",
+            "Spherical",
+            "auto",
+            "cartesian",
+            "cylindrical",
+            "spherical"
+          ],
+          "title": "coordinate topology: Auto, Cartesian, Cylindrical, or Spherical"
+        },
         "grading": {
+          "default": 2.0,
           "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
           "oneOf": [
             {
@@ -1729,7 +1806,8 @@
           ],
           "title": "order of the polynomial profile"
         },
-        "layers": {
+        "layer_grading": {
+          "default": null,
           "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
           "oneOf": [
             {
@@ -1739,14 +1817,37 @@
               "type": "string"
             }
           ],
-          "title": "number of element layers across it"
+          "title": "geometric mesh layer grading ratio (>= 1; 1 is uniform)"
+        },
+        "layers": {
+          "default": "auto",
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "number of element layers across it (or \"auto\" / -1)"
+        },
+        "mode": {
+          "default": "Inward",
+          "enum": [
+            "Inward",
+            "Outward",
+            "inward",
+            "outward"
+          ],
+          "title": "growth mode: Inward (around window) or Outward (exterior boundary extrusion)"
         },
         "regions": {
           "default": [],
           "items": {
             "type": "string"
           },
-          "title": "regions to split (empty: all)",
+          "title": "regions to split or extrude (empty: all)",
           "type": "array"
         },
         "sides": {
@@ -1765,6 +1866,7 @@
           "type": "array"
         },
         "thickness": {
+          "default": "auto",
           "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
           "oneOf": [
             {
@@ -1774,9 +1876,10 @@
               "type": "string"
             }
           ],
-          "title": "layer thickness"
+          "title": "layer thickness in metres (or \"auto\" / -1)"
         },
         "window": {
+          "default": null,
           "description": "the name of an earlier feature (or its id)",
           "oneOf": [
             {
@@ -1786,15 +1889,10 @@
               "type": "integer"
             }
           ],
-          "title": "the feature that bounds the physical window"
+          "title": "the feature that bounds the physical window (required when mode is Inward; omitted for Outward)"
         }
       },
-      "required": [
-        "window",
-        "thickness",
-        "layers",
-        "grading"
-      ],
+      "required": [],
       "type": "object"
     },
     "title": "Absorbing layers",

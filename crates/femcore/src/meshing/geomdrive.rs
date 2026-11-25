@@ -14,12 +14,12 @@
 //! Problems are written with names: `MeshedGeom::domains("sapphire*")` is the region and its absorbing pieces, `boundary("rib|air")` the
 //! labels of an interface, `pml_materials` the stretching of every absorbing piece from the data of the `Pml` feature.
 
-use crate::mesh::SimplexMesh;
+use crate::mesh::{Mesh, SimplexMesh};
 use crate::meshing::mesher::{mesh_chains, Chain, Fill, MeshParams};
-use crate::props::{Pml, PmlDir};
+use crate::props::{Pml, PmlCoord, PmlDir};
 use geom::eval::{Evaluated, Tier};
 use geom::labels::LabelMap;
-use geom::model::{FeatureList, RegionKind};
+use geom::model::{FeatureList, PmlCoordKind, PmlGrowMode, PmlRole, RegionKind};
 use geom::query::DiscretizeOpts;
 use geom::select::{EntityKind, Selector};
 use std::collections::BTreeMap;
@@ -80,10 +80,14 @@ impl GeomMeshOpts {
     }
 }
 
-/// A meshed model: the mesh, the compiled names, and the evaluation they came from.
+/// A meshed model: the mesh, the uncut mixed-cell exchange mesh (when present), the compiled names,
+/// and the evaluation they came from.
 #[derive(Clone)]
 pub struct MeshedGeom {
     pub mesh: SimplexMesh,
+    /// Uncut mixed-cell `Mesh` (`CellMesh<2>` or `CellMesh<3>`) preserving `Quad`, `Prism`, and `Hex`
+    /// absorbing-layer elements without eager simplex splitting.
+    pub cells: Option<Mesh>,
     pub labels: LabelMap,
     /// shared, so that a cached mesh can be handed out many times without copying the evaluation
     pub eval: std::sync::Arc<Evaluated>,
@@ -92,6 +96,15 @@ pub struct MeshedGeom {
 }
 
 impl MeshedGeom {
+    /// Returns the uncut mixed-cell exchange [`Mesh`] (`CellMesh<2>` or `CellMesh<3>`) when available,
+    /// falling back to [`Mesh::from_solver_mesh`] on `self.mesh` otherwise.
+    pub fn into_exchange_mesh(&self) -> Result<Mesh, String> {
+        match &self.cells {
+            Some(m) => Ok(m.clone()),
+            None => Mesh::from_solver_mesh(&self.mesh),
+        }
+    }
+
     /// The domain label of a region.
     pub fn domain(&self, region: &str) -> Option<i32> {
         self.labels.domain(region)
@@ -129,7 +142,8 @@ impl MeshedGeom {
     }
 
     /// The absorbing layers of the model as solver stretching, keyed by domain: `strength` is the imaginary stretch at the outer edge, the
-    /// grading of the `Pml` feature is the order of the polynomial profile.
+    /// `grading` of the `Pml` feature is strictly the order of the polynomial profile (decoupled from geometric `layer_grading`), and
+    /// `coord` / `bounds` carry exact `Cartesian`, `Cylindrical`, or `Spherical` geometry in wafer coordinates.
     pub fn pml_materials(&self, strength: f64) -> BTreeMap<i32, Pml> {
         let dir = |s: i8| match s {
             0 => PmlDir::Off,
@@ -147,7 +161,97 @@ impl MeshedGeom {
                 } else {
                     (dir(p.sides[0]), dir(p.sides[1]), dir(p.sides[2]))
                 };
-                (d, Pml { x, y, z, strength, order: p.grading, re: 1.0 })
+                let (coord, bounds) = match p.coord {
+                    PmlCoordKind::Spherical => (
+                        PmlCoord::Spherical {
+                            center: p.center,
+                            r_in: p.r_in,
+                            thickness: p.thickness,
+                        },
+                        None,
+                    ),
+                    PmlCoordKind::Cylindrical if p.r_in > 0.0 => {
+                        let ax_len = (p.axis[0] * p.axis[0] + p.axis[1] * p.axis[1] + p.axis[2] * p.axis[2]).sqrt();
+                        let a_hat = if ax_len > 1e-30 {
+                            [p.axis[0] / ax_len, p.axis[1] / ax_len, p.axis[2] / ax_len]
+                        } else if self.mesh.dim == 2 {
+                            [0.0, 1.0, 0.0]
+                        } else {
+                            [0.0, 0.0, 1.0]
+                        };
+                        let c_dot_a = p.center[0] * a_hat[0] + p.center[1] * a_hat[1] + p.center[2] * a_hat[2];
+                        let s_dot = p.sides[0] as f64 * a_hat[0]
+                            + p.sides[1] as f64 * a_hat[1]
+                            + p.sides[2] as f64 * a_hat[2];
+                        let radial_on = matches!(p.role, PmlRole::RadialShell | PmlRole::CornerAnnulus);
+                        let axial = if matches!(p.role, PmlRole::EndCap | PmlRole::CornerAnnulus) {
+                            if s_dot < -0.5 {
+                                PmlDir::Minus
+                            } else if s_dot > 0.5 {
+                                PmlDir::Plus
+                            } else {
+                                PmlDir::Off
+                            }
+                        } else {
+                            PmlDir::Off
+                        };
+                        let z_in = match axial {
+                            PmlDir::Plus => p.z_range[1] - c_dot_a,
+                            PmlDir::Minus => p.z_range[0] - c_dot_a,
+                            PmlDir::Off => 0.0,
+                        };
+                        let r_thickness = if radial_on { p.thickness } else { 0.0 };
+                        let z_thickness = if axial != PmlDir::Off { p.thickness } else { 0.0 };
+                        (
+                            PmlCoord::Cylindrical {
+                                center: p.center,
+                                axis: a_hat,
+                                r_in: p.r_in,
+                                r_thickness,
+                                radial_on,
+                                axial,
+                                z_in,
+                                z_thickness,
+                            },
+                            None,
+                        )
+                    }
+                    _ => {
+                        let reg_bb = self.eval.regions()[p.region as usize].bbox;
+                        let mut lo = reg_bb.lo;
+                        let mut hi = reg_bb.hi;
+                        for a in 0..3 {
+                            if p.sides[a] < 0
+                                && (p.mode == PmlGrowMode::Outward
+                                    || ((reg_bb.hi[a] - reg_bb.lo[a]) - p.thickness).abs() <= 1e-5 * p.thickness)
+                            {
+                                lo[a] = p.window.lo[a] - p.thickness;
+                                hi[a] = p.window.lo[a];
+                            } else if p.sides[a] > 0
+                                && (p.mode == PmlGrowMode::Outward
+                                    || ((reg_bb.hi[a] - reg_bb.lo[a]) - p.thickness).abs() <= 1e-5 * p.thickness)
+                            {
+                                lo[a] = p.window.hi[a];
+                                hi[a] = p.window.hi[a] + p.thickness;
+                            }
+                        }
+                        (PmlCoord::Cartesian, Some((lo, hi)))
+                    }
+                };
+                (
+                    d,
+                    Pml {
+                        x,
+                        y,
+                        z,
+                        strength,
+                        order: p.grading,
+                        re: 1.0,
+                        coord,
+                        bounds,
+                        ..Default::default()
+                    },
+                )
             })
             .collect()
     }
@@ -165,10 +269,12 @@ pub(crate) struct SizeMap {
     pub edge_rule: Vec<Option<f64>>,
 }
 
-pub(crate) fn size_map(ev: &Evaluated, h: f64) -> SizeMap {
+pub(crate) fn size_map_with_skip(ev: &Evaluated, h: f64, skip: &[bool]) -> SizeMap {
     let mut region_h = vec![h; ev.regions().len()];
     for p in ev.pml_regions() {
-        region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
+        if !skip.get(p.region as usize).copied().unwrap_or(false) {
+            region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
+        }
     }
     let mut edge_rule: Vec<Option<f64>> = vec![None; ev.edges().len()];
     for rule in ev.size_rules() {
@@ -192,6 +298,16 @@ pub(crate) fn size_map(ev: &Evaluated, h: f64) -> SizeMap {
 
 /// Meshes a 2D model (the x-z cross-section) with triangles.
 pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, String> {
+    mesh_geom_2d_with_skip(ev, opts, &[])
+}
+
+/// Meshes a 2D model (the x-z cross-section) with triangles, leaving out any regions marked in `skip`
+/// (e.g. `Inward` PML domains when structured `Quad` layers will be built around the physical window).
+pub fn mesh_geom_2d_with_skip(
+    ev: Evaluated,
+    opts: &GeomMeshOpts,
+    skip: &[bool],
+) -> Result<MeshedGeom, String> {
     if ev.list.dim != 2 {
         return Err("mesh_geom_2d needs a 2D model".into());
     }
@@ -206,13 +322,33 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let max_dev = opts.max_dev.unwrap_or(opts.h / 50.0);
 
-    let SizeMap { region_h, edge_rule } = size_map(&ev, opts.h);
+    let SizeMap { region_h, edge_rule } = size_map_with_skip(&ev, opts.h, skip);
+    let skipped = |r: usize| skip.get(r).copied().unwrap_or(false);
+    let meshable: Vec<bool> = labels
+        .domains
+        .iter()
+        .map(|d| !skipped(d.region as usize) && !matches!(d.kind, RegionKind::Hole | RegionKind::Void))
+        .collect();
+    let has_skip = skip.iter().any(|&s| s);
 
-    // chains: one per edge, with the end points of the vertices so that neighbours share them exactly
+    // chains: one per active edge, with the end points of the vertices so that neighbours share them exactly
     let w2 = |p: [f64; 3]| [p[0], p[2]];
     let mut chains = Vec::with_capacity(ev.edges().len());
     for (i, ed) in ev.edges().iter().enumerate() {
-        let mut h = [ed.left, ed.right].iter().flatten().map(|&r| region_h[r as usize]).fold(opts.h, f64::min);
+        if has_skip
+            && ![ed.left, ed.right]
+                .into_iter()
+                .flatten()
+                .any(|r| meshable.get(r as usize).copied().unwrap_or(false))
+        {
+            continue;
+        }
+        let mut h = [ed.left, ed.right]
+            .iter()
+            .flatten()
+            .filter(|&&r| meshable.get(r as usize).copied().unwrap_or(false))
+            .map(|&r| region_h[r as usize])
+            .fold(opts.h, f64::min);
         if let Some(x) = edge_rule[i] {
             h = h.min(x);
         }
@@ -225,14 +361,29 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
         chains.push(Chain { pts, label, part: i });
     }
 
-    // domain of a region; holes and the void have none
+    // domain of a region; holes, voids, and skipped PML regions have none
     let domain_of: Vec<Option<i32>> = labels
         .domains
         .iter()
-        .map(|d| if matches!(d.kind, RegionKind::Hole | RegionKind::Void) { None } else { Some(d.id) })
+        .map(|d| meshable[d.region as usize].then_some(d.id))
         .collect();
-    let b = ev.bounds();
-    let (lo, hi) = ([b.lo[0], b.lo[2]], [b.hi[0], b.hi[2]]);
+    let (lo, hi) = if has_skip {
+        let mut bb = geom::math::Aabb::EMPTY;
+        for (r, &m) in meshable.iter().enumerate() {
+            if m {
+                bb = bb.union(&ev.regions()[r].bbox);
+            }
+        }
+        if bb.is_empty() {
+            let b = ev.bounds();
+            ([b.lo[0], b.lo[2]], [b.hi[0], b.hi[2]])
+        } else {
+            ([bb.lo[0], bb.lo[2]], [bb.hi[0], bb.hi[2]])
+        }
+    } else {
+        let b = ev.bounds();
+        ([b.lo[0], b.lo[2]], [b.hi[0], b.hi[2]])
+    };
 
     // finer regions get a lattice of interior points
     let fills: Vec<Fill> = (0..ev.regions().len())
@@ -248,7 +399,10 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
             }
         })
         .collect();
-    let h_fine_min = region_h.iter().copied().fold(opts.h, f64::min);
+    let h_fine_min = (0..ev.regions().len())
+        .filter(|&r| domain_of[r].is_some())
+        .map(|r| region_h[r])
+        .fold(opts.h, f64::min);
     let domain_at = |c: [f64; 2]| ev.classify([c[0], 0.0, c[1]]).and_then(|r| domain_of[r as usize]);
     let (mesh, mc_rep) = mesh_chains(
         &chains,
@@ -274,7 +428,14 @@ pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, St
             ));
         }
     }
-    Ok(MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings: mc_rep.warnings })
+    let cells = Mesh::from_solver_mesh(&mesh)?;
+    Ok(MeshedGeom {
+        mesh,
+        cells: Some(cells),
+        labels,
+        eval: std::sync::Arc::new(ev),
+        warnings: mc_rep.warnings,
+    })
 }
 
 /// Labels of whatever a selector text picks in an evaluated model: boundary labels for edges, domain labels for regions.

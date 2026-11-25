@@ -840,7 +840,7 @@
   },
   {
     "access": "edit",
-    "description": "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
+    "description": "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
     "name": "set_mesh",
     "schema": {
       "additionalProperties": false,
@@ -929,6 +929,19 @@
           "description": "size the elements from the waves of the physics (points per wavelength)",
           "type": "boolean"
         },
+        "pml_mode": {
+          "description": "how absorbing layers are meshed: \"auto\" (default, structured native Quad/Prism/Hex layers when PML regions exist), \"structured\", or \"inline\" (legacy unstructured simplices)",
+          "enum": [
+            "auto",
+            "structured",
+            "inline",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "points_per_wavelength": {
           "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2",
           "type": [
@@ -962,8 +975,11 @@
           "type": "boolean"
         },
         "structured_pml": {
-          "description": "rebuild the absorbing layers as structured layers",
-          "type": "boolean"
+          "description": "legacy boolean alias for pml_mode (true -> \"structured\", false -> \"inline\")",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "sweep": {
           "description": "layers to sweep a 2D cross-section or 3D geometry model along y",
@@ -2274,11 +2290,170 @@
   },
   {
     "access": "edit",
-    "description": "Adds a `pml` condition for every absorbing piece the geometry made with add_pml (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. `strength` is the imaginary stretch at the outer edge (default 3).",
+    "description": "Adds an outward zero-padding absorbing layer (`Op::Pml` with `mode = \"Outward\"`, `window = null`, `coord = \"Auto\"`, `layer_grading = 2.0`, `thickness = \"auto\"`, `layers = \"auto\"`) around the exterior of the physical domain across Cartesian, Cylindrical, or Spherical topologies.",
+    "name": "add_absorbing_layer",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "axis": {
+          "description": "optional cylinder axis (X, Y, or Z)",
+          "enum": [
+            "X",
+            "Y",
+            "Z",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "center": {
+          "description": "optional centre [x, y, z] (or [x, z] in 2D) for Cylindrical or Spherical shells",
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "coord": {
+          "description": "coordinate topology, default \"Auto\"",
+          "enum": [
+            "Auto",
+            "Cartesian",
+            "Cylindrical",
+            "Spherical",
+            "auto",
+            "cartesian",
+            "cylindrical",
+            "spherical"
+          ],
+          "type": "string"
+        },
+        "grading": {
+          "description": "polynomial stretch profile order m, default 2.0",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "layer_grading": {
+          "description": "geometric mesh layer grading ratio (>= 1; default 2.0)",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "layers": {
+          "description": "number of structured element layers across the shell, or \"auto\" (default \"auto\")",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "mode": {
+          "description": "growth mode, default \"Outward\"",
+          "enum": [
+            "Inward",
+            "Outward",
+            "inward",
+            "outward"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "description": "feature name; omit for pml1, pml2, ...",
+          "type": "string"
+        },
+        "regions": {
+          "description": "regions to extrude (empty: all)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sides": {
+          "description": "active sides (empty: all)",
+          "items": {
+            "enum": [
+              "XMin",
+              "XMax",
+              "YMin",
+              "YMax",
+              "ZMin",
+              "ZMax"
+            ]
+          },
+          "type": "array"
+        },
+        "thickness": {
+          "description": "layer thickness in metres, or \"auto\" (default \"auto\")",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "window": {
+          "description": "optional window feature when mode is Inward",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Add an outward absorbing layer"
+  },
+  {
+    "access": "edit",
+    "description": "Adds a `pml` (or `infinite_element` for static studies) condition for every absorbing piece the geometry made with `add_pml` or `add_absorbing_layer` (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. When `strength <= 0` or `auto_scale: true`, parameters are jointly auto-calibrated across materials sharing each PML slab/shell from the study's wavelengths.",
     "name": "add_pml_conditions",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "auto_scale": {
+          "description": "jointly auto-calibrate strength, profile, and kappa_max/curvature from study wavelengths across materials sharing each PML slab/shell",
+          "type": "boolean"
+        },
         "physics": {
           "description": "the three-letter code of the physics",
           "enum": [
@@ -2288,8 +2463,26 @@
           ],
           "type": "string"
         },
+        "profile": {
+          "description": "stretching profile (\"auto\" selects kappa_polynomial for eigenproblems/waveguides and rational for direct driven/static problems)",
+          "enum": [
+            "auto",
+            "kappa_polynomial",
+            "rational",
+            "exponential",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "strength": {
-          "description": "imaginary stretch at the outer edge, default 3",
+          "description": "imaginary stretch at the outer edge (default 3; <= 0 auto-calibrates from study wavelengths)",
+          "type": "number"
+        },
+        "target_reflection": {
+          "description": "target normal-incidence amplitude reflection R_0 when auto_scale is enabled, default 1e-6",
           "type": "number"
         }
       },
@@ -2299,6 +2492,18 @@
       "type": "object"
     },
     "title": "Add the absorbing-layer conditions"
+  },
+  {
+    "access": "read",
+    "description": "Returns absorbing-layer diagnostics across all PML domains: uncut `element_counts`, `min_pml_scaled_jacobian`, `pml_warnings`, normalized penetration depth `s_dist_bounds` `[0.0, 1.0]`, and pre-solve Christoffel backward-wave check (`has_backward_wave`, `min_projection`, `recommended_mpml_ratio`).",
+    "name": "pml_diagnostics",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "title": "Absorbing-layer mesh and stability diagnostics"
   },
   {
     "access": "read",
@@ -4412,12 +4617,54 @@
   },
   {
     "access": "edit",
-    "description": "Absorbing layers of `thickness` around a window on some sides; splits every matching region into the physical part and one piece per side combination. [boundary; dimensions [2, 3]]",
+    "description": "Absorbing layers around a window (`mode = \"Inward\"`) or extruded outward from the physical exterior (`mode = \"Outward\"`, `window` omitted); splits or extrudes matching regions into `<region>.pml_<piece>` sub-domains across Cartesian, Cylindrical, or Spherical topologies. [boundary; dimensions [2, 3]]",
     "name": "add_pml",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "axis": {
+          "default": null,
+          "enum": [
+            "X",
+            "Y",
+            "Z"
+          ],
+          "title": "optional axis (X, Y, or Z) for Cylindrical shells"
+        },
+        "center": {
+          "default": null,
+          "items": {
+            "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "optional centre [x, y, z] for Cylindrical or Spherical shells",
+          "type": "array"
+        },
+        "coord": {
+          "default": "Auto",
+          "enum": [
+            "Auto",
+            "Cartesian",
+            "Cylindrical",
+            "Spherical",
+            "auto",
+            "cartesian",
+            "cylindrical",
+            "spherical"
+          ],
+          "title": "coordinate topology: Auto, Cartesian, Cylindrical, or Spherical"
+        },
         "grading": {
+          "default": 2.0,
           "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
           "oneOf": [
             {
@@ -4429,7 +4676,8 @@
           ],
           "title": "order of the polynomial profile"
         },
-        "layers": {
+        "layer_grading": {
+          "default": null,
           "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
           "oneOf": [
             {
@@ -4439,7 +4687,30 @@
               "type": "string"
             }
           ],
-          "title": "number of element layers across it"
+          "title": "geometric mesh layer grading ratio (>= 1; 1 is uniform)"
+        },
+        "layers": {
+          "default": "auto",
+          "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "number of element layers across it (or \"auto\" / -1)"
+        },
+        "mode": {
+          "default": "Inward",
+          "enum": [
+            "Inward",
+            "Outward",
+            "inward",
+            "outward"
+          ],
+          "title": "growth mode: Inward (around window) or Outward (exterior boundary extrusion)"
         },
         "name": {
           "description": "a name for the feature; default the kind and a number (`rect1`)",
@@ -4450,7 +4721,7 @@
           "items": {
             "type": "string"
           },
-          "title": "regions to split (empty: all)",
+          "title": "regions to split or extrude (empty: all)",
           "type": "array"
         },
         "sides": {
@@ -4469,6 +4740,7 @@
           "type": "array"
         },
         "thickness": {
+          "default": "auto",
           "description": "a number in metres (or the unit of the field) or an expression over the model parameters",
           "oneOf": [
             {
@@ -4478,9 +4750,10 @@
               "type": "string"
             }
           ],
-          "title": "layer thickness"
+          "title": "layer thickness in metres (or \"auto\" / -1)"
         },
         "window": {
+          "default": null,
           "description": "the name of an earlier feature (or its id)",
           "oneOf": [
             {
@@ -4490,15 +4763,10 @@
               "type": "integer"
             }
           ],
-          "title": "the feature that bounds the physical window"
+          "title": "the feature that bounds the physical window (required when mode is Inward; omitted for Outward)"
         }
       },
-      "required": [
-        "window",
-        "thickness",
-        "layers",
-        "grading"
-      ],
+      "required": [],
       "type": "object"
     },
     "title": "Absorbing layers"

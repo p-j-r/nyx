@@ -10,12 +10,12 @@
         "op": {
           "Rect": {
             "max": [
-              7e-6,
-              4e-6
+              6e-6,
+              3e-6
             ],
             "min": [
-              -7e-6,
-              -0.000011
+              -6e-6,
+              -9.999999999999999e-6
             ]
           }
         },
@@ -29,12 +29,12 @@
         "op": {
           "Rect": {
             "max": [
-              7e-6,
+              6e-6,
               0.0
             ],
             "min": [
-              -7e-6,
-              -0.000011
+              -6e-6,
+              -9.999999999999999e-6
             ]
           }
         },
@@ -101,25 +101,6 @@
       },
       {
         "id": 6,
-        "name": "window",
-        "op": {
-          "Rect": {
-            "max": [
-              6e-6,
-              3e-6
-            ],
-            "min": [
-              -6e-6,
-              -9.999999999999999e-6
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 7,
         "name": "regions",
         "op": {
           "Overlay": {
@@ -164,16 +145,17 @@
         "tags": []
       },
       {
-        "id": 8,
+        "id": 7,
         "name": "pml",
         "op": {
           "Pml": {
             "grading": 2.0,
-            "layers": 3.0,
+            "layer_grading": 2.0,
+            "layers": 5.0,
+            "mode": "Outward",
             "regions": [],
             "sides": [],
-            "thickness": 1e-6,
-            "window": 6
+            "thickness": 1e-6
           }
         },
         "origin": "Code",
@@ -181,7 +163,7 @@
         "tags": []
       },
       {
-        "id": 9,
+        "id": 8,
         "name": "size_near",
         "op": {
           "Size": {
@@ -205,7 +187,7 @@
         "tags": []
       },
       {
-        "id": 10,
+        "id": 9,
         "name": "size_si",
         "op": {
           "Size": {
@@ -235,7 +217,20 @@
           "kind": "pml",
           "on": "air.pml_xmin",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -247,7 +242,20 @@
           "kind": "pml",
           "on": "air.pml_xmax",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -259,7 +267,20 @@
           "kind": "pml",
           "on": "air.pml_zmax",
           "params": {
+            "bounds_hi": [
+              6e-6,
+              0.0,
+              4e-6
+            ],
+            "bounds_lo": [
+              -6e-6,
+              0.0,
+              3e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "off",
@@ -271,7 +292,20 @@
           "kind": "pml",
           "on": "air.pml_xmin_zmax",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              4e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              3e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -283,7 +317,20 @@
           "kind": "pml",
           "on": "air.pml_xmax_zmax",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              4e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              3e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -295,7 +342,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmin",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -307,7 +367,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmax",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -319,7 +392,20 @@
           "kind": "pml",
           "on": "sapphire.pml_zmin",
           "params": {
+            "bounds_hi": [
+              6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "bounds_lo": [
+              -6e-6,
+              0.0,
+              -0.000011
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "off",
@@ -331,7 +417,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmin_zmin",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              -0.000011
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -343,7 +442,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmax_zmin",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              -0.000011
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -391,7 +503,20 @@
           "kind": "pml",
           "on": "air.pml_xmin",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -403,7 +528,20 @@
           "kind": "pml",
           "on": "air.pml_xmax",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -415,7 +553,20 @@
           "kind": "pml",
           "on": "air.pml_zmax",
           "params": {
+            "bounds_hi": [
+              6e-6,
+              0.0,
+              4e-6
+            ],
+            "bounds_lo": [
+              -6e-6,
+              0.0,
+              3e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "off",
@@ -427,7 +578,20 @@
           "kind": "pml",
           "on": "air.pml_xmin_zmax",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              4e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              3e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -439,7 +603,20 @@
           "kind": "pml",
           "on": "air.pml_xmax_zmax",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              4e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              3e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -451,7 +628,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmin",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -463,7 +653,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmax",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              3e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -475,7 +678,20 @@
           "kind": "pml",
           "on": "sapphire.pml_zmin",
           "params": {
+            "bounds_hi": [
+              6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "bounds_lo": [
+              -6e-6,
+              0.0,
+              -0.000011
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "off",
@@ -487,7 +703,20 @@
           "kind": "pml",
           "on": "sapphire.pml_xmin_zmin",
           "params": {
+            "bounds_hi": [
+              -6e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "bounds_lo": [
+              -7e-6,
+              0.0,
+              -0.000011
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "minus",
@@ -499,21 +728,25 @@
           "kind": "pml",
           "on": "sapphire.pml_xmax_zmin",
           "params": {
+            "bounds_hi": [
+              7e-6,
+              0.0,
+              -9.999999999999999e-6
+            ],
+            "bounds_lo": [
+              6e-6,
+              0.0,
+              -0.000011
+            ],
+            "coord": "cartesian",
+            "kappa_max": 1.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
             "y": "off",
             "z": "minus"
-          }
-        },
-        {
-          "kind": "fixed",
-          "on": "outer & in_box([-1, 0, -1], [1, 0, 1e-12], within)",
-          "params": {
-            "ux": 0.0,
-            "uy": 0.0,
-            "uz": 0.0
           }
         }
       ],

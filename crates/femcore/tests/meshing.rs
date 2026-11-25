@@ -282,11 +282,18 @@ fn structured(plan: MeshPlan) -> MeshPlan {
     MeshPlan { pml: femcore::meshing::PmlMode::Structured, ..plan }
 }
 
+fn inline_pml(plan: MeshPlan) -> MeshPlan {
+    MeshPlan { pml: femcore::meshing::PmlMode::Inline, ..plan }
+}
+
 #[test]
 fn structured_layers_have_the_labels_areas_and_walls_of_the_inline_ones() {
     let m = boxed_pml();
-    let inline = mesh_model(&m.list, &MeshPlan::simple(0.25)).unwrap();
+    let inline = mesh_model(&m.list, &inline_pml(MeshPlan::simple(0.25))).unwrap();
     let st = mesh_model(&m.list, &structured(MeshPlan::simple(0.25))).unwrap();
+    // Default `MeshPlan::simple` (`PmlMode::Auto`) selects structured layers automatically
+    let auto_st = mesh_model(&m.list, &MeshPlan::simple(0.25)).unwrap();
+    assert_eq!(auto_st.mesh.cells, st.mesh.cells);
     // the same names mean the same numbers, and each piece fills the same area
     assert_eq!(st.labels, inline.labels);
     let (ai, as_) = (label_areas(&inline.mesh), label_areas(&st.mesh));
@@ -333,7 +340,7 @@ fn structured_layers_follow_an_adaptive_window() {
     let m = boxed_pml();
     let plan = structured(MeshPlan::adaptive(0.25, 0.5));
     let st = mesh_model(&m.list, &plan).unwrap();
-    let inline = mesh_model(&m.list, &MeshPlan::adaptive(0.25, 0.5)).unwrap();
+    let inline = mesh_model(&m.list, &inline_pml(MeshPlan::adaptive(0.25, 0.5))).unwrap();
     assert_eq!(labels(&st.mesh).0, labels(&inline.mesh).0);
     let (ai, as_) = (label_areas(&inline.mesh), label_areas(&st.mesh));
     for (l, a) in &ai {
@@ -427,7 +434,7 @@ fn a_fill_layer_gives_all_its_cells_one_domain() {
 fn native_structured_layers_keep_their_quadrilaterals_and_split_to_the_simplex_mesh() {
     use femcore::meshing::pml_geom::{structured_pml, structured_pml_native, Native};
     let m = boxed_pml();
-    let start = mesh_model(&m.list, &MeshPlan::simple(0.25)).unwrap();
+    let start = mesh_model(&m.list, &inline_pml(MeshPlan::simple(0.25))).unwrap();
     let (split, report) = structured_pml(start.clone()).unwrap();
     let Native::Cells(cells, rep2) = structured_pml_native(start).unwrap() else { panic!("the model has a Pml") };
     assert_eq!(report, rep2);
@@ -488,7 +495,8 @@ fn ruppert_10_finger_idc_completes_cleanly_and_reports_steiner_cap_warning_or_st
         h: 4.0e-6,
         max_dev: None,
         mesher: MesherRequest::Simple,
-        structured_pml: false,
+        pml_mode: femcore::meshing::request::PmlModeRequest::Auto,
+        structured_pml: None,
         waves: None,
         curved: false,
         gap_cells: None,
@@ -559,7 +567,8 @@ fn fill_grid_1000_to_1_ratio_via_geom_completes_under_250ms_and_matches_across_t
         h: 250e-6,
         max_dev: None,
         mesher: MesherRequest::Simple,
-        structured_pml: false,
+        pml_mode: femcore::meshing::request::PmlModeRequest::Auto,
+        structured_pml: None,
         waves: None,
         curved: false,
         gap_cells: None,

@@ -275,11 +275,27 @@ fn leaky_vs_lossless_transverse_pml_grating_transition_and_polarization() {
             p.materials.set(4 + off, "eps_r", tooth_n * tooth_n);
             p.materials.pml.insert(
                 1 + off,
-                Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Minus, strength: 3.0, order: 2.0, re: 1.0 },
+                Pml {
+                    x: PmlDir::Off,
+                    y: PmlDir::Off,
+                    z: PmlDir::Minus,
+                    strength: 3.0,
+                    order: 2.0,
+                    re: 1.0,
+                    ..Default::default()
+                },
             );
             p.materials.pml.insert(
                 6 + off,
-                Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Plus, strength: 3.0, order: 2.0, re: 1.0 },
+                Pml {
+                    x: PmlDir::Off,
+                    y: PmlDir::Off,
+                    z: PmlDir::Plus,
+                    strength: 3.0,
+                    order: 2.0,
+                    re: 1.0,
+                    ..Default::default()
+                },
             );
         }
         p.periodic = vec![

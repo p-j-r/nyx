@@ -11,12 +11,12 @@ use nyx_ems::cavity::{assemble_maxwell, basis3, Ned3, CURVED_QUAD_DEGREE};
 
 type C3 = [[C; 3]; 3];
 
-fn unit_media(n: usize) -> (Vec<C3>, Vec<[C; 3]>) {
+fn unit_media(n: usize) -> (Vec<C3>, Vec<C3>) {
     let mut e = [[c(0.0, 0.0); 3]; 3];
     for (a, row) in e.iter_mut().enumerate() {
         row[a] = c(1.0, 0.0);
     }
-    (vec![e; n], vec![[c(1.0, 0.0); 3]; n])
+    (vec![e; n], vec![e; n])
 }
 
 fn ned(mesh: &SimplexMesh, order: usize) -> Ned3 {

@@ -80,12 +80,28 @@
     },
     {
       "applies": "domain",
-      "doc": "Absorbing layer by coordinate stretching in the region.",
+      "doc": "Absorbing layer by curvilinear complex coordinate stretching in the region (eigenfrequency studies).",
       "kind": "pml",
       "name": "Perfectly matched layer",
       "params": [
         {
-          "doc": "which side of the region the layer absorbs towards",
+          "doc": "coordinate system along which the layer stretches",
+          "kind": {
+            "default": "cartesian",
+            "options": [
+              "cartesian",
+              "cylindrical",
+              "spherical"
+            ],
+            "type": "choice"
+          },
+          "label": "Coordinate topology",
+          "name": "coord",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region stretches outward",
           "kind": {
             "default": "off",
             "options": [
@@ -101,7 +117,7 @@
           "unit": ""
         },
         {
-          "doc": "which side of the region the layer absorbs towards",
+          "doc": "which side of the region stretches outward",
           "kind": {
             "default": "off",
             "options": [
@@ -117,7 +133,7 @@
           "unit": ""
         },
         {
-          "doc": "which side of the region the layer absorbs towards",
+          "doc": "which side of the region stretches outward",
           "kind": {
             "default": "off",
             "options": [
@@ -133,11 +149,144 @@
           "unit": ""
         },
         {
-          "doc": "stretch s = re - j strength t^order",
+          "doc": "center [x, y, z] for cylindrical or spherical coordinates",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Center",
+          "name": "center",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "axis vector [x, y, z] for cylindrical coordinates",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Cylinder axis",
+          "name": "axis",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "inner interface radius for cylindrical/spherical layers",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Inner radius",
+          "name": "r_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "physical radial/spherical layer thickness (0 infers from domain mesh)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Radial/shell thickness",
+          "name": "thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "enable cylindrical radial stretching",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Radial stretching",
+          "name": "radial_on",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region stretches outward",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Axial stretching (cylindrical)",
+          "name": "axial",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "inner axial interface offset along axis",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Axial inner coordinate",
+          "name": "z_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "cylindrical endcap axial thickness",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Axial thickness",
+          "name": "z_thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional explicit [x_min, y_min, z_min]",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Cartesian lower bounds",
+          "name": "bounds_lo",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional explicit [x_max, y_max, z_max]",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Cartesian upper bounds",
+          "name": "bounds_hi",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "imaginary stretch scale psi_max",
           "kind": {
             "default": 3.0,
             "max": null,
-            "min": null,
+            "min": 0.0,
             "type": "number"
           },
           "label": "Strength",
@@ -146,11 +295,11 @@
           "unit": ""
         },
         {
-          "doc": "",
+          "doc": "polynomial stretch exponent m",
           "kind": {
             "default": 2.0,
             "max": null,
-            "min": null,
+            "min": 0.0,
             "type": "number"
           },
           "label": "Order",
@@ -159,7 +308,7 @@
           "unit": ""
         },
         {
-          "doc": "",
+          "doc": "constant real stretch when kappa_max = 1",
           "kind": {
             "default": 1.0,
             "max": null,
@@ -168,6 +317,382 @@
           },
           "label": "Real part",
           "name": "re",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "kappa_polynomial: bounded ABCS complex dilation (eigenfrequencies); rational: singular pole mapping",
+          "kind": {
+            "default": "kappa_polynomial",
+            "options": [
+              "kappa_polynomial",
+              "rational"
+            ],
+            "type": "choice"
+          },
+          "label": "Stretching profile",
+          "name": "profile",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "peak real evanescent stretch kappa_max >= 1",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 1.0,
+            "type": "number"
+          },
+          "label": "Max real stretch",
+          "name": "kappa_max",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "rational pole parameter c_rat in [0, 1)",
+          "kind": {
+            "default": 0.9,
+            "max": 0.999999,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Rational curvature",
+          "name": "curvature",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "calibrate stretch from elastic wavelengths",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Auto-calibrate scaling",
+          "name": "auto_scale",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "target normal-incidence amplitude reflection R_0",
+          "kind": {
+            "default": 1e-6,
+            "max": 0.5,
+            "min": 1e-15,
+            "type": "number"
+          },
+          "label": "Target reflection",
+          "name": "target_reflection",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto: Christoffel pre-check enables M-PML when bulk backward waves exist; mpml: tangential damping; adiabatic: stiffness loss ramp",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "off",
+              "mpml",
+              "adiabatic"
+            ],
+            "type": "choice"
+          },
+          "label": "Backward-wave stabilization",
+          "name": "stabilization",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "tangential-to-normal damping ratio",
+          "kind": {
+            "default": 0.15,
+            "max": 2.0,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "M-PML tangential ratio",
+          "name": "mpml_ratio",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "peak stiffness loss factor eta_max",
+          "kind": {
+            "default": 0.5,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Adiabatic loss peak",
+          "name": "adiabatic_eta",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "apply u = 0 Dirichlet clamping on exterior PML termination facets",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Clamp outer PML boundary",
+          "name": "clamp_outer",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Real coordinate-stretching far-field domain mapping [R_in, R_out) -> [R_in, infinity) for static elasticity.",
+      "kind": "infinite_element",
+      "name": "Infinite element",
+      "params": [
+        {
+          "doc": "coordinate system along which the layer stretches",
+          "kind": {
+            "default": "cartesian",
+            "options": [
+              "cartesian",
+              "cylindrical",
+              "spherical"
+            ],
+            "type": "choice"
+          },
+          "label": "Coordinate topology",
+          "name": "coord",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region stretches outward",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along x",
+          "name": "x",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region stretches outward",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along y (3D only)",
+          "name": "y",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region stretches outward",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Absorb along z",
+          "name": "z",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "center [x, y, z] for cylindrical or spherical coordinates",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Center",
+          "name": "center",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "axis vector [x, y, z] for cylindrical coordinates",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Cylinder axis",
+          "name": "axis",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "inner interface radius for cylindrical/spherical layers",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Inner radius",
+          "name": "r_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "physical radial/spherical layer thickness (0 infers from domain mesh)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Radial/shell thickness",
+          "name": "thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "enable cylindrical radial stretching",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Radial stretching",
+          "name": "radial_on",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "which side of the region stretches outward",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Axial stretching (cylindrical)",
+          "name": "axial",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "inner axial interface offset along axis",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Axial inner coordinate",
+          "name": "z_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "cylindrical endcap axial thickness",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Axial thickness",
+          "name": "z_thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional explicit [x_min, y_min, z_min]",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Cartesian lower bounds",
+          "name": "bounds_lo",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional explicit [x_max, y_max, z_max]",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Cartesian upper bounds",
+          "name": "bounds_hi",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "distance from inner IE interface to multipole center (0 auto-computes)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Pole distance",
+          "name": "pole_dist",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "rational: exact [R_in, R_out) -> [R_in, inf) mapping; exponential: bounded real stretch + outer 1st-order spring Robin",
+          "kind": {
+            "default": "rational",
+            "options": [
+              "rational",
+              "exponential"
+            ],
+            "type": "choice"
+          },
+          "label": "Infinite-element profile",
+          "name": "profile",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "outer-to-inner slope ratio chi = exp(beta) for exponential profile",
+          "kind": {
+            "default": 30.0,
+            "max": null,
+            "min": 1.0,
+            "type": "number"
+          },
+          "label": "Exponential stretch ratio",
+          "name": "decay",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "clamp u = 0 at infinity for rational infinite elements",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Clamp outer boundary",
+          "name": "clamp_outer",
           "required": false,
           "unit": ""
         }
@@ -565,7 +1090,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "Absorbing layer by coordinate stretching in the region.",
+              "description": "Absorbing layer by curvilinear complex coordinate stretching in the region (eigenfrequency studies).",
               "properties": {
                 "kind": {
                   "const": "pml"
@@ -577,24 +1102,170 @@
                 "params": {
                   "additionalProperties": false,
                   "properties": {
+                    "adiabatic_eta": {
+                      "default": 0.5,
+                      "description": "Adiabatic loss peak. peak stiffness loss factor eta_max",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "auto_scale": {
+                      "default": false,
+                      "description": "Auto-calibrate scaling. calibrate stretch from elastic wavelengths",
+                      "type": "boolean"
+                    },
+                    "axial": {
+                      "default": "off",
+                      "description": "Axial stretching (cylindrical). which side of the region stretches outward",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "axis": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "description": "Cylinder axis. axis vector [x, y, z] for cylindrical coordinates",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "bounds_hi": {
+                      "default": [],
+                      "description": "Cartesian upper bounds [m]. optional explicit [x_max, y_max, z_max]",
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "bounds_lo": {
+                      "default": [],
+                      "description": "Cartesian lower bounds [m]. optional explicit [x_min, y_min, z_min]",
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "center": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Center [m]. center [x, y, z] for cylindrical or spherical coordinates",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "clamp_outer": {
+                      "default": true,
+                      "description": "Clamp outer PML boundary. apply u = 0 Dirichlet clamping on exterior PML termination facets",
+                      "type": "boolean"
+                    },
+                    "coord": {
+                      "default": "cartesian",
+                      "description": "Coordinate topology. coordinate system along which the layer stretches",
+                      "enum": [
+                        "cartesian",
+                        "cylindrical",
+                        "spherical"
+                      ],
+                      "type": "string"
+                    },
+                    "curvature": {
+                      "default": 0.9,
+                      "description": "Rational curvature. rational pole parameter c_rat in [0, 1)",
+                      "maximum": 0.999999,
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "kappa_max": {
+                      "default": 1.0,
+                      "description": "Max real stretch. peak real evanescent stretch kappa_max >= 1",
+                      "minimum": 1.0,
+                      "type": "number"
+                    },
+                    "mpml_ratio": {
+                      "default": 0.15,
+                      "description": "M-PML tangential ratio. tangential-to-normal damping ratio",
+                      "maximum": 2.0,
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
                     "order": {
                       "default": 2.0,
-                      "description": "Order",
+                      "description": "Order. polynomial stretch exponent m",
+                      "minimum": 0.0,
                       "type": "number"
+                    },
+                    "profile": {
+                      "default": "kappa_polynomial",
+                      "description": "Stretching profile. kappa_polynomial: bounded ABCS complex dilation (eigenfrequencies); rational: singular pole mapping",
+                      "enum": [
+                        "kappa_polynomial",
+                        "rational"
+                      ],
+                      "type": "string"
+                    },
+                    "r_in": {
+                      "default": 0.0,
+                      "description": "Inner radius [m]. inner interface radius for cylindrical/spherical layers",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "radial_on": {
+                      "default": true,
+                      "description": "Radial stretching. enable cylindrical radial stretching",
+                      "type": "boolean"
                     },
                     "re": {
                       "default": 1.0,
-                      "description": "Real part",
+                      "description": "Real part. constant real stretch when kappa_max = 1",
                       "type": "number"
+                    },
+                    "stabilization": {
+                      "default": "auto",
+                      "description": "Backward-wave stabilization. auto: Christoffel pre-check enables M-PML when bulk backward waves exist; mpml: tangential damping; adiabatic: stiffness loss ramp",
+                      "enum": [
+                        "auto",
+                        "off",
+                        "mpml",
+                        "adiabatic"
+                      ],
+                      "type": "string"
                     },
                     "strength": {
                       "default": 3.0,
-                      "description": "Strength. stretch s = re - j strength t^order",
+                      "description": "Strength. imaginary stretch scale psi_max",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "target_reflection": {
+                      "default": 1e-6,
+                      "description": "Target reflection. target normal-incidence amplitude reflection R_0",
+                      "maximum": 0.5,
+                      "minimum": 1e-15,
+                      "type": "number"
+                    },
+                    "thickness": {
+                      "default": 0.0,
+                      "description": "Radial/shell thickness [m]. physical radial/spherical layer thickness (0 infers from domain mesh)",
+                      "minimum": 0.0,
                       "type": "number"
                     },
                     "x": {
                       "default": "off",
-                      "description": "Absorb along x. which side of the region the layer absorbs towards",
+                      "description": "Absorb along x. which side of the region stretches outward",
                       "enum": [
                         "off",
                         "plus",
@@ -604,7 +1275,7 @@
                     },
                     "y": {
                       "default": "off",
-                      "description": "Absorb along y (3D only). which side of the region the layer absorbs towards",
+                      "description": "Absorb along y (3D only). which side of the region stretches outward",
                       "enum": [
                         "off",
                         "plus",
@@ -614,13 +1285,197 @@
                     },
                     "z": {
                       "default": "off",
-                      "description": "Absorb along z. which side of the region the layer absorbs towards",
+                      "description": "Absorb along z. which side of the region stretches outward",
                       "enum": [
                         "off",
                         "plus",
                         "minus"
                       ],
                       "type": "string"
+                    },
+                    "z_in": {
+                      "default": 0.0,
+                      "description": "Axial inner coordinate [m]. inner axial interface offset along axis",
+                      "type": "number"
+                    },
+                    "z_thickness": {
+                      "default": 0.0,
+                      "description": "Axial thickness [m]. cylindrical endcap axial thickness",
+                      "minimum": 0.0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Real coordinate-stretching far-field domain mapping [R_in, R_out) -> [R_in, infinity) for static elasticity.",
+              "properties": {
+                "kind": {
+                  "const": "infinite_element"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "axial": {
+                      "default": "off",
+                      "description": "Axial stretching (cylindrical). which side of the region stretches outward",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "axis": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "description": "Cylinder axis. axis vector [x, y, z] for cylindrical coordinates",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "bounds_hi": {
+                      "default": [],
+                      "description": "Cartesian upper bounds [m]. optional explicit [x_max, y_max, z_max]",
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "bounds_lo": {
+                      "default": [],
+                      "description": "Cartesian lower bounds [m]. optional explicit [x_min, y_min, z_min]",
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "center": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Center [m]. center [x, y, z] for cylindrical or spherical coordinates",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "clamp_outer": {
+                      "default": true,
+                      "description": "Clamp outer boundary. clamp u = 0 at infinity for rational infinite elements",
+                      "type": "boolean"
+                    },
+                    "coord": {
+                      "default": "cartesian",
+                      "description": "Coordinate topology. coordinate system along which the layer stretches",
+                      "enum": [
+                        "cartesian",
+                        "cylindrical",
+                        "spherical"
+                      ],
+                      "type": "string"
+                    },
+                    "decay": {
+                      "default": 30.0,
+                      "description": "Exponential stretch ratio. outer-to-inner slope ratio chi = exp(beta) for exponential profile",
+                      "minimum": 1.0,
+                      "type": "number"
+                    },
+                    "pole_dist": {
+                      "default": 0.0,
+                      "description": "Pole distance [m]. distance from inner IE interface to multipole center (0 auto-computes)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "profile": {
+                      "default": "rational",
+                      "description": "Infinite-element profile. rational: exact [R_in, R_out) -> [R_in, inf) mapping; exponential: bounded real stretch + outer 1st-order spring Robin",
+                      "enum": [
+                        "rational",
+                        "exponential"
+                      ],
+                      "type": "string"
+                    },
+                    "r_in": {
+                      "default": 0.0,
+                      "description": "Inner radius [m]. inner interface radius for cylindrical/spherical layers",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "radial_on": {
+                      "default": true,
+                      "description": "Radial stretching. enable cylindrical radial stretching",
+                      "type": "boolean"
+                    },
+                    "thickness": {
+                      "default": 0.0,
+                      "description": "Radial/shell thickness [m]. physical radial/spherical layer thickness (0 infers from domain mesh)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "x": {
+                      "default": "off",
+                      "description": "Absorb along x. which side of the region stretches outward",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "y": {
+                      "default": "off",
+                      "description": "Absorb along y (3D only). which side of the region stretches outward",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "z": {
+                      "default": "off",
+                      "description": "Absorb along z. which side of the region stretches outward",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "z_in": {
+                      "default": 0.0,
+                      "description": "Axial inner coordinate [m]. inner axial interface offset along axis",
+                      "type": "number"
+                    },
+                    "z_thickness": {
+                      "default": 0.0,
+                      "description": "Axial thickness [m]. cylindrical endcap axial thickness",
+                      "minimum": 0.0,
+                      "type": "number"
                     }
                   },
                   "required": [],
@@ -813,7 +1668,7 @@
         "oneOf": [
           {
             "additionalProperties": false,
-            "description": "Displacement and stress under fixed constraints, loads and thermal expansion.",
+            "description": "Displacement and stress under fixed constraints, loads, thermal expansion, and static infinite elements.",
             "properties": {
               "kind": {
                 "const": "static"
@@ -832,7 +1687,7 @@
           },
           {
             "additionalProperties": false,
-            "description": "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
+            "description": "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (signed Q = Re f / (2 Im f)).",
             "properties": {
               "kind": {
                 "const": "eigenfrequency"
@@ -864,7 +1719,7 @@
           },
           {
             "additionalProperties": false,
-            "description": "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.",
+            "description": "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 Im f); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.",
             "properties": {
               "kind": {
                 "const": "axisymmetric_eigenfrequency"
@@ -903,7 +1758,7 @@
           },
           {
             "additionalProperties": false,
-            "description": "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.",
+            "description": "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 Im f); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.",
             "properties": {
               "kind": {
                 "const": "modes"
@@ -952,14 +1807,14 @@
   "studies": [
     {
       "dims": "both",
-      "doc": "Displacement and stress under fixed constraints, loads and thermal expansion.",
+      "doc": "Displacement and stress under fixed constraints, loads, thermal expansion, and static infinite elements.",
       "kind": "static",
       "name": "Static",
       "params": []
     },
     {
       "dims": "both",
-      "doc": "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (Q).",
+      "doc": "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (signed Q = Re f / (2 Im f)).",
       "kind": "eigenfrequency",
       "name": "Eigenfrequencies",
       "params": [
@@ -993,7 +1848,7 @@
     },
     {
       "dims": "two",
-      "doc": "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.",
+      "doc": "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 Im f); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.",
       "kind": "axisymmetric_eigenfrequency",
       "name": "Axisymmetric eigenfrequencies",
       "params": [
@@ -1040,7 +1895,7 @@
     },
     {
       "dims": "two",
-      "doc": "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.",
+      "doc": "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 Im f); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.",
       "kind": "modes",
       "name": "Waveguide modes",
       "params": [

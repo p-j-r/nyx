@@ -104,8 +104,25 @@ pub struct CellMesh<const D: usize> {
     /// cells around it are quadratic (isoparametric) there. Sorted by pair. Empty by default; an edge that is not listed is straight
     /// (its node is the midpoint), so an empty list is the straight mesh of ADR 18.
     pub edge_nodes: Vec<([u32; 2], [f64; D])>,
+    /// Optional curved quad-face center nodes (for 9-node `Quad`, 18-node `Prism`, 27-node `Hex`), keyed by [`canonical_quad_face`]
+    /// and sorted by key. Empty by default; unlisted quad faces use transfinite / bilinear face centers.
+    pub quad_face_nodes: Vec<([u32; 4], [f64; D])>,
     /// Barsoum quarter-point singularity edges (`AF-2`), given as sorted vertex pairs `[a, b]` (`a < b`), sorted by pair.
     pub qp_edges: Vec<[u32; 2]>,
+}
+
+/// Canonical cyclic key of a quadrilateral `[q0, q1, q2, q3]`: starts at the smallest vertex id
+/// and steps in the cyclic direction of the smaller adjacent vertex id. All 8 dihedral (`D_4`)
+/// traversal orders of the same untwisted quad map to the identical `[u32; 4]` key.
+pub fn canonical_quad_face(q: [u32; 4]) -> [u32; 4] {
+    let m = (0..4).min_by_key(|&i| q[i]).unwrap();
+    let next = q[(m + 1) % 4];
+    let prev = q[(m + 3) % 4];
+    if next <= prev {
+        [q[m], next, q[(m + 2) % 4], prev]
+    } else {
+        [q[m], prev, q[(m + 2) % 4], next]
+    }
 }
 
 impl<const D: usize> CellMesh<D> {
@@ -192,22 +209,66 @@ impl<const D: usize> CellMesh<D> {
         self.edge_nodes.binary_search_by_key(&key, |e| e.0).ok().map(|i| self.edge_nodes[i].1)
     }
 
-    /// Drops the curved edges that are not an edge of any cell (after the connectivity changed). Never adds one.
+    /// Sets the curved quad-face center nodes: cyclic quadruples are canonicalised with [`canonical_quad_face`], sorted, and when a face
+    /// is given twice the last position wins.
+    pub fn set_quad_face_nodes(&mut self, nodes: impl IntoIterator<Item = ([u32; 4], [f64; D])>) {
+        let mut v: Vec<([u32; 4], [f64; D])> = nodes.into_iter().map(|(q, p)| (canonical_quad_face(q), p)).collect();
+        v.sort_by_key(|e| e.0);
+        let mut out: Vec<([u32; 4], [f64; D])> = Vec::with_capacity(v.len());
+        for e in v {
+            match out.last_mut() {
+                Some(l) if l.0 == e.0 => *l = e,
+                _ => out.push(e),
+            }
+        }
+        self.quad_face_nodes = out;
+    }
+
+    /// Position of the curved center node of the quad `q` (given in cyclic order), `None` when not listed.
+    pub fn quad_face_node(&self, q: [u32; 4]) -> Option<[f64; D]> {
+        let key = canonical_quad_face(q);
+        self.quad_face_nodes.binary_search_by_key(&key, |e| e.0).ok().map(|i| self.quad_face_nodes[i].1)
+    }
+
+    /// Drops the curved edges and quad-face centers that do not belong to any cell (after the connectivity changed). Never adds one.
     pub fn retain_existing_edge_nodes(&mut self) {
-        if self.edge_nodes.is_empty() {
+        if self.edge_nodes.is_empty() && self.qp_edges.is_empty() && self.quad_face_nodes.is_empty() {
             return;
         }
         let mut exist: std::collections::HashSet<[u32; 2]> = std::collections::HashSet::new();
+        let mut exist_quads: std::collections::HashSet<[u32; 4]> = std::collections::HashSet::new();
         for c in 0..self.n_cells() {
             let vs = self.cell(c);
-            for i in 0..vs.len() {
-                for j in i + 1..vs.len() {
-                    exist.insert([vs[i].min(vs[j]), vs[i].max(vs[j])]);
+            let pairs: &[(usize, usize)] = match self.types[c] {
+                CellType::Tri => &[(0, 1), (0, 2), (1, 2)],
+                CellType::Quad => &[(0, 1), (1, 2), (2, 3), (3, 0)],
+                CellType::Tet => &[(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)],
+                CellType::Prism => &[(0, 1), (0, 2), (1, 2), (3, 4), (3, 5), (4, 5), (0, 3), (1, 4), (2, 5)],
+                CellType::Hex => &[(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)],
+            };
+            for &(i, j) in pairs {
+                exist.insert([vs[i].min(vs[j]), vs[i].max(vs[j])]);
+            }
+            if !self.quad_face_nodes.is_empty() {
+                if self.types[c] == CellType::Quad {
+                    exist_quads.insert(canonical_quad_face([vs[0], vs[1], vs[2], vs[3]]));
+                } else {
+                    for f in self.types[c].faces() {
+                        if f.len() == 4 {
+                            exist_quads.insert(canonical_quad_face([
+                                vs[f[0] as usize],
+                                vs[f[1] as usize],
+                                vs[f[2] as usize],
+                                vs[f[3] as usize],
+                            ]));
+                        }
+                    }
                 }
             }
         }
         self.edge_nodes.retain(|e| exist.contains(&e.0));
         self.qp_edges.retain(|e| exist.contains(e));
+        self.quad_face_nodes.retain(|q| exist_quads.contains(&q.0));
     }
 
     /// Number of cells of each shape.
@@ -352,11 +413,16 @@ impl<const D: usize> CellMesh<D> {
         out
     }
 
+    /// Whether every cell is a triangle (2D) or tetrahedron (3D) and every facet has `D` vertices.
+    pub fn is_pure_simplex(&self) -> bool {
+        let t = if D == 2 { CellType::Tri } else { CellType::Tet };
+        self.types.iter().all(|&x| x == t) && (0..self.n_facets()).all(|f| self.facet(f).len() == D)
+    }
+
     /// `Some` simplex mesh when every cell is a triangle / tetrahedron and every facet an
     /// edge / triangle, else `None` (use [`CellMesh::split_to_simplices`] to convert).
     pub fn as_simplex(&self) -> Option<SimplexMesh<D>> {
-        let t = if D == 2 { CellType::Tri } else { CellType::Tet };
-        if self.types.iter().any(|&x| x != t) || (0..self.n_facets()).any(|f| self.facet(f).len() != D) {
+        if !self.is_pure_simplex() {
             return None;
         }
         Some(SimplexMesh {

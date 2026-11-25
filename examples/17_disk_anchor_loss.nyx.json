@@ -10,12 +10,12 @@
         "op": {
           "Rect": {
             "max": [
-              0.000021,
+              0.000016,
               -5e-7
             ],
             "min": [
               0.0,
-              -0.0000135
+              -8.5e-6
             ]
           }
         },
@@ -63,25 +63,6 @@
       },
       {
         "id": 4,
-        "name": "window",
-        "op": {
-          "Rect": {
-            "max": [
-              0.000016,
-              3e-6
-            ],
-            "min": [
-              0.0,
-              -8.5e-6
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 5,
         "name": "regions",
         "op": {
           "Overlay": {
@@ -114,12 +95,14 @@
         "tags": []
       },
       {
-        "id": 6,
+        "id": 5,
         "name": "pml",
         "op": {
           "Pml": {
             "grading": 2.0,
-            "layers": 3.0,
+            "layer_grading": 2.0,
+            "layers": 5.0,
+            "mode": "Outward",
             "regions": [
               "substrate"
             ],
@@ -127,8 +110,7 @@
               "XMax",
               "ZMin"
             ],
-            "thickness": 4.9999999999999996e-6,
-            "window": 4
+            "thickness": 4.9999999999999996e-6
           }
         },
         "origin": "Code",
@@ -136,7 +118,7 @@
         "tags": []
       },
       {
-        "id": 7,
+        "id": 6,
         "name": "size_disk",
         "op": {
           "Size": {
@@ -173,7 +155,20 @@
           "kind": "pml",
           "on": "substrate.pml_xmax",
           "params": {
+            "bounds_hi": [
+              0.000021,
+              0.0,
+              -5e-7
+            ],
+            "bounds_lo": [
+              0.000016,
+              0.0,
+              -8.5e-6
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
@@ -185,7 +180,20 @@
           "kind": "pml",
           "on": "substrate.pml_zmin",
           "params": {
+            "bounds_hi": [
+              0.000016,
+              0.0,
+              -8.5e-6
+            ],
+            "bounds_lo": [
+              0.0,
+              0.0,
+              -0.0000135
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "off",
@@ -197,30 +205,25 @@
           "kind": "pml",
           "on": "substrate.pml_xmax_zmin",
           "params": {
+            "bounds_hi": [
+              0.000021,
+              0.0,
+              -8.5e-6
+            ],
+            "bounds_lo": [
+              0.000016,
+              0.0,
+              -0.0000135
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
             "re": 1.0,
             "strength": 3.0,
             "x": "plus",
             "y": "off",
             "z": "minus"
-          }
-        },
-        {
-          "kind": "fixed",
-          "on": "outer & plane(x = 0.000021)",
-          "params": {
-            "ux": 0.0,
-            "uy": 0.0,
-            "uz": 0.0
-          }
-        },
-        {
-          "kind": "fixed",
-          "on": "outer & plane(z = -0.0000135)",
-          "params": {
-            "ux": 0.0,
-            "uy": 0.0,
-            "uz": 0.0
           }
         }
       ],

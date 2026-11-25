@@ -233,9 +233,9 @@ pub fn project_sheet3d_curved_edges(
     report
 }
 
-/// Reconstructs the prismatic 2D column/slab topology of a `MeshedGeom` built by
-/// `sheet3d::mesh_sheet_stack_3d` (even after `structured_pml_3d`) and projects + relaxes curved
-/// `EdgeNodes` onto `g.mesh`.
+/// Reconstructs the prismatic 2D column/slab topology of the physical interior of a `MeshedGeom`
+/// built by `sheet3d::mesh_sheet_stack_3d` and projects + relaxes curved `EdgeNodes` strictly on
+/// physical non-PML cells, preserving any pre-existing lockstep PML `edge_nodes` untouched.
 pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
     if g.mesh.dim != 3 || g.mesh.n_points() == 0 || g.mesh.n_cells() == 0 {
         return CurveReport::default();
@@ -248,17 +248,45 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
     if !ov.curves.iter().any(|c| matches!(c, Curve::Circle { .. } | Curve::Ellipse { .. })) {
         return CurveReport::default();
     }
+    let pml_doms: std::collections::HashSet<i32> = g
+        .eval
+        .pml_regions()
+        .iter()
+        .map(|p| g.labels.domains[p.region as usize].id)
+        .collect();
+    let has_pml_cells = !pml_doms.is_empty()
+        && (0..g.mesh.n_cells()).any(|c| pml_doms.contains(&g.mesh.cell_labels[c]));
+
     let tol = cx.tol.max(1e-12);
     let n3 = g.mesh.n_points();
+    let mut phys_vert = vec![!has_pml_cells; n3];
+    let mut pml_edges: BTreeSet<[u32; 2]> = BTreeSet::new();
+    if has_pml_cells {
+        for c in 0..g.mesh.n_cells() {
+            let tet = g.mesh.cell(c);
+            if pml_doms.contains(&g.mesh.cell_labels[c]) {
+                for &(i, j) in &EDGES {
+                    pml_edges.insert(pair(tet[i], tet[j]));
+                }
+            } else {
+                for &v in tet {
+                    phys_vert[v as usize] = true;
+                }
+            }
+        }
+    }
+    if !phys_vert.iter().any(|&b| b) {
+        return CurveReport::default();
+    }
 
-    // 1. Extract unique `z_planes` and 2D `(x, y)` columns in internal stack frame (`cx.iv`).
+    // 1. Extract unique `z_planes` and 2D `(x, y)` columns in internal stack frame (`cx.iv`) across physical vertices.
     let mut stack_pts: Vec<[f64; 3]> = Vec::with_capacity(n3);
     let mut z_planes: Vec<f64> = Vec::new();
     for v3 in 0..n3 {
         let pw = [g.mesh.points[3 * v3], g.mesh.points[3 * v3 + 1], g.mesh.points[3 * v3 + 2]];
         let ps = cx.iv(pw);
         stack_pts.push(ps);
-        if !z_planes.iter().any(|&z| (z - ps[2]).abs() <= tol) {
+        if phys_vert[v3] && !z_planes.iter().any(|&z| (z - ps[2]).abs() <= tol) {
             z_planes.push(ps[2]);
         }
     }
@@ -271,10 +299,13 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
     let grid_h = (16.0 * tol).max(1e-11);
     let mut col_grid: HashMap<(i64, i64), Vec<u32>> = HashMap::new();
     let mut pts2: Vec<V2> = Vec::new();
-    let mut v2_of_v3 = vec![0u32; n3];
+    let mut v2_of_v3 = vec![u32::MAX; n3];
     let mut zp_of_v3 = vec![0usize; n3];
 
     for (v3, ps) in stack_pts.iter().enumerate() {
+        if !phys_vert[v3] {
+            continue;
+        }
         let p2 = [ps[0], ps[1]];
         let gx = (p2[0] / grid_h).floor() as i64;
         let gy = (p2[1] / grid_h).floor() as i64;
@@ -313,7 +344,9 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
     let n2 = pts2.len();
     let mut used_v = vec![u32::MAX; nz * n2];
     for v3 in 0..n3 {
-        used_v[zp_of_v3[v3] * n2 + v2_of_v3[v3] as usize] = v3 as u32;
+        if phys_vert[v3] && v2_of_v3[v3] != u32::MAX {
+            used_v[zp_of_v3[v3] * n2 + v2_of_v3[v3] as usize] = v3 as u32;
+        }
     }
 
     let (zp_fine, max_active_per_plane) = (0..nz)
@@ -321,10 +354,13 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
         .max_by_key(|&(_, cnt)| cnt)
         .unwrap_or((0, 0));
 
-    // 2. Collect the exact level-0 2D triangulation `m2` from tetrahedron faces lying on `zp_fine`.
+    // 2. Collect the exact level-0 2D triangulation `m2` from physical tetrahedron faces lying on `zp_fine`.
     let mut tri_set: BTreeSet<[u32; 3]> = BTreeSet::new();
     let mut tris2: Vec<([u32; 3], usize)> = Vec::new();
     for c in 0..g.mesh.n_cells() {
+        if has_pml_cells && pml_doms.contains(&g.mesh.cell_labels[c]) {
+            continue;
+        }
         let tet = g.mesh.cell(c);
         let mut fine_cols = [0u32; 4];
         let mut nf = 0usize;
@@ -418,7 +454,38 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
         })
         .collect();
 
-    project_sheet3d_curved_edges(
+    if !has_pml_cells {
+        let qp_backup = g.mesh.qp_edge_list();
+        let rep = project_sheet3d_curved_edges(
+            cx,
+            &m2,
+            &bnd_edges2,
+            &z_planes,
+            &used_v,
+            &slab_layer,
+            &level_of_zp,
+            &[],
+            &mut g.mesh,
+        );
+        if !qp_backup.is_empty() {
+            g.mesh.set_qp_edges(&qp_backup);
+        }
+        return rep;
+    }
+
+    // Build a temporary physical-only SimplexMesh view sharing `g.mesh.points` so relaxation only inspects physical tets!
+    let existing_en = g.mesh.edge_node_list();
+    let existing_qp = g.mesh.qp_edge_list();
+    let mut phys_cells_flat = Vec::new();
+    let mut phys_labels = Vec::new();
+    for c in 0..g.mesh.n_cells() {
+        if !pml_doms.contains(&g.mesh.cell_labels[c]) {
+            phys_cells_flat.extend_from_slice(g.mesh.cell(c));
+            phys_labels.push(g.mesh.cell_labels[c]);
+        }
+    }
+    let mut tmp_phys = SimplexMesh::new(3, g.mesh.points.clone(), phys_cells_flat, phys_labels, Vec::new(), Vec::new());
+    let rep = project_sheet3d_curved_edges(
         cx,
         &m2,
         &bnd_edges2,
@@ -427,6 +494,18 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
         &slab_layer,
         &level_of_zp,
         &[],
-        &mut g.mesh,
-    )
+        &mut tmp_phys,
+    );
+    let mut merged: BTreeMap<[u32; 2], [f64; 3]> = tmp_phys.edge_node_list().into_iter().collect();
+    for (pr, q) in existing_en {
+        if pml_edges.contains(&pr) {
+            merged.insert(pr, q);
+        }
+    }
+    let merged_vec: Vec<([u32; 2], [f64; 3])> = merged.into_iter().collect();
+    g.mesh.set_edge_nodes(&merged_vec);
+    if !existing_qp.is_empty() {
+        g.mesh.set_qp_edges(&existing_qp);
+    }
+    rep
 }

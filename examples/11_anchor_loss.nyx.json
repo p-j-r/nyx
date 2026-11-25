@@ -10,12 +10,12 @@
         "op": {
           "Rect": {
             "max": [
-              1.0,
+              0.8,
               0.5
             ],
             "min": [
-              0.0,
-              0.0
+              0.2,
+              0.15
             ]
           }
         },
@@ -25,101 +25,6 @@
       },
       {
         "id": 2,
-        "name": "pml_left_box",
-        "op": {
-          "Rect": {
-            "max": [
-              0.2,
-              0.5
-            ],
-            "min": [
-              0.0,
-              0.15
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 3,
-        "name": "pml_right_box",
-        "op": {
-          "Rect": {
-            "max": [
-              1.0,
-              0.5
-            ],
-            "min": [
-              0.8,
-              0.15
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 4,
-        "name": "pml_bottom_box",
-        "op": {
-          "Rect": {
-            "max": [
-              0.8,
-              0.15
-            ],
-            "min": [
-              0.2,
-              0.0
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 5,
-        "name": "pml_bottom_left_box",
-        "op": {
-          "Rect": {
-            "max": [
-              0.2,
-              0.15
-            ],
-            "min": [
-              0.0,
-              0.0
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 6,
-        "name": "pml_bottom_right_box",
-        "op": {
-          "Rect": {
-            "max": [
-              1.0,
-              0.15
-            ],
-            "min": [
-              0.8,
-              0.0
-            ]
-          }
-        },
-        "origin": "Code",
-        "suppressed": false,
-        "tags": []
-      },
-      {
-        "id": 7,
         "name": "beam_box",
         "op": {
           "Rect": {
@@ -138,7 +43,7 @@
         "tags": []
       },
       {
-        "id": 8,
+        "id": 3,
         "name": "regions",
         "op": {
           "Overlay": {
@@ -154,40 +59,34 @@
               {
                 "input": 2,
                 "kind": "Material",
-                "name": "pml_left",
-                "pinned_id": null
-              },
-              {
-                "input": 3,
-                "kind": "Material",
-                "name": "pml_right",
-                "pinned_id": null
-              },
-              {
-                "input": 4,
-                "kind": "Material",
-                "name": "pml_bottom",
-                "pinned_id": null
-              },
-              {
-                "input": 5,
-                "kind": "Material",
-                "name": "pml_bottom_left",
-                "pinned_id": null
-              },
-              {
-                "input": 6,
-                "kind": "Material",
-                "name": "pml_bottom_right",
-                "pinned_id": null
-              },
-              {
-                "input": 7,
-                "kind": "Material",
                 "name": "beam",
                 "pinned_id": null
               }
             ]
+          }
+        },
+        "origin": "Code",
+        "suppressed": false,
+        "tags": []
+      },
+      {
+        "id": 4,
+        "name": "pml",
+        "op": {
+          "Pml": {
+            "grading": 2.0,
+            "layer_grading": 2.0,
+            "layers": 5.0,
+            "mode": "Outward",
+            "regions": [
+              "substrate"
+            ],
+            "sides": [
+              "XMin",
+              "XMax",
+              "ZMin"
+            ],
+            "thickness": 0.2
           }
         },
         "origin": "Code",
@@ -206,61 +105,127 @@
       "bcs": [
         {
           "kind": "pml",
-          "on": "pml_left",
+          "on": "substrate.pml_xmin",
           "params": {
+            "bounds_hi": [
+              0.2,
+              0.0,
+              0.5
+            ],
+            "bounds_lo": [
+              0.0,
+              0.0,
+              0.15
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 3.0,
             "x": "minus",
+            "y": "off",
             "z": "off"
           }
         },
         {
           "kind": "pml",
-          "on": "pml_right",
+          "on": "substrate.pml_xmax",
           "params": {
+            "bounds_hi": [
+              1.0,
+              0.0,
+              0.5
+            ],
+            "bounds_lo": [
+              0.8,
+              0.0,
+              0.15
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 3.0,
             "x": "plus",
+            "y": "off",
             "z": "off"
           }
         },
         {
           "kind": "pml",
-          "on": "pml_bottom",
+          "on": "substrate.pml_zmin",
           "params": {
+            "bounds_hi": [
+              0.8,
+              0.0,
+              0.15
+            ],
+            "bounds_lo": [
+              0.2,
+              0.0,
+              -0.05000000000000002
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 3.0,
             "x": "off",
+            "y": "off",
             "z": "minus"
           }
         },
         {
           "kind": "pml",
-          "on": "pml_bottom_left",
+          "on": "substrate.pml_xmin_zmin",
           "params": {
+            "bounds_hi": [
+              0.2,
+              0.0,
+              0.15
+            ],
+            "bounds_lo": [
+              0.0,
+              0.0,
+              -0.05000000000000002
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 3.0,
             "x": "minus",
+            "y": "off",
             "z": "minus"
           }
         },
         {
           "kind": "pml",
-          "on": "pml_bottom_right",
+          "on": "substrate.pml_xmax_zmin",
           "params": {
+            "bounds_hi": [
+              1.0,
+              0.0,
+              0.15
+            ],
+            "bounds_lo": [
+              0.8,
+              0.0,
+              -0.05000000000000002
+            ],
+            "coord": "cartesian",
+            "kappa_max": 2.0,
             "order": 2.0,
+            "profile": "kappa_polynomial",
+            "re": 1.0,
             "strength": 3.0,
             "x": "plus",
+            "y": "off",
             "z": "minus"
-          }
-        },
-        {
-          "kind": "fixed",
-          "on": "(outer & in_box([-1, 0, -1], [2, 0, 0.5000000001], within)) - plane(z = 0.5)",
-          "params": {
-            "ux": 0.0,
-            "uy": 0.0,
-            "uz": 0.0
           }
         }
       ],
@@ -272,37 +237,7 @@
           "nu": 0.3,
           "rho": 7850.0
         },
-        "pml_bottom": {
-          "E": 200000000000.0,
-          "alpha": 0.000012,
-          "nu": 0.3,
-          "rho": 7850.0
-        },
-        "pml_bottom_left": {
-          "E": 200000000000.0,
-          "alpha": 0.000012,
-          "nu": 0.3,
-          "rho": 7850.0
-        },
-        "pml_bottom_right": {
-          "E": 200000000000.0,
-          "alpha": 0.000012,
-          "nu": 0.3,
-          "rho": 7850.0
-        },
-        "pml_left": {
-          "E": 200000000000.0,
-          "alpha": 0.000012,
-          "nu": 0.3,
-          "rho": 7850.0
-        },
-        "pml_right": {
-          "E": 200000000000.0,
-          "alpha": 0.000012,
-          "nu": 0.3,
-          "rho": 7850.0
-        },
-        "substrate": {
+        "substrate*": {
           "E": 200000000000.0,
           "alpha": 0.000012,
           "nu": 0.3,

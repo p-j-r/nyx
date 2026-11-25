@@ -52,7 +52,9 @@ impl<'a> GeomDomain3<'a> {
         let nr = ev.regions().len();
         let mut region_h = vec![h; nr];
         for p in ev.pml_regions() {
-            region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
+            if !sizes.skip.get(p.region as usize).copied().unwrap_or(false) {
+                region_h[p.region as usize] = region_h[p.region as usize].min(p.thickness / p.layers);
+            }
         }
         // the sizes of regions lower the size of the region; the sizes of faces (and their chord limit) are kept per face (ADR 83). A rule on
         // the crease edges or vertices of a 3D model has no meaning for the lattice and is reported as a warning by the mesh report
@@ -363,7 +365,17 @@ pub fn mesh_geom_3d_with(ev: Evaluated, opts: &GeomMeshOpts, sizes: &Sizes3) -> 
         (cells, report)
     };
     let mesh = SimplexMesh::from_cells(&cells)?;
-    Ok((MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings: vec![] }, report, cells))
+    Ok((
+        MeshedGeom {
+            mesh,
+            cells: Some(crate::mesh::Mesh::D3(cells.clone())),
+            labels,
+            eval: std::sync::Arc::new(ev),
+            warnings: vec![],
+        },
+        report,
+        cells,
+    ))
 }
 
 /// A spherical cavity of radius `r` centred at the origin, meshed at element size `h`: one domain (`cavity`) and one boundary, the surface of

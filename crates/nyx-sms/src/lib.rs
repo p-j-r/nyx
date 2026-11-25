@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
 //! nyx-sms: solid mechanics (`sms`, ADR 12): static and eigenfrequency studies of isotropic and anisotropic solids, in 2D (plane strain or
-//! stress) and 3D, with absorbing layers (perfectly matched layers and low-reflecting boundaries) and Floquet-periodic pairs.
-//!
-//! The crate holds the typed problem (`problem`, decoded from the envelope by `problem::decode`), the kernels in the three stages of
-//! ADR 9 (`solid`: static and real eigenfrequencies; `pml`, `lrb`, `floquet`: the complex-frequency variants; `axisym` and
-//! `cross_section`: bodies of revolution on their half-plane, reached by the study `axisymmetric_eigenfrequency`, ADR 68) and the `Physics`
-//! implementation below. Moved here from
-//! `femcore::{sms, sms_pml, sms_lrb, sms_floquet, sms_axisym, sms_kz}` in restructure phase 4 (ADR 42). `femcore::periodic` (the Floquet
-//! reduction, shared with 3D EM waves) stays in femcore.
+//! stress) and 3D, with absorbing layers (perfectly matched layers, static infinite elements, and low-reflecting boundaries) and
+//! Floquet-periodic pairs, assembled natively on mixed (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) or simplex meshes.
 
 // The kernels index several arrays with one loop variable, the form that matches the formulas (as in femcore).
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments, clippy::type_complexity)]
@@ -23,10 +17,13 @@ pub mod solid;
 pub mod waveguide;
 
 pub use cross_section::{
-    solve_axisymmetric, solve_solid_axisym, solve_solid_waveguide, solve_waveguide_modes, CrossModes,
+    solve_axisymmetric, solve_axisymmetric_mixed, solve_solid_axisym, solve_solid_waveguide, solve_waveguide_modes,
+    solve_waveguide_modes_mixed, CrossModes,
 };
-pub use problem::{decode, Bc, BcKind, Plane, Problem, Study, ThermalExpansion, ThermalSource};
-pub use solid::{solve_solid, Setup};
+pub use problem::{
+    decode, Bc, BcKind, IeProfile, InfiniteElement, Plane, Problem, Study, ThermalExpansion, ThermalSource,
+};
+pub use solid::{solve_solid, solve_solid_mixed, Setup};
 
 use femcore::progress::{self, Progress};
 use nyx_physics::Mesh;
@@ -37,18 +34,126 @@ pub struct Sms;
 
 const WAFER: [&str; 3] = ["x", "y", "z"];
 
-fn axes_pml_params() -> Vec<ParamDesc> {
+fn shared_coord_params() -> Vec<ParamDesc> {
     let dir = |n: &str, l: &str| {
-        ParamDesc::choice(n, l, &["off", "plus", "minus"], "off", "which side of the region the layer absorbs towards")
+        ParamDesc::choice(n, l, &["off", "plus", "minus"], "off", "which side of the region stretches outward")
     };
     vec![
+        ParamDesc::choice(
+            "coord",
+            "Coordinate topology",
+            &["cartesian", "cylindrical", "spherical"],
+            "cartesian",
+            "coordinate system along which the layer stretches",
+        ),
         dir("x", "Absorb along x"),
         dir("y", "Absorb along y (3D only)"),
         dir("z", "Absorb along z"),
-        ParamDesc::number("strength", "Strength", "", 3.0, "stretch s = re - j strength t^order"),
-        ParamDesc::number("order", "Order", "", 2.0, ""),
-        ParamDesc::number("re", "Real part", "", 1.0, ""),
+        ParamDesc::vector("center", "Center", "m", 3, "center [x, y, z] for cylindrical or spherical coordinates"),
+        ParamDesc::vector("axis", "Cylinder axis", "", 3, "axis vector [x, y, z] for cylindrical coordinates")
+            .default_vector(vec![0.0, 0.0, 1.0]),
+        ParamDesc::number("r_in", "Inner radius", "m", 0.0, "inner interface radius for cylindrical/spherical layers")
+            .range(Some(0.0), None),
+        ParamDesc::number(
+            "thickness",
+            "Radial/shell thickness",
+            "m",
+            0.0,
+            "physical radial/spherical layer thickness (0 infers from domain mesh)",
+        )
+        .range(Some(0.0), None),
+        ParamDesc::boolean("radial_on", "Radial stretching", true, "enable cylindrical radial stretching"),
+        dir("axial", "Axial stretching (cylindrical)"),
+        ParamDesc::number("z_in", "Axial inner coordinate", "m", 0.0, "inner axial interface offset along axis"),
+        ParamDesc::number("z_thickness", "Axial thickness", "m", 0.0, "cylindrical endcap axial thickness")
+            .range(Some(0.0), None),
+        ParamDesc::numbers("bounds_lo", "Cartesian lower bounds", "m", "optional explicit [x_min, y_min, z_min]"),
+        ParamDesc::numbers("bounds_hi", "Cartesian upper bounds", "m", "optional explicit [x_max, y_max, z_max]"),
     ]
+}
+
+fn axes_pml_params() -> Vec<ParamDesc> {
+    let mut out = shared_coord_params();
+    out.extend([
+        ParamDesc::number("strength", "Strength", "", 3.0, "imaginary stretch scale psi_max")
+            .range(Some(0.0), None),
+        ParamDesc::number("order", "Order", "", 2.0, "polynomial stretch exponent m").range(Some(0.0), None),
+        ParamDesc::number("re", "Real part", "", 1.0, "constant real stretch when kappa_max = 1"),
+        ParamDesc::choice(
+            "profile",
+            "Stretching profile",
+            &["kappa_polynomial", "rational"],
+            "kappa_polynomial",
+            "kappa_polynomial: bounded ABCS complex dilation (eigenfrequencies); rational: singular pole mapping",
+        ),
+        ParamDesc::number("kappa_max", "Max real stretch", "", 1.0, "peak real evanescent stretch kappa_max >= 1")
+            .range(Some(1.0), None),
+        ParamDesc::number("curvature", "Rational curvature", "", 0.9, "rational pole parameter c_rat in [0, 1)")
+            .range(Some(0.0), Some(0.999_999)),
+        ParamDesc::boolean("auto_scale", "Auto-calibrate scaling", false, "calibrate stretch from elastic wavelengths"),
+        ParamDesc::number(
+            "target_reflection",
+            "Target reflection",
+            "",
+            1e-6,
+            "target normal-incidence amplitude reflection R_0",
+        )
+        .range(Some(1e-15), Some(0.5)),
+        ParamDesc::choice(
+            "stabilization",
+            "Backward-wave stabilization",
+            &["auto", "off", "mpml", "adiabatic"],
+            "auto",
+            "auto: Christoffel pre-check enables M-PML when bulk backward waves exist; mpml: tangential damping; adiabatic: stiffness loss ramp",
+        ),
+        ParamDesc::number("mpml_ratio", "M-PML tangential ratio", "", 0.15, "tangential-to-normal damping ratio")
+            .range(Some(0.0), Some(2.0)),
+        ParamDesc::number("adiabatic_eta", "Adiabatic loss peak", "", 0.5, "peak stiffness loss factor eta_max")
+            .range(Some(0.0), None),
+        ParamDesc::boolean(
+            "clamp_outer",
+            "Clamp outer PML boundary",
+            true,
+            "apply u = 0 Dirichlet clamping on exterior PML termination facets",
+        ),
+    ]);
+    out
+}
+
+fn infinite_element_params() -> Vec<ParamDesc> {
+    let mut out = shared_coord_params();
+    out.extend([
+        ParamDesc::number(
+            "pole_dist",
+            "Pole distance",
+            "m",
+            0.0,
+            "distance from inner IE interface to multipole center (0 auto-computes)",
+        )
+        .range(Some(0.0), None),
+        ParamDesc::choice(
+            "profile",
+            "Infinite-element profile",
+            &["rational", "exponential"],
+            "rational",
+            "rational: exact [R_in, R_out) -> [R_in, inf) mapping; exponential: bounded real stretch + outer 1st-order spring Robin",
+        ),
+        ParamDesc::number(
+            "decay",
+            "Exponential stretch ratio",
+            "",
+            30.0,
+            "outer-to-inner slope ratio chi = exp(beta) for exponential profile",
+        )
+        .range(Some(1.0), None),
+        ParamDesc::boolean(
+            "clamp_outer",
+            "Clamp outer boundary",
+            true,
+            "clamp u = 0 at infinity for rational infinite elements",
+        ),
+    ]);
+    out
 }
 
 impl Physics for Sms {
@@ -62,11 +167,11 @@ impl Physics for Sms {
 
     fn studies(&self) -> Vec<StudyDesc> {
         vec![
-            StudyDesc { kind: "static".into(), name: "Static".into(), doc: "Displacement and stress under fixed constraints, loads and thermal expansion.".into(), dims: Dims::Both, params: vec![] },
+            StudyDesc { kind: "static".into(), name: "Static".into(), doc: "Displacement and stress under fixed constraints, loads, thermal expansion, and static infinite elements.".into(), dims: Dims::Both, params: vec![] },
             StudyDesc {
                 kind: "eigenfrequency".into(),
                 name: "Eigenfrequencies".into(),
-                doc: "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (Q).".into(),
+                doc: "Vibration modes. With absorbing layers or low-reflecting boundaries the frequencies are complex (signed Q = Re f / (2 Im f)).".into(),
                 dims: Dims::Both,
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
@@ -76,7 +181,7 @@ impl Physics for Sms {
             StudyDesc {
                 kind: "axisymmetric_eigenfrequency".into(),
                 name: "Axisymmetric eigenfrequencies".into(),
-                doc: "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.".into(),
+                doc: "Vibration modes of a body of revolution; the mesh is the (r, z) half plane with x = r, and the displacement goes as exp(-j m theta). With absorbing layers the frequencies are complex: Im f > 0 and Q = Re f / (2 Im f); the scalar 'layer fraction N' tells a resonator mode from a layer mode. Every mode also carries 'f re N (Hz)' and 'f im N (Hz)' as numbers and its energy shares outside the layers: 'radial share N', 'axial share N', 'azimuthal share N' and 'share in <region> N'. At m = 0 the torsional modes (azimuthal displacement only, azimuthal share 1) are solved together with the radial and axial ones. The modes returned are the converged eigenpairs nearest f_search: their number can be smaller or larger than n_modes.".into(),
                 dims: Dims::Two,
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
@@ -88,7 +193,7 @@ impl Physics for Sms {
             StudyDesc {
                 kind: "modes".into(),
                 name: "Waveguide modes".into(),
-                doc: "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 |Im f|); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.".into(),
+                doc: "Elastic waveguide modes on the 2D (x, z) cross-section; the displacement has three components (ux, uz, uy) and goes as exp(-j q y) with longitudinal wavevector q. With absorbing layers or low-reflecting boundaries the frequencies are complex: Im f > 0 and Q = Re f / (2 Im f); the scalar 'layer fraction N' tells a guided mode from a layer mode. Every mode outputs the fields '|u|', 'Re ux', 'Re uz', 'Re uy', '|uy|' and the scalars 'f re N (Hz)', 'f im N (Hz)', 'QN' (with loss), 'layer fraction N', 'lateral share N', 'vertical share N', 'longitudinal share N' and 'share in <region> N'.".into(),
                 dims: Dims::Two,
                 params: vec![
                     ParamDesc::integer("n_modes", "Number of modes", 6, 1, ""),
@@ -140,9 +245,16 @@ impl Physics for Sms {
             BcDesc {
                 kind: "pml".into(),
                 name: "Perfectly matched layer".into(),
-                doc: "Absorbing layer by coordinate stretching in the region.".into(),
+                doc: "Absorbing layer by curvilinear complex coordinate stretching in the region (eigenfrequency studies).".into(),
                 applies: Applies::Domain,
                 params: axes_pml_params(),
+            },
+            BcDesc {
+                kind: "infinite_element".into(),
+                name: "Infinite element".into(),
+                doc: "Real coordinate-stretching far-field domain mapping [R_in, R_out) -> [R_in, infinity) for static elasticity.".into(),
+                applies: Applies::Domain,
+                params: infinite_element_params(),
             },
             BcDesc {
                 kind: "periodic".into(),
@@ -311,8 +423,9 @@ impl Physics for Sms {
     }
 }
 
-/// Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the
-/// stage log to the result. `Physics::solve` is this after `decode`; code that already has mesh numbers calls it directly.
+/// Solves a typed problem: checks the numbers, assembles natively on `MixedDiscretisation` whenever
+/// non-simplex (`Quad`/`Prism`/`Hex`), curved, or static infinite-element cells are present (while
+/// preserving the `SimplexMesh` fast path on straight pure-simplex meshes), and appends the stage log.
 pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error> {
     let _installed = progress::install(progress);
     let first_line = progress.log().len();
@@ -324,24 +437,39 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     }
     check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
+    problem.check_study_open_domains()?;
     let mut result = {
         let _s =
             progress::stage(format!("solving solid mechanics on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
-        let d = discretise(mesh)?;
-        problem.check_wafer(d.dim).map_err(Error::invalid)?;
+        let mixed = discretise_mixed(mesh)?;
+        problem.check_wafer(mixed.dim).map_err(Error::invalid)?;
+        let use_mixed = !mixed.is_pure_simplex() || mixed.has_curved() || problem.has_infinite_elements();
         if matches!(problem.study, Study::AxisymmetricEigenfrequency { .. }) {
-            if d.dim != 2 {
+            if mixed.dim != 2 {
                 return Err(Error::invalid("the axisymmetric study needs a 2D mesh (the (r, z) half plane)"));
             }
             problem.check_axisymmetric()?;
-            solve_axisymmetric(&d, problem).map_err(Error::from_kernel)?
+            if use_mixed {
+                solve_axisymmetric_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+            } else {
+                let d = discretise(mesh)?;
+                solve_axisymmetric(&d, problem).map_err(Error::from_kernel)?
+            }
         } else if matches!(problem.study, Study::Modes { .. }) {
-            if d.dim != 2 {
+            if mixed.dim != 2 {
                 return Err(Error::invalid("the waveguide modes study needs a 2D mesh (the (x, z) cross-section)"));
             }
             problem.check_modes()?;
-            solve_waveguide_modes(&d, problem).map_err(Error::from_kernel)?
+            if use_mixed {
+                solve_waveguide_modes_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+            } else {
+                let d = discretise(mesh)?;
+                solve_waveguide_modes(&d, problem).map_err(Error::from_kernel)?
+            }
+        } else if use_mixed {
+            solve_solid_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
         } else {
+            let d = discretise(mesh)?;
             solve_solid(&d, problem).map_err(Error::from_kernel)?
         }
     };

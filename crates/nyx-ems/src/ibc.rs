@@ -4,12 +4,19 @@
 //! `pec` sheets, rank-1 and distributed-sheet lumped Josephson junction (`lumped_jj`) operators, single-facet deduplication,
 //! and symmetric Ruiz diagonal equilibration for 3D `cavity` and 2D `modes` / `axisymmetric_modes`.
 
-use crate::cavity::{basis3, safe_curved_jacobian, Ned3};
+use crate::cavity::{basis3, safe_curved_jacobian, Ned3, CURVED_QUAD_DEGREE};
 use crate::modes::C0;
-use crate::problem::{LumpedJjBc, SurfaceImpedanceBc};
+use crate::problem::{symmetry_facet_flags_mixed, LumpedJjBc, SurfaceImpedanceBc, Symmetry};
 use femcore::edge::{cell_data, edge_basis, tri_g};
+use femcore::edge_mixed::{eval_cell_basis_2d, eval_cell_basis_3d, nedelec_nloc, NedEvalScratch, NedMixed};
 use femcore::fem::{facet_rule, geometry, quad_rule, shape, CurvedTet};
+use femcore::fem_mixed::{
+    cell_corner_ref_coords, eval_facet_jacobian, facet_lagrange_shape, facet_rule_mixed, lagrange_shape_into,
+    IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap,
+};
 use femcore::linalg::csr::{c, CCoo, CCsr, Coo, RCsr, C};
+use femcore::mesh::cells::CellType;
+use femcore::mesh::mixed::{FacetType, MixedDiscretisation, PRISM_TRI_FACES, QUAD_EDGES, TET_TRI_FACES, TRI_EDGES};
 use nyx_physics::Discretisation;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::f64::consts::PI;
@@ -298,6 +305,140 @@ impl PerturbativeIbcEvaluator {
                     }
                 }
                 let wq = quad2.w[q] * area_q;
+                let dof_vecs: Vec<(usize, [f64; 3])> = dof_map.into_iter().collect();
+                points.push((wq * lk_over_mu0, wq * pt.r_s, dof_vecs));
+            }
+        }
+
+        Ok(Self { points })
+    }
+
+    /// Mixed-cell (`Tet + Prism + Hex`) constructor for perturbative `surface_impedance` triangles.
+    pub fn new_mixed(
+        mesh: &MixedDiscretisation,
+        ned: &NedMixed,
+        mur_phys: &[f64],
+        pert_tris: &[PerturbativeIbcTri],
+    ) -> Result<Self, String> {
+        if pert_tris.is_empty() {
+            return Ok(Self { points: Vec::new() });
+        }
+        let mut tri_to_cells: HashMap<[u32; 3], Vec<(usize, [usize; 3])>> = HashMap::new();
+        for ci in 0..mesh.n_cells() {
+            let cv = mesh.cell(ci);
+            let faces: &[[usize; 3]] = match mesh.cell_type(ci) {
+                CellType::Tet => &TET_TRI_FACES,
+                CellType::Prism => &PRISM_TRI_FACES,
+                _ => &[],
+            };
+            for f_loc in faces {
+                let key = sorted3(cv[f_loc[0]], cv[f_loc[1]], cv[f_loc[2]]);
+                let mut lf = [0usize; 3];
+                for (k, &tv) in key.iter().enumerate() {
+                    lf[k] = cv.iter().position(|&v| v == tv).expect("face vertex belongs to cell");
+                }
+                tri_to_cells.entry(key).or_default().push((ci, lf));
+            }
+        }
+        let mut tri_to_facet: HashMap<[u32; 3], usize> = HashMap::new();
+        for f in 0..mesh.n_facets() {
+            if mesh.facet_type(f) == FacetType::Tri3 {
+                let fv = mesh.facet(f);
+                tri_to_facet.insert(sorted3(fv[0], fv[1], fv[2]), f);
+            }
+        }
+
+        let mut points = Vec::new();
+        let mut scratch = NedEvalScratch::new();
+        let (mut w, mut cu) = (Vec::new(), Vec::new());
+
+        for pt in pert_tris {
+            let adj = tri_to_cells
+                .get(&pt.tri)
+                .ok_or_else(|| format!("perturbative IBC facet {:?} is not a face of any cell", pt.tri))?;
+            let &f_id = tri_to_facet
+                .get(&pt.tri)
+                .ok_or_else(|| format!("perturbative IBC triangle {:?} is not a mesh facet", pt.tri))?;
+            let fv = mesh.facet(f_id);
+            let (p0, p1, p2) =
+                (mesh.point3(pt.tri[0] as usize), mesh.point3(pt.tri[1] as usize), mesh.point3(pt.tri[2] as usize));
+            let n_raw = cross3(sub3(p1, p0), sub3(p2, p0));
+            let n_len = norm3(n_raw);
+            if n_len <= 0.0 {
+                continue;
+            }
+            let n_hat = [n_raw[0] / n_len, n_raw[1] / n_len, n_raw[2] / n_len];
+
+            struct AdjMixed {
+                ci: usize,
+                lf_fv: [usize; 3],
+                sign_inv_mur: f64,
+                iso: IsoparametricCell,
+                corners_ref: &'static [[f64; 3]],
+                nb: usize,
+            }
+            let mut adj_cells = Vec::with_capacity(adj.len());
+            let mut any_curved = false;
+            for &(ci, _lf_sorted) in adj {
+                let cv = mesh.cell(ci);
+                let ct = mesh.cell_type(ci);
+                let mut cent = [0.0; 3];
+                for &v in cv {
+                    let pv = mesh.point3(v as usize);
+                    for k in 0..3 {
+                        cent[k] += pv[k] / cv.len() as f64;
+                    }
+                }
+                let sign = if dot3(sub3(cent, p0), n_hat) >= 0.0 { 1.0 } else { -1.0 };
+                let lf_fv = [
+                    cv.iter().position(|&v| v == fv[0]).expect("facet vertex belongs to cell"),
+                    cv.iter().position(|&v| v == fv[1]).expect("facet vertex belongs to cell"),
+                    cv.iter().position(|&v| v == fv[2]).expect("facet vertex belongs to cell"),
+                ];
+                let iso = IsoparametricCell::from_mesh(mesh, ci);
+                any_curved |= iso.curved;
+                adj_cells.push(AdjMixed {
+                    ci,
+                    lf_fv,
+                    sign_inv_mur: sign / mur_phys[ci],
+                    iso,
+                    corners_ref: cell_corner_ref_coords(ct),
+                    nb: nedelec_nloc(ct, ned.order),
+                });
+            }
+
+            let deg = if any_curved { CURVED_QUAD_DEGREE } else { 4 };
+            let frule = facet_rule_mixed(FacetType::Tri3, deg);
+            let lk_over_mu0 = pt.l_k_sq / MU0;
+            for (xi_f, &wf) in frule.pts.iter().zip(&frule.w) {
+                let (fn1, _) = facet_lagrange_shape(FacetType::Tri3, LagrangeSpace::Order1, xi_f);
+                let (_xq, dsq, mut n_q) = eval_facet_jacobian(mesh, f_id, xi_f);
+                if dsq <= 0.0 {
+                    continue;
+                }
+                if dot3(n_q, n_hat) < 0.0 {
+                    n_q = [-n_q[0], -n_q[1], -n_q[2]];
+                }
+                let mut dof_map: BTreeMap<usize, [f64; 3]> = BTreeMap::new();
+                for ac in &adj_cells {
+                    let mut xi_cell = [0.0; 3];
+                    for (k, &li) in ac.lf_fv.iter().enumerate() {
+                        let cr = ac.corners_ref[li];
+                        for a in 0..3 {
+                            xi_cell[a] += fn1[k] * cr[a];
+                        }
+                    }
+                    eval_cell_basis_3d(mesh, ned, ac.ci, &ac.iso, &xi_cell, &mut scratch, &mut w, &mut cu);
+                    let cdofs = ned.cell_dofs(ac.ci);
+                    for s in 0..ac.nb {
+                        let kx = cross3(n_q, cu[s]);
+                        let entry = dof_map.entry(cdofs[s]).or_insert([0.0; 3]);
+                        entry[0] += ac.sign_inv_mur * kx[0];
+                        entry[1] += ac.sign_inv_mur * kx[1];
+                        entry[2] += ac.sign_inv_mur * kx[2];
+                    }
+                }
+                let wq = wf * dsq;
                 let dof_vecs: Vec<(usize, [f64; 3])> = dof_map.into_iter().collect();
                 points.push((wq * lk_over_mu0, wq * pt.r_s, dof_vecs));
             }
@@ -1265,6 +1406,7 @@ pub fn add_ibc_2d_axisym(
                 edge_basis(&l2, &g, &cd.sign[ci], order, &mut w, &mut curl);
                 let (nv, _) = shape(&l2, order);
                 let wr = rule.w[q] * len * r;
+                let w_inv_r = if r > 1e-30 { rule.w[q] * len / r } else { 0.0 };
                 for s in 0..nloc_e {
                     let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
                     for t in 0..nloc_e {
@@ -1274,7 +1416,248 @@ pub fn add_ibc_2d_axisym(
                 }
                 for a in 0..nl {
                     for b in 0..nl {
-                        ke_p[a * nl + b] += alpha * (wr * nv[a] * nv[b]);
+                        ke_p[a * nl + b] += alpha * (w_inv_r * nv[a] * nv[b]);
+                    }
+                }
+            }
+            a_coo.push_block(rows_e, rows_e, &ke_e);
+            a_coo.push_block(&cols_p, &cols_p, &ke_p);
+        }
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ 2D MixedDiscretisation (`Tri + Quad`) PEC & IBC
+
+pub fn pec_edges_and_nodes_2d_mixed(
+    mesh: &MixedDiscretisation,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+    symmetry: Symmetry,
+) -> Result<(Vec<usize>, Vec<usize>), String> {
+    let (sym_pec, sym_pmc) = symmetry_facet_flags_mixed(mesh, symmetry)?;
+    let ibc_labels: Vec<i32> = ibc_bcs.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let is_pec_facet = |f: usize| -> bool {
+        let l = mesh.facet_labels[f];
+        pec_labels.contains(&l)
+            || sym_pec[f]
+            || (mesh.exterior_facets[f] && !ibc_labels.contains(&l) && !pmc_labels.contains(&l) && !sym_pmc[f])
+    };
+    let mut be: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| is_pec_facet(f))
+        .map(|f| mesh.edge_index(mesh.facet(f)[0], mesh.facet(f)[1]).expect("2D facet edge"))
+        .collect();
+    be.sort_unstable();
+    be.dedup();
+    let mut bn: Vec<usize> = (0..mesh.n_facets())
+        .filter(|&f| is_pec_facet(f))
+        .flat_map(|f| mesh.facet(f).iter().map(|&v| v as usize).collect::<Vec<_>>())
+        .collect();
+    bn.sort_unstable();
+    bn.dedup();
+    Ok((be, bn))
+}
+
+fn build_edge_to_cell_2d_mixed(mesh: &MixedDiscretisation) -> HashMap<(u32, u32), usize> {
+    let mut map = HashMap::with_capacity(mesh.n_edges());
+    for ci in 0..mesh.n_cells() {
+        let cv = mesh.cell(ci);
+        let le: &[(usize, usize)] = match mesh.cell_type(ci) {
+            CellType::Tri => &TRI_EDGES,
+            CellType::Quad => &QUAD_EDGES,
+            _ => &[],
+        };
+        for &(i, j) in le {
+            map.entry((cv[i].min(cv[j]), cv[i].max(cv[j]))).or_insert(ci);
+        }
+    }
+    map
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_ibc_2d_waveguide_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    phi_map: &MixedLagrangeDofMap,
+    freq: f64,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    a_coo: &mut CCoo,
+    b_coo: &mut CCoo,
+) -> Result<(), String> {
+    if ibc_bcs.is_empty() {
+        return Ok(());
+    }
+    let net = ned.n_dofs;
+    let edge_to_cell = build_edge_to_cell_2d_mixed(mesh);
+    let mut seen_pec = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen_pec.insert((fv[0].min(fv[1]), fv[0].max(fv[1])));
+        }
+    }
+    let mut seen_ibc = BTreeSet::new();
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut curl = Vec::new();
+    let mut nv = Vec::new();
+    let mut dxi = Vec::new();
+
+    for bc in ibc_bcs {
+        let f_ref = if bc.f_ref > 0.0 { bc.f_ref } else { freq };
+        let omega_ref = 2.0 * PI * f_ref;
+        let k0_ref = omega_ref / C0;
+        let (inv_l_eff, g_eff) = ibc_parallel_params(bc.r_s, bc.l_k_sq, omega_ref);
+        let alpha = c(MU0 * inv_l_eff, k0_ref * MU0 * C0 * g_eff);
+        if alpha.norm() == 0.0 {
+            continue;
+        }
+        for f in 0..mesh.n_facets() {
+            if !bc.labels.contains(&mesh.facet_labels[f]) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let key = (fv[0].min(fv[1]), fv[0].max(fv[1]));
+            if seen_pec.contains(&key) || !seen_ibc.insert(key) {
+                continue;
+            }
+            let &ci =
+                edge_to_cell.get(&key).ok_or_else(|| format!("1D facet {:?} is not an edge of any 2D cell", key))?;
+            let iso = IsoparametricCell::from_mesh(mesh, ci);
+            let cv = mesh.cell(ci);
+            let corners_ref = cell_corner_ref_coords(iso.cell_type);
+            let la = cv.iter().position(|&v| v == fv[0]).unwrap();
+            let lb = cv.iter().position(|&v| v == fv[1]).unwrap();
+            let deg = if iso.curved { 6 } else { 4 };
+            let frule = facet_rule_mixed(FacetType::Edge2, deg);
+            let rows_e = ned.cell_dofs(ci);
+            let pd = phi_map.cell_dofs(ci);
+            let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+            let nloc_e = rows_e.len();
+            let nl = cols_p.len();
+            let mut ke_e = vec![c(0.0, 0.0); nloc_e * nloc_e];
+            let mut ke_p = vec![c(0.0, 0.0); nl * nl];
+
+            for (xi_f, &wf) in frule.pts.iter().zip(&frule.w) {
+                let (fn1, _) = facet_lagrange_shape(FacetType::Edge2, LagrangeSpace::Order1, xi_f);
+                let xi_cell = [
+                    fn1[0] * corners_ref[la][0] + fn1[1] * corners_ref[lb][0],
+                    fn1[0] * corners_ref[la][1] + fn1[1] * corners_ref[lb][1],
+                ];
+                let (_, ds, n_hat) = eval_facet_jacobian(mesh, f, xi_f);
+                let tau = [-n_hat[1], n_hat[0]];
+                eval_cell_basis_2d(mesh, ned, ci, &iso, &xi_cell, &mut scratch, &mut w, &mut curl);
+                lagrange_shape_into(iso.cell_type, phi_map.space, &xi_cell, &mut nv, &mut dxi);
+                let wq = wf * ds;
+                for s in 0..nloc_e {
+                    let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
+                    for t in 0..nloc_e {
+                        let wt_t = w[t][0] * tau[0] + w[t][1] * tau[1];
+                        ke_e[s * nloc_e + t] += alpha * (wq * ws_t * wt_t);
+                    }
+                }
+                for a in 0..nl {
+                    for b in 0..nl {
+                        ke_p[a * nl + b] += alpha * (wq * nv[a] * nv[b]);
+                    }
+                }
+            }
+            a_coo.push_block(rows_e, rows_e, &ke_e);
+            b_coo.push_block(&cols_p, &cols_p, &ke_p);
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_ibc_2d_axisym_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    phi_map: &MixedLagrangeDofMap,
+    f_search: f64,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    a_coo: &mut CCoo,
+) -> Result<(), String> {
+    if ibc_bcs.is_empty() {
+        return Ok(());
+    }
+    let net = ned.n_dofs;
+    let edge_to_cell = build_edge_to_cell_2d_mixed(mesh);
+    let mut seen_pec = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen_pec.insert((fv[0].min(fv[1]), fv[0].max(fv[1])));
+        }
+    }
+    let mut seen_ibc = BTreeSet::new();
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut curl = Vec::new();
+    let mut nv = Vec::new();
+    let mut dxi = Vec::new();
+
+    for bc in ibc_bcs {
+        let f_ref = if bc.f_ref > 0.0 { bc.f_ref } else { f_search };
+        let omega_ref = 2.0 * PI * f_ref;
+        let k0_ref = omega_ref / C0;
+        let (inv_l_eff, g_eff) = ibc_parallel_params(bc.r_s, bc.l_k_sq, omega_ref);
+        let alpha = c(MU0 * inv_l_eff, k0_ref * MU0 * C0 * g_eff);
+        if alpha.norm() == 0.0 {
+            continue;
+        }
+        for f in 0..mesh.n_facets() {
+            if !bc.labels.contains(&mesh.facet_labels[f]) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let key = (fv[0].min(fv[1]), fv[0].max(fv[1]));
+            if seen_pec.contains(&key) || !seen_ibc.insert(key) {
+                continue;
+            }
+            let &ci =
+                edge_to_cell.get(&key).ok_or_else(|| format!("1D facet {:?} is not an edge of any 2D cell", key))?;
+            let iso = IsoparametricCell::from_mesh(mesh, ci);
+            let cv = mesh.cell(ci);
+            let corners_ref = cell_corner_ref_coords(iso.cell_type);
+            let la = cv.iter().position(|&v| v == fv[0]).unwrap();
+            let lb = cv.iter().position(|&v| v == fv[1]).unwrap();
+            let deg = if iso.curved { 6 } else { 4 };
+            let frule = facet_rule_mixed(FacetType::Edge2, deg);
+            let rows_e = ned.cell_dofs(ci);
+            let pd = phi_map.cell_dofs(ci);
+            let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+            let nloc_e = rows_e.len();
+            let nl = cols_p.len();
+            let mut ke_e = vec![c(0.0, 0.0); nloc_e * nloc_e];
+            let mut ke_p = vec![c(0.0, 0.0); nl * nl];
+
+            for (xi_f, &wf) in frule.pts.iter().zip(&frule.w) {
+                let (fn1, _) = facet_lagrange_shape(FacetType::Edge2, LagrangeSpace::Order1, xi_f);
+                let xi_cell = [
+                    fn1[0] * corners_ref[la][0] + fn1[1] * corners_ref[lb][0],
+                    fn1[0] * corners_ref[la][1] + fn1[1] * corners_ref[lb][1],
+                ];
+                let (xq, ds, n_hat) = eval_facet_jacobian(mesh, f, xi_f);
+                let r = xq[0];
+                let tau = [-n_hat[1], n_hat[0]];
+                eval_cell_basis_2d(mesh, ned, ci, &iso, &xi_cell, &mut scratch, &mut w, &mut curl);
+                lagrange_shape_into(iso.cell_type, phi_map.space, &xi_cell, &mut nv, &mut dxi);
+                let wr = wf * ds * r;
+                let w_inv_r = if r > 1e-30 { wf * ds / r } else { 0.0 };
+                for s in 0..nloc_e {
+                    let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
+                    for t in 0..nloc_e {
+                        let wt_t = w[t][0] * tau[0] + w[t][1] * tau[1];
+                        ke_e[s * nloc_e + t] += alpha * (wr * ws_t * wt_t);
+                    }
+                }
+                for a in 0..nl {
+                    for b in 0..nl {
+                        ke_p[a * nl + b] += alpha * (w_inv_r * nv[a] * nv[b]);
                     }
                 }
             }

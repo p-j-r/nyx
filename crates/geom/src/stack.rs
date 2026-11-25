@@ -254,22 +254,30 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
             naming: if scene.naming == NameScheme::Numbered { NameScheme::Region } else { scene.naming },
             axis: 2,
             auto_tags: vec![],
+            outward_pmls: vec![],
         };
         let cx = arrange(&ls, cache).map_err(|e| GeomError(format!("layer z = {z0:.6e}..{z1:.6e}: {}", e.0)))?;
         raws.push(Raw { z0, z1, exprs, cx });
     }
-    if raws.is_empty() {
+    let has_sphere_host = prims.iter().any(|p| matches!(p.body, Some(crate::prim::Body::Sphere { .. })));
+    if raws.is_empty() && !has_sphere_host {
         return Err(GeomError("the model has no prismatic host: curved bodies (sphere, torus) must sit inside a box, cylinder or extruded solid in this build".into()));
     }
 
-    // final regions: every declared region, and generated (Pml) ones that exist in some layer
+    // final regions: every declared region, and generated (Pml) ones that exist in some layer or curved body
     let nsr = scene.regions.len();
     let mut present = vec![false; nsr];
     for (i, r) in scene.regions.iter().enumerate() {
         if matches!(r.kind, RegionKind::Hole | RegionKind::Void) {
             continue;
         }
-        present[i] = r.pml.is_none() || raws.iter().any(|l| l.cx.regions.iter().any(|x| x.scene_index == i));
+        let has_curved = {
+            let mut lv = vec![];
+            r.expr.leaves(&mut lv);
+            lv.iter().any(|&li| prims[li].is_curved_solid())
+        };
+        present[i] =
+            r.pml.is_none() || raws.iter().any(|l| l.cx.regions.iter().any(|x| x.scene_index == i)) || has_curved;
     }
     let mut fin: Vec<Option<u32>> = vec![None; nsr];
     let mut regions: Vec<Region> = vec![];
@@ -394,6 +402,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
         naming: NameScheme::Feature,
         axis: 2,
         auto_tags: vec![],
+        outward_pmls: vec![],
     };
     let mut overlay = arrange_with(&ov_scene, cache, &classify, &synth)?;
     if let Some(msg) = sheet_conflict.into_inner() {
@@ -921,6 +930,9 @@ impl crate::eval::Evaluated {
                 (Surface::Cylinder { c: c1, r: r1, .. }, Surface::Cylinder { c: c2, r: r2, .. }) => {
                     norm3(sub3(*c1, *c2)) <= tol && (r1 - r2).abs() <= tol
                 }
+                (Surface::Sphere { c: c1, r: r1 }, Surface::Sphere { c: c2, r: r2 }) => {
+                    norm3(sub3(*c1, *c2)) <= tol && (r1 - r2).abs() <= tol
+                }
                 _ => false,
             };
             match out.iter_mut().find(|s| same(&s.surface)) {
@@ -1040,7 +1052,19 @@ fn add_bodies(scene: &Scene, cx: &mut Complex, band: f64) -> GeomResult<BodyCirc
         for fi in 0..nhost {
             let fname = &cx.faces[fi].name;
             let clear = match sa {
-                Solid::B(Body::Sphere { c, r }) => norm3(sub3(cx.facet_project(fi as u32, *c), *c)) > r + band,
+                Solid::B(Body::Sphere { c, r }) => {
+                    let d_min = norm3(sub3(cx.facet_project(fi as u32, *c), *c));
+                    let fb = cx.faces[fi].bbox;
+                    let mut d_max = 0.0_f64;
+                    for &x in &[fb.lo[0], fb.hi[0]] {
+                        for &y in &[fb.lo[1], fb.hi[1]] {
+                            for &z in &[fb.lo[2], fb.hi[2]] {
+                                d_max = d_max.max(norm3(sub3([x, y, z], *c)));
+                            }
+                        }
+                    }
+                    d_min > r + band || d_max < r - band
+                }
                 _ => !sa.bbox().pad(band).overlaps(&cx.faces[fi].bbox),
             };
             if !clear {
@@ -1125,6 +1149,136 @@ fn add_bodies(scene: &Scene, cx: &mut Complex, band: f64) -> GeomResult<BodyCirc
         }
         for (c, r, [i, j]) in rims {
             circles.push((c, r, vec![first_id + i as u32, first_id + j as u32]));
+        }
+    }
+    if nhost > 0 && solids.iter().any(|(_, s)| matches!(s, Solid::B(Body::Sphere { .. }))) {
+        let bbox_inside_sphere = |bb: Aabb, sc: V3, sr: f64| -> bool {
+            let mut d_max = 0.0_f64;
+            for &x in &[bb.lo[0], bb.hi[0]] {
+                for &y in &[bb.lo[1], bb.hi[1]] {
+                    for &z in &[bb.lo[2], bb.hi[2]] {
+                        d_max = d_max.max(norm3(sub3([x, y, z], sc)));
+                    }
+                }
+            }
+            d_max < sr - band
+        };
+        if let Some(st) = &cx.stack {
+            let mut sub_vols: Vec<(usize, f64)> = vec![];
+            for l in &st.layers {
+                let dz = l.z1 - l.z0;
+                let z_mid = 0.5 * (l.z0 + l.z1);
+                for (c, (&r_opt, &is_cav)) in l.region_of.iter().zip(&l.is_conductor_cavity).enumerate() {
+                    if r_opt.is_none() && !is_cav {
+                        continue;
+                    }
+                    let mut cb = st.overlay.regions[c].bbox;
+                    cb.lo[2] = l.z0;
+                    cb.hi[2] = l.z1;
+                    let Some(pt) = interior_point(&st.overlay, c as u32) else { continue };
+                    let p_test = [pt[0], pt[1], z_mid];
+                    let bits: Vec<bool> = prims
+                        .iter()
+                        .map(|q| {
+                            matches!(q.body, Some(Body::Sphere { c: sc, r: sr }) if bbox_inside_sphere(cb, sc, sr))
+                                && q.sdf3(p_test, 0.0) < 0.0
+                        })
+                        .collect();
+                    if bits.iter().any(|&b| b) {
+                        if let Some(enc) = scene.region_of(&|i| bits[i]).and_then(|s| cx.scene_to_region[s]) {
+                            if Some(enc) != r_opt {
+                                sub_vols.push((enc as usize, st.overlay.regions[c].measure * dz));
+                            }
+                        }
+                    }
+                }
+            }
+            for (enc, dv) in sub_vols {
+                cx.regions[enc].measure -= dv;
+            }
+        }
+        for fi in 0..nhost {
+            if cx.faces[fi].is_conductor_cavity() || (cx.faces[fi].first.is_some() && cx.faces[fi].second.is_some()) {
+                continue;
+            }
+            let Some(inner) = cx.faces[fi].first.or(cx.faces[fi].second) else { continue };
+            let fb = cx.faces[fi].bbox;
+            let samples = cx.facet_samples(fi as u32);
+            let normals = cx.facet_normals(fi as u32);
+            let (Some(&p_sample), Some(&n_out)) = (samples.last(), normals.first()) else { continue };
+            let p_out = add3(p_sample, mul3(n_out, 2.0 * band));
+            let bits: Vec<bool> = prims
+                .iter()
+                .map(|q| {
+                    if let Some(Body::Sphere { c: sc, r: sr }) = q.body {
+                        bbox_inside_sphere(fb, sc, sr) && q.sdf3(p_out, 0.0) < 0.0
+                    } else {
+                        q.sdf3(p_out, 0.0) < 0.0
+                    }
+                })
+                .collect();
+            if let Some(enc) = scene.region_of(&|i| bits[i]).and_then(|s| cx.scene_to_region[s]) {
+                if enc != inner {
+                    if cx.faces[fi].first.is_none() {
+                        cx.faces[fi].first = Some(enc);
+                    } else {
+                        cx.faces[fi].second = Some(enc);
+                    }
+                    if !cx.faces[fi].is_sheet() {
+                        let (mut a, mut b) =
+                            (cx.regions[inner as usize].name.clone(), cx.regions[enc as usize].name.clone());
+                        if a > b {
+                            std::mem::swap(&mut a, &mut b);
+                        }
+                        cx.faces[fi].name = format!("{a}|{b}");
+                        cx.faces[fi].prov.clear();
+                    }
+                }
+            }
+        }
+    }
+    // Drop generated (Pml) regions that ended up with no face and no volume
+    let mut used = vec![false; cx.regions.len()];
+    for f in &cx.faces {
+        for r in [f.first, f.second].into_iter().flatten() {
+            used[r as usize] = true;
+        }
+    }
+    let keep: Vec<bool> = cx
+        .regions
+        .iter()
+        .enumerate()
+        .map(|(i, r)| used[i] || r.measure > 0.0 || scene.regions[r.scene_index].pml.is_none())
+        .collect();
+    if keep.iter().any(|k| !k) {
+        let mut newid = vec![None; cx.regions.len()];
+        let mut kept = vec![];
+        for (i, r) in cx.regions.drain(..).enumerate() {
+            if keep[i] {
+                newid[i] = Some(kept.len() as u32);
+                kept.push(r);
+            }
+        }
+        cx.regions = kept;
+        for f in &mut cx.faces {
+            f.first = f.first.and_then(|r| newid[r as usize]);
+            f.second = f.second.and_then(|r| newid[r as usize]);
+        }
+        for r in &mut cx.regions {
+            r.parent = r.parent.and_then(|p| newid[p as usize]);
+        }
+        for x in cx.scene_to_region.iter_mut() {
+            *x = x.and_then(|r| newid[r as usize]);
+        }
+        if let Some(st) = &mut cx.stack {
+            for l in &mut st.layers {
+                for r in &mut l.region_ids {
+                    *r = r.and_then(|x| newid[x as usize]);
+                }
+                for r in &mut l.region_of {
+                    *r = r.and_then(|x| newid[x as usize]);
+                }
+            }
         }
     }
     if scene.naming == NameScheme::Numbered {

@@ -23,6 +23,8 @@ pub mod pml_geom;
 pub mod pml_geom3;
 pub mod pml3;
 pub mod pml_box;
+pub mod pml_cyl;
+pub mod pml_sphere;
 pub mod refine3d;
 pub mod request;
 pub mod sheet3d;
@@ -31,9 +33,13 @@ pub mod sheet3d_curve;
 pub mod singularity;
 pub mod validate;
 
-use crate::meshing::geomdrive::{evaluate, mesh_geom_2d, size_map, GeomMeshOpts, MeshedGeom};
-use crate::mesh::SimplexMesh;
-pub use crate::meshing::pml_geom::{structured_pml, PmlMode, PmlReport};
+use crate::meshing::geomdrive::{
+    evaluate, mesh_geom_2d_with_skip, size_map_with_skip, GeomMeshOpts, MeshedGeom,
+};
+use crate::mesh::{Mesh, SimplexMesh};
+pub use crate::meshing::pml_geom::{
+    structured_pml, structured_pml_native_with_curved, structured_pml_with_curved, PmlMode, PmlReport,
+};
 use crate::adapt::drive::{adapt2_with, AdaptOptions, AdaptReport};
 use crate::adapt::field::{BackgroundMetric2, MetricField};
 use crate::adapt::geom::Geometry2;
@@ -46,7 +52,7 @@ use crate::adapt::work::{simplex_from_adapt, simplex_to_adapt};
 use geom::diff::{diff, ChangeKind};
 use geom::eval::{Evaluated, Evaluator, Tier};
 use geom::labels::LabelMap;
-use geom::model::FeatureList;
+use geom::model::{FeatureList, PmlGrowMode};
 use geom::select::EntityKind;
 use std::collections::HashMap;
 
@@ -85,21 +91,72 @@ pub struct MeshPlan {
 }
 
 impl MeshPlan {
-    /// The simple mesher at element size `h`.
+    /// The simple mesher at element size `h` (physics-controlled `PmlMode::Auto` default).
     pub fn simple(h: f64) -> Self {
-        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Simple, pml: PmlMode::Inline }
+        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Simple, pml: PmlMode::Auto }
     }
 
     /// The adaptive mesher: start at element size `h`, adapt to `scale * h` (and to the curvature of the edges at that scale).
     pub fn adaptive(h: f64, scale: f64) -> Self {
-        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Adaptive(Adaptive { scale, ..Adaptive::default() }), pml: PmlMode::Inline }
+        MeshPlan { opts: GeomMeshOpts::new(h), mesher: Mesher::Adaptive(Adaptive { scale, ..Adaptive::default() }), pml: PmlMode::Auto }
     }
 }
 
 impl From<GeomMeshOpts> for MeshPlan {
     fn from(opts: GeomMeshOpts) -> Self {
-        MeshPlan { opts, mesher: Mesher::Simple, pml: PmlMode::Inline }
+        MeshPlan { opts, mesher: Mesher::Simple, pml: PmlMode::Auto }
     }
+}
+
+/// Return tuple for zero-eager-split native mixed-cell meshing entry points.
+pub type NativeMeshTuple = (
+    Mesh,
+    LabelMap,
+    std::sync::Arc<Evaluated>,
+    Option<AdaptReport>,
+    crate::meshing::request::MeshReport,
+    Vec<String>,
+);
+
+/// Internal raw tuple before `MeshReport` summarization.
+pub type NativeRawTuple = (
+    Mesh,
+    LabelMap,
+    std::sync::Arc<Evaluated>,
+    Option<AdaptReport>,
+    Option<PmlReport>,
+    Vec<String>,
+);
+
+type NativeSizingRawTuple = (
+    Mesh,
+    LabelMap,
+    std::sync::Arc<Evaluated>,
+    Option<AdaptReport>,
+    Option<PmlReport>,
+    Vec<String>,
+    PhysicsSizing,
+);
+
+fn check_outward_inline_guard(ev: &Evaluated, pml: PmlMode) -> Result<(), String> {
+    if pml == PmlMode::Inline && ev.pml_regions().iter().any(|p| p.mode == PmlGrowMode::Outward) {
+        return Err(
+            "outward absorbing layers have no inline CAD cells; use PmlMode::Auto or PmlMode::Structured"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn pml_skip_mask(ev: &Evaluated, use_structured: bool) -> Vec<bool> {
+    if !use_structured {
+        return Vec::new();
+    }
+    let mut s = vec![false; ev.regions().len()];
+    for p in ev.pml_regions() {
+        s[p.region as usize] = true;
+    }
+    s
 }
 
 /// Meshes a model.
@@ -114,10 +171,21 @@ pub fn mesh_evaluated(ev: Evaluated, plan: &MeshPlan) -> Result<MeshedGeom, Stri
 
 /// Like `mesh_evaluated`, with the report of the adaptation when there was one.
 pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    let (g, adapt, _) = mesh_evaluated_with_pml_report(ev, plan)?;
+    Ok((g, adapt))
+}
+
+pub(crate) fn mesh_evaluated_with_pml_report(
+    ev: Evaluated,
+    plan: &MeshPlan,
+) -> Result<(MeshedGeom, Option<AdaptReport>, Option<PmlReport>), String> {
+    check_outward_inline_guard(&ev, plan.pml)?;
     if ev.list.dim == 3 {
         return mesh_3d_plan(ev, plan, None);
     }
-    let start = mesh_geom_2d(ev, &plan.opts)?;
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    let skip = pml_skip_mask(&ev, use_structured);
+    let start = mesh_geom_2d_with_skip(ev, &plan.opts, &skip)?;
     let (g, report) = match plan.mesher {
         Mesher::Simple => (start, None),
         Mesher::Adaptive(a) => {
@@ -126,20 +194,88 @@ pub fn mesh_evaluated_report(ev: Evaluated, plan: &MeshPlan) -> Result<(MeshedGe
             (g, Some(r))
         }
     };
-    match plan.pml {
-        PmlMode::Inline => Ok((g, report)),
-        PmlMode::Structured => Ok((structured_pml(g)?.0, report)),
+    if use_structured {
+        let (g, pml_rep) = structured_pml_with_curved(g, plan.opts.curved)?;
+        Ok((g, report, Some(pml_rep)))
+    } else {
+        Ok((g, report, None))
+    }
+}
+
+/// Meshes an evaluated model directly into an uncut [`Mesh`] (`Quad`/`Prism`/`Hex` preserved without
+/// eager simplex splitting), returning `(Mesh, LabelMap, Arc<Evaluated>, Option<AdaptReport>, MeshReport, Vec<String>)`.
+pub fn mesh_evaluated_native_report(ev: Evaluated, plan: &MeshPlan) -> Result<NativeMeshTuple, String> {
+    let (mesh, labels, eval, adapt, pml_rep, warnings) = mesh_evaluated_native_inner(ev, plan)?;
+    let report = crate::meshing::request::summarise_native_mesh(
+        &mesh,
+        &labels,
+        &eval,
+        plan,
+        adapt.as_ref(),
+        pml_rep.as_ref(),
+        &[],
+        &warnings,
+    );
+    Ok((mesh, labels, eval, adapt, report, warnings))
+}
+
+pub(crate) fn mesh_evaluated_native_inner(
+    ev: Evaluated,
+    plan: &MeshPlan,
+) -> Result<NativeRawTuple, String> {
+    check_outward_inline_guard(&ev, plan.pml)?;
+    if ev.list.dim == 3 {
+        return mesh_3d_plan_native(ev, plan, None);
+    }
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    let skip = pml_skip_mask(&ev, use_structured);
+    let start = mesh_geom_2d_with_skip(ev, &plan.opts, &skip)?;
+    let (g, adapt) = match plan.mesher {
+        Mesher::Simple => (start, None),
+        Mesher::Adaptive(a) => {
+            let metrics = a_priori_metrics(&start, &plan.opts, &a)?;
+            let (g, r) = adapt_to_metrics(start, &metrics, &a)?;
+            (g, Some(r))
+        }
+    };
+    if use_structured {
+        let (labels, eval, warnings) = (g.labels.clone(), g.eval.clone(), g.warnings.clone());
+        match structured_pml_native_with_curved(g, plan.opts.curved)? {
+            pml_geom::Native::Unchanged(g_unch, rep) => {
+                let m = g_unch.into_exchange_mesh()?;
+                Ok((m, g_unch.labels, g_unch.eval, adapt, Some(rep), g_unch.warnings))
+            }
+            pml_geom::Native::Cells(cells, rep) => {
+                Ok((Mesh::D2(cells), labels, eval, adapt, Some(rep), warnings))
+            }
+        }
+    } else {
+        let m = g.into_exchange_mesh()?;
+        Ok((m, g.labels, g.eval, adapt, None, g.warnings))
     }
 }
 
 /// Meshes a model of either dimension for the neutral `Sizing` a physics reports (ADR 50): the sizes the model asks for, and in
-/// addition the sizes the waves need. Region names of the sizing are resolved with the model's labels, absorbing pieces are relaxed by
-/// `sz.pml_relax`. In 3D the simple mesher lowers the element size of the
-/// regions that carry short waves (the lattice is made at the coarsest size any region needs, finer regions are refined locally), and
-/// the adaptive mesher adapts the start mesh to the intersection of the geometry metric and the wave metric.
+/// addition the sizes the waves need. Region names of the sizing are resolved with the model's labels; inside structured PMLs
+/// `pml_relax` coarsening is disabled (`1.0`).
 pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz: &PhysicsSizing) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+    let (g, adapt, _) = mesh_for_sizing_with_pml_report(list, plan, sizing, sz)?;
+    Ok((g, adapt))
+}
+
+pub(crate) fn mesh_for_sizing_with_pml_report(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    sizing: &Sizing,
+    sz: &PhysicsSizing,
+) -> Result<(MeshedGeom, Option<AdaptReport>, Option<PmlReport>), String> {
     let ev = evaluate(list)?;
-    // a material given for `Air*` sizes `Air` and its absorbing pieces `Air.pml_*` (the pieces exist only in the label map of the model)
+    check_outward_inline_guard(&ev, plan.pml)?;
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    let mut eff_sz = *sz;
+    if use_structured {
+        eff_sz.pml_relax = 1.0;
+    }
     let expanded = {
         let labels = ev.label_map().map_err(|e| e.to_string())?;
         let names: Vec<&str> = labels.domains.iter().map(|d| d.name.as_str()).collect();
@@ -147,7 +283,7 @@ pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz:
     };
     let sizing = &expanded;
     if ev.list.dim == 3 {
-        return mesh_3d_plan(ev, plan, Some((sizing, sz)));
+        return mesh_3d_plan(ev, plan, Some((sizing, &eff_sz)));
     }
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let resolve = |n: &str| labels.domain(n);
@@ -156,29 +292,103 @@ pub fn mesh_for_sizing(list: &FeatureList, plan: &MeshPlan, sizing: &Sizing, sz:
     mesh_waves_2d(
         list,
         plan,
-        &|m: &SimplexMesh| physics_size::vertex_sizes_for(sizing, &resolve, m, &is_pml, sz),
-        &|m: &SimplexMesh, ceiling: f64| physics_size::metrics_for::<2>(sizing, &resolve, m, &is_pml, sz, ceiling),
+        &|m: &SimplexMesh| physics_size::vertex_sizes_for(sizing, &resolve, m, &is_pml, &eff_sz),
+        &|m: &SimplexMesh, ceiling: f64| physics_size::metrics_for::<2>(sizing, &resolve, m, &is_pml, &eff_sz, ceiling),
     )
+}
+
+/// Meshes a model for study `Sizing` directly into an uncut [`Mesh`] (`Quad`/`Prism`/`Hex` preserved
+/// with zero eager simplex splitting), returning `(Mesh, LabelMap, Arc<Evaluated>, Option<AdaptReport>, MeshReport, Vec<String>)`.
+pub fn mesh_for_sizing_native(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    sizing: &Sizing,
+    sz: &PhysicsSizing,
+) -> Result<NativeMeshTuple, String> {
+    let (mesh, labels, eval, adapt, pml_rep, warnings, eff_sz) =
+        mesh_for_sizing_native_inner(list, plan, sizing, sz)?;
+    let wave_sizes: Vec<Option<f64>> = wave_sizes_by_region(&eval, &labels, sizing, &eff_sz)?
+        .into_iter()
+        .map(|h| h.is_finite().then_some(h))
+        .collect();
+    let report = crate::meshing::request::summarise_native_mesh(
+        &mesh,
+        &labels,
+        &eval,
+        plan,
+        adapt.as_ref(),
+        pml_rep.as_ref(),
+        &wave_sizes,
+        &warnings,
+    );
+    Ok((mesh, labels, eval, adapt, report, warnings))
+}
+
+pub(crate) fn mesh_for_sizing_native_inner(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    sizing: &Sizing,
+    sz: &PhysicsSizing,
+) -> Result<NativeSizingRawTuple, String> {
+    let ev = evaluate(list)?;
+    check_outward_inline_guard(&ev, plan.pml)?;
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    let mut eff_sz = *sz;
+    if use_structured {
+        eff_sz.pml_relax = 1.0;
+    }
+    let expanded = {
+        let labels = ev.label_map().map_err(|e| e.to_string())?;
+        let names: Vec<&str> = labels.domains.iter().map(|d| d.name.as_str()).collect();
+        sizing.expand_wildcards(&names)
+    };
+    if ev.list.dim == 3 {
+        let (m, labels, eval, adapt, pml_rep, warnings) =
+            mesh_3d_plan_native(ev, plan, Some((&expanded, &eff_sz)))?;
+        return Ok((m, labels, eval, adapt, pml_rep, warnings, eff_sz));
+    }
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let resolve = |n: &str| labels.domain(n);
+    let pml: std::collections::HashSet<i32> =
+        ev.pml_regions().iter().map(|p| labels.domains[p.region as usize].id).collect();
+    let is_pml = |d: i32| pml.contains(&d);
+    let (m, labels_out, eval_out, adapt, pml_rep, warnings) = mesh_waves_2d_native(
+        list,
+        plan,
+        &|m: &SimplexMesh| physics_size::vertex_sizes_for(&expanded, &resolve, m, &is_pml, &eff_sz),
+        &|m: &SimplexMesh, ceiling: f64| {
+            physics_size::metrics_for::<2>(&expanded, &resolve, m, &is_pml, &eff_sz, ceiling)
+        },
+    )?;
+    Ok((m, labels_out, eval_out, adapt, pml_rep, warnings, eff_sz))
 }
 
 type VertexSizesFn<'a> = &'a dyn Fn(&SimplexMesh) -> Result<Vec<f64>, String>;
 type MetricsFn<'a> = &'a dyn Fn(&SimplexMesh, f64) -> Result<Vec<Sym<2>>, String>;
 
-fn mesh_waves_2d(list: &FeatureList, plan: &MeshPlan, vertex_sizes: VertexSizesFn, wave_metrics: MetricsFn) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
+fn mesh_waves_2d_phys(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    vertex_sizes: VertexSizesFn,
+    wave_metrics: MetricsFn,
+) -> Result<(MeshedGeom, Option<AdaptReport>, bool), String> {
     let mut opts = plan.opts.clone();
+    let ev0 = evaluate(list)?;
+    let use_structured = plan.pml.is_structured(!ev0.pml_regions().is_empty());
+    let skip = pml_skip_mask(&ev0, use_structured);
     let (g, report) = match plan.mesher {
         Mesher::Simple => {
-            let probe = mesh_geom_2d(evaluate(list)?, &opts)?;
+            let probe = mesh_geom_2d_with_skip(ev0, &opts, &skip)?;
             let hmin = vertex_sizes(&probe.mesh)?.into_iter().fold(f64::INFINITY, f64::min);
             if hmin < opts.h {
                 opts.h = hmin;
-                (mesh_geom_2d(evaluate(list)?, &opts)?, None)
+                (mesh_geom_2d_with_skip(evaluate(list)?, &opts, &skip)?, None)
             } else {
                 (probe, None)
             }
         }
         Mesher::Adaptive(a) => {
-            let start = mesh_geom_2d(evaluate(list)?, &opts)?;
+            let start = mesh_geom_2d_with_skip(ev0, &opts, &skip)?;
             let geo = a_priori_metrics(&start, &opts, &a)?;
             let phys = wave_metrics(&start.mesh, opts.h)?;
             let metrics: Vec<Sym<2>> = geo
@@ -194,9 +404,45 @@ fn mesh_waves_2d(list: &FeatureList, plan: &MeshPlan, vertex_sizes: VertexSizesF
             (g, Some(r))
         }
     };
-    match plan.pml {
-        PmlMode::Inline => Ok((g, report)),
-        PmlMode::Structured => Ok((structured_pml(g)?.0, report)),
+    Ok((g, report, use_structured))
+}
+
+fn mesh_waves_2d(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    vertex_sizes: VertexSizesFn,
+    wave_metrics: MetricsFn,
+) -> Result<(MeshedGeom, Option<AdaptReport>, Option<PmlReport>), String> {
+    let (g, report, use_structured) = mesh_waves_2d_phys(list, plan, vertex_sizes, wave_metrics)?;
+    if use_structured {
+        let (g, pml_rep) = structured_pml_with_curved(g, plan.opts.curved)?;
+        Ok((g, report, Some(pml_rep)))
+    } else {
+        Ok((g, report, None))
+    }
+}
+
+fn mesh_waves_2d_native(
+    list: &FeatureList,
+    plan: &MeshPlan,
+    vertex_sizes: VertexSizesFn,
+    wave_metrics: MetricsFn,
+) -> Result<NativeRawTuple, String> {
+    let (g, report, use_structured) = mesh_waves_2d_phys(list, plan, vertex_sizes, wave_metrics)?;
+    if use_structured {
+        let (labels, eval, warnings) = (g.labels.clone(), g.eval.clone(), g.warnings.clone());
+        match structured_pml_native_with_curved(g, plan.opts.curved)? {
+            pml_geom::Native::Unchanged(g_unch, rep) => {
+                let m = g_unch.into_exchange_mesh()?;
+                Ok((m, g_unch.labels, g_unch.eval, report, Some(rep), g_unch.warnings))
+            }
+            pml_geom::Native::Cells(cells, rep) => {
+                Ok((Mesh::D2(cells), labels, eval, report, Some(rep), warnings))
+            }
+        }
+    } else {
+        let m = g.into_exchange_mesh()?;
+        Ok((m, g.labels, g.eval, report, None, g.warnings))
     }
 }
 
@@ -209,48 +455,47 @@ pub fn wave_sizes_by_region(ev: &Evaluated, labels: &LabelMap, sizing: &Sizing, 
     physics_size::cell_sizes_for(&sizing.expand_wildcards(&names), &|n| labels.domain(n), &ids, &|d| pml.contains(&d), sz)
 }
 
-/// Meshes a 3D model (ADR 40, 50, 51, 52): the lattice mesher with the sizes of the model and, when `waves` is given, of the study; then
-/// the metric adaptation of `adapt3` for `Mesher::Adaptive`; then the structured absorbing layers for `PmlMode::Structured`.
-fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &PhysicsSizing)>) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
-    if ev.complex().has_sheets() {
-        return sheet3d::mesh_sheet_stack_3d(ev, plan, waves);
-    }
+fn mesh_3d_physical_interior(
+    ev: Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<(MeshedGeom, Option<AdaptReport>, bool), String> {
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let nr = ev.regions().len();
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    let mut eff_sz_opt: Option<PhysicsSizing> = None;
     let want = match waves {
-        Some((sizing, sz)) => wave_sizes_by_region(&ev, &labels, sizing, sz)?,
+        Some((sizing, sz)) => {
+            let mut s = *sz;
+            if use_structured {
+                s.pml_relax = 1.0;
+            }
+            let v = wave_sizes_by_region(&ev, &labels, sizing, &s)?;
+            eff_sz_opt = Some(s);
+            v
+        }
         None => vec![f64::INFINITY; nr],
     };
-    // structured layers are built around the physical window, which is meshed alone
-    let skip: Vec<bool> = if matches!(plan.pml, PmlMode::Structured) {
-        let mut s = vec![false; nr];
-        for p in ev.pml_regions() {
-            s[p.region as usize] = true;
-        }
-        s
-    } else {
-        vec![]
-    };
-    // the simple mesher takes the wave sizes at once; the adaptive one starts from the model's own sizes and adapts towards them
+    let _ = eff_sz_opt;
+    let skip = pml_skip_mask(&ev, use_structured);
     let start_sizes = match plan.mesher {
-        Mesher::Simple => Sizes3 { region_h: want.clone(), skip },
-        Mesher::Adaptive(_) => Sizes3 { region_h: vec![], skip },
+        Mesher::Simple => Sizes3 { region_h: want.clone(), skip: skip.clone() },
+        Mesher::Adaptive(_) => Sizes3 { region_h: vec![], skip: skip.clone() },
     };
-    // curved geometry (ADR 82) is given by the lattice mesher itself when it makes the final mesh; after an adaptation or the structured
-    // layers the connectivity changes, so the edges are curved last
-    let curve_last = plan.opts.curved && (matches!(plan.mesher, Mesher::Adaptive(_)) || matches!(plan.pml, PmlMode::Structured));
+    // When adaptive meshing runs, curve the adapted physical interior BEFORE building structured PML shells
+    // so physical tets are curved on the physical geometry and PML shells propagate `edge_nodes` in lockstep!
+    let curve_after_adapt = plan.opts.curved && matches!(plan.mesher, Mesher::Adaptive(_));
     let mut start_opts = plan.opts.clone();
-    if curve_last {
+    if curve_after_adapt {
         start_opts.curved = false;
     }
     let (g, _, _) = geomdrive3::mesh_geom_3d_with(ev, &start_opts, &start_sizes)?;
-    let (g, report) = match plan.mesher {
+    let (mut g, report) = match plan.mesher {
         Mesher::Simple => (g, None),
         Mesher::Adaptive(a) => {
             let geo = adapt3d::vertex_sizes3(&g, &plan.opts, &a, false)?;
             let mut size = geo;
             if waves.is_some() {
-                // the wave size is scaled like the geometry sizes, so `Adaptive::scale` stays one knob for the whole mesh
                 let region_of: HashMap<i32, usize> = g.labels.domains.iter().map(|d| (d.id, d.region as usize)).collect();
                 let mut vw = vec![f64::INFINITY; g.mesh.n_points()];
                 for c in 0..g.mesh.n_cells() {
@@ -268,15 +513,84 @@ fn mesh_3d_plan(ev: Evaluated, plan: &MeshPlan, waves: Option<(&Sizing, &Physics
             (g, Some(r))
         }
     };
-    let mut g = match plan.pml {
-        PmlMode::Inline => g,
-        PmlMode::Structured => pml_geom3::structured_pml_3d(g)?.0,
-    };
-    if curve_last {
-        let dom = geomdrive3::GeomDomain3::new(&g.eval, &g.labels, plan.opts.h)?;
+    if curve_after_adapt {
+        let dom = geomdrive3::GeomDomain3::new_with(
+            &g.eval,
+            &g.labels,
+            plan.opts.h,
+            &Sizes3 { region_h: vec![], skip },
+        )?;
         curve3::curve_solver_mesh(&mut g.mesh, &dom);
+        if let Some(Mesh::D3(ref mut cm)) = g.cells {
+            cm.set_edge_nodes(g.mesh.edge_node_list());
+        }
     }
-    Ok((g, report))
+    Ok((g, report, use_structured))
+}
+
+fn uses_prismatic_stack_mesher(ev: &Evaluated, use_structured: bool) -> bool {
+    let cx = ev.complex();
+    if cx.has_sheets() {
+        return true;
+    }
+    use_structured
+        && ev
+            .pml_regions()
+            .iter()
+            .any(|p| p.coord == geom::model::PmlCoordKind::Cylindrical && p.r_in > 0.0)
+        && cx.stack.is_some()
+        && cx.faces.iter().all(|f| {
+            matches!(
+                f.geom,
+                geom::complex::FaceGeom::Cap { .. } | geom::complex::FaceGeom::Lateral { .. }
+            )
+        })
+}
+
+/// Meshes a 3D model (ADR 40, 50, 51, 52).
+fn mesh_3d_plan(
+    ev: Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<(MeshedGeom, Option<AdaptReport>, Option<PmlReport>), String> {
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    if uses_prismatic_stack_mesher(&ev, use_structured) {
+        return sheet3d::mesh_sheet_stack_3d_with_pml(ev, plan, waves);
+    }
+    let (g, report, use_structured) = mesh_3d_physical_interior(ev, plan, waves)?;
+    if use_structured {
+        let (g, pml_rep) = pml_geom3::structured_pml_3d_with_curved(g, plan.opts.curved)?;
+        Ok((g, report, Some(pml_rep)))
+    } else {
+        Ok((g, report, None))
+    }
+}
+
+fn mesh_3d_plan_native(
+    ev: Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<NativeRawTuple, String> {
+    let use_structured = plan.pml.is_structured(!ev.pml_regions().is_empty());
+    if uses_prismatic_stack_mesher(&ev, use_structured) {
+        return sheet3d::mesh_sheet_stack_3d_native(ev, plan, waves);
+    }
+    let (g, report, use_structured) = mesh_3d_physical_interior(ev, plan, waves)?;
+    if use_structured {
+        let (labels, eval, warnings) = (g.labels.clone(), g.eval.clone(), g.warnings.clone());
+        match pml_geom3::structured_pml_3d_native_with_curved(g, plan.opts.curved)? {
+            pml_geom3::Native3::Unchanged(g_unch, rep) => {
+                let m = g_unch.into_exchange_mesh()?;
+                Ok((m, g_unch.labels, g_unch.eval, report, Some(rep), g_unch.warnings))
+            }
+            pml_geom3::Native3::Cells(cells, rep) => {
+                Ok((Mesh::D3(cells), labels, eval, report, Some(rep), warnings))
+            }
+        }
+    } else {
+        let m = g.into_exchange_mesh()?;
+        Ok((m, g.labels, g.eval, report, None, g.warnings))
+    }
 }
 
 /// The isotropic metric at every vertex of a meshed model that the model itself asks for: the size of the region(s) the vertex belongs
@@ -297,8 +611,12 @@ fn vertex_sizes(g: &MeshedGeom, opts: &GeomMeshOpts, a: &Adaptive, geometry_only
         return Err("the adaptation scale must be positive".into());
     }
     let ev = &g.eval;
-    let sizes = size_map(ev, opts.h);
     let m = &g.mesh;
+    let pml_doms: std::collections::HashSet<i32> =
+        ev.pml_regions().iter().map(|p| g.labels.domains[p.region as usize].id).collect();
+    let has_pml_cells = !pml_doms.is_empty() && m.cell_labels.iter().any(|l| pml_doms.contains(l));
+    let skip = pml_skip_mask(ev, !pml_doms.is_empty() && !has_pml_cells);
+    let sizes = size_map_with_skip(ev, opts.h, &skip);
     let max_dev = opts.max_dev.unwrap_or(opts.h / 50.0);
     // region index of a domain label
     let region_of: HashMap<i32, usize> = g.labels.domains.iter().map(|d| (d.id, d.region as usize)).collect();
@@ -404,7 +722,17 @@ pub fn adapt_to_field(g: MeshedGeom, field: &dyn MetricField<2>, a: &Adaptive) -
         adapt2_with(&old, field, &opts, |w| GeomOracle2::from_work(ev, labels, w))?
     };
     let mesh = simplex_from_adapt(&result.mesh);
-    Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval, warnings: g.warnings }, result.report))
+    let cells = Mesh::from_solver_mesh(&mesh)?;
+    Ok((
+        MeshedGeom {
+            mesh,
+            cells: Some(cells),
+            labels: g.labels,
+            eval: g.eval,
+            warnings: g.warnings,
+        },
+        result.report,
+    ))
 }
 
 /// Boundary labels of the edges (2D) or faces (3D) that take part in a periodic pair of the model. Their chains or patches stay
@@ -589,6 +917,7 @@ impl MeshCache {
     pub fn mesh_extruded(&mut self, list: &FeatureList, plan: &MeshPlan, layers: &[crate::meshing::mesher::Layer]) -> Result<(MeshedGeom, Reuse), String> {
         let (mut g, reuse) = self.mesh(list, plan)?;
         g.mesh = crate::meshing::mesher::extrude_y(&g.mesh, layers, 0.0)?;
+        g.cells = Some(Mesh::from_solver_mesh(&g.mesh)?);
         Ok((g, reuse))
     }
 }

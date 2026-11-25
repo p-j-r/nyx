@@ -5,9 +5,14 @@
 //! text (and hash) in every build. The project, its feature list and each of its problems carry a `format` key (first value 1, ADR 63); a file
 //! of another format, or without the key, is refused with a plain message (there is no migration code).
 
+pub use femcore::meshing::request::PmlModeRequest;
 use geom::model::FeatureList;
 use nyx_physics::{canonical_json, Error, ProblemSpec, Registry};
 use serde::{Deserialize, Serialize};
+
+fn is_auto_pml_mode(m: &PmlModeRequest) -> bool {
+    *m == PmlModeRequest::Auto
+}
 
 /// One layer of a model swept along y into a 3D mesh (the 2D cross-section is extruded with `n` cells across `thickness`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -44,9 +49,12 @@ pub struct MeshSettings {
     /// points per shortest wavelength when `physics_sizing` is on; absent: 12 for order 1, 6 for order 2
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points_per_wavelength: Option<f64>,
-    /// rebuild the absorbing layers of the model as structured layers (quadrilaterals, prisms, hexahedra, cut into simplices)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub structured_pml: bool,
+    /// how absorbing layers of the model are meshed (`"auto"` [default], `"structured"`, or `"inline"`)
+    #[serde(default, skip_serializing_if = "is_auto_pml_mode")]
+    pub pml_mode: PmlModeRequest,
+    /// legacy boolean alias (`true` -> `Structured`, `false` -> `Inline` when `pml_mode == Auto`) kept for backward compatibility
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_pml: Option<bool>,
     /// largest distance of a chord from a curved edge or face in metres; absent: h / 50
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_dev: Option<f64>,
@@ -105,7 +113,8 @@ impl Default for MeshSettings {
             adapt_scale: None,
             physics_sizing: false,
             points_per_wavelength: None,
-            structured_pml: false,
+            pml_mode: PmlModeRequest::Auto,
+            structured_pml: None,
             max_dev: None,
             curved: false,
             gap_cells: None,
@@ -121,6 +130,18 @@ impl Default for MeshSettings {
             singular_edges: None,
             quarter_point_xi: None,
             corner_grading: false,
+        }
+    }
+}
+
+impl MeshSettings {
+    /// Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true | false)`
+    /// when `pml_mode` was left at its default `Auto`.
+    pub fn resolved_pml_mode(&self) -> PmlModeRequest {
+        match (self.pml_mode, self.structured_pml) {
+            (PmlModeRequest::Auto, Some(true)) => PmlModeRequest::Structured,
+            (PmlModeRequest::Auto, Some(false)) => PmlModeRequest::Inline,
+            (mode, _) => mode,
         }
     }
 }

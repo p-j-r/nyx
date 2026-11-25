@@ -94,7 +94,7 @@
     },
     {
       "applies": "boundary",
-      "doc": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+      "doc": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics, stationary heat, magnetostatics).",
       "kind": "far_field",
       "name": "Far-field open boundary",
       "params": [
@@ -137,6 +137,223 @@
           },
           "label": "Multipole center",
           "name": "center",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "far-field ambient temperature T_inf for stationary heat transfer",
+          "kind": {
+            "default": 293.15,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Ambient far-field temperature",
+          "name": "t_inf",
+          "required": false,
+          "unit": "K"
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Real coordinate-stretched infinite-element domain mapping [R_in, R_out) -> [R_in, inf) (rational, locking-free on Quad/Prism/Hex) or bounded exponential stretching with outer far-field Robin (electrostatics, stationary heat, magnetostatics).",
+      "kind": "infinite_element",
+      "name": "Infinite element",
+      "params": [
+        {
+          "doc": "coordinate topology of the infinite-element domain",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "cartesian",
+              "cylindrical",
+              "spherical"
+            ],
+            "type": "choice"
+          },
+          "label": "Coordinate system",
+          "name": "coord",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "rational: maps [R_in, R_out) -> [R_in, inf); exponential: bounded real stretching chi = exp(beta) paired with outer Order-1 far_field Robin",
+          "kind": {
+            "default": "rational",
+            "options": [
+              "rational",
+              "exponential"
+            ],
+            "type": "choice"
+          },
+          "label": "Stretching profile",
+          "name": "profile",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Cartesian stretching direction along x",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Stretch along x",
+          "name": "x",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Cartesian stretching direction along y",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Stretch along y (3D only)",
+          "name": "y",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Cartesian stretching direction along z",
+          "kind": {
+            "default": "off",
+            "options": [
+              "off",
+              "plus",
+              "minus"
+            ],
+            "type": "choice"
+          },
+          "label": "Stretch along z",
+          "name": "z",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "center [x0, y0, z0] for cylindrical or spherical infinite elements",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Reference center",
+          "name": "center",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "unit axis vector [ax, ay, az] for cylindrical infinite elements",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Cylinder axis",
+          "name": "axis",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "inner interface radius R_in (0 auto-detects from domain vertices)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Inner radius",
+          "name": "r_in",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "physical thickness d of the infinite-element shell (0 auto-detects from domain extent)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Physical layer thickness",
+          "name": "thickness",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "pole distance d_pole for rational stretching (0 or null uses R_in or 0.5 * L_char)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Rational pole distance",
+          "name": "pole_dist",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "bounded exponential stretch ratio chi = exp(beta) >= 1 (typically 20..50)",
+          "kind": {
+            "default": 30.0,
+            "max": null,
+            "min": 1.0,
+            "type": "number"
+          },
+          "label": "Exponential stretch ratio",
+          "name": "decay",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional explicit lower corner [x_min, y_min, z_min] of a Cartesian IE domain",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Cartesian lower bounds",
+          "name": "bounds_lo",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional explicit upper corner [x_max, y_max, z_max] of a Cartesian IE domain",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Cartesian upper bounds",
+          "name": "bounds_hi",
           "required": false,
           "unit": "m"
         }
@@ -768,7 +985,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+              "description": "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics, stationary heat, magnetostatics).",
               "properties": {
                 "kind": {
                   "const": "far_field"
@@ -806,6 +1023,166 @@
                       "maximum": 2,
                       "minimum": 1,
                       "type": "integer"
+                    },
+                    "t_inf": {
+                      "default": 293.15,
+                      "description": "Ambient far-field temperature [K]. far-field ambient temperature T_inf for stationary heat transfer",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Real coordinate-stretched infinite-element domain mapping [R_in, R_out) -> [R_in, inf) (rational, locking-free on Quad/Prism/Hex) or bounded exponential stretching with outer far-field Robin (electrostatics, stationary heat, magnetostatics).",
+              "properties": {
+                "kind": {
+                  "const": "infinite_element"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "axis": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        1.0
+                      ],
+                      "description": "Cylinder axis. unit axis vector [ax, ay, az] for cylindrical infinite elements",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "bounds_hi": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Cartesian upper bounds [m]. optional explicit upper corner [x_max, y_max, z_max] of a Cartesian IE domain",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "bounds_lo": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Cartesian lower bounds [m]. optional explicit lower corner [x_min, y_min, z_min] of a Cartesian IE domain",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "center": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Reference center [m]. center [x0, y0, z0] for cylindrical or spherical infinite elements",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "coord": {
+                      "default": "auto",
+                      "description": "Coordinate system. coordinate topology of the infinite-element domain",
+                      "enum": [
+                        "auto",
+                        "cartesian",
+                        "cylindrical",
+                        "spherical"
+                      ],
+                      "type": "string"
+                    },
+                    "decay": {
+                      "default": 30.0,
+                      "description": "Exponential stretch ratio. bounded exponential stretch ratio chi = exp(beta) >= 1 (typically 20..50)",
+                      "minimum": 1.0,
+                      "type": "number"
+                    },
+                    "pole_dist": {
+                      "default": 0.0,
+                      "description": "Rational pole distance [m]. pole distance d_pole for rational stretching (0 or null uses R_in or 0.5 * L_char)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "profile": {
+                      "default": "rational",
+                      "description": "Stretching profile. rational: maps [R_in, R_out) -> [R_in, inf); exponential: bounded real stretching chi = exp(beta) paired with outer Order-1 far_field Robin",
+                      "enum": [
+                        "rational",
+                        "exponential"
+                      ],
+                      "type": "string"
+                    },
+                    "r_in": {
+                      "default": 0.0,
+                      "description": "Inner radius [m]. inner interface radius R_in (0 auto-detects from domain vertices)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "thickness": {
+                      "default": 0.0,
+                      "description": "Physical layer thickness [m]. physical thickness d of the infinite-element shell (0 auto-detects from domain extent)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "x": {
+                      "default": "off",
+                      "description": "Stretch along x. Cartesian stretching direction along x",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "y": {
+                      "default": "off",
+                      "description": "Stretch along y (3D only). Cartesian stretching direction along y",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
+                    },
+                    "z": {
+                      "default": "off",
+                      "description": "Stretch along z. Cartesian stretching direction along z",
+                      "enum": [
+                        "off",
+                        "plus",
+                        "minus"
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [],

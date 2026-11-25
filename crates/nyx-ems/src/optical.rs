@@ -9,7 +9,7 @@ use crate::modes_complex::{solve_modes_complex, ModesC};
 use crate::problem::{Problem, Study};
 use femcore::linalg::csr::c;
 use femcore::optical::{cell_materials_signed, OptMode, OpticalSet};
-use femcore::props::{PmlDir, TensorKind};
+use femcore::props::{Pml, TensorKind};
 use nyx_physics::Discretisation;
 
 fn from_real(m: &Modes) -> Vec<OptMode> {
@@ -27,15 +27,7 @@ fn from_complex(m: &ModesC) -> Vec<OptMode> {
 }
 
 fn in_pml(mesh: &Discretisation, problem: &Problem) -> Vec<bool> {
-    (0..mesh.n_cells())
-        .map(|ci| {
-            problem
-                .materials
-                .pml
-                .get(&mesh.cell_labels[ci])
-                .is_some_and(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
-        })
-        .collect()
+    (0..mesh.n_cells()).map(|ci| problem.materials.pml.get(&mesh.cell_labels[ci]).is_some_and(Pml::is_active)).collect()
 }
 
 /// Solves the optical modes of `problem` (a `Modes` study in wafer axes), propagating along `+y`; complex materials and PMLs go through the
@@ -86,7 +78,7 @@ pub fn solve_optical_wafer(mesh: &Discretisation, problem: &Problem, prop_sign: 
 
 /// Domains of the problem that are absorbing layers: the polarization analysis leaves their cells out.
 pub(crate) fn absorbing_domains(problem: &Problem) -> Vec<i32> {
-    femcore::optical::absorbing_domains(&problem.materials)
+    problem.materials.pml.iter().filter(|(_, p)| p.is_active()).map(|(&d, _)| d).collect()
 }
 
 /// The frame of the modes of a cross-section study: lateral x, normal z, propagation y (the local triple of the mode solvers, left-handed),

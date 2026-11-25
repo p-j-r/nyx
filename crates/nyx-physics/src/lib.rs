@@ -39,6 +39,8 @@ pub use cqed::{
 pub use decode::{tls_interface_from_material_name, tls_interfaces_from_spec};
 pub use desc::*;
 pub use error::Error;
+/// Native mixed-cell discretisation (`Tri`+`Quad` in 2D, `Tet`+`Prism`+`Hex` in 3D) without splitting structured cells.
+pub use femcore::mesh::mixed::{FacetType, MixedDiscretisation};
 /// The mesh a physics is given: the one native cell mesh, 2D or 3D (restructure phase 4, ADR 32 and 41; it was `SimplexMesh`).
 pub use femcore::mesh::Mesh;
 pub use frame::{FieldFrame, FRAME_KEY};
@@ -49,6 +51,11 @@ pub type Discretisation = femcore::mesh::SimplexMesh;
 /// The `Discretisation` a physics assembles on, made from the `Mesh` it was given (non-simplex cells are cut into simplices).
 pub fn discretise(mesh: &Mesh) -> Result<Discretisation, Error> {
     mesh.discretise().map_err(Error::invalid)
+}
+
+/// Native mixed-cell discretisation made directly from `mesh` without splitting `Quad`, `Prism`, or `Hex` cells.
+pub fn discretise_mixed(mesh: &Mesh) -> Result<MixedDiscretisation, Error> {
+    mesh.discretise_mixed().map_err(Error::invalid)
 }
 
 /// Refuses a mesh with a NaN or infinite coordinate, naming the vertex and the axis.
@@ -62,6 +69,8 @@ pub fn check_mesh(mesh: &Mesh) -> Result<(), Error> {
 }
 pub use physics::{Ctx, LabelResolver, Physics};
 pub use registry::Registry;
-pub use result::{cell_fields_back, cell_fields_of, CellField, Field, Scalar, Solution, SolveResult};
+pub use result::{
+    cell_fields_back, cell_fields_of, CellField, Field, MixedToSimplexProjector, Scalar, Solution, SolveResult,
+};
 pub use spec::{canonical_json, BcSpec, MaterialAssign, ProblemSpec, PropValue, StudySpec, FORMAT as PROBLEM_FORMAT};
 pub use validate::{check_params, check_result_finite, validate_spec};

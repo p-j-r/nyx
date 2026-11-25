@@ -7,14 +7,17 @@
 
 use crate::cavity::{gradient_full, EmwAssembly};
 use crate::ibc::{jj_inv_l_tot, sorted3, PerturbativeIbcEvaluator, EPS0, MU0};
+use crate::mixed_ops::{gradient_mixed_full, scalar_nullspace_count_mixed};
 use crate::modes::C0;
 use crate::problem::Problem;
+use femcore::edge_mixed::NedMixed;
 use femcore::fem::solve_dirichlet;
 use femcore::linalg::amg_elastic::spmm;
 use femcore::linalg::csr::{c, RCsr, C};
 use femcore::linalg::dense::Dense;
 use femcore::linalg::driver::{dense_gen_eigh, DirectSolver};
 use femcore::linalg::faer_glue::generalized_eig_c64;
+use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
 use femcore::periodic::Reduction;
 use nyx_physics::{CircuitRom, Discretisation, ModeEnergyRow, RomPort, TlsMeta};
 use std::collections::{BTreeMap, BTreeSet};
@@ -565,6 +568,375 @@ pub fn build_circuit_rom(
     modes: Vec<ModeEnergyRow>,
     pert_eval: Option<&PerturbativeIbcEvaluator>,
 ) -> Result<CircuitRom, String> {
+    let caps = compute_port_capacitance_and_static_cap(mesh, problem, asm)?;
+    build_circuit_rom_with_caps(asm, solved_vectors, freq_indices, modes, caps, pert_eval)
+}
+
+/// Assembles `CircuitRom` on a native 3D `MixedDiscretisation`.
+pub fn build_circuit_rom_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    problem: &Problem,
+    asm: &EmwAssembly,
+    solved_vectors: &[Vec<C>],
+    freq_indices: &[(C, usize)],
+    modes: Vec<ModeEnergyRow>,
+    pert_eval: Option<&PerturbativeIbcEvaluator>,
+) -> Result<CircuitRom, String> {
+    let caps = compute_port_capacitance_and_static_cap_mixed(mesh, ned, problem, asm)?;
+    build_circuit_rom_with_caps(asm, solved_vectors, freq_indices, modes, caps, pert_eval)
+}
+
+fn compute_port_capacitance_and_static_cap_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    problem: &Problem,
+    asm: &EmwAssembly,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), String> {
+    let n_ports = asm.jj_ports.len() + asm.lumped_ports.len();
+    if n_ports == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let nv = mesh.n_points();
+    let ne = mesh.n_edges();
+    let order = asm.order;
+    let n_nodes = scalar_nullspace_count_mixed(mesh, order);
+
+    let mut term_minus: Vec<Vec<usize>> = Vec::with_capacity(n_ports);
+    let mut term_plus: Vec<Vec<usize>> = Vec::with_capacity(n_ports);
+    let mut port_b_reds: Vec<&[f64]> = Vec::with_capacity(n_ports);
+    let mut jj_cross_edges: BTreeSet<(u32, u32)> = BTreeSet::new();
+
+    let mut collect_single_terminals =
+        |triangles: &[[u32; 3]], d_hat: [f64; 3], u_min: f64, u_max: f64, length_m: f64| -> (Vec<usize>, Vec<usize>) {
+            let mut verts = BTreeSet::new();
+            for &tri in triangles {
+                for v in tri {
+                    verts.insert(v);
+                }
+                for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
+                    let pa = mesh.point3(a as usize);
+                    let pb = mesh.point3(b as usize);
+                    let ua = pa[0] * d_hat[0] + pa[1] * d_hat[1] + pa[2] * d_hat[2];
+                    let ub = pb[0] * d_hat[0] + pb[1] * d_hat[1] + pb[2] * d_hat[2];
+                    if (ua - ub).abs() > 0.2 * length_m {
+                        jj_cross_edges.insert((a.min(b), a.max(b)));
+                    }
+                }
+            }
+            let mut tm = Vec::new();
+            let mut tp = Vec::new();
+            for &v in &verts {
+                let p = mesh.point3(v as usize);
+                let u = p[0] * d_hat[0] + p[1] * d_hat[1] + p[2] * d_hat[2];
+                if u <= u_min + 0.15 * length_m {
+                    tm.push(v as usize);
+                } else if u >= u_max - 0.15 * length_m {
+                    tp.push(v as usize);
+                }
+            }
+            if tm.is_empty() {
+                if let Some(&v) = verts.first() {
+                    tm.push(v as usize);
+                }
+            }
+            if tp.is_empty() {
+                if let Some(&v) = verts.last() {
+                    tp.push(v as usize);
+                }
+            }
+            (tm, tp)
+        };
+
+    for port in &asm.jj_ports {
+        let (tm, tp) = collect_single_terminals(&port.triangles, port.d_hat, port.u_min, port.u_max, port.length_m);
+        term_minus.push(tm);
+        term_plus.push(tp);
+        port_b_reds.push(&port.b_red);
+    }
+    for lp in &asm.lumped_ports {
+        if let Some((ref comp_l, ref comp_r)) = lp.cpw_slots {
+            let span_of = |tris: &[[u32; 3]]| -> (f64, f64) {
+                let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &tri in tris {
+                    for v in tri {
+                        let p = mesh.point3(v as usize);
+                        let u = p[0] * lp.d_hat[0] + p[1] * lp.d_hat[1] + p[2] * lp.d_hat[2];
+                        lo = lo.min(u);
+                        hi = hi.max(u);
+                    }
+                }
+                (lo, hi)
+            };
+            let (ul0, ul1) = span_of(comp_l);
+            let (ur0, ur1) = span_of(comp_r);
+            let (tm_l, tp_l) = collect_single_terminals(comp_l, lp.d_hat, ul0, ul1, (ul1 - ul0).max(1e-15));
+            let (tp_r, tm_r) = collect_single_terminals(comp_r, lp.d_hat, ur0, ur1, (ur1 - ur0).max(1e-15));
+            let mut tm = tm_l;
+            tm.extend(tm_r);
+            let mut tp = tp_l;
+            tp.extend(tp_r);
+            term_minus.push(tm);
+            term_plus.push(tp);
+        } else {
+            let (tm, tp) = collect_single_terminals(&lp.triangles, lp.d_hat, lp.u_min, lp.u_max, lp.length_m);
+            term_minus.push(tm);
+            term_plus.push(tp);
+        }
+        port_b_reds.push(&lp.b_red);
+    }
+
+    let mut dsu = VertexDsu::new(nv);
+    for j in 0..n_ports {
+        let m0 = term_minus[j][0];
+        for &v in &term_minus[j][1..] {
+            dsu.union(m0, v);
+        }
+        let p0 = term_plus[j][0];
+        for &v in &term_plus[j][1..] {
+            dsu.union(p0, v);
+        }
+    }
+
+    let would_short_port = |dsu: &mut VertexDsu, a: usize, b: usize| -> bool {
+        let (ra, rb) = (dsu.find(a), dsu.find(b));
+        if ra == rb {
+            return false;
+        }
+        for j in 0..n_ports {
+            let rm = dsu.find(term_minus[j][0]);
+            let rp = dsu.find(term_plus[j][0]);
+            if (ra == rm && rb == rp) || (ra == rp && rb == rm) {
+                return true;
+            }
+        }
+        false
+    };
+
+    let periodic_labels: Vec<i32> =
+        problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
+    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+
+    let mut sheet_cond_edges = Vec::new();
+    let mut ext_pec_edges = Vec::new();
+    let mut ext_pec_verts = BTreeSet::new();
+    let mut cond_verts = vec![false; nv];
+    let mut cond_quad_faces = BTreeSet::new();
+
+    for f in 0..mesh.n_facets() {
+        let l = mesh.facet_labels[f];
+        let is_sheet_cond = problem.pec.contains(&l) || ibc_labels.contains(&l);
+        let is_ext_pec = mesh.exterior_facets[f]
+            && !periodic_labels.contains(&l)
+            && !problem.pmc.contains(&l)
+            && !ibc_labels.contains(&l)
+            && !jj_labels.contains(&l)
+            && !lp_labels.contains(&l);
+        if !is_sheet_cond && !is_ext_pec {
+            continue;
+        }
+        let fv = mesh.facet(f);
+        for &v in fv {
+            cond_verts[v as usize] = true;
+            if is_ext_pec {
+                ext_pec_verts.insert(v as usize);
+            }
+        }
+        let le: &[(usize, usize)] = match mesh.facet_type(f) {
+            FacetType::Edge2 => &[(0, 1)],
+            FacetType::Tri3 => &TRI_EDGES,
+            FacetType::Quad4 => &QUAD_EDGES,
+        };
+        for &(i, j) in le {
+            let key = (fv[i].min(fv[j]), fv[i].max(fv[j]));
+            if jj_cross_edges.contains(&key) {
+                continue;
+            }
+            if is_sheet_cond {
+                sheet_cond_edges.push((key.0 as usize, key.1 as usize));
+            } else {
+                ext_pec_edges.push((key.0 as usize, key.1 as usize));
+            }
+        }
+        if order == 2 && mesh.facet_type(f) == FacetType::Quad4 {
+            cond_quad_faces.insert(mesh.quad_face_index([fv[0], fv[1], fv[2], fv[3]]).unwrap());
+        }
+    }
+    for &v in term_minus.iter().flatten().chain(term_plus.iter().flatten()) {
+        cond_verts[v] = true;
+    }
+
+    for &(a, b) in &sheet_cond_edges {
+        if !would_short_port(&mut dsu, a, b) {
+            dsu.union(a, b);
+        }
+    }
+    for &(a, b) in &ext_pec_edges {
+        if !would_short_port(&mut dsu, a, b) {
+            dsu.union(a, b);
+        }
+    }
+
+    let mut rels = asm.periodic_node_relations.clone();
+    for v in 0..nv {
+        let r = dsu.find(v);
+        if r != v {
+            rels.push((v, r, c(1.0, 0.0)));
+        }
+    }
+    let mut fixed_bubbles = Vec::new();
+    if order == 2 {
+        for (e, &(a, b)) in mesh.edges.iter().enumerate() {
+            let (ua, ub) = (a as usize, b as usize);
+            if cond_verts[ua] && cond_verts[ub] && dsu.find(ua) == dsu.find(ub) {
+                fixed_bubbles.push(nv + e);
+            }
+        }
+        for qf in cond_quad_faces {
+            let qvs = mesh.quad_faces[qf];
+            let r0 = dsu.find(qvs[0] as usize);
+            if qvs.iter().all(|&v| cond_verts[v as usize] && dsu.find(v as usize) == r0) {
+                fixed_bubbles.push(nv + ne + qf);
+            }
+        }
+    }
+
+    let red_island = Reduction::build(n_nodes, &rels, &fixed_bubbles);
+    let p_island = red_island.prolong().real_part();
+    let g_full = gradient_mixed_full(mesh, ned);
+    let g_island = spmm(&g_full, &p_island);
+    let g_island_t = g_island.transpose();
+    let m0_g = spmm(&asm.m0_full, &g_island);
+    let mut l_isl = spmm(&g_island_t, &m0_g);
+
+    let n_isl = l_isl.nrows();
+    let diag = l_isl.diagonal();
+    let max_diag = diag.iter().copied().fold(0.0_f64, f64::max).max(1.0);
+    if diag.iter().any(|&d| d <= 1e-18 * max_diag) {
+        let reg_diag: Vec<f64> =
+            diag.iter().map(|&d| if d <= 1e-18 * max_diag { 1e-15 * max_diag } else { 0.0 }).collect();
+        l_isl = l_isl.add_scaled(&RCsr::from_diag(&reg_diag), 1.0);
+    }
+
+    let mut ground_roots = BTreeSet::new();
+    for &v in &ext_pec_verts {
+        let idx = red_island.index_of[dsu.find(v)];
+        if idx != usize::MAX {
+            ground_roots.insert(idx);
+        }
+    }
+
+    let mut port_minus_idx = Vec::with_capacity(n_ports);
+    let mut port_plus_idx = Vec::with_capacity(n_ports);
+    for j in 0..n_ports {
+        let im = red_island.index_of[dsu.find(term_minus[j][0])];
+        let ip = red_island.index_of[dsu.find(term_plus[j][0])];
+        port_minus_idx.push(im);
+        port_plus_idx.push(ip);
+        if ground_roots.contains(&im) && ground_roots.contains(&ip) {
+            ground_roots.remove(&ip);
+        }
+    }
+
+    let mut phi_ports: Vec<Vec<f64>> = Vec::with_capacity(n_ports);
+    let mut q_cap_red: Vec<Vec<f64>> = Vec::with_capacity(n_ports);
+
+    for j in 0..n_ports {
+        let im = port_minus_idx[j];
+        let ip = port_plus_idx[j];
+        let mut base_dirichlet: BTreeMap<usize, f64> = BTreeMap::new();
+        for &g in &ground_roots {
+            base_dirichlet.insert(g, 0.0);
+        }
+        for k in 0..n_ports {
+            if k == j {
+                continue;
+            }
+            let (km, kp) = (port_minus_idx[k], port_plus_idx[k]);
+            if km != im && km != ip {
+                base_dirichlet.entry(km).or_insert(0.0);
+            }
+            if kp != im && kp != ip {
+                base_dirichlet.entry(kp).or_insert(0.0);
+            }
+        }
+
+        let solve_with = |dir: &BTreeMap<usize, f64>| -> Result<Vec<f64>, String> {
+            let fixed: Vec<usize> = dir.keys().copied().collect();
+            let vals: Vec<f64> = dir.values().copied().collect();
+            let rhs = vec![0.0; n_isl];
+            solve_dirichlet(&l_isl, &rhs, &fixed, &vals)
+        };
+
+        let m_grounded = base_dirichlet.contains_key(&im) || base_dirichlet.is_empty();
+        let p_grounded = base_dirichlet.contains_key(&ip);
+
+        let phi_j = if m_grounded && !p_grounded {
+            let mut dir = base_dirichlet.clone();
+            dir.insert(im, 0.0);
+            dir.insert(ip, 1.0);
+            solve_with(&dir)?
+        } else if p_grounded && !m_grounded {
+            let mut dir = base_dirichlet.clone();
+            dir.insert(ip, 0.0);
+            dir.insert(im, -1.0);
+            solve_with(&dir)?
+        } else {
+            let mut dir_p = base_dirichlet.clone();
+            dir_p.insert(ip, 1.0);
+            dir_p.insert(im, 0.0);
+            let phi_p = solve_with(&dir_p)?;
+
+            let mut dir_m = base_dirichlet.clone();
+            dir_m.insert(ip, 0.0);
+            dir_m.insert(im, 1.0);
+            let phi_m = solve_with(&dir_m)?;
+
+            let l_phi_p = l_isl.matvec(&phi_p);
+            let l_phi_m = l_isl.matvec(&phi_m);
+            let l_pp = dot_real(&phi_p, &l_phi_p);
+            let l_mm = dot_real(&phi_m, &l_phi_m);
+            let l_pm = dot_real(&phi_p, &l_phi_m);
+            let denom = l_pp + l_mm + 2.0 * l_pm;
+            let gamma = if denom > 1e-18 * (l_pp + l_mm) { ((l_mm + l_pm) / denom).clamp(0.0, 1.0) } else { 0.5 };
+            phi_p.iter().zip(&phi_m).map(|(&vp, &vm)| gamma * vp - (1.0 - gamma) * vm).collect()
+        };
+
+        let e_full = g_island.matvec(&phi_j);
+        let mut e_red: Vec<f64> = asm.red.roots.iter().map(|&r| e_full[r]).collect();
+        let vj = dot_real(port_b_reds[j], &e_red);
+        if vj.abs() > 1e-12 {
+            for x in &mut e_red {
+                *x /= vj;
+            }
+        }
+        phi_ports.push(phi_j);
+        q_cap_red.push(e_red);
+    }
+
+    let mut c_port_f = vec![vec![0.0; n_ports]; n_ports];
+    let l_phis: Vec<Vec<f64>> = phi_ports.iter().map(|p| l_isl.matvec(p)).collect();
+    for j in 0..n_ports {
+        for k in j..n_ports {
+            let c_jk = 0.5 * EPS0 * (dot_real(&phi_ports[j], &l_phis[k]) + dot_real(&phi_ports[k], &l_phis[j]));
+            c_port_f[j][k] = c_jk;
+            c_port_f[k][j] = c_jk;
+        }
+    }
+
+    Ok((c_port_f, q_cap_red))
+}
+
+fn build_circuit_rom_with_caps(
+    asm: &EmwAssembly,
+    solved_vectors: &[Vec<C>],
+    freq_indices: &[(C, usize)],
+    modes: Vec<ModeEnergyRow>,
+    (c_port_f, mut q_cap_list): (Vec<Vec<f64>>, Vec<Vec<f64>>),
+    pert_eval: Option<&PerturbativeIbcEvaluator>,
+) -> Result<CircuitRom, String> {
     let mut ports: Vec<RomPort> = asm
         .jj_ports
         .iter()
@@ -599,8 +971,6 @@ pub fn build_circuit_rom(
             formulation: if lp.bc.mode == "cpw_even" { "cpw_even".into() } else { "rank1".into() },
         });
     }
-
-    let (c_port_f, mut q_cap_list) = compute_port_capacitance_and_static_cap(mesh, problem, asm)?;
 
     // Regularized full-domain (including PML) matrices for non-singular gradient projection & static lifts
     let k_passive_reg =

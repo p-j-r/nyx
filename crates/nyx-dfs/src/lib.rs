@@ -18,12 +18,13 @@ pub mod planar_bem;
 pub mod problem;
 
 pub use electro::{
-    assemble_electrostatics, electrostatics_fields, solve_electrostatics, solve_potential, ElectroAssembly, EPS0,
+    assemble_electrostatics, electrostatics_fields, solve_electrostatics, solve_electrostatics_mixed, solve_potential,
+    ElectroAssembly, EPS0,
 };
-pub use heat::{assemble_heat, heat_fields, solve_heat, solve_heat_states, HeatStates, HeatSystem};
-pub use magneto::{solve_magnetostatics, MU0};
+pub use heat::{assemble_heat, heat_fields, solve_heat, solve_heat_mixed, solve_heat_states, HeatStates, HeatSystem};
+pub use magneto::{solve_magnetostatics, solve_magnetostatics_mixed, MU0};
 pub use planar_bem::{layered_greens_function, solve_planar_bem, LayeredStack};
-pub use problem::{decode, Bc, BcKind, Problem, Study};
+pub use problem::{decode, Bc, BcKind, IeCoordKind, IeProfile, InfiniteElementSpec, Problem, Study};
 
 use femcore::progress::{self, Progress};
 use nyx_physics::*;
@@ -217,7 +218,7 @@ impl Physics for Dfs {
             b(
                 "far_field",
                 "Far-field open boundary",
-                "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics).",
+                "Asymptotic open/infinite Robin and 2nd-order Bayliss-Turkel boundary condition (electrostatics, stationary heat, magnetostatics).",
                 vec![
                     ParamDesc::integer(
                         "order",
@@ -242,8 +243,119 @@ impl Physics for Dfs {
                         3,
                         "optional multipole expansion center [cx, cy, cz]; omit to use conductor area-weighted centroid",
                     ),
+                    ParamDesc::number(
+                        "t_inf",
+                        "Ambient far-field temperature",
+                        "K",
+                        293.15,
+                        "far-field ambient temperature T_inf for stationary heat transfer",
+                    ),
                 ],
             ),
+            BcDesc {
+                kind: "infinite_element".into(),
+                name: "Infinite element".into(),
+                doc: "Real coordinate-stretched infinite-element domain mapping [R_in, R_out) -> [R_in, inf) (rational, locking-free on Quad/Prism/Hex) or bounded exponential stretching with outer far-field Robin (electrostatics, stationary heat, magnetostatics).".into(),
+                applies: Applies::Domain,
+                params: vec![
+                    ParamDesc::choice(
+                        "coord",
+                        "Coordinate system",
+                        &["auto", "cartesian", "cylindrical", "spherical"],
+                        "auto",
+                        "coordinate topology of the infinite-element domain",
+                    ),
+                    ParamDesc::choice(
+                        "profile",
+                        "Stretching profile",
+                        &["rational", "exponential"],
+                        "rational",
+                        "rational: maps [R_in, R_out) -> [R_in, inf); exponential: bounded real stretching chi = exp(beta) paired with outer Order-1 far_field Robin",
+                    ),
+                    ParamDesc::choice(
+                        "x",
+                        "Stretch along x",
+                        &["off", "plus", "minus"],
+                        "off",
+                        "Cartesian stretching direction along x",
+                    ),
+                    ParamDesc::choice(
+                        "y",
+                        "Stretch along y (3D only)",
+                        &["off", "plus", "minus"],
+                        "off",
+                        "Cartesian stretching direction along y",
+                    ),
+                    ParamDesc::choice(
+                        "z",
+                        "Stretch along z",
+                        &["off", "plus", "minus"],
+                        "off",
+                        "Cartesian stretching direction along z",
+                    ),
+                    ParamDesc::vector(
+                        "center",
+                        "Reference center",
+                        "m",
+                        3,
+                        "center [x0, y0, z0] for cylindrical or spherical infinite elements",
+                    ),
+                    ParamDesc::vector(
+                        "axis",
+                        "Cylinder axis",
+                        "",
+                        3,
+                        "unit axis vector [ax, ay, az] for cylindrical infinite elements",
+                    )
+                    .default_vector(vec![0.0, 0.0, 1.0]),
+                    ParamDesc::number(
+                        "r_in",
+                        "Inner radius",
+                        "m",
+                        0.0,
+                        "inner interface radius R_in (0 auto-detects from domain vertices)",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::number(
+                        "thickness",
+                        "Physical layer thickness",
+                        "m",
+                        0.0,
+                        "physical thickness d of the infinite-element shell (0 auto-detects from domain extent)",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::number(
+                        "pole_dist",
+                        "Rational pole distance",
+                        "m",
+                        0.0,
+                        "pole distance d_pole for rational stretching (0 or null uses R_in or 0.5 * L_char)",
+                    )
+                    .range(Some(0.0), None),
+                    ParamDesc::number(
+                        "decay",
+                        "Exponential stretch ratio",
+                        "",
+                        30.0,
+                        "bounded exponential stretch ratio chi = exp(beta) >= 1 (typically 20..50)",
+                    )
+                    .range(Some(1.0), None),
+                    ParamDesc::vector(
+                        "bounds_lo",
+                        "Cartesian lower bounds",
+                        "m",
+                        3,
+                        "optional explicit lower corner [x_min, y_min, z_min] of a Cartesian IE domain",
+                    ),
+                    ParamDesc::vector(
+                        "bounds_hi",
+                        "Cartesian upper bounds",
+                        "m",
+                        3,
+                        "optional explicit upper corner [x_max, y_max, z_max] of a Cartesian IE domain",
+                    ),
+                ],
+            },
             b(
                 "temperature",
                 "Temperature",
@@ -468,9 +580,9 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
                     "planar_bem is a single-pass 2D boundary-element formulation and does not support volumetric multi-pass AMR (`adapt_passes > 1`)".into(),
                 ));
             }
-            if problem.bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. })) {
+            if problem.bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. } | BcKind::InfiniteElement(_))) {
                 return Err(Error::Unsupported(
-                    "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+                    "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' or 'infinite_element' conditions".into(),
                 ));
             }
             if problem.flux_bounds != "none" {
@@ -485,12 +597,31 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             }
         }
     }
+    let use_mixed = !mesh.is_pure_simplex() || problem.has_infinite_element();
     let mut result = {
         let _s = progress::stage(format!("solving diffusion on a {}D mesh of {} cells", mesh.dim(), mesh.n_cells()));
         match problem.study {
-            Study::Electrostatic => solve_electrostatics(&d, problem),
-            Study::Magnetostatic { .. } => solve_magnetostatics(&d, problem),
-            Study::HeatStationary | Study::HeatTransient { .. } => solve_heat(&d, problem),
+            Study::Electrostatic => {
+                if use_mixed {
+                    solve_electrostatics_mixed(mesh, problem)
+                } else {
+                    solve_electrostatics(&d, problem)
+                }
+            }
+            Study::Magnetostatic { .. } => {
+                if use_mixed {
+                    solve_magnetostatics_mixed(mesh, problem)
+                } else {
+                    solve_magnetostatics(&d, problem)
+                }
+            }
+            Study::HeatStationary | Study::HeatTransient { .. } => {
+                if use_mixed {
+                    solve_heat_mixed(mesh, problem)
+                } else {
+                    solve_heat(&d, problem)
+                }
+            }
         }
         .map_err(Error::from_kernel)?
     };

@@ -25,9 +25,9 @@
 //! The result is a [`CellMesh`]; [`CellMesh::split_to_simplices`] gives the simplex fallback for
 //! solvers that cannot take quads, prisms or hexahedra yet. Physical vertices keep their ids.
 
-use crate::mesh::cells::{CellMesh, CellType};
+use crate::mesh::cells::{canonical_quad_face, CellMesh, CellType};
 use crate::adapt::work::{FacetKey, SimplexMesh, bbox_of, facet_key};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 /// Layer specification. Axis `a`, side `s` (0 = minimum, 1 = maximum face of the box); a side
 /// with zero thickness or zero layers gets no PML.
@@ -48,6 +48,8 @@ pub struct PmlSpec<const D: usize> {
     pub outer_label: Option<i32>,
     /// Relative tolerance (to the box size) for a vertex to count as lying on a box face.
     pub tol: f64,
+    /// Optional explicit interface box `[[lo, hi]; D]` (`None` uses `phys.bbox()`).
+    pub interface_box: Option<[[f64; 2]; D]>,
 }
 
 impl<const D: usize> PmlSpec<D> {
@@ -61,6 +63,7 @@ impl<const D: usize> PmlSpec<D> {
             label_stride: 1000,
             outer_label: None,
             tol: 1e-9,
+            interface_box: None,
         }
     }
 
@@ -252,10 +255,11 @@ pub fn build_pml<const D: usize>(phys: &SimplexMesh<D>, spec: &PmlSpec<D>) -> Re
     if spec.label_stride <= 0 {
         return Err("label_stride must be positive".into());
     }
-    let bbox = phys.bbox();
-    let size = (0..D).map(|a| bbox[a][1] - bbox[a][0]).fold(0.0, f64::max);
+    let bbox = spec.interface_box.unwrap_or_else(|| phys.bbox());
+    let size = (0..D).map(|a| bbox[a][1] - bbox[a][0]).fold(0.0, f64::max).max(1e-30);
     let tol = spec.tol * size;
     let on_plane = |p: &[f64; D], a: usize, s: usize| (p[a] - bbox[a][s]).abs() <= tol;
+    let all_sides_active = (0..D).all(|a| spec.active(a, 0) && spec.active(a, 1));
 
     // boundary facets of the physical mesh and the plane each one lies on
     let fc = phys.facet_cells();
@@ -273,10 +277,29 @@ pub fn build_pml<const D: usize>(phys: &SimplexMesh<D>, spec: &PmlSpec<D>) -> Re
                 }
             }
         }
-        let (a, s) = plane.ok_or_else(|| {
-            format!("physical boundary facet {vs:?} does not lie on a face of the bounding box; the domain must be box-shaped")
-        })?;
-        bfacets.push((vs, a, s, phys.cell_label[cs[0] as usize]));
+        match plane {
+            Some((a, s)) => bfacets.push((vs, a, s, phys.cell_label[cs[0] as usize])),
+            None if !all_sides_active => {
+                // Allow curved or stepped inactive walls when only a subset of sides carries a Cartesian PML,
+                // provided no vertex protrudes outside an active interface plane.
+                for &v in &vs {
+                    let p = &phys.points[v as usize];
+                    for a in 0..D {
+                        if spec.active(a, 0) && p[a] < bbox[a][0] - tol {
+                            return Err(format!("physical boundary vertex {v} protrudes past active min plane of axis {a}"));
+                        }
+                        if spec.active(a, 1) && p[a] > bbox[a][1] + tol {
+                            return Err(format!("physical boundary vertex {v} protrudes past active max plane of axis {a}"));
+                        }
+                    }
+                }
+            }
+            None => {
+                return Err(format!(
+                    "physical boundary facet {vs:?} does not lie on a face of the bounding box; the domain must be box-shaped"
+                ));
+            }
+        }
     }
     // restore the original facet orientation (the key is sorted) from the owning cell
     for bf in bfacets.iter_mut() {
@@ -299,6 +322,65 @@ pub fn build_pml<const D: usize>(phys: &SimplexMesh<D>, spec: &PmlSpec<D>) -> Re
     for (i, p) in phys.points.iter().enumerate() {
         if (0..D).any(|a| (0..2).any(|s| on_plane(p, a, s))) {
             b.lookup.insert(key_bits(p), i as u32);
+        }
+    }
+
+    // Pre-create PML layer vertices in canonical `(n_directions, layer_k, sym_key)` order so vertex IDs
+    // are strictly ordered by shell depth and coordinate symmetry.
+    {
+        let q_scale = 1e9 / size;
+        let sym_key = |v: u32| -> ([i64; D], u32) {
+            let p = phys.points[v as usize];
+            (std::array::from_fn(|a| ((p[a] - bbox[a][0]) * q_scale).round() as i64), v)
+        };
+        let n_codes = 3usize.pow(D as u32);
+        let mut ordered_codes: Vec<[i8; D]> = (0..n_codes)
+            .map(PmlSpec::<D>::region_code)
+            .filter(|c| c.iter().any(|&x| x != 0))
+            .collect();
+        ordered_codes.sort_by_key(|c| (c.iter().filter(|&&x| x != 0).count(), PmlSpec::<D>::region_index(c)));
+        for code in ordered_codes {
+            let axes: Vec<usize> = (0..D).filter(|&a| code[a] != 0).collect();
+            let side = |a: usize| if code[a] < 0 { 0 } else { 1 };
+            if axes.iter().any(|&a| !spec.active(a, side(a))) {
+                continue;
+            }
+            let mut base_vs: Vec<u32> = if axes.len() == 1 {
+                let (a, s) = (axes[0], side(axes[0]));
+                let mut vs_set = BTreeSet::new();
+                for (vs, fa, fs, _) in &bfacets {
+                    if *fa == a && *fs == s {
+                        vs_set.extend(vs.iter().copied());
+                    }
+                }
+                vs_set.into_iter().collect()
+            } else {
+                (0..phys.n_points() as u32)
+                    .filter(|&v| axes.iter().all(|&a| on_plane(&phys.points[v as usize], a, side(a))))
+                    .collect()
+            };
+            base_vs.sort_by_key(|&v| sym_key(v));
+            let dims: Vec<usize> = axes.iter().map(|&a| spec.layers[a][side(a)]).collect();
+            let total_layers: usize = dims.iter().map(|&n| n + 1).product();
+            let mut layer_tuples: Vec<Vec<usize>> = Vec::with_capacity(total_layers);
+            for mut r in 0..total_layers {
+                let mut idx = vec![0usize; axes.len()];
+                for (i, &n) in dims.iter().enumerate() {
+                    idx[i] = r % (n + 1);
+                    r /= n + 1;
+                }
+                if idx.iter().all(|&k| k > 0) {
+                    layer_tuples.push(idx);
+                }
+            }
+            layer_tuples.sort_by(|a, b| a.iter().sum::<usize>().cmp(&b.iter().sum::<usize>()).then_with(|| a.cmp(b)));
+            for idx in layer_tuples {
+                for &bv in &base_vs {
+                    let steps: Vec<(usize, usize, usize)> =
+                        axes.iter().enumerate().map(|(i, &a)| (a, side(a), idx[i])).collect();
+                    let _ = b.shifted(bv, &steps);
+                }
+            }
         }
     }
 
@@ -480,6 +562,277 @@ pub fn build_pml<const D: usize>(phys: &SimplexMesh<D>, spec: &PmlSpec<D>) -> Re
     })
 }
 
+/// Extruded conductive `Op::Sheet` `Quad4` facets `(quad_verts, sheet_label)`.
+pub type ExtrudedSheetQuads = Vec<([u32; 4], i32)>;
+type CornerSheetTouches = HashMap<(u32, i32), ([f64; 3], BTreeSet<(usize, usize)>)>;
+
+/// Builds a 3D structured Cartesian PML via [`build_pml`] AND extrudes interior 2D conductive `Op::Sheet`
+/// edges touching active lateral faces (and vertical corner edge bars) into interior `Quad` sheet facets
+/// `(quad_verts, sheet_label)` continuing conformally through the `Prism` and `Hex` PML layers.
+pub fn build_pml_with_sheets(
+    phys: &SimplexMesh<3>,
+    spec: &PmlSpec<3>,
+    interior_sheets: &[([u32; 3], i32)],
+) -> Result<(PmlMesh<3>, ExtrudedSheetQuads), String> {
+    let built = build_pml(phys, spec)?;
+    if interior_sheets.is_empty() {
+        return Ok((built, Vec::new()));
+    }
+
+    let bbox = built.interface;
+    let size = (0..3).map(|a| bbox[a][1] - bbox[a][0]).fold(0.0, f64::max).max(1e-30);
+    let tol = spec.tol * size;
+    let on_plane = |p: &[f64; 3], a: usize, s: usize| (p[a] - bbox[a][s]).abs() <= tol;
+    let offsets: [[Vec<f64>; 2]; 3] = [
+        [spec.layer_offsets(0, 0), spec.layer_offsets(0, 1)],
+        [spec.layer_offsets(1, 0), spec.layer_offsets(1, 1)],
+        [spec.layer_offsets(2, 0), spec.layer_offsets(2, 1)],
+    ];
+
+    let mut pt_lookup: HashMap<[u64; 3], u32> = HashMap::with_capacity(built.mesh.n_points());
+    for (i, p) in built.mesh.points.iter().enumerate() {
+        pt_lookup.insert(key_bits(p), i as u32);
+    }
+    let shifted_vid = |base_v: u32, steps: &[(usize, usize, usize)]| -> Option<u32> {
+        let mut p = phys.points[base_v as usize];
+        for &(a, s, k) in steps {
+            if k > 0 {
+                let sign = if s == 0 { -1.0 } else { 1.0 };
+                p[a] = bbox[a][s] + sign * offsets[a][s][k];
+            }
+        }
+        pt_lookup.get(&key_bits(&p)).copied()
+    };
+
+    // Count all PML Quad faces (`count == 2` means shared interior PML face).
+    let mut pml_quad_counts: HashMap<[u32; 4], u32> = HashMap::new();
+    for c in built.n_physical_cells..built.mesh.n_cells() {
+        let vs = built.mesh.cell(c);
+        for f in built.mesh.types[c].faces() {
+            if f.len() == 4 {
+                let q = canonical_quad_face([
+                    vs[f[0] as usize],
+                    vs[f[1] as usize],
+                    vs[f[2] as usize],
+                    vs[f[3] as usize],
+                ]);
+                *pml_quad_counts.entry(q).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let cross3 = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let sub3 = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot3 = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+    let mut extruded_sheets: Vec<([u32; 4], i32)> = Vec::new();
+    let mut seen_quads: BTreeSet<([u32; 4], i32)> = BTreeSet::new();
+    // Track vertices touching active walls `(v, sheet_lab, normal)` -> set of `(a, s)` walls so 2-axis corners get `Hex` sheet quads too!
+    let mut corner_sheet_touches: CornerSheetTouches = HashMap::new();
+
+    for &(tri, sheet_lab) in interior_sheets {
+        let (p0, p1, p2) = (
+            phys.points[tri[0] as usize],
+            phys.points[tri[1] as usize],
+            phys.points[tri[2] as usize],
+        );
+        let n_sheet = cross3(sub3(p1, p0), sub3(p2, p0));
+        // Skip sheets lying parallel inside a boundary plane itself (we only extrude interior sheets meeting the wall transversely).
+        for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+            let (u, v) = (tri[i], tri[j]);
+            let (pu, pv) = (phys.points[u as usize], phys.points[v as usize]);
+            for a in 0..3 {
+                // Sheet normal must not be parallel to axis `a` (edge `(u, v)` is transverse to normal `a`).
+                if n_sheet[a].abs() > 0.99 * dot3(n_sheet, n_sheet).sqrt() {
+                    continue;
+                }
+                for s in 0..2 {
+                    if !spec.active(a, s) || !on_plane(&pu, a, s) || !on_plane(&pv, a, s) {
+                        continue;
+                    }
+                    corner_sheet_touches
+                        .entry((u, sheet_lab))
+                        .or_insert_with(|| (n_sheet, BTreeSet::new()))
+                        .1
+                        .insert((a, s));
+                    corner_sheet_touches
+                        .entry((v, sheet_lab))
+                        .or_insert_with(|| (n_sheet, BTreeSet::new()))
+                        .1
+                        .insert((a, s));
+
+                    let n_layers = spec.layers[a][s];
+                    for k in 0..n_layers {
+                        let (Some(u0), Some(v0), Some(v1), Some(u1)) = (
+                            shifted_vid(u, &[(a, s, k)]),
+                            shifted_vid(v, &[(a, s, k)]),
+                            shifted_vid(v, &[(a, s, k + 1)]),
+                            shifted_vid(u, &[(a, s, k + 1)]),
+                        ) else {
+                            continue;
+                        };
+                        let mut q = [u0, v0, v1, u1];
+                        let cq = canonical_quad_face(q);
+                        if pml_quad_counts.get(&cq).copied() == Some(2) && seen_quads.insert((cq, sheet_lab)) {
+                            let n_q = cross3(
+                                sub3(built.mesh.points[q[1] as usize], built.mesh.points[q[0] as usize]),
+                                sub3(built.mesh.points[q[3] as usize], built.mesh.points[q[0] as usize]),
+                            );
+                            if dot3(n_q, n_sheet) < 0.0 {
+                                q = [v0, u0, u1, v1];
+                            }
+                            extruded_sheets.push((q, sheet_lab));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Also extrude sheet corners across 2-axis edge `Hex` bars when a sheet spans right up to a lateral corner!
+    let mut corner_list: Vec<_> = corner_sheet_touches.into_iter().collect();
+    corner_list.sort_by_key(|x| x.0);
+    for ((w, sheet_lab), (n_sheet, walls)) in corner_list {
+        let wall_vec: Vec<(usize, usize)> = walls.into_iter().collect();
+        for i in 0..wall_vec.len() {
+            for j in (i + 1)..wall_vec.len() {
+                let (a1, s1) = wall_vec[i];
+                let (a2, s2) = wall_vec[j];
+                if a1 == a2 {
+                    continue;
+                }
+                for k1 in 0..spec.layers[a1][s1] {
+                    for k2 in 0..spec.layers[a2][s2] {
+                        let (Some(q0), Some(q1), Some(q2), Some(q3)) = (
+                            shifted_vid(w, &[(a1, s1, k1), (a2, s2, k2)]),
+                            shifted_vid(w, &[(a1, s1, k1 + 1), (a2, s2, k2)]),
+                            shifted_vid(w, &[(a1, s1, k1 + 1), (a2, s2, k2 + 1)]),
+                            shifted_vid(w, &[(a1, s1, k1), (a2, s2, k2 + 1)]),
+                        ) else {
+                            continue;
+                        };
+                        let mut q = [q0, q1, q2, q3];
+                        let cq = canonical_quad_face(q);
+                        if pml_quad_counts.get(&cq).copied() == Some(2) && seen_quads.insert((cq, sheet_lab)) {
+                            let n_q = cross3(
+                                sub3(built.mesh.points[q[1] as usize], built.mesh.points[q[0] as usize]),
+                                sub3(built.mesh.points[q[3] as usize], built.mesh.points[q[0] as usize]),
+                            );
+                            if dot3(n_q, n_sheet) < 0.0 {
+                                q = [q1, q0, q3, q2];
+                            }
+                            extruded_sheets.push((q, sheet_lab));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((built, extruded_sheets))
+}
+
+/// Transfers physical curved `edge_nodes` (and `qp_edges`) onto `built.mesh`, propagating any curved
+/// physical edge lying on an active Cartesian interface plane in lockstep across all extruded layer steps
+/// so curved waveguides/interfaces piercing a Cartesian PML remain shear-free.
+pub fn propagate_cartesian_edge_nodes(
+    built: &mut PmlMesh<3>,
+    phys: &SimplexMesh<3>,
+    spec: &PmlSpec<3>,
+    phys_edge_nodes: &[([u32; 2], [f64; 3])],
+    phys_qp_edges: &[[u32; 2]],
+) {
+    if phys_edge_nodes.is_empty() {
+        return;
+    }
+    let bbox = spec.interface_box.unwrap_or_else(|| phys.bbox());
+    let size = (0..3).map(|a| bbox[a][1] - bbox[a][0]).fold(0.0_f64, f64::max).max(1e-30);
+    let tol = (spec.tol * size).max(1e-12);
+    let on_plane = |p: &[f64; 3], a: usize, s: usize| (p[a] - bbox[a][s]).abs() <= tol;
+    let offsets: Vec<[Vec<f64>; 2]> =
+        (0..3).map(|a| [spec.layer_offsets(a, 0), spec.layer_offsets(a, 1)]).collect();
+    let mut pt_lookup: HashMap<[u64; 3], u32> = HashMap::with_capacity(built.mesh.n_points());
+    for (vi, p) in built.mesh.points.iter().enumerate() {
+        pt_lookup.insert(key_bits(p), vi as u32);
+    }
+    let shifted_vid = |v: u32, steps: &[(usize, usize, usize)]| -> Option<(u32, [f64; 3])> {
+        if steps.iter().all(|&(_, _, k)| k == 0) {
+            return Some((v, [0.0; 3]));
+        }
+        let mut p = phys.points[v as usize];
+        let mut delta = [0.0; 3];
+        for &(a, s, k) in steps {
+            if k == 0 {
+                continue;
+            }
+            let target = match s {
+                0 => bbox[a][0] - offsets[a][0][k],
+                _ => bbox[a][1] + offsets[a][1][k],
+            };
+            delta[a] = target - p[a];
+            p[a] = target;
+        }
+        pt_lookup.get(&key_bits(&p)).copied().map(|id| (id, delta))
+    };
+
+    let mut edge_map: std::collections::BTreeMap<[u32; 2], [f64; 3]> = std::collections::BTreeMap::new();
+    let mut quad_face_map: std::collections::BTreeMap<[u32; 4], [f64; 3]> = std::collections::BTreeMap::new();
+
+    for &([u0, v0], q0) in phys_edge_nodes {
+        let (u, v) = (u0.min(v0), u0.max(v0));
+        edge_map.insert([u, v], q0);
+        let (pu, pv) = (&phys.points[u as usize], &phys.points[v as usize]);
+        for a in 0..3 {
+            for s in 0..2 {
+                if !spec.active(a, s) || !on_plane(pu, a, s) || !on_plane(pv, a, s) {
+                    continue;
+                }
+                let n = spec.layers[a][s];
+                for k in 1..=n {
+                    if let (Some((uk, du)), Some((vk, _))) =
+                        (shifted_vid(u, &[(a, s, k)]), shifted_vid(v, &[(a, s, k)]))
+                    {
+                        edge_map.insert([uk.min(vk), uk.max(vk)], [q0[0] + du[0], q0[1] + du[1], q0[2] + du[2]]);
+                    }
+                    if let (Some((u_prev, du_prev)), Some((v_prev, _)), Some((uk, du_k)), Some((vk, _))) = (
+                        shifted_vid(u, &[(a, s, k - 1)]),
+                        shifted_vid(v, &[(a, s, k - 1)]),
+                        shifted_vid(u, &[(a, s, k)]),
+                        shifted_vid(v, &[(a, s, k)]),
+                    ) {
+                        quad_face_map.insert(
+                            crate::mesh::cells::canonical_quad_face([u_prev, v_prev, vk, uk]),
+                            [
+                                q0[0] + 0.5 * (du_prev[0] + du_k[0]),
+                                q0[1] + 0.5 * (du_prev[1] + du_k[1]),
+                                q0[2] + 0.5 * (du_prev[2] + du_k[2]),
+                            ],
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    built.mesh.set_edge_nodes(edge_map);
+    if !quad_face_map.is_empty() {
+        built.mesh.set_quad_face_nodes(quad_face_map);
+    }
+    if !phys_qp_edges.is_empty() {
+        let mut qp: Vec<[u32; 2]> =
+            phys_qp_edges.iter().map(|&[a, b]| [a.min(b), a.max(b)]).collect();
+        qp.sort_unstable();
+        qp.dedup();
+        built.mesh.qp_edges = qp;
+    }
+}
+
 // ---- the nyx Pml description of a PML mesh (was mesh::interop) ----
 /// The `Pml` of every domain label of a PML mesh, keyed by label, to merge into `ProblemSpec::optical_pml`.
 /// `strength`, `order` and `re` are the stretch parameters of `Pml`.
@@ -495,7 +848,7 @@ pub fn pml_domains<const D: usize>(pml: &PmlMesh<D>, strength: f64, order: f64, 
         for &(_, label) in &r.labels {
             // a 2D mesh is the x-z cross-section: its second axis is z
             let (y, z) = if D == 2 { (crate::props::PmlDir::Off, axis(1)) } else { (axis(1), axis(2)) };
-            out.insert(label, crate::props::Pml { x: axis(0), y, z, strength, order, re });
+            out.insert(label, crate::props::Pml { x: axis(0), y, z, strength, order, re, ..Default::default() });
         }
     }
     out

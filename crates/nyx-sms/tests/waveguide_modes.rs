@@ -7,7 +7,7 @@
 //! - `+q` and `-q` are degenerate and all component and domain energy shares sum to 1.
 //! - A silicon strip (`800 x 300 nm`) on tilted R-plane sapphire (`euler_deg = [0.0, 57.6, 0.0]`) at `q = 2.3468e7 rad/m`
 //!   agrees with a 3D 1-layer swept Floquet solve (`phase = q * L_y`) to `< 5e-4` relative.
-//! - Absorbing layers (PML) yield complex eigenfrequencies with `Q = Re f / (2 |Im f|)` and `layer fraction` in `[0, 1]`.
+//! - Absorbing layers (PML) yield complex eigenfrequencies with signed `Q = Re f / (2 Im f)` and `layer fraction` in `[0, 1]`.
 
 mod common;
 
@@ -272,9 +272,18 @@ fn pml_complex_eigenfrequencies_periodic_lateral_and_inactive_domains() {
     }
     // Domain 3 is inactive and intentionally has NO "rho", "E", or "nu"
     p.inactive = vec![3];
-    p.materials
-        .pml
-        .insert(2, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 });
+    p.materials.pml.insert(
+        2,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 3.0,
+            order: 2.0,
+            re: 1.0,
+            ..Default::default()
+        },
+    );
     let r = common::solve(&mesh, &p);
     let mut seen_lossy = false;
     for (j, sol) in r.solutions.iter().enumerate() {
@@ -292,7 +301,10 @@ fn pml_complex_eigenfrequencies_periodic_lateral_and_inactive_domains() {
         if im != 0.0 {
             seen_lossy = true;
             let q_val = num(&r, &format!("Q{}", j + 1));
-            assert!((q_val - re / (2.0 * im.abs())).abs() < 1e-9 * q_val);
+            assert!((q_val - re / (2.0 * im)).abs() <= 1e-9 * q_val.abs());
+            if lf > 1e-3 {
+                assert!(im > 0.0 && q_val > 0.0, "radiating PML mode {} must have Im f > 0: im={im}", j + 1);
+            }
         }
     }
     assert!(seen_lossy, "expected complex eigenfrequencies with PML");

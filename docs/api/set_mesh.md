@@ -2,7 +2,7 @@
 
 **Set the mesh settings** · access `edit`: changes the project
 
-Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
+Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
 
 ## Arguments
 
@@ -21,11 +21,12 @@ Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_ce
 | `max_steiner_multiplier` | integer or null | no |  | 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial PSLG vertices; null uses default max(20 * n_init, 100000) |
 | `max_z_slabs` | integer or null | no |  | 3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap |
 | `physics_sizing` | true or false | no |  | size the elements from the waves of the physics (points per wavelength) |
+| `pml_mode` | text or null: `auto`, `structured`, `inline`, `null` | no |  | how absorbing layers are meshed: "auto" (default, structured native Quad/Prism/Hex layers when PML regions exist), "structured", or "inline" (legacy unstructured simplices) |
 | `points_per_wavelength` | number or null | no |  | points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2 |
 | `quarter_point_xi` | number or null | no |  | 3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25 |
 | `singular_edges` | text or null: `none`, `quarter_point`, `null` | no |  | 3D sheet stack: edge singularity enrichment on zero-thickness conductor rims ("none" or "quarter_point"); null uses study defaults |
 | `strict_mesh` | true or false | no |  | fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default false |
-| `structured_pml` | true or false | no |  | rebuild the absorbing layers as structured layers |
+| `structured_pml` | true or false or null | no |  | legacy boolean alias for pml_mode (true -> "structured", false -> "inline") |
 | `sweep` | list of object or null | no |  | layers to sweep a 2D cross-section or 3D geometry model along y |
 | `sweep[].domain_offset` | integer | no |  | added to the domain numbers of the layer's cells |
 | `sweep[].fill` | text | no |  | region name: every cell of the layer belongs to it |

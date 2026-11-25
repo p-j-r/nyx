@@ -386,7 +386,17 @@ pub fn adapt_to_metrics3(g: MeshedGeom, metrics: &[Sym<3>], a: &Adaptive) -> Res
     }
     let points = wm.points.iter().flat_map(|p| p.iter().copied()).collect();
     let mesh = SimplexMesh::new(3, points, wm.cells.clone(), wm.cell_label.clone(), facets, facet_labels);
-    Ok((MeshedGeom { mesh, labels: g.labels, eval: g.eval, warnings: g.warnings }, result.report))
+    let cells = crate::mesh::Mesh::from_solver_mesh(&mesh)?;
+    Ok((
+        MeshedGeom {
+            mesh,
+            cells: Some(cells),
+            labels: g.labels,
+            eval: g.eval,
+            warnings: g.warnings,
+        },
+        result.report,
+    ))
 }
 
 /// The element size every vertex of a meshed 3D model is asked for by the model itself: the size of the regions it belongs to (the

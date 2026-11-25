@@ -100,7 +100,15 @@
       "f im 3 (Hz)",
       "radial share 3",
       "axial share 3",
-      "azimuthal share 3"
+      "azimuthal share 3",
+      "f4 (Hz)",
+      "Q4",
+      "layer fraction 4",
+      "f re 4 (Hz)",
+      "f im 4 (Hz)",
+      "radial share 4",
+      "axial share 4",
+      "azimuthal share 4"
     ],
     "solutions": [
       {
@@ -144,7 +152,7 @@
           "|uy|"
         ],
         "has_value": true,
-        "label": "mode 1: 7.650961e1 +1.546e1i Hz (Q = 2.475e0)"
+        "label": "mode 1: 4.975067e2 +9.442e1i Hz (Q = 2.634e0)"
       }
     ],
     "study": "axisymmetric_eigenfrequency"
@@ -273,8 +281,14 @@
     "scalars": [
       "f1 (Hz)",
       "Q1",
+      "layer fraction 1",
+      "f re 1 (Hz)",
+      "f im 1 (Hz)",
       "f2 (Hz)",
-      "Q2"
+      "Q2",
+      "layer fraction 2",
+      "f re 2 (Hz)",
+      "f im 2 (Hz)"
     ],
     "solutions": [
       {
@@ -305,7 +319,7 @@
           "Re uz"
         ],
         "has_value": true,
-        "label": "mode 1: 8.269663e1 +1.659e1i Hz"
+        "label": "mode 1: 4.992838e2 +9.460e1i Hz"
       }
     ],
     "study": "eigenfrequency"
@@ -403,15 +417,7 @@
       "f im 2 (Hz)",
       "lateral share 2",
       "vertical share 2",
-      "longitudinal share 2",
-      "f3 (Hz)",
-      "Q3",
-      "layer fraction 3",
-      "f re 3 (Hz)",
-      "f im 3 (Hz)",
-      "lateral share 3",
-      "vertical share 3",
-      "longitudinal share 3"
+      "longitudinal share 2"
     ],
     "solutions": [
       {
@@ -455,7 +461,7 @@
           "|uy|"
         ],
         "has_value": true,
-        "label": "mode 1: 2.123815e3 +7.164e0i Hz (Q = 1.482e2)"
+        "label": "mode 1: 2.318026e3 +4.697e1i Hz (Q = 2.467e1)"
       }
     ],
     "study": "modes"

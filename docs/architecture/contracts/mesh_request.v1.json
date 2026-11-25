@@ -7,7 +7,7 @@
     "max_cells": 200000,
     "scale": 0.7
   },
-  "structured_pml": true,
+  "pml_mode": "structured",
   "waves": {
     "eigen_headroom": 1.5,
     "pml_relax": 1.5,

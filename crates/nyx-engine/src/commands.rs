@@ -210,8 +210,8 @@ impl Engine {
                     ("vac_top_region", text("region name of the top vacuum in Overlay, default \"VacTop\"")),
                     ("overlay", boolean("create or update the project's Overlay feature with the stack regions, default true")),
                 ], &[])),
-            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
-                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("adapt_grade", json!({ "type": ["number", "null"], "description": "adaptive / AMR metric gradation slope (> 0); null uses 0.4" })), ("adapt_max_cells", json!({ "type": ["integer", "null"], "minimum": 1, "description": "adaptive / AMR maximum cell count (>= 1); null uses 2000000" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("structured_pml", boolean("rebuild the absorbing layers as structured layers")), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false")),
+            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
+                schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("adapt_grade", json!({ "type": ["number", "null"], "description": "adaptive / AMR metric gradation slope (> 0); null uses 0.4" })), ("adapt_max_cells", json!({ "type": ["integer", "null"], "minimum": 1, "description": "adaptive / AMR maximum cell count (>= 1); null uses 2000000" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("pml_mode", json!({ "type": ["string", "null"], "enum": ["auto", "structured", "inline", null], "description": "how absorbing layers are meshed: \"auto\" (default, structured native Quad/Prism/Hex layers when PML regions exist), \"structured\", or \"inline\" (legacy unstructured simplices)" })), ("structured_pml", json!({ "type": ["boolean", "null"], "description": "legacy boolean alias for pml_mode (true -> \"structured\", false -> \"inline\")" })), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false")),
                     ("gap_cells", json!({ "type": ["number", "null"], "description": "3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping" })),
                     ("z_coarsen", boolean("3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false")),
                     ("max_cells", json!({ "type": ["integer", "null"], "minimum": 1, "description": "maximum number of mesh cells allowed before aborting meshing (overrides the default 2,000,000 cap on adaptive meshing and enforces pre-allocation guard on 3D sheet stacks); null restores default" })),
@@ -279,8 +279,30 @@ impl Engine {
                 schema(vec![("a", expr_schema("a field, a formula, an expression, or a list of components")), ("b", expr_schema("a field, a formula, an expression, or a list of components")), ("region", text("region name(s); default all")), ("revolution", boolean("weight by 2 pi r, default false")), ("wavelength", wl()), ("physics", phys()), ("solution", int("default 0"))], &["a", "b"])),
             cmd("confinement", "Fraction of a field in a region", "The integral of sum_k |c_k|^2 over one or more regions divided by the same over the whole mesh, for the components `fields` (e.g. [Ex, Ey, Ez]). Without `weight` it has no material weight; give `weight` a real formula such as \"eps_r\" for the energy fraction (the integrand is weight * sum_k |c_k|^2, in each region and over the whole mesh). Pass `solutions` (`\"all\"` or a list of 0-based indices), `by_region: true`, or `regions` (`[str]`) to accumulate all requested solutions and regions in a single bit-exact quadrature pass.", Read,
                 schema(vec![("fields", expr_schema("a field, a formula, an expression, or a list of components")), ("expr", expr_schema("optional alias for `fields`: a field, formula, expression, or list of components")), ("weight", text("a real formula that multiplies the integrand at each point, e.g. eps_r; default none")), ("region", json!({ "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }], "description": "the region (or list of regions) the fraction is of; omit when `regions` or `by_region: true` is given" })), ("regions", json!({ "type": "array", "items": { "type": "string" }, "description": "batch list of region names to compute confinement fractions over in a single pass" })), ("by_region", boolean("compute confinement fractions across every region of the mesh (or within `region`) in a single pass, default false")), ("revolution", boolean("weight by 2 pi r, default false")), ("wavelength", wl()), ("physics", phys()), ("solution", int("0-based solution index, default 0 (mutually exclusive with solutions)")), ("solutions", json!({ "oneOf": [{ "type": "string", "enum": ["all"] }, { "type": "array", "items": { "type": "integer", "minimum": 0 } }], "description": "\"all\" or a list of 0-based solution indices to evaluate in a single pass" }))], &["fields"])),
-            cmd("add_pml_conditions", "Add the absorbing-layer conditions", "Adds a `pml` condition for every absorbing piece the geometry made with add_pml (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. `strength` is the imaginary stretch at the outer edge (default 3).", Edit,
-                schema(vec![("physics", phys()), ("strength", number("imaginary stretch at the outer edge, default 3"))], &["physics"])),
+            cmd("add_absorbing_layer", "Add an outward absorbing layer", "Adds an outward zero-padding absorbing layer (`Op::Pml` with `mode = \"Outward\"`, `window = null`, `coord = \"Auto\"`, `layer_grading = 2.0`, `thickness = \"auto\"`, `layers = \"auto\"`) around the exterior of the physical domain across Cartesian, Cylindrical, or Spherical topologies.", Edit,
+                schema(vec![
+                    ("name", text("feature name; omit for pml1, pml2, ...")),
+                    ("sides", json!({ "type": "array", "items": { "enum": ["XMin", "XMax", "YMin", "YMax", "ZMin", "ZMax"] }, "description": "active sides (empty: all)" })),
+                    ("thickness", json!({ "oneOf": [{ "type": "number" }, { "type": "string" }], "description": "layer thickness in metres, or \"auto\" (default \"auto\")" })),
+                    ("layers", json!({ "oneOf": [{ "type": "number" }, { "type": "string" }], "description": "number of structured element layers across the shell, or \"auto\" (default \"auto\")" })),
+                    ("grading", json!({ "oneOf": [{ "type": "number" }, { "type": "string" }], "description": "polynomial stretch profile order m, default 2.0" })),
+                    ("layer_grading", json!({ "oneOf": [{ "type": "number" }, { "type": "string" }, { "type": "null" }], "description": "geometric mesh layer grading ratio (>= 1; default 2.0)" })),
+                    ("coord", json!({ "type": "string", "enum": ["Auto", "Cartesian", "Cylindrical", "Spherical", "auto", "cartesian", "cylindrical", "spherical"], "description": "coordinate topology, default \"Auto\"" })),
+                    ("center", json!({ "type": ["array", "null"], "items": { "oneOf": [{ "type": "number" }, { "type": "string" }] }, "minItems": 2, "maxItems": 3, "description": "optional centre [x, y, z] (or [x, z] in 2D) for Cylindrical or Spherical shells" })),
+                    ("axis", json!({ "type": ["string", "null"], "enum": ["X", "Y", "Z", null], "description": "optional cylinder axis (X, Y, or Z)" })),
+                    ("regions", json!({ "type": "array", "items": { "type": "string" }, "description": "regions to extrude (empty: all)" })),
+                    ("mode", json!({ "type": "string", "enum": ["Inward", "Outward", "inward", "outward"], "description": "growth mode, default \"Outward\"" })),
+                    ("window", json!({ "oneOf": [{ "type": "string" }, { "type": "integer" }, { "type": "null" }], "description": "optional window feature when mode is Inward" })),
+                ], &[])),
+            cmd("add_pml_conditions", "Add the absorbing-layer conditions", "Adds a `pml` (or `infinite_element` for static studies) condition for every absorbing piece the geometry made with `add_pml` or `add_absorbing_layer` (replacing earlier ones on those pieces), so the physics absorbs where the geometry says. When `strength <= 0` or `auto_scale: true`, parameters are jointly auto-calibrated across materials sharing each PML slab/shell from the study's wavelengths.", Edit,
+                schema(vec![
+                    ("physics", phys()),
+                    ("strength", number("imaginary stretch at the outer edge (default 3; <= 0 auto-calibrates from study wavelengths)")),
+                    ("profile", json!({ "type": ["string", "null"], "enum": ["auto", "kappa_polynomial", "rational", "exponential", null], "description": "stretching profile (\"auto\" selects kappa_polynomial for eigenproblems/waveguides and rational for direct driven/static problems)" })),
+                    ("auto_scale", boolean("jointly auto-calibrate strength, profile, and kappa_max/curvature from study wavelengths across materials sharing each PML slab/shell")),
+                    ("target_reflection", number("target normal-incidence amplitude reflection R_0 when auto_scale is enabled, default 1e-6")),
+                ], &["physics"])),
+            cmd("pml_diagnostics", "Absorbing-layer mesh and stability diagnostics", "Returns absorbing-layer diagnostics across all PML domains: uncut `element_counts`, `min_pml_scaled_jacobian`, `pml_warnings`, normalized penetration depth `s_dist_bounds` `[0.0, 1.0]`, and pre-solve Christoffel backward-wave check (`has_backward_wave`, `min_projection`, `recommended_mpml_ratio`).", Read, schema(vec![], &[])),
             cmd("list_materials", "List the materials", "The materials a problem can name: those of the library (material files) and those the project carries.", Read, schema(vec![], &[])),
             cmd("describe_material", "Describe a material", "What a material gives (elastic class, optical model, thermal, electrical) and its TOML text.", Read, schema(vec![("name", text("material name"))], &["name"])),
             cmd("add_material", "Add a material to the project", "Adds (or replaces) a material the project carries, as TOML text (units are written in the file; `extends = \"silicon\"` starts from a library material). Read at once, so a mistake is reported here.", Edit,
@@ -684,7 +706,36 @@ impl Engine {
                 })?;
                 Ok(json!({ "topic": topic, "text": text }))
             }
-            "add_pml_conditions" => self.add_pml_conditions(get_str(args, "physics")?, args.get("strength").and_then(Value::as_f64).unwrap_or(3.0)),
+            "add_absorbing_layer" => {
+                let mut fields = a.clone();
+                let given = fields.remove("name");
+                fields.entry("mode").or_insert_with(|| json!("Outward"));
+                fields.entry("coord").or_insert_with(|| json!("Auto"));
+                fields.entry("thickness").or_insert_with(|| json!("auto"));
+                fields.entry("layers").or_insert_with(|| json!("auto"));
+                fields.entry("grading").or_insert_with(|| json!(2.0));
+                fields.entry("layer_grading").or_insert_with(|| json!(2.0));
+                let n = geometry::add_feature(
+                    &mut self.project.geometry,
+                    "Pml",
+                    given.as_ref().and_then(Value::as_str),
+                    &Value::Object(fields),
+                )?;
+                Ok(json!({ "name": n, "features": self.project.geometry.features.len() }))
+            }
+            "add_pml_conditions" => {
+                let physics = get_str(args, "physics")?;
+                let profile = opt_str(args, "profile");
+                let auto_scale = args.get("auto_scale").and_then(Value::as_bool);
+                let target_r0 = args.get("target_reflection").and_then(Value::as_f64);
+                let strength_arg = args.get("strength").and_then(Value::as_f64);
+                if profile.is_none() && auto_scale.is_none() && target_r0.is_none() {
+                    self.add_pml_conditions(physics, strength_arg.unwrap_or(3.0))
+                } else {
+                    self.add_pml_conditions_with(physics, strength_arg, profile, auto_scale, target_r0)
+                }
+            }
+            "pml_diagnostics" => self.pml_diagnostics(),
             "list_materials" => self.list_materials(),
             "describe_material" => self.describe_material(get_str(args, "name")?),
             "add_material" => self.add_material(get_str(args, "name")?, get_str(args, "toml")?),
@@ -902,8 +953,30 @@ impl Engine {
                         Some(v.as_f64().ok_or_else(|| Error::invalid("`points_per_wavelength` is a number or null"))?)
                     }
                 }
+                "pml_mode" => {
+                    s.pml_mode = if v.is_null() {
+                        crate::project::PmlModeRequest::Auto
+                    } else {
+                        serde_json::from_value(v.clone()).map_err(|_| {
+                            Error::invalid("`pml_mode` must be \"auto\", \"structured\", \"inline\", or null")
+                        })?
+                    };
+                    if !a.contains_key("structured_pml") {
+                        s.structured_pml = None;
+                    }
+                }
                 "structured_pml" => {
-                    s.structured_pml = v.as_bool().ok_or_else(|| Error::invalid("`structured_pml` is true or false"))?
+                    if v.is_null() {
+                        s.structured_pml = None;
+                    } else {
+                        let b = v
+                            .as_bool()
+                            .ok_or_else(|| Error::invalid("`structured_pml` is true, false, or null"))?;
+                        s.structured_pml = Some(b);
+                        if !a.contains_key("pml_mode") {
+                            s.pml_mode = crate::project::PmlModeRequest::Auto;
+                        }
+                    }
                 }
                 "max_dev" => {
                     s.max_dev = if v.is_null() {
@@ -1048,7 +1121,7 @@ impl Engine {
                 }
                 other => {
                     return Err(Error::invalid(format!(
-                        "set_mesh has no field '{other}' (h, adapt_scale, adapt_grade, adapt_max_cells, physics_sizing, points_per_wavelength, structured_pml, max_dev, curved, gap_cells, z_coarsen, max_cells, dz_min, max_z_slabs, z_growth_ratio, max_steiner_multiplier, strict_mesh, singular_edges, quarter_point_xi, corner_grading, sweep)"
+                        "set_mesh has no field '{other}' (h, adapt_scale, adapt_grade, adapt_max_cells, physics_sizing, points_per_wavelength, pml_mode, structured_pml, max_dev, curved, gap_cells, z_coarsen, max_cells, dz_min, max_z_slabs, z_growth_ratio, max_steiner_multiplier, strict_mesh, singular_edges, quarter_point_xi, corner_grading, sweep)"
                     )))
                 }
             }

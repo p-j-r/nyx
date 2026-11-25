@@ -111,6 +111,16 @@ fn refined(p: &Project, factor: f64, scale_sizes: bool, sizing_order: Option<u8>
                         Expr::Text(s) => Expr::Text(format!("max(1, ({s}) / {factor:?})")),
                     };
                 }
+            } else if let Op::Pml { layers, .. } = &mut feat.op {
+                *layers = match &*layers {
+                    Expr::Num(v) if *v > 0.0 => Expr::Num((*v / factor).ceil().max(5.0)),
+                    Expr::Num(v) => Expr::Num(*v),
+                    Expr::Text(s) if s.trim().eq_ignore_ascii_case("auto") || s.trim().starts_with('-') => {
+                        Expr::Text(s.clone())
+                    }
+                    Expr::Text(s) if factor < 1.0 => Expr::Text(format!("({s}) / {factor:?}")),
+                    Expr::Text(s) => Expr::Text(format!("max(5, ({s}) / {factor:?})")),
+                };
             }
         }
     }
@@ -1550,5 +1560,67 @@ mod tests {
         let np = noise_modes(&pml);
         assert_eq!(np.iter().copied().collect::<Vec<_>>(), vec![0], "{np:?}");
         assert!(is_noise("scalar Q1", &np) && !is_noise("value[0]", &np) && !is_noise("scalar Q2", &np));
+    }
+
+    #[test]
+    fn refined_scales_pml_layers_when_scale_sizes_is_on_and_preserves_auto_sentinel() {
+        use geom::expr::Expr;
+        use geom::model::{Feature, Op, Origin, PmlCoordKind, PmlGrowMode};
+
+        let mut p = Project::new("pml_conv", 2);
+        p.geometry.features.push(Feature {
+            id: 1,
+            name: "pml_explicit".into(),
+            suppressed: false,
+            origin: Origin::Code,
+            tags: vec![],
+            op: Op::Pml {
+                window: None,
+                sides: vec![],
+                thickness: Expr::Num(1e-6),
+                layers: Expr::Num(6.0),
+                grading: Expr::Num(2.0),
+                regions: vec![],
+                mode: PmlGrowMode::Outward,
+                coord: PmlCoordKind::Auto,
+                center: None,
+                axis: None,
+                layer_grading: Some(Expr::Num(2.0)),
+            },
+        });
+        p.geometry.features.push(Feature {
+            id: 2,
+            name: "pml_auto".into(),
+            suppressed: false,
+            origin: Origin::Code,
+            tags: vec![],
+            op: Op::Pml {
+                window: None,
+                sides: vec![],
+                thickness: Expr::Text("auto".into()),
+                layers: Expr::Num(-1.0),
+                grading: Expr::Num(2.0),
+                regions: vec![],
+                mode: PmlGrowMode::Outward,
+                coord: PmlCoordKind::Auto,
+                center: None,
+                axis: None,
+                layer_grading: Some(Expr::Num(2.0)),
+            },
+        });
+        let r = refined(&p, 0.5, true, Some(2));
+        match &r.geometry.features[0].op {
+            Op::Pml { layers, .. } => assert_eq!(*layers, Expr::Num(12.0)),
+            other => panic!("unexpected op: {other:?}"),
+        }
+        match &r.geometry.features[1].op {
+            Op::Pml { layers, .. } => assert_eq!(*layers, Expr::Num(-1.0)),
+            other => panic!("unexpected op: {other:?}"),
+        }
+        let r_coarse = refined(&p, 2.0, true, Some(2));
+        match &r_coarse.geometry.features[0].op {
+            Op::Pml { layers, .. } => assert_eq!(*layers, Expr::Num(5.0)),
+            other => panic!("unexpected op: {other:?}"),
+        }
     }
 }

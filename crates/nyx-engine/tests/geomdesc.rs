@@ -26,6 +26,8 @@ fn sample(t: Ty) -> Value {
         Ty::Pins => json!([{ "sel": "outer", "id": 1 }]),
         Ty::Steps => json!([{ "Translate": [1.0, 0.0, 0.0] }]),
         Ty::Pattern => json!({ "Linear": { "step": [1.0, 0.0, 0.0] } }),
+        Ty::PmlMode => json!("Outward"),
+        Ty::PmlCoord => json!("Cartesian"),
     }
 }
 
@@ -39,6 +41,10 @@ fn required_args(d: &OpDesc) -> Value {
     Value::Object(d.fields.iter().filter(|f| f.required).map(|f| (f.name.to_string(), sample(f.ty))).collect())
 }
 
+fn all_args(d: &OpDesc) -> Value {
+    Value::Object(d.fields.iter().map(|f| (f.name.to_string(), sample(f.ty))).collect())
+}
+
 #[test]
 fn every_kind_is_described_once_with_its_serde_fields() {
     let list = base();
@@ -49,7 +55,8 @@ fn every_kind_is_described_once_with_its_serde_fields() {
     for d in &all {
         let op = build_op(&list, d.kind, &required_args(d)).unwrap_or_else(|e| panic!("{}: {e}", d.kind));
         assert_eq!(kind_of(&op), d.kind);
-        let v = serde_json::to_value(&op).unwrap();
+        let op_all = build_op(&list, d.kind, &all_args(d)).unwrap_or_else(|e| panic!("{}: {e}", d.kind));
+        let v = serde_json::to_value(&op_all).unwrap();
         let got: BTreeSet<String> = v[d.kind].as_object().unwrap().keys().cloned().collect();
         let want: BTreeSet<String> = d.fields.iter().map(|f| f.name.to_string()).collect();
         assert_eq!(got, want, "{}: the descriptor fields differ from the serde fields", d.kind);

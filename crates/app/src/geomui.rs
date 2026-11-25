@@ -75,16 +75,26 @@ impl State {
             Err(e) => self.error = Some(e),
         }
     }
+
+    /// Domain labels of absorbing-layer regions (`RegionKind::Pml`) in the current geometry preview.
+    pub fn pml_domain_ids(&self) -> Vec<i32> {
+        self.domains
+            .iter()
+            .filter(|(_, _, k)| *k == RegionKind::Pml)
+            .map(|(_, id, _)| *id)
+            .collect()
+    }
 }
 
 /// The exact regions and edges of a 2D model as a display mesh, numbered like the compiled labels (region = domain, edge = boundary), so the
-/// viewport draws it as it draws a mesh.
+/// viewport draws it as it draws a mesh. Outward 2D absorbing shells (`PmlGrowMode::Outward`) are synthesized onto the preview mesh so
+/// zero-padding absorbing layers are visible before meshing.
 fn preview(ev: &Evaluated, lm: &LabelMap) -> Option<ViewMesh> {
     if ev.list.dim != 2 {
         return None;
     }
     let dm = ev.tessellate(ev.bounds().diagonal() / 400.0);
-    let points: Vec<[f32; 3]> = dm.points.iter().map(|p| [p[0] as f32, p[2] as f32, 0.0]).collect();
+    let mut points: Vec<[f32; 3]> = dm.points.iter().map(|p| [p[0] as f32, p[2] as f32, 0.0]).collect();
     let domain = |r: u32| lm.domains.get(r as usize).filter(|d| matches!(d.kind, RegionKind::Material | RegionKind::Pml)).map(|d| d.id);
     let (mut tris, mut tri_label) = (vec![], vec![]);
     for (t, &r) in dm.tris.iter().zip(&dm.tri_face) {
@@ -98,6 +108,82 @@ fn preview(ev: &Evaluated, lm: &LabelMap) -> Option<ViewMesh> {
         if let Some(l) = lm.label_of_edge(e) {
             segs.push(*s);
             seg_label.push(l);
+        }
+    }
+    let diag = ev.bounds().diagonal().max(1e-6);
+    let half_plane_x = ev.bounds().lo[0] >= -1e-9 * diag;
+    for p in ev.pml_regions() {
+        if p.mode != PmlGrowMode::Outward {
+            continue;
+        }
+        let Some(dom_id) = domain(p.region) else { continue };
+        let d_vis = if p.thickness > 0.0 && p.thickness.is_finite() {
+            p.thickness
+        } else {
+            0.15 * diag
+        };
+        match p.coord {
+            PmlCoordKind::Auto | PmlCoordKind::Cartesian => {
+                let (wx0, wx1) = (p.window.lo[0], p.window.hi[0]);
+                let (wz0, wz1) = (p.window.lo[2], p.window.hi[2]);
+                let (x0, x1) = match p.sides[0] {
+                    s if s < 0 => (wx0 - d_vis, wx0),
+                    s if s > 0 => (wx1, wx1 + d_vis),
+                    _ => (wx0, wx1),
+                };
+                let (z0, z1) = match p.sides[2] {
+                    s if s < 0 => (wz0 - d_vis, wz0),
+                    s if s > 0 => (wz1, wz1 + d_vis),
+                    _ => (wz0, wz1),
+                };
+                if x1 > x0 && z1 > z0 {
+                    let b = points.len() as u32;
+                    points.extend_from_slice(&[
+                        [x0 as f32, z0 as f32, 0.0],
+                        [x1 as f32, z0 as f32, 0.0],
+                        [x1 as f32, z1 as f32, 0.0],
+                        [x0 as f32, z1 as f32, 0.0],
+                    ]);
+                    tris.push([b, b + 1, b + 2]);
+                    tri_label.push(dom_id);
+                    tris.push([b, b + 2, b + 3]);
+                    tri_label.push(dom_id);
+                    for (u, v) in [(b, b + 1), (b + 1, b + 2), (b + 2, b + 3), (b + 3, b)] {
+                        segs.push([u, v]);
+                        seg_label.push(0);
+                    }
+                }
+            }
+            PmlCoordKind::Cylindrical | PmlCoordKind::Spherical if p.r_in > 0.0 => {
+                let (cx, cz) = (p.center[0], p.center[2]);
+                let (r0, r1) = (p.r_in, p.r_in + d_vis);
+                let (th0, th1) = if half_plane_x && cx.abs() <= 1e-9 * diag {
+                    (-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2)
+                } else {
+                    (0.0, std::f64::consts::TAU)
+                };
+                let n_sec = 32usize;
+                for k in 0..n_sec {
+                    let a0 = th0 + (th1 - th0) * (k as f64) / (n_sec as f64);
+                    let a1 = th0 + (th1 - th0) * ((k + 1) as f64) / (n_sec as f64);
+                    let (s0, c0) = a0.sin_cos();
+                    let (s1, c1) = a1.sin_cos();
+                    let b = points.len() as u32;
+                    points.extend_from_slice(&[
+                        [(cx + r0 * c0) as f32, (cz + r0 * s0) as f32, 0.0],
+                        [(cx + r1 * c0) as f32, (cz + r1 * s0) as f32, 0.0],
+                        [(cx + r1 * c1) as f32, (cz + r1 * s1) as f32, 0.0],
+                        [(cx + r0 * c1) as f32, (cz + r0 * s1) as f32, 0.0],
+                    ]);
+                    tris.push([b, b + 1, b + 2]);
+                    tri_label.push(dom_id);
+                    tris.push([b, b + 2, b + 3]);
+                    tri_label.push(dom_id);
+                    segs.push([b + 1, b + 2]);
+                    seg_label.push(0);
+                }
+            }
+            _ => {}
         }
     }
     let mut domain_labels = tri_label.clone();
@@ -534,27 +620,108 @@ fn op_form(ui: &mut Ui, op: &mut Op, prior: &[(FeatureId, String)], ev: Option<&
                 ui.weak(format!("{} boundary label pin(s) kept from an older project", pins.len()));
             }
         }
-        Op::Pml { window, sides, thickness, layers, grading, regions } => {
-            c |= feature_combo(ui, "window", window, prior);
-            row(ui, "sides (none: all)", |ui| {
+        Op::Pml {
+            window,
+            sides,
+            thickness,
+            layers,
+            grading,
+            regions,
+            mode,
+            coord,
+            center,
+            axis,
+            layer_grading,
+        } => {
+            row(ui, "growth mode", |ui| {
                 let mut ch = false;
-                for s in [Side::XMin, Side::XMax, Side::YMin, Side::YMax, Side::ZMin, Side::ZMax] {
-                    let mut on = sides.contains(&s);
-                    if ui.checkbox(&mut on, s.name()).changed() {
-                        if on {
-                            sides.push(s);
-                        } else {
-                            sides.retain(|x| *x != s);
-                        }
-                        ch = true;
+                if ui.selectable_value(mode, PmlGrowMode::Outward, "outward (exterior)").changed() {
+                    *window = None;
+                    ch = true;
+                }
+                if ui.selectable_value(mode, PmlGrowMode::Inward, "inward (window)").changed() {
+                    if window.is_none() {
+                        *window = prior.last().map(|(i, _)| *i);
                     }
+                    ch = true;
                 }
                 c |= ch;
                 ch
             });
+            row(ui, "coordinates", |ui| {
+                let mut ch = false;
+                for (val, label) in [
+                    (PmlCoordKind::Auto, "auto"),
+                    (PmlCoordKind::Cartesian, "cartesian"),
+                    (PmlCoordKind::Cylindrical, "cylindrical"),
+                    (PmlCoordKind::Spherical, "spherical"),
+                ] {
+                    ch |= ui.selectable_value(coord, val, label).changed();
+                }
+                c |= ch;
+                ch
+            });
+            if *mode == PmlGrowMode::Inward {
+                let mut wid = window.unwrap_or_else(|| prior.last().map(|(i, _)| *i).unwrap_or(0));
+                if feature_combo(ui, "window", &mut wid, prior) || window.is_none() {
+                    *window = Some(wid);
+                    c = true;
+                }
+            }
+            if matches!(*coord, PmlCoordKind::Auto | PmlCoordKind::Cartesian) || *mode == PmlGrowMode::Inward {
+                row(ui, "sides (none: all)", |ui| {
+                    let mut ch = false;
+                    for s in [Side::XMin, Side::XMax, Side::YMin, Side::YMax, Side::ZMin, Side::ZMax] {
+                        let mut on = sides.contains(&s);
+                        if ui.checkbox(&mut on, s.name()).changed() {
+                            if on {
+                                sides.push(s);
+                            } else {
+                                sides.retain(|x| *x != s);
+                            }
+                            ch = true;
+                        }
+                    }
+                    c |= ch;
+                    ch
+                });
+            }
             c |= one(ui, "thickness", thickness);
             c |= one(ui, "layers", layers);
+            c |= optional(ui, "layer grading", layer_grading);
             c |= one(ui, "grading order", grading);
+            if matches!(*coord, PmlCoordKind::Cylindrical | PmlCoordKind::Spherical) {
+                row(ui, "center (x, y, z)", |ui| {
+                    let mut on = center.is_some();
+                    let mut ch = ui.checkbox(&mut on, "").changed();
+                    if ch {
+                        *center = if on { Some(zero3()) } else { None };
+                    }
+                    if let Some(ctr) = center {
+                        for (i, e) in ctr.iter_mut().enumerate() {
+                            ch |= expr_edit(ui, ("pml_center", i), e);
+                        }
+                    }
+                    c |= ch;
+                    ch
+                });
+                if *coord == PmlCoordKind::Cylindrical {
+                    row(ui, "cylinder axis", |ui| {
+                        let mut on = axis.is_some();
+                        let mut ch = ui.checkbox(&mut on, "").changed();
+                        if ch {
+                            *axis = if on { Some(Axis::Z) } else { None };
+                        }
+                        if let Some(ax) = axis {
+                            for x in [Axis::X, Axis::Y, Axis::Z] {
+                                ch |= ui.selectable_value(ax, x, x.name()).changed();
+                            }
+                        }
+                        c |= ch;
+                        ch
+                    });
+                }
+            }
             row(ui, "regions (none: all)", |ui| {
                 let mut text = regions.join(", ");
                 let ch = ui.add(TextEdit::singleline(&mut text).desired_width(200.0)).changed();
@@ -641,7 +808,19 @@ fn default_op(kind: &str, list: &FeatureList) -> Option<Op> {
                 .collect();
             Op::Overlay { regions, pins: vec![], naming: NameScheme::Feature }
         }
-        "Pml" => Op::Pml { window: last?, sides: vec![], thickness: Expr::Num(1.0), layers: Expr::Num(4.0), grading: Expr::Num(2.0), regions: vec![] },
+        "Pml" => Op::Pml {
+            window: None,
+            sides: vec![],
+            thickness: Expr::Text("auto".into()),
+            layers: Expr::Num(6.0),
+            grading: Expr::Num(2.0),
+            regions: vec![],
+            mode: PmlGrowMode::Outward,
+            coord: PmlCoordKind::Auto,
+            center: None,
+            axis: None,
+            layer_grading: Some(Expr::Num(2.0)),
+        },
         "Size" => Op::Size { sel: Selector::parse("outer").ok()?, h: Some(Expr::Num(0.1)), max_deviation: None, min_layers: None },
         "Tag" => Op::Tag { sel: Selector::parse("outer").ok()?, name: "tag".into() },
         "Cut" => Op::Cut { normal: [Expr::Num(1.0), Expr::Num(0.0), Expr::Num(0.0)], offset: Expr::Num(0.0), keep: Keep::Above },

@@ -2,10 +2,11 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:af84b951b76aed1b51a88bcb7f4b0f83` · 111 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:beeeb69cdd3f46d7f08513ce570c99c0` · 113 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
+| [`add_absorbing_layer`](add_absorbing_layer.md) | edit | Add an outward absorbing layer |
 | [`add_box`](add_box.md) | edit | Box |
 | [`add_chip_stack`](add_chip_stack.md) | edit | Add a 3D chip dielectric stack |
 | [`add_circle`](add_circle.md) | edit | Circle |
@@ -70,6 +71,7 @@ Catalog hash: `b3:af84b951b76aed1b51a88bcb7f4b0f83` · 111 commands. `nyx api li
 | [`mesh_build`](mesh_build.md) | expensive | Mesh the geometry |
 | [`open_results`](open_results.md) | edit | Open an HDF5 results file |
 | [`overlap`](overlap.md) | read | Overlap of two fields |
+| [`pml_diagnostics`](pml_diagnostics.md) | read | Absorbing-layer mesh and stability diagnostics |
 | [`poll_jobs`](poll_jobs.md) | read | Apply finished jobs |
 | [`probe`](probe.md) | read | Value of an expression at points |
 | [`project_info`](project_info.md) | read | Project summary |

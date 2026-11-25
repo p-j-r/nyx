@@ -195,7 +195,7 @@ fn curved_bodies_that_touch_something_are_refused() {
     });
     assert!(e.contains("torus 'ring'") && e.contains("sphere 'ball'"), "{e}");
     let e = three_d(|m| {
-        let s = m.sphere("alone", (0.0, 0.0, 0.0), 1.0);
+        let s = m.torus("alone", (0.0, 0.0, 0.0), 1.0, 0.25);
         vec![("a", s)]
     });
     assert!(e.contains("prismatic host"), "{e}");

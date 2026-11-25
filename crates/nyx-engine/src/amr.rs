@@ -298,6 +298,7 @@ pub(crate) fn solve_dfs_with_amr(
                 let a3 = Adaptive { scale: 1.0, grade, max_cells: Some(max_cells_3d) };
                 let g_in = MeshedGeom {
                     mesh: (*sm_cur).clone(),
+                    cells: None,
                     labels: current_model.labels().clone(),
                     eval: current_model.evaluated().clone(),
                     warnings: vec![],
@@ -315,6 +316,7 @@ pub(crate) fn solve_dfs_with_amr(
                 let a2 = Adaptive { scale: 1.0, grade, max_cells: Some(max_cells_3d) };
                 let g_in = MeshedGeom {
                     mesh: (*sm_cur).clone(),
+                    cells: None,
                     labels: current_model.labels().clone(),
                     eval: current_model.evaluated().clone(),
                     warnings: vec![],

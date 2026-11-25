@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
-//! Linear elastic solid mechanics on P1/P2 triangles (plane stress or plane strain) and tetrahedra: static solve with boundary loads,
-//! prescribed displacements and thermal expansion, eigenfrequencies, stress and von Mises. Moved here from `femcore::sms` in restructure
-//! phase 4 (ADR 42): the kernels are unchanged, they read the typed `Problem` and give `nyx_physics` results.
+//! Linear elastic solid mechanics on P1/P2 triangles/quadrilaterals (plane stress or plane strain) and
+//! tetrahedra/prisms/hexahedra: static solve with boundary loads, prescribed displacements, thermal
+//! expansion, and locking-free Static Infinite Elements (`Rational` and `Exponential`), plus real/complex
+//! eigenfrequencies, stress, and von Mises.
 //! Materials may be anisotropic (a 6x6 stiffness per domain, see `femcore::material`).
 //!
 //! Everything is in the wafer axes (`femcore::section`): a 2D mesh is the x-z cross-section, y the axis out of it. Dof layout: all displacements
@@ -19,19 +20,185 @@
 use crate::problem::*;
 use femcore::fem::check_boundary_labels;
 use femcore::fem::*;
+use femcore::fem_mixed::{
+    assemble_mass_mixed, eval_facet_jacobian, facet_lagrange_shape, facet_rule_mixed, lagrange_ref_nodes,
+    lagrange_shape_into, quad_rule_mixed, IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap,
+};
 use femcore::fields::{gradients_at_nodes, node_average, CellFields};
-use femcore::linalg::csr::RCsr as Csr;
-use femcore::linalg::csr::{c, C};
-use femcore::linalg::driver::eigs_sym;
-use femcore::linalg::driver::EigOpts;
-use femcore::material::{M3, M6};
-use femcore::props::{LinearSolver, TensorKind};
-use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
+use femcore::linalg::csr::{c, Coo, RCsr as Csr, C};
+use femcore::linalg::driver::{eigs_sym, EigOpts};
+use femcore::material::{self, M3, M6};
+use femcore::mesh::cells::canonical_quad_face;
+use femcore::mesh::mixed::{
+    cell_local_edges, cell_local_quad_faces, cell_local_tri_faces, sorted_tri_face, FacetType, MixedDiscretisation,
+    QUAD_EDGES, TRI_EDGES,
+};
+use femcore::pml::ie_exponential_stretch_1d;
+use femcore::props::{LinearSolver, Materials, Pml, PmlCoord, PmlDir, TensorKind};
+use nyx_physics::{
+    cell_fields_of, CellField, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
+};
 use rayon::prelude::*;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
 fn check_labels(mesh: &Discretisation, bcs: &[Bc]) -> Result<(), String> {
     check_boundary_labels(mesh, bcs.iter().flat_map(|b| b.labels.iter().copied()))
+}
+
+pub(crate) fn mixed_check_boundary_labels(mixed: &MixedDiscretisation, bcs: &[Bc]) -> Result<(), String> {
+    let mut known: Vec<i32> = mixed.facet_labels.clone();
+    known.sort_unstable();
+    known.dedup();
+    let mut bad: Vec<i32> =
+        bcs.iter().flat_map(|b| b.labels.iter().copied()).filter(|l| known.binary_search(l).is_err()).collect();
+    bad.sort_unstable();
+    bad.dedup();
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("boundary number(s) {bad:?} do not exist in this mesh (it has {known:?})"))
+    }
+}
+
+fn mixed_domain_labels(mixed: &MixedDiscretisation) -> Vec<i32> {
+    let mut labels = mixed.cell_labels.clone();
+    labels.sort_unstable();
+    labels.dedup();
+    labels
+}
+
+pub(crate) fn mixed_cell_stiffness_skipping(
+    materials: &Materials,
+    mixed: &MixedDiscretisation,
+    skip: &[i32],
+) -> Result<Vec<M6>, String> {
+    let mut by_domain: BTreeMap<i32, M6> = BTreeMap::new();
+    for d in mixed_domain_labels(mixed) {
+        if skip.contains(&d) {
+            by_domain.insert(d, [[0.0; 6]; 6]);
+            continue;
+        }
+        let c = if let Some(st) = materials.aniso.get(&d).and_then(|a| a.stiffness.as_ref()) {
+            material::stiffness_global(st, materials.aniso[&d].euler_deg)
+        } else {
+            let e = materials.get(d, "E").ok_or_else(|| format!("domain {d} has no value for 'E'"))?;
+            let nu = materials.get(d, "nu").ok_or_else(|| format!("domain {d} has no value for 'nu'"))?;
+            if nu >= 0.5 || nu <= -1.0 {
+                return Err("Poisson's ratio must be between -1 and 0.5".into());
+            }
+            if e <= 0.0 {
+                return Err("Young's modulus must be positive".into());
+            }
+            material::isotropic_stiffness(e, nu)
+        };
+        if !material::is_positive_definite(&c) {
+            return Err(format!("the stiffness of domain {d} is not positive definite (check the constants)"));
+        }
+        by_domain.insert(d, c);
+    }
+    Ok(mixed.cell_labels.iter().map(|l| by_domain[l]).collect())
+}
+
+pub(crate) fn mixed_cell_viscosity_skipping(
+    materials: &Materials,
+    mixed: &MixedDiscretisation,
+    skip: &[i32],
+) -> Result<Vec<M6>, String> {
+    let mut by_domain: BTreeMap<i32, M6> = BTreeMap::new();
+    for d in mixed_domain_labels(mixed) {
+        if skip.contains(&d) {
+            by_domain.insert(d, [[0.0; 6]; 6]);
+            continue;
+        }
+        let eta = if let Some(v) = materials.aniso.get(&d).and_then(|a| a.viscosity.as_ref()) {
+            material::rotate_m6_global(v, materials.aniso[&d].euler_deg)
+        } else if let Some(eta_s) = materials.get(d, "eta") {
+            if eta_s < 0.0 {
+                return Err(format!("viscosity 'eta' of domain {d} must be non-negative (found {eta_s})"));
+            }
+            if eta_s > 0.0 {
+                material::isotropic_stiffness(eta_s, 0.0)
+            } else {
+                [[0.0; 6]; 6]
+            }
+        } else {
+            [[0.0; 6]; 6]
+        };
+        by_domain.insert(d, eta);
+    }
+    Ok(mixed.cell_labels.iter().map(|l| by_domain[l]).collect())
+}
+
+pub(crate) fn mixed_cell_rho(
+    materials: &Materials,
+    mixed: &MixedDiscretisation,
+    inactive: &[i32],
+) -> Result<Vec<f64>, String> {
+    let mut by_domain = BTreeMap::new();
+    for d in mixed_domain_labels(mixed) {
+        let v = if inactive.contains(&d) {
+            0.0
+        } else {
+            materials.get(d, "rho").ok_or_else(|| format!("domain {d} has no value for 'rho'"))?
+        };
+        by_domain.insert(d, v);
+    }
+    Ok(mixed.cell_labels.iter().map(|l| by_domain[l]).collect())
+}
+
+pub(crate) fn mixed_cell_tensor(
+    materials: &Materials,
+    mixed: &MixedDiscretisation,
+    kind: TensorKind,
+    fallback: Option<f64>,
+) -> Result<Vec<M3>, String> {
+    let (scalar_name, pick): (&str, fn(&material::Anisotropy) -> Option<&material::Tensor>) = match kind {
+        TensorKind::Conductivity => ("k", |a| a.conductivity.as_ref()),
+        TensorKind::Permittivity => ("eps_r", |a| a.permittivity.as_ref()),
+        TensorKind::PermittivityIm => ("eps_r_im", |a| a.permittivity_im.as_ref()),
+        TensorKind::Expansion => ("alpha", |a| a.expansion.as_ref()),
+    };
+    let mut by_domain: BTreeMap<i32, M3> = BTreeMap::new();
+    for d in mixed_domain_labels(mixed) {
+        let t = match materials.aniso.get(&d).and_then(pick) {
+            Some(t) => material::tensor_global(t, materials.aniso[&d].euler_deg),
+            None => {
+                let v = materials
+                    .get(d, scalar_name)
+                    .or(fallback)
+                    .ok_or_else(|| format!("domain {d} has no value for '{scalar_name}'"))?;
+                material::iso_tensor(v)
+            }
+        };
+        by_domain.insert(d, t);
+    }
+    Ok(mixed.cell_labels.iter().map(|l| by_domain[l]).collect())
+}
+
+pub(crate) fn mixed_untouched_dofs(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    ncomp: usize,
+    inactive: &[i32],
+) -> Vec<usize> {
+    if inactive.is_empty() {
+        return Vec::new();
+    }
+    let n1 = dof_map.n_dofs;
+    let mut used = vec![false; n1];
+    for c in 0..mixed.n_cells() {
+        if !inactive.contains(&mixed.cell_labels[c]) {
+            for &d in dof_map.cell_dofs(c) {
+                used[d] = true;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for k in 0..ncomp {
+        out.extend((0..n1).filter(|&d| !used[d]).map(|d| d + k * n1));
+    }
+    out
 }
 
 /// Indices of the in-plane components (xx, zz, xz) in the solver's Voigt order on a cross-section.
@@ -158,6 +325,903 @@ pub fn assemble_solid(mesh: &Discretisation, c6: &[M6], order: usize, plane: Pla
     })
 }
 
+// ------------------------------------------------------------------ Static Infinite Elements (`ResolvedIeDomains`)
+
+#[derive(Clone, Copy, Debug)]
+struct IeJacobian {
+    j_inv: [[f64; 3]; 3],
+    det: f64,
+    r_tilde: f64,
+}
+
+impl IeJacobian {
+    #[inline]
+    fn identity() -> Self {
+        Self { j_inv: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], det: 1.0, r_tilde: 1.0 }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedIeDomain {
+    ie: InfiniteElement,
+    pml: Pml,
+    bounds: ([f64; 3], [f64; 3]),
+}
+
+#[derive(Clone, Debug, Default)]
+struct ResolvedIeDomains {
+    domains: BTreeMap<i32, ResolvedIeDomain>,
+    diagnostics: Vec<String>,
+}
+
+fn permute_real_wafer_to_2d(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    const P: [usize; 3] = [0, 2, 1];
+    let mut out = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i][j] = m[P[i]][P[j]];
+        }
+    }
+    out
+}
+
+fn normalize_ie_axis(axis: [f64; 3], dim: usize) -> [f64; 3] {
+    let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    if n > 1e-30 {
+        [axis[0] / n, axis[1] / n, axis[2] / n]
+    } else if dim == 2 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [0.0, 0.0, 1.0]
+    }
+}
+
+fn infer_ie_curvilinear_extents(pml: &mut Pml, pts_wafer: &[[f64; 3]], dim: usize) {
+    if pts_wafer.is_empty() {
+        return;
+    }
+    match &mut pml.coord {
+        PmlCoord::Cartesian => {}
+        PmlCoord::Spherical { center, r_in, thickness } => {
+            if *thickness <= 0.0 {
+                let (mut r_lo, mut r_hi) = (f64::INFINITY, 0.0_f64);
+                for p in pts_wafer {
+                    let dx = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
+                    let r = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
+                    r_lo = r_lo.min(r);
+                    r_hi = r_hi.max(r);
+                }
+                if r_hi > r_lo {
+                    *r_in = r_lo;
+                    *thickness = r_hi - r_lo;
+                }
+            }
+        }
+        PmlCoord::Cylindrical { center, axis, r_in, r_thickness, radial_on, axial, z_in, z_thickness } => {
+            let a_hat = normalize_ie_axis(*axis, dim);
+            let (mut r_lo, mut r_hi) = (f64::INFINITY, 0.0_f64);
+            let (mut z_lo, mut z_hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for p in pts_wafer {
+                let d = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
+                let zeta = d[0] * a_hat[0] + d[1] * a_hat[1] + d[2] * a_hat[2];
+                let rv = [d[0] - zeta * a_hat[0], d[1] - zeta * a_hat[1], d[2] - zeta * a_hat[2]];
+                let r = (rv[0] * rv[0] + rv[1] * rv[1] + rv[2] * rv[2]).sqrt();
+                r_lo = r_lo.min(r);
+                r_hi = r_hi.max(r);
+                z_lo = z_lo.min(zeta);
+                z_hi = z_hi.max(zeta);
+            }
+            if *radial_on && *r_thickness <= 0.0 && r_hi > r_lo {
+                *r_in = r_lo;
+                *r_thickness = r_hi - r_lo;
+            }
+            if *axial != PmlDir::Off && *z_thickness <= 0.0 && z_hi > z_lo {
+                *z_in = if *axial == PmlDir::Plus { z_lo } else { z_hi };
+                *z_thickness = z_hi - z_lo;
+            }
+        }
+    }
+}
+
+/// Evaluates `(s_u, inv_su, du_tilde)` along a 1D IE ray `t in [0, 1]` of physical thickness `length`.
+/// Computes `inv_su` directly without dividing by `s_u`, so at `t = 1` (`q = 0`) for `Rational`
+/// `inv_su == 0.0` with zero `Inf`/`NaN`.
+#[inline]
+fn eval_ie_ray_1d(ie: &InfiniteElement, t: f64, length: f64, default_pole: f64) -> (f64, f64, f64, f64) {
+    let t = t.clamp(0.0, 1.0);
+    let len = length.max(1e-300);
+    let d_pole = ie.pole_dist.unwrap_or(default_pole).max(1e-30);
+    match ie.profile {
+        IeProfile::Rational => {
+            let q = (1.0 - t).clamp(0.0, 1.0);
+            let q_safe = q.max(1e-12);
+            let s_u = d_pole / (len * q_safe * q_safe);
+            let inv_su = (len * q * q) / d_pole;
+            let du = (d_pole * t) / q_safe;
+            (s_u, inv_su, du, d_pole)
+        }
+        IeProfile::Exponential => {
+            let (s_u, du) = ie_exponential_stretch_1d(t, len, ie.decay);
+            (s_u, 1.0 / s_u, du, d_pole)
+        }
+    }
+}
+
+impl ResolvedIeDomains {
+    fn from_mixed(mixed: &MixedDiscretisation, spec: &Problem) -> Self {
+        if spec.infinite_elements.is_empty() {
+            return Self::default();
+        }
+        let d = mixed.dim;
+        let mut dom_verts: BTreeMap<i32, BTreeSet<u32>> = BTreeMap::new();
+        for ci in 0..mixed.n_cells() {
+            let dom = mixed.cell_labels[ci];
+            if spec.infinite_elements.contains_key(&dom) && !spec.inactive.contains(&dom) {
+                dom_verts.entry(dom).or_default().extend(mixed.cell(ci).iter().copied());
+            }
+        }
+        let mut domains = BTreeMap::new();
+        let mut diagnostics = Vec::new();
+        for (&dom, ie) in &spec.infinite_elements {
+            if spec.inactive.contains(&dom) || !ie.is_active() {
+                continue;
+            }
+            let Some(vs) = dom_verts.get(&dom) else { continue };
+            let pts: Vec<[f64; 3]> =
+                vs.iter().map(|&v| femcore::section::wafer_point(mixed.point(v as usize), d)).collect();
+            let mut pml = ie.pml.clone();
+            infer_ie_curvilinear_extents(&mut pml, &pts, d);
+            if !pml.is_active() {
+                continue;
+            }
+            let bounds = if let Some(b) = pml.bounds {
+                b
+            } else {
+                let mut lo = [f64::INFINITY; 3];
+                let mut hi = [f64::NEG_INFINITY; 3];
+                for p in &pts {
+                    for k in 0..3 {
+                        lo[k] = lo[k].min(p[k]);
+                        hi[k] = hi[k].max(p[k]);
+                    }
+                }
+                (lo, hi)
+            };
+            let prof_name = match ie.profile {
+                IeProfile::Rational => "rational [R_in, R_out) -> [R_in, inf)",
+                IeProfile::Exponential => "exponential + outer 1st-order spring Robin",
+            };
+            diagnostics.push(format!("static infinite element on domain {dom}: {prof_name}"));
+            domains.insert(dom, ResolvedIeDomain { ie: ie.clone(), pml, bounds });
+        }
+        Self { domains, diagnostics }
+    }
+
+    #[inline]
+    fn contains(&self, dom: i32) -> bool {
+        self.domains.contains_key(&dom)
+    }
+
+    fn has_rational(&self) -> bool {
+        self.domains.values().any(|rd| rd.ie.profile == IeProfile::Rational)
+    }
+
+    fn has_exponential_robin(&self) -> bool {
+        self.domains.values().any(|rd| rd.ie.profile == IeProfile::Exponential && !rd.ie.clamp_outer)
+    }
+
+    /// Evaluates the Infinite Element Jacobian inside cell `iso`, using nodal-radius isoparametric
+    /// interpolation on uncurved (`!iso.curved`) Spherical/Cylindrical shells so flat polyhedral
+    /// outer facets map conformingly to `t = 1` (`R_tilde -> infinity`) without secant gap error.
+    fn eval_cell_jacobian(
+        &self,
+        dom: i32,
+        iso: &IsoparametricCell,
+        jg: &femcore::fem_mixed::JacobianEval,
+        sn: &[f64],
+        sdn: &[[f64; 3]],
+        dim: usize,
+    ) -> IeJacobian {
+        let x_w = femcore::section::wafer_point(&jg.x[..dim], dim);
+        let Some(rd) = self.domains.get(&dom) else {
+            return IeJacobian::identity();
+        };
+        if !iso.curved {
+            if let PmlCoord::Spherical { center, r_in, thickness } = rd.pml.coord {
+                if thickness > 0.0 {
+                    let mut u = 0.0;
+                    let mut g_m = [0.0; 3];
+                    for (b, node) in iso.nodes.iter().enumerate() {
+                        let pw = femcore::section::wafer_point(&node[..dim], dim);
+                        let dx = [pw[0] - center[0], pw[1] - center[1], pw[2] - center[2]];
+                        let rb = (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]).sqrt();
+                        u += sn[b] * rb;
+                        let gp = jg.map_grad(sdn[b]);
+                        for k in 0..dim {
+                            g_m[k] += rb * gp[k];
+                        }
+                    }
+                    if u < r_in {
+                        return IeJacobian::identity();
+                    }
+                    let g_w = if dim == 2 { [g_m[0], 0.0, g_m[1]] } else { g_m };
+                    let r_vec = [x_w[0] - center[0], x_w[1] - center[1], x_w[2] - center[2]];
+                    let c1 = r_vec[0] * g_w[0] + r_vec[1] * g_w[1] + r_vec[2] * g_w[2];
+                    let r_scale = thickness.max(r_in.abs()).max(1e-30);
+                    if u > 1e-15 * r_scale && c1 > 1e-15 * u {
+                        let t = ((u - r_in) / thickness).clamp(0.0, 1.0);
+                        let default_pole = if r_in > 0.0 { r_in } else { thickness };
+                        let (s_r, inv_sr, du_r, d_pole) = eval_ie_ray_1d(&rd.ie, t, thickness, default_pole);
+                        let r_tilde = (r_in + du_r).max(1e-12 * r_scale);
+                        let q_rem = (1.0 - t).clamp(0.0, 1.0);
+                        let (gamma, inv_gamma) = match rd.ie.profile {
+                            IeProfile::Rational => {
+                                let q_safe = q_rem.max(1e-12);
+                                let num = r_in * q_safe + d_pole * t;
+                                (num / (u * q_safe), (u * q_rem) / (r_in * q_rem + d_pole * t).max(1e-300))
+                            }
+                            IeProfile::Exponential => (r_tilde / u, u / r_tilde.max(1e-300)),
+                        };
+                        let ratio = c1 / u;
+                        let sigma = (1.0 - ratio) * gamma + ratio * s_r;
+                        let inv_sigma = if rd.ie.profile == IeProfile::Rational && q_rem <= 1e-6 {
+                            inv_sr / ratio.max(1e-300)
+                        } else {
+                            1.0 / sigma.max(1e-300)
+                        };
+                        let coeff = (inv_gamma - inv_sigma) / c1;
+                        let mut j_inv_w = [[0.0; 3]; 3];
+                        for p in 0..3 {
+                            for q_idx in 0..3 {
+                                let diag = if p == q_idx { inv_gamma } else { 0.0 };
+                                j_inv_w[p][q_idx] = diag - coeff * r_vec[p] * g_w[q_idx];
+                            }
+                        }
+                        if dim == 2 {
+                            j_inv_w[1][1] = 1.0;
+                            return IeJacobian {
+                                j_inv: permute_real_wafer_to_2d(j_inv_w),
+                                det: gamma * sigma,
+                                r_tilde,
+                            };
+                        }
+                        return IeJacobian { j_inv: j_inv_w, det: gamma * gamma * sigma, r_tilde };
+                    }
+                }
+            }
+        }
+        self.eval_jacobian(dom, x_w, dim)
+    }
+
+    fn eval_jacobian(&self, dom: i32, x_w: [f64; 3], dim: usize) -> IeJacobian {
+        let Some(rd) = self.domains.get(&dom) else {
+            return IeJacobian::identity();
+        };
+        let (lo, hi) = rd.bounds;
+        match rd.pml.coord {
+            PmlCoord::Cartesian => {
+                let dirs = if dim == 2 { [rd.pml.x, PmlDir::Off, rd.pml.z] } else { [rd.pml.x, rd.pml.y, rd.pml.z] };
+                let mut s_w = [1.0; 3];
+                let mut inv_w = [1.0; 3];
+                let mut x_tilde = x_w;
+                let mut r_scale = 0.0_f64;
+                for a in 0..3 {
+                    let len = (hi[a] - lo[a]).max(1e-300);
+                    r_scale = r_scale.max(len).max(lo[a].abs()).max(hi[a].abs());
+                    let (t, default_pole) = match dirs[a] {
+                        PmlDir::Off => continue,
+                        PmlDir::Plus => {
+                            let pole = if lo[a] > 1e-12 * len { lo[a] } else { len };
+                            (((x_w[a] - lo[a]) / len).clamp(0.0, 1.0), pole)
+                        }
+                        PmlDir::Minus => {
+                            let pole = if hi[a] < -1e-12 * len { -hi[a] } else { len };
+                            (((hi[a] - x_w[a]) / len).clamp(0.0, 1.0), pole)
+                        }
+                    };
+                    let (su, inv_su, du, _) = eval_ie_ray_1d(&rd.ie, t, len, default_pole);
+                    s_w[a] = su;
+                    inv_w[a] = inv_su;
+                    x_tilde[a] = match dirs[a] {
+                        PmlDir::Plus => lo[a] + du,
+                        PmlDir::Minus => hi[a] - du,
+                        PmlDir::Off => x_w[a],
+                    };
+                }
+                let mut j_inv_w = [[0.0; 3]; 3];
+                for a in 0..3 {
+                    j_inv_w[a][a] = inv_w[a];
+                }
+                let det = if dim == 2 { s_w[0] * s_w[2] } else { s_w[0] * s_w[1] * s_w[2] };
+                let r_tilde = if dim == 2 {
+                    x_tilde[0].hypot(x_tilde[2])
+                } else {
+                    (x_tilde[0] * x_tilde[0] + x_tilde[1] * x_tilde[1] + x_tilde[2] * x_tilde[2]).sqrt()
+                }
+                .max(1e-12 * r_scale.max(1e-30));
+                let j_inv = if dim == 2 { permute_real_wafer_to_2d(j_inv_w) } else { j_inv_w };
+                IeJacobian { j_inv, det, r_tilde }
+            }
+            PmlCoord::Cylindrical { center, axis, r_in, r_thickness, radial_on, axial, z_in, z_thickness } => {
+                let a_hat = normalize_ie_axis(axis, dim);
+                let d_vec = [x_w[0] - center[0], x_w[1] - center[1], x_w[2] - center[2]];
+                let zeta = d_vec[0] * a_hat[0] + d_vec[1] * a_hat[1] + d_vec[2] * a_hat[2];
+                let r_vec = [d_vec[0] - zeta * a_hat[0], d_vec[1] - zeta * a_hat[1], d_vec[2] - zeta * a_hat[2]];
+                let r = (r_vec[0] * r_vec[0] + r_vec[1] * r_vec[1] + r_vec[2] * r_vec[2]).sqrt();
+                let r_scale = r_thickness.max(r_in.abs()).max(z_thickness).max(1e-30);
+
+                let (mut s_r, mut inv_sr, mut s_phi, mut inv_sphi, mut r_tilde_cyl) = (1.0, 1.0, 1.0, 1.0, r);
+                if radial_on && r_thickness > 0.0 && r >= r_in {
+                    let t_r = ((r - r_in) / r_thickness).clamp(0.0, 1.0);
+                    let default_pole = if r_in > 0.0 { r_in } else { r_thickness };
+                    let (sr_v, inv_sr_v, du_r, d_pole) = eval_ie_ray_1d(&rd.ie, t_r, r_thickness, default_pole);
+                    s_r = sr_v;
+                    inv_sr = inv_sr_v;
+                    r_tilde_cyl = r_in + du_r;
+                    if r > 1e-15 * r_scale {
+                        match rd.ie.profile {
+                            IeProfile::Rational => {
+                                let q = (1.0 - t_r).clamp(0.0, 1.0);
+                                let q_safe = q.max(1e-12);
+                                let num = r_in * q_safe + d_pole * t_r;
+                                s_phi = num / (r * q_safe);
+                                inv_sphi = (r * q) / (r_in * q + d_pole * t_r).max(1e-300);
+                            }
+                            IeProfile::Exponential => {
+                                s_phi = r_tilde_cyl / r;
+                                inv_sphi = r / r_tilde_cyl.max(1e-300);
+                            }
+                        }
+                    } else {
+                        s_phi = s_r;
+                        inv_sphi = inv_sr;
+                    }
+                }
+
+                let (mut s_zeta, mut inv_szeta, mut zeta_tilde) = (1.0, 1.0, zeta);
+                if dim == 3 && axial != PmlDir::Off && z_thickness > 0.0 {
+                    let raw_tz = match axial {
+                        PmlDir::Plus => (zeta - z_in) / z_thickness,
+                        PmlDir::Minus => (z_in - zeta) / z_thickness,
+                        PmlDir::Off => 0.0,
+                    };
+                    if raw_tz >= 0.0 {
+                        let t_z = raw_tz.clamp(0.0, 1.0);
+                        let default_pole = if z_in.abs() > 1e-12 * z_thickness { z_in.abs() } else { z_thickness };
+                        let (sz_v, inv_sz_v, du_z, _) = eval_ie_ray_1d(&rd.ie, t_z, z_thickness, default_pole);
+                        s_zeta = sz_v;
+                        inv_szeta = inv_sz_v;
+                        zeta_tilde = if axial == PmlDir::Plus { z_in + du_z } else { z_in - du_z };
+                    }
+                }
+
+                let r_hat = if r > 1e-30 { [r_vec[0] / r, r_vec[1] / r, r_vec[2] / r] } else { [0.0; 3] };
+                let mut j_inv_w = [[0.0; 3]; 3];
+                let dinv_r = inv_sr - inv_sphi;
+                for p in 0..3 {
+                    for q in 0..3 {
+                        let id_pq = if p == q { 1.0 } else { 0.0 };
+                        let pa = a_hat[p] * a_hat[q];
+                        let pr = r_hat[p] * r_hat[q];
+                        j_inv_w[p][q] = inv_sphi * (id_pq - pa) + dinv_r * pr + inv_szeta * pa;
+                    }
+                }
+                let det = if dim == 2 { s_r * s_phi } else { s_r * s_phi * s_zeta };
+                let r_tilde = if dim == 2 { r_tilde_cyl } else { r_tilde_cyl.hypot(zeta_tilde) }.max(1e-12 * r_scale);
+                let j_inv = if dim == 2 { permute_real_wafer_to_2d(j_inv_w) } else { j_inv_w };
+                IeJacobian { j_inv, det, r_tilde }
+            }
+            PmlCoord::Spherical { center, r_in, thickness } => {
+                if thickness <= 0.0 {
+                    return IeJacobian::identity();
+                }
+                let r_vec = [x_w[0] - center[0], x_w[1] - center[1], x_w[2] - center[2]];
+                let big_r = (r_vec[0] * r_vec[0] + r_vec[1] * r_vec[1] + r_vec[2] * r_vec[2]).sqrt();
+                if big_r < r_in {
+                    return IeJacobian::identity();
+                }
+                let r_scale = thickness.max(r_in.abs()).max(1e-30);
+                let t = ((big_r - r_in) / thickness).clamp(0.0, 1.0);
+                let default_pole = if r_in > 0.0 { r_in } else { thickness };
+                let (s_r, inv_sr, du_r, d_pole) = eval_ie_ray_1d(&rd.ie, t, thickness, default_pole);
+                let r_tilde = (r_in + du_r).max(1e-12 * r_scale);
+                let (s_om, inv_som) = if big_r > 1e-15 * r_scale {
+                    match rd.ie.profile {
+                        IeProfile::Rational => {
+                            let q = (1.0 - t).clamp(0.0, 1.0);
+                            let q_safe = q.max(1e-12);
+                            let num = r_in * q_safe + d_pole * t;
+                            (num / (big_r * q_safe), (big_r * q) / (r_in * q + d_pole * t).max(1e-300))
+                        }
+                        IeProfile::Exponential => (r_tilde / big_r, big_r / r_tilde.max(1e-300)),
+                    }
+                } else {
+                    (s_r, inv_sr)
+                };
+                let r_hat =
+                    if big_r > 1e-30 { [r_vec[0] / big_r, r_vec[1] / big_r, r_vec[2] / big_r] } else { [0.0; 3] };
+                let mut j_inv_w = [[0.0; 3]; 3];
+                let dinv = inv_sr - inv_som;
+                for p in 0..3 {
+                    for q in 0..3 {
+                        let id_pq = if p == q { 1.0 } else { 0.0 };
+                        let pr = r_hat[p] * r_hat[q];
+                        j_inv_w[p][q] = inv_som * id_pq + dinv * pr;
+                    }
+                }
+                if dim == 2 {
+                    j_inv_w[1][1] = 1.0;
+                    return IeJacobian { j_inv: permute_real_wafer_to_2d(j_inv_w), det: s_r * s_om, r_tilde };
+                }
+                IeJacobian { j_inv: j_inv_w, det: s_r * s_om * s_om, r_tilde }
+            }
+        }
+    }
+
+    fn outer_clamped_dofs(
+        &self,
+        mixed: &MixedDiscretisation,
+        dof_map: &MixedLagrangeDofMap,
+        spec: &Problem,
+    ) -> Vec<usize> {
+        if self.domains.values().all(|rd| !rd.ie.clamp_outer) {
+            return Vec::new();
+        }
+        let mut protected = BTreeSet::new();
+        for bc in &spec.bcs {
+            if matches!(bc.kind, BcKind::Fixed { .. }) {
+                protected.extend(bc.labels.iter().copied());
+            }
+        }
+        let d = mixed.dim;
+        crate::pml::outer_faces_mixed_where(mixed, dof_map, &spec.inactive, &protected, |dom, pts_w| {
+            self.domains.get(&dom).is_some_and(|rd| {
+                rd.ie.clamp_outer && crate::pml::is_outer_termination_face(&rd.pml, rd.bounds, pts_w, d, false)
+            })
+        })
+    }
+}
+
+/// Evaluates `(x, ds, n_hat)` on an arbitrary face defined by corner vertex indices `fv` (`Edge2`, `Tri3`, `Quad4`)
+/// regardless of whether the face appears in `mixed.facets`.
+fn eval_raw_face_jacobian(
+    mixed: &MixedDiscretisation,
+    ft: FacetType,
+    fv: &[u32],
+    xi: &[f64; 2],
+) -> ([f64; 3], f64, [f64; 3]) {
+    let corners: Vec<[f64; 3]> = fv.iter().map(|&v| mixed.point3(v as usize)).collect();
+    match ft {
+        FacetType::Edge2 => {
+            let eid = mixed.edge_index(fv[0], fv[1]).expect("face edge");
+            let (space, nodes) = if let Some(mid) = mixed.edge_node(eid) {
+                (LagrangeSpace::Order2Serendipity, vec![corners[0], corners[1], mid])
+            } else {
+                (LagrangeSpace::Order1, corners)
+            };
+            let (n, dn) = facet_lagrange_shape(ft, space, xi);
+            let mut x = [0.0; 3];
+            let mut t = [0.0; 2];
+            for (a, p) in nodes.iter().enumerate() {
+                x[0] += n[a] * p[0];
+                x[1] += n[a] * p[1];
+                t[0] += dn[a][0] * p[0];
+                t[1] += dn[a][0] * p[1];
+            }
+            let ds = t[0].hypot(t[1]);
+            let n_hat = if ds > 0.0 { [t[1] / ds, -t[0] / ds, 0.0] } else { [0.0; 3] };
+            (x, ds, n_hat)
+        }
+        FacetType::Tri3 => {
+            let e01 = mixed.edge_index(fv[0], fv[1]).unwrap();
+            let e02 = mixed.edge_index(fv[0], fv[2]).unwrap();
+            let e12 = mixed.edge_index(fv[1], fv[2]).unwrap();
+            let any_curved =
+                mixed.edge_node(e01).is_some() || mixed.edge_node(e02).is_some() || mixed.edge_node(e12).is_some();
+            let (space, nodes) = if any_curved {
+                let mid = |eid: usize, i: usize, j: usize| {
+                    mixed.edge_node(eid).unwrap_or([
+                        0.5 * (corners[i][0] + corners[j][0]),
+                        0.5 * (corners[i][1] + corners[j][1]),
+                        0.5 * (corners[i][2] + corners[j][2]),
+                    ])
+                };
+                (
+                    LagrangeSpace::Order2Serendipity,
+                    vec![corners[0], corners[1], corners[2], mid(e01, 0, 1), mid(e02, 0, 2), mid(e12, 1, 2)],
+                )
+            } else {
+                (LagrangeSpace::Order1, corners)
+            };
+            let (n, dn) = facet_lagrange_shape(ft, space, xi);
+            let (mut x, mut t0, mut t1) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+            for (a, p) in nodes.iter().enumerate() {
+                for k in 0..3 {
+                    x[k] += n[a] * p[k];
+                    t0[k] += dn[a][0] * p[k];
+                    t1[k] += dn[a][1] * p[k];
+                }
+            }
+            let cx = [t0[1] * t1[2] - t0[2] * t1[1], t0[2] * t1[0] - t0[0] * t1[2], t0[0] * t1[1] - t0[1] * t1[0]];
+            let ds = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+            let n_hat = if ds > 0.0 { [cx[0] / ds, cx[1] / ds, cx[2] / ds] } else { [0.0; 3] };
+            (x, ds, n_hat)
+        }
+        FacetType::Quad4 => {
+            let qf_id = mixed.quad_face_index([fv[0], fv[1], fv[2], fv[3]]).unwrap();
+            let eids = [
+                mixed.edge_index(fv[0], fv[1]).unwrap(),
+                mixed.edge_index(fv[1], fv[2]).unwrap(),
+                mixed.edge_index(fv[2], fv[3]).unwrap(),
+                mixed.edge_index(fv[3], fv[0]).unwrap(),
+            ];
+            let has_qfn = mixed.quad_face_node(qf_id).is_some();
+            let any_curved = has_qfn || eids.iter().any(|&e| mixed.edge_node(e).is_some());
+            let (space, nodes) = if any_curved {
+                let mut ns = corners.clone();
+                for (k, &(i, j)) in QUAD_EDGES.iter().enumerate() {
+                    ns.push(mixed.edge_node(eids[k]).unwrap_or([
+                        0.5 * (corners[i][0] + corners[j][0]),
+                        0.5 * (corners[i][1] + corners[j][1]),
+                        0.5 * (corners[i][2] + corners[j][2]),
+                    ]));
+                }
+                if has_qfn {
+                    ns.push(mixed.quad_face_node(qf_id).unwrap());
+                    (LagrangeSpace::Order2Tensor, ns)
+                } else {
+                    (LagrangeSpace::Order2Serendipity, ns)
+                }
+            } else {
+                (LagrangeSpace::Order1, corners)
+            };
+            let (n, dn) = facet_lagrange_shape(ft, space, xi);
+            let (mut x, mut t0, mut t1) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+            for (a, p) in nodes.iter().enumerate() {
+                for k in 0..3 {
+                    x[k] += n[a] * p[k];
+                    t0[k] += dn[a][0] * p[k];
+                    t1[k] += dn[a][1] * p[k];
+                }
+            }
+            let cx = [t0[1] * t1[2] - t0[2] * t1[1], t0[2] * t1[0] - t0[0] * t1[2], t0[0] * t1[1] - t0[1] * t1[0]];
+            let ds = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+            let n_hat = if ds > 0.0 { [cx[0] / ds, cx[1] / ds, cx[2] / ds] } else { [0.0; 3] };
+            (x, ds, n_hat)
+        }
+    }
+}
+
+fn raw_face_dofs(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    ft: FacetType,
+    fv: &[u32],
+    out: &mut Vec<usize>,
+) {
+    out.clear();
+    for &v in fv {
+        out.push(v as usize);
+    }
+    if dof_map.space == LagrangeSpace::Order1 {
+        return;
+    }
+    let nv = dof_map.n_vertices;
+    match ft {
+        FacetType::Edge2 => out.push(nv + mixed.edge_index(fv[0], fv[1]).unwrap()),
+        FacetType::Tri3 => {
+            for &(i, j) in &TRI_EDGES {
+                out.push(nv + mixed.edge_index(fv[i], fv[j]).unwrap());
+            }
+        }
+        FacetType::Quad4 => {
+            for &(i, j) in &QUAD_EDGES {
+                out.push(nv + mixed.edge_index(fv[i], fv[j]).unwrap());
+            }
+            if dof_map.space == LagrangeSpace::Order2Tensor {
+                let qf = mixed.quad_face_index([fv[0], fv[1], fv[2], fv[3]]).unwrap();
+                out.push(nv + dof_map.n_edges + qf);
+            }
+        }
+    }
+}
+
+/// Assembles the outer 1st-order asymptotic elastic spring Robin matrix on exterior termination
+/// facets of `IeProfile::Exponential` domains (`t_tilde = -(1 / R_tilde) [G I + (M_p - G) n_tilde n_tilde^T] u`).
+fn assemble_exponential_ie_robin(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    c6: &[M6],
+    ie_domains: &ResolvedIeDomains,
+    inactive: &[i32],
+    thickness_2d: f64,
+) -> Csr {
+    let d = mixed.dim;
+    let n1 = dof_map.n_dofs;
+    let n = d * n1;
+    if !ie_domains.has_exponential_robin() {
+        return Csr::zeros(n, n);
+    }
+
+    let mut faces: Vec<(usize, FacetType, Vec<u32>)> = Vec::new();
+    if d == 2 {
+        let mut adj: HashMap<(u32, u32), (u32, usize, [u32; 2])> = HashMap::new();
+        for ci in 0..mixed.n_cells() {
+            if inactive.contains(&mixed.cell_labels[ci]) {
+                continue;
+            }
+            let vs = mixed.cell(ci);
+            for &(i, j) in cell_local_edges(mixed.cell_type(ci)) {
+                let (a, b) = (vs[i], vs[j]);
+                let e = adj.entry((a.min(b), a.max(b))).or_insert((0, ci, [a, b]));
+                e.0 += 1;
+            }
+        }
+        for (_, (cnt, ci, fv)) in adj {
+            if cnt != 1 {
+                continue;
+            }
+            let dom = mixed.cell_labels[ci];
+            let Some(rd) = ie_domains.domains.get(&dom) else { continue };
+            if rd.ie.profile != IeProfile::Exponential || rd.ie.clamp_outer {
+                continue;
+            }
+            let pts_w = fv.map(|v| femcore::section::wafer_point(mixed.point(v as usize), 2));
+            if crate::pml::is_outer_termination_face(&rd.pml, rd.bounds, &pts_w, 2, false) {
+                faces.push((ci, FacetType::Edge2, fv.to_vec()));
+            }
+        }
+    } else {
+        let mut tri_adj: HashMap<[u32; 3], (u32, usize, [u32; 3])> = HashMap::new();
+        let mut quad_adj: HashMap<[u32; 4], (u32, usize, [u32; 4])> = HashMap::new();
+        for ci in 0..mixed.n_cells() {
+            if inactive.contains(&mixed.cell_labels[ci]) {
+                continue;
+            }
+            let vs = mixed.cell(ci);
+            let ct = mixed.cell_type(ci);
+            for lf in cell_local_tri_faces(ct) {
+                let raw = [vs[lf[0]], vs[lf[1]], vs[lf[2]]];
+                let e = tri_adj.entry(sorted_tri_face(raw)).or_insert((0, ci, raw));
+                e.0 += 1;
+            }
+            for lq in cell_local_quad_faces(ct) {
+                let raw = [vs[lq[0]], vs[lq[1]], vs[lq[2]], vs[lq[3]]];
+                let e = quad_adj.entry(canonical_quad_face(raw)).or_insert((0, ci, raw));
+                e.0 += 1;
+            }
+        }
+        for (_, (cnt, ci, fv)) in tri_adj {
+            if cnt != 1 {
+                continue;
+            }
+            let dom = mixed.cell_labels[ci];
+            let Some(rd) = ie_domains.domains.get(&dom) else { continue };
+            if rd.ie.profile != IeProfile::Exponential || rd.ie.clamp_outer {
+                continue;
+            }
+            let pts_w = fv.map(|v| femcore::section::wafer_point(mixed.point(v as usize), 3));
+            if crate::pml::is_outer_termination_face(&rd.pml, rd.bounds, &pts_w, 3, false) {
+                faces.push((ci, FacetType::Tri3, fv.to_vec()));
+            }
+        }
+        for (_, (cnt, ci, fv)) in quad_adj {
+            if cnt != 1 {
+                continue;
+            }
+            let dom = mixed.cell_labels[ci];
+            let Some(rd) = ie_domains.domains.get(&dom) else { continue };
+            if rd.ie.profile != IeProfile::Exponential || rd.ie.clamp_outer {
+                continue;
+            }
+            let pts_w = fv.map(|v| femcore::section::wafer_point(mixed.point(v as usize), 3));
+            if crate::pml::is_outer_termination_face(&rd.pml, rd.bounds, &pts_w, 3, false) {
+                faces.push((ci, FacetType::Quad4, fv.to_vec()));
+            }
+        }
+    }
+
+    if faces.is_empty() {
+        return Csr::zeros(n, n);
+    }
+
+    let deg = 2 * dof_map.space.order() + 4;
+    let thk = if d == 2 { thickness_2d } else { 1.0 };
+    let mut coo = Coo::new(n, n);
+    let mut dofs = Vec::new();
+
+    for (ci, ft, fv) in faces {
+        let dom = mixed.cell_labels[ci];
+        let (bulk, shear) = crate::lrb::voigt_moduli(&c6[ci]);
+        let p_mod = bulk + 4.0 * shear / 3.0;
+        raw_face_dofs(mixed, dof_map, ft, &fv, &mut dofs);
+        let nloc = dofs.len();
+        let rule = facet_rule_mixed(ft, deg);
+
+        let mut blocks = vec![vec![0.0; nloc * nloc]; d * d];
+        for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+            let (x_m, ds, n_hat) = eval_raw_face_jacobian(mixed, ft, &fv, xi);
+            if ds <= 0.0 {
+                continue;
+            }
+            let x_w = femcore::section::wafer_point(&x_m[..d], d);
+            let ie_j = ie_domains.eval_jacobian(dom, x_w, d);
+            // Nanson's surface area/normal relation: d\tilde{\Gamma} \hat{\tilde{n}} = |det J_s| J_s^{-T} \hat{n}_phys d\Gamma_phys
+            let mut n_tilde = [0.0; 3];
+            for i in 0..d {
+                let mut s = 0.0;
+                for k in 0..d {
+                    s += ie_j.j_inv[k][i] * n_hat[k];
+                }
+                n_tilde[i] = ie_j.det.abs() * s;
+            }
+            let area_scale = (0..d).map(|i| n_tilde[i] * n_tilde[i]).sum::<f64>().sqrt();
+            if area_scale <= 0.0 {
+                continue;
+            }
+            let nn: [f64; 3] = std::array::from_fn(|i| if i < d { n_tilde[i] / area_scale } else { 0.0 });
+            let (nv, _) = facet_lagrange_shape(ft, dof_map.space, xi);
+            let w_ds = wq * ds * area_scale * thk / ie_j.r_tilde.max(1e-30);
+            for i in 0..d {
+                for j in 0..d {
+                    let dij = (if i == j { shear } else { 0.0 }) + (p_mod - shear) * nn[i] * nn[j];
+                    if dij == 0.0 {
+                        continue;
+                    }
+                    let blk = &mut blocks[i * d + j];
+                    for a in 0..nloc {
+                        let wa = w_ds * dij * nv[a];
+                        for b in 0..nloc {
+                            blk[a * nloc + b] += wa * nv[b];
+                        }
+                    }
+                }
+            }
+        }
+
+        for i in 0..d {
+            let ri: Vec<usize> = dofs.iter().map(|&x| x + i * n1).collect();
+            for j in 0..d {
+                let blk = &blocks[i * d + j];
+                if blk.iter().any(|&v| v != 0.0) {
+                    let cj: Vec<usize> = dofs.iter().map(|&x| x + j * n1).collect();
+                    coo.push_block(&ri, &cj, blk);
+                }
+            }
+        }
+    }
+    coo.to_csr()
+}
+
+/// Native mixed-cell elastic stiffness matrix (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`).
+pub(crate) fn assemble_solid_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    c6: &[M6],
+    plane: Plane,
+    thickness: f64,
+) -> Csr {
+    assemble_solid_mixed_with_ie(mixed, dof_map, c6, plane, thickness, &ResolvedIeDomains::default(), &[])
+}
+
+fn assemble_solid_mixed_with_ie(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    c6: &[M6],
+    plane: Plane,
+    thickness: f64,
+    ie_domains: &ResolvedIeDomains,
+    inactive: &[i32],
+) -> Csr {
+    let d = mixed.dim;
+    let space = dof_map.space;
+    let order = space.order();
+    let n1 = dof_map.n_dofs;
+    let n = d * n1;
+    let ns = if d == 2 { 3 } else { 6 };
+    let thk = if d == 2 { thickness } else { 1.0 };
+
+    let k_vol = assemble_parallel(mixed.n_cells(), n, n, |range, coo| {
+        let mut vals = Vec::new();
+        let mut dxi = Vec::new();
+        let mut sn = Vec::new();
+        let mut sdn = Vec::new();
+        let mut grad = Vec::new();
+        let mut b = Vec::new();
+        let mut db = Vec::new();
+        let mut ke = Vec::new();
+        let mut full = Vec::new();
+
+        for ci in range {
+            let dom = mixed.cell_labels[ci];
+            if inactive.contains(&dom) {
+                continue;
+            }
+            let ct = mixed.cell_type(ci);
+            let iso = IsoparametricCell::from_mesh(mixed, ci);
+            let in_ie = ie_domains.contains(dom);
+            let deg = if in_ie {
+                10
+            } else if iso.curved {
+                2 * order + 4
+            } else {
+                2 * order + 2
+            };
+            let rule = quad_rule_mixed(ct, deg);
+            let cdofs = dof_map.cell_dofs(ci);
+            let nloc = cdofs.len();
+            let nd = d * nloc;
+            let dm = d_matrix(&c6[ci], d, plane);
+
+            grad.resize(nloc * d, 0.0);
+            b.resize(ns * nd, 0.0);
+            db.resize(ns * nd, 0.0);
+            ke.clear();
+            ke.resize(nd * nd, 0.0);
+
+            for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+                let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+                lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+
+                let w_eff = if in_ie {
+                    let ie_j = ie_domains.eval_cell_jacobian(dom, &iso, &jg, &sn, &sdn, d);
+                    for a in 0..nloc {
+                        let gp = jg.map_grad(dxi[a]);
+                        for i in 0..d {
+                            let mut acc = 0.0;
+                            for k in 0..d {
+                                acc += ie_j.j_inv[k][i] * gp[k];
+                            }
+                            grad[a * d + i] = acc;
+                        }
+                    }
+                    wq * jg.det.abs() * ie_j.det * thk
+                } else {
+                    for a in 0..nloc {
+                        let gp = jg.map_grad(dxi[a]);
+                        grad[a * d..a * d + d].copy_from_slice(&gp[..d]);
+                    }
+                    wq * jg.det.abs() * thk
+                };
+
+                b_matrix(&grad, nloc, d, &mut b);
+                for s in 0..ns {
+                    for j in 0..nd {
+                        let mut acc = 0.0;
+                        for t in 0..ns {
+                            acc += dm[s * ns + t] * b[t * nd + j];
+                        }
+                        db[s * nd + j] = acc;
+                    }
+                }
+                for i in 0..nd {
+                    for j in 0..nd {
+                        let mut acc = 0.0;
+                        for s in 0..ns {
+                            acc += b[s * nd + i] * db[s * nd + j];
+                        }
+                        ke[i * nd + j] += w_eff * acc;
+                    }
+                }
+            }
+
+            full.clear();
+            for k in 0..d {
+                full.extend(cdofs.iter().map(|&gd| gd + k * n1));
+            }
+            coo.push_block(&full, &full, &ke);
+        }
+    });
+
+    if ie_domains.has_exponential_robin() {
+        let k_rob = assemble_exponential_ie_robin(mixed, dof_map, c6, ie_domains, inactive, thickness);
+        if k_rob.nnz() > 0 {
+            return k_vol.add_scaled(&k_rob, 1.0);
+        }
+    }
+    k_vol
+}
+
 /// Load vector of the thermal strain `alpha (T - Tref)`; `t` is the temperature at the scalar
 /// dofs of the mesh and `alpha` the expansion tensor of every cell.
 #[allow(clippy::too_many_arguments)]
@@ -215,6 +1279,117 @@ pub fn thermal_load(
             f
         })
         .collect();
+    let mut parts = parts.into_iter();
+    let mut f = parts.next().unwrap_or_else(|| vec![0.0; d * n1]);
+    for p in parts {
+        f.iter_mut().zip(&p).for_each(|(a, b)| *a += b);
+    }
+    f
+}
+
+#[allow(clippy::too_many_arguments)]
+fn thermal_load_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    c6: &[M6],
+    alpha: &[M3],
+    t_field: &[f64],
+    tref: f64,
+    plane: Plane,
+    thickness: f64,
+    ie_domains: &ResolvedIeDomains,
+    inactive: &[i32],
+) -> Vec<f64> {
+    let d = mixed.dim;
+    let space = dof_map.space;
+    let order = space.order();
+    let n1 = dof_map.n_dofs;
+    let nc = mixed.n_cells();
+    let ns = if d == 2 { 3 } else { 6 };
+    let thk = if d == 2 { thickness } else { 1.0 };
+    let nt = if nc < 2000 { 1 } else { femcore::par::threads_up_to(8) };
+    let chunk = nc.div_ceil(nt).max(1);
+
+    let parts: Vec<Vec<f64>> = (0..nt)
+        .into_par_iter()
+        .map(|tid| {
+            let mut f = vec![0.0; d * n1];
+            let mut vals = Vec::new();
+            let mut dxi = Vec::new();
+            let mut sn = Vec::new();
+            let mut sdn = Vec::new();
+            let mut grad = Vec::new();
+            let mut b = Vec::new();
+            for ci in (tid * chunk)..((tid + 1) * chunk).min(nc) {
+                let dom = mixed.cell_labels[ci];
+                if inactive.contains(&dom) {
+                    continue;
+                }
+                let ct = mixed.cell_type(ci);
+                let iso = IsoparametricCell::from_mesh(mixed, ci);
+                let in_ie = ie_domains.contains(dom);
+                let deg = if in_ie {
+                    8
+                } else if iso.curved {
+                    2 * order + 4
+                } else {
+                    2 * order + 2
+                };
+                let rule = quad_rule_mixed(ct, deg);
+                let cdofs = dof_map.cell_dofs(ci);
+                let nloc = cdofs.len();
+                let nd = d * nloc;
+                grad.resize(nloc * d, 0.0);
+                b.resize(ns * nd, 0.0);
+                let mut fe = vec![0.0; nd];
+
+                for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+                    let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+                    lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+                    let tq: f64 = (0..nloc).map(|a| vals[a] * t_field[cdofs[a]]).sum();
+                    if (tq - tref).abs() == 0.0 {
+                        continue;
+                    }
+                    let sig = thermal_stress(&c6[ci], d, plane, &thermal_strain(&alpha[ci], tq - tref));
+                    let w_eff = if in_ie {
+                        let ie_j = ie_domains.eval_cell_jacobian(dom, &iso, &jg, &sn, &sdn, d);
+                        for a in 0..nloc {
+                            let gp = jg.map_grad(dxi[a]);
+                            for i in 0..d {
+                                let mut acc = 0.0;
+                                for k in 0..d {
+                                    acc += ie_j.j_inv[k][i] * gp[k];
+                                }
+                                grad[a * d + i] = acc;
+                            }
+                        }
+                        wq * jg.det.abs() * ie_j.det * thk
+                    } else {
+                        for a in 0..nloc {
+                            let gp = jg.map_grad(dxi[a]);
+                            grad[a * d..a * d + d].copy_from_slice(&gp[..d]);
+                        }
+                        wq * jg.det.abs() * thk
+                    };
+                    b_matrix(&grad, nloc, d, &mut b);
+                    for i in 0..nd {
+                        let mut acc = 0.0;
+                        for s in 0..ns {
+                            acc += b[s * nd + i] * sig[s];
+                        }
+                        fe[i] += w_eff * acc;
+                    }
+                }
+                for k in 0..d {
+                    for (a, &gd) in cdofs.iter().enumerate() {
+                        f[k * n1 + gd] += fe[k * nloc + a];
+                    }
+                }
+            }
+            f
+        })
+        .collect();
+
     let mut parts = parts.into_iter();
     let mut f = parts.next().unwrap_or_else(|| vec![0.0; d * n1]);
     for p in parts {
@@ -299,7 +1474,7 @@ pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
         .map(|c| femcore::section::plane_stiffness(c, d))
         .collect();
     let n1 = mesh.n_dofs(order);
-    let mut seen = std::collections::BTreeMap::new();
+    let mut seen = BTreeMap::new();
     for dof in untouched_dofs(mesh, order, d, &spec.inactive) {
         seen.insert(dof, 0.0);
     }
@@ -313,6 +1488,45 @@ pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
                     }
                 }
             }
+        }
+    }
+    let fixed: Vec<usize> = seen.keys().copied().collect();
+    let vals: Vec<f64> = seen.values().copied().collect();
+    Ok(Setup { d, n1, c6, fixed, vals })
+}
+
+fn setup_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    spec: &Problem,
+    ie_domains: &ResolvedIeDomains,
+) -> Result<Setup, String> {
+    let d = mixed.dim;
+    mixed_check_boundary_labels(mixed, &spec.bcs)?;
+    let c6: Vec<M6> = mixed_cell_stiffness_skipping(&spec.materials, mixed, &spec.inactive)?
+        .iter()
+        .map(|c| femcore::section::plane_stiffness(c, d))
+        .collect();
+    let n1 = dof_map.n_dofs;
+    let mut seen = BTreeMap::new();
+    for dof in mixed_untouched_dofs(mixed, dof_map, d, &spec.inactive) {
+        seen.insert(dof, 0.0);
+    }
+    for bc in &spec.bcs {
+        if let BcKind::Fixed { fixed, values } = &bc.kind {
+            let bd = dof_map.boundary_dofs(mixed, &bc.labels);
+            for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                if fixed[w] {
+                    for &dof in &bd {
+                        seen.entry(dof + k * n1).or_insert(values[w]);
+                    }
+                }
+            }
+        }
+    }
+    for dof in ie_domains.outer_clamped_dofs(mixed, dof_map, spec) {
+        for k in 0..d {
+            seen.entry(dof + k * n1).or_insert(0.0);
         }
     }
     let fixed: Vec<usize> = seen.keys().copied().collect();
@@ -389,6 +1603,154 @@ fn fields_of(
     (fields, cells)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn fields_of_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    u: &[f64],
+    u_unit: &str,
+    order: usize,
+    st: &Setup,
+    plane: Plane,
+    thermal: Option<&Thermal>,
+    ie_domains: &ResolvedIeDomains,
+    inactive: &[i32],
+    with_stress: bool,
+) -> (Vec<Field>, Vec<CellField>) {
+    let d = st.d;
+    let n1 = st.n1;
+    let nc = mixed.n_cells();
+    let space = dof_map.space;
+    let names = femcore::section::component_names(d);
+
+    let mut fields = vec![proj.project_vector_field(mixed, dof_map, "u", u_unit, names, u, order)];
+    let mut cell_fields = Vec::new();
+
+    let mut m_offsets = Vec::with_capacity(nc + 1);
+    m_offsets.push(0);
+    for mc in 0..nc {
+        m_offsets.push(m_offsets[mc] + dof_map.cell_dofs(mc).len());
+    }
+    let total_cell_nodes = *m_offsets.last().unwrap();
+
+    if with_stress {
+        let mut s_all = Vec::with_capacity(total_cell_nodes);
+        let mut vals = Vec::new();
+        let mut dxi = Vec::new();
+        let mut sn = Vec::new();
+        let mut sdn = Vec::new();
+
+        for mc in 0..nc {
+            let dom = mixed.cell_labels[mc];
+            let cdofs = dof_map.cell_dofs(mc);
+            let nloc = cdofs.len();
+            if inactive.contains(&dom) {
+                s_all.extend(std::iter::repeat_n([0.0; 6], nloc));
+                continue;
+            }
+            let ct = mixed.cell_type(mc);
+            let iso = IsoparametricCell::from_mesh(mixed, mc);
+            let in_ie = ie_domains.contains(dom);
+            let ref_nodes = lagrange_ref_nodes(ct, space);
+            let mut grad_cell = vec![0.0; nloc * d * d];
+            let mut eth_cell = if thermal.is_some() { Vec::with_capacity(nloc) } else { Vec::new() };
+
+            for (a, xi) in ref_nodes.iter().enumerate() {
+                let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+                lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+                let mut g_phys = [[0.0; 3]; 3];
+                for (b_idx, &gd) in cdofs.iter().enumerate() {
+                    let gp = jg.map_grad(dxi[b_idx]);
+                    for i in 0..d {
+                        let ui = u[i * n1 + gd];
+                        for k in 0..d {
+                            g_phys[i][k] += ui * gp[k];
+                        }
+                    }
+                }
+                if in_ie {
+                    let ie_j = ie_domains.eval_cell_jacobian(dom, &iso, &jg, &sn, &sdn, d);
+                    for i in 0..d {
+                        for m in 0..d {
+                            let mut acc = 0.0;
+                            for k in 0..d {
+                                acc += g_phys[i][k] * ie_j.j_inv[k][m];
+                            }
+                            grad_cell[a * d * d + i * d + m] = acc;
+                        }
+                    }
+                } else {
+                    for i in 0..d {
+                        for m in 0..d {
+                            grad_cell[a * d * d + i * d + m] = g_phys[i][m];
+                        }
+                    }
+                }
+                if let Some(th) = thermal {
+                    eth_cell.push(thermal_strain(&th.alpha[mc], th.t[cdofs[a]] - th.tref));
+                }
+            }
+            let cell_stress = stress_at_nodes(&grad_cell, 1, nloc, d, &st.c6[mc..mc + 1], plane, &eth_cell);
+            s_all.extend_from_slice(&cell_stress);
+        }
+
+        let vm_mixed: Vec<f64> = s_all.iter().map(von_mises).collect();
+        let vm_cf = proj.project_cell_field(mixed, space, "von Mises", "Pa", &vm_mixed, &[], &m_offsets, order);
+        fields.push(Field::scalar("von Mises", "Pa", node_average(simplex, &vm_cf.re, 1, order)));
+        cell_fields.push(vm_cf);
+
+        for (k, ax) in names.iter().enumerate() {
+            let mut uk_mixed = Vec::with_capacity(total_cell_nodes);
+            for mc in 0..nc {
+                for &gd in dof_map.cell_dofs(mc) {
+                    uk_mixed.push(u[k * n1 + gd]);
+                }
+            }
+            cell_fields.push(proj.project_cell_field(
+                mixed,
+                space,
+                format!("u{ax}"),
+                u_unit,
+                &uk_mixed,
+                &[],
+                &m_offsets,
+                order,
+            ));
+        }
+
+        let idxs: &[usize] = if d == 2 { &[0, 1, 3, 2] } else { &[0, 1, 2, 3, 4, 5] };
+        for &idx in idxs {
+            let sname = femcore::section::stress_name(d, idx);
+            let comp_mixed: Vec<f64> = s_all.iter().map(|x| x[idx]).collect();
+            let s_cf = proj.project_cell_field(mixed, space, sname, "Pa", &comp_mixed, &[], &m_offsets, order);
+            fields.push(Field::scalar(sname, "Pa", node_average(simplex, &s_cf.re, 1, order)));
+            cell_fields.push(s_cf);
+        }
+    } else {
+        for (k, ax) in names.iter().enumerate() {
+            let mut uk_mixed = Vec::with_capacity(total_cell_nodes);
+            for mc in 0..nc {
+                for &gd in dof_map.cell_dofs(mc) {
+                    uk_mixed.push(u[k * n1 + gd]);
+                }
+            }
+            cell_fields.push(proj.project_cell_field(
+                mixed,
+                space,
+                format!("u{ax}"),
+                u_unit,
+                &uk_mixed,
+                &[],
+                &m_offsets,
+                order,
+            ));
+        }
+    }
+    (fields, cell_fields)
+}
+
 /// Stage 3 of the complex-frequency solid kernels (PML, Floquet, low-reflecting): the mode shape `u` over all dofs
 /// (component blocks) with its largest component made real and of unit modulus, as the plot fields `|u|` and `Re u{x,z}` (scalars: the
 /// vector `Re u` would add a norm `|Re u|` that the pre-restructure results do not have), and the complex components per cell.
@@ -418,6 +1780,78 @@ pub(crate) fn complex_mode_fields(mesh: &Discretisation, order: usize, u: &[C]) 
         cells.push_complex(format!("u{ax}"), "a.u.", re_c, im_c);
     }
     (fields, cells)
+}
+
+/// Stage-3 complex-frequency mode fields projected from [`MixedDiscretisation`] onto [`Discretisation`] (`SimplexMesh`).
+pub(crate) fn complex_mode_fields_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    proj: &MixedToSimplexProjector,
+    order: usize,
+    u: &[C],
+) -> (Vec<Field>, Vec<CellField>) {
+    let d = mixed.dim;
+    let n1 = dof_map.n_dofs;
+    let big = u.iter().cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+    let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+    let scale = 1.0 / big.norm().max(1e-300);
+
+    let mut re_blocks = Vec::with_capacity(d * n1);
+    let mut im_blocks = Vec::with_capacity(d * n1);
+    for comp in 0..d {
+        for a in 0..n1 {
+            let z = u[comp * n1 + a] * rot * scale;
+            re_blocks.push(z.re);
+            im_blocks.push(z.im);
+        }
+    }
+    let re_proj = proj.project_lagrange_blocks(mixed, dof_map, &re_blocks, d, order);
+    let im_proj = proj.project_lagrange_blocks(mixed, dof_map, &im_blocks, d, order);
+    let n_out = re_proj.len() / d;
+    let mag: Vec<f64> = (0..n_out)
+        .map(|a| {
+            (0..d)
+                .map(|k| {
+                    let r0 = re_proj[k * n_out + a];
+                    let i0 = im_proj[k * n_out + a];
+                    r0 * r0 + i0 * i0
+                })
+                .sum::<f64>()
+                .sqrt()
+        })
+        .collect();
+    let mut fields = vec![Field::scalar("|u|", "a.u.", mag)];
+
+    let mut m_offsets = Vec::with_capacity(mixed.n_cells() + 1);
+    m_offsets.push(0);
+    for mc in 0..mixed.n_cells() {
+        m_offsets.push(m_offsets[mc] + dof_map.cell_dofs(mc).len());
+    }
+    let total_nodes = *m_offsets.last().unwrap();
+    let mut cell_fields = Vec::with_capacity(d);
+
+    for (comp, ax) in femcore::section::component_names(d).iter().enumerate() {
+        fields.push(Field::scalar(format!("Re u{ax}"), "a.u.", re_proj[comp * n_out..(comp + 1) * n_out].to_vec()));
+        let mut re_c = Vec::with_capacity(total_nodes);
+        let mut im_c = Vec::with_capacity(total_nodes);
+        for mc in 0..mixed.n_cells() {
+            for &gd in dof_map.cell_dofs(mc) {
+                re_c.push(re_blocks[comp * n1 + gd]);
+                im_c.push(im_blocks[comp * n1 + gd]);
+            }
+        }
+        cell_fields.push(proj.project_cell_field(
+            mixed,
+            dof_map.space,
+            format!("u{ax}"),
+            "a.u.",
+            &re_c,
+            &im_c,
+            &m_offsets,
+            order,
+        ));
+    }
+    (fields, cell_fields)
 }
 
 /// Stage 2 of the real solid eigenfrequency kernel: the `nm` eigenpairs of `K u = w^2 M u` on the free dofs nearest the
@@ -550,6 +1984,106 @@ pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr
     Ok(StaticAssembly { k, f, thermal })
 }
 
+fn add_boundary_load_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    labels: &[i32],
+    tc: f64,
+    out: &mut [f64],
+    comp: usize,
+) {
+    let n1 = dof_map.n_dofs;
+    let deg = 2 * dof_map.space.order() + 2;
+    let mut dofs = Vec::new();
+    for f in 0..mixed.n_facets() {
+        if !labels.contains(&mixed.facet_labels[f]) {
+            continue;
+        }
+        let ft = mixed.facet_type(f);
+        dof_map.facet_dofs(mixed, f, &mut dofs);
+        let rule = facet_rule_mixed(ft, deg);
+        for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+            let (_x, ds, _n) = eval_facet_jacobian(mixed, f, xi);
+            if ds <= 0.0 {
+                continue;
+            }
+            let (nv, _) = facet_lagrange_shape(ft, dof_map.space, xi);
+            let w_ds = tc * wq * ds;
+            for (a, &gd) in dofs.iter().enumerate() {
+                out[comp * n1 + gd] += w_ds * nv[a];
+            }
+        }
+    }
+}
+
+fn assemble_static_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    ie_domains: &ResolvedIeDomains,
+    k: Csr,
+) -> Result<StaticAssembly, String> {
+    if st.fixed.is_empty() && !ie_domains.has_exponential_robin() {
+        return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
+    }
+    let (d, n1, order, thk) = (st.d, st.n1, spec.order, spec.thickness);
+    let n = d * n1;
+    let mut f = vec![0.0; n];
+    for bc in &spec.bcs {
+        if let BcKind::Load(t) = &bc.kind {
+            for (comp, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                if t[w] != 0.0 {
+                    let tc = t[w] * if d == 2 { thk } else { 1.0 };
+                    add_boundary_load_mixed(mixed, dof_map, &bc.labels, tc, &mut f, comp);
+                }
+            }
+        }
+    }
+    let mut thermal: Option<Thermal> = None;
+    if let Some(th) = &spec.thermal {
+        let alpha: Vec<M3> = mixed_cell_tensor(&spec.materials, mixed, TensorKind::Expansion, Some(0.0))?
+            .iter()
+            .map(|a| femcore::section::plane_tensor(a, d))
+            .collect();
+        let t = match &th.source {
+            ThermalSource::Uniform(tv) => vec![*tv; n1],
+            ThermalSource::Imported(t) if t.len() == n1 => t.clone(),
+            ThermalSource::Imported(t) if t.len() == simplex.n_dofs(order) => {
+                let nv = dof_map.n_vertices;
+                let mut mapped = Vec::with_capacity(n1);
+                mapped.extend_from_slice(&t[..nv]);
+                if dof_map.space != LagrangeSpace::Order1 {
+                    for &(a, b) in &mixed.edges {
+                        let seid = simplex.edge_index(a, b);
+                        mapped.push(t[nv + seid]);
+                    }
+                }
+                mapped
+            }
+            ThermalSource::Imported(_) => {
+                return Err("no heat-transfer result on this mesh and element order; solve Heat transfer first".into())
+            }
+        };
+        let fth = thermal_load_mixed(
+            mixed,
+            dof_map,
+            &st.c6,
+            &alpha,
+            &t,
+            th.t_ref,
+            spec.plane,
+            thk,
+            ie_domains,
+            &spec.inactive,
+        );
+        f.iter_mut().zip(&fth).for_each(|(a, b)| *a += b);
+        thermal = Some(Thermal { alpha, t, tref: th.t_ref });
+    }
+    Ok(StaticAssembly { k, f, thermal })
+}
+
 /// Stage 2: the displacement (component blocks) by the linear solver `spec.solver` names, and its note.
 pub fn solve_static(
     mesh: &Discretisation,
@@ -560,6 +2094,208 @@ pub fn solve_static(
     solve_spd(mesh, spec.order, st.d, spec.solver, &asm.k, &asm.f, &st.fixed, &st.vals)
 }
 
+fn near_nullspace_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    ncomp: usize,
+    is_fixed: &[bool],
+    perm: &[usize],
+) -> Vec<Vec<f64>> {
+    let dim = mixed.dim;
+    let n = is_fixed.len();
+    let n1 = dof_map.n_dofs;
+    let coords = dof_map.dof_coordinates(mixed);
+    let mut centre = vec![0.0; dim];
+    for p in coords.chunks(dim) {
+        for a in 0..dim {
+            centre[a] += p[a] / n1 as f64;
+        }
+    }
+    let mut ns: Vec<Vec<f64>> = Vec::new();
+    for t in 0..dim {
+        let mut v = vec![0.0; n];
+        for node in 0..n1 {
+            v[node * ncomp + t] = 1.0;
+        }
+        ns.push(v);
+    }
+    let nrot = if dim == 2 { 1 } else { 3 };
+    for r in 0..nrot {
+        let mut v = vec![0.0; n];
+        for node in 0..n1 {
+            let p: Vec<f64> = (0..dim).map(|a| coords[node * dim + a] - centre[a]).collect();
+            let (x, y, z) = (p[0], p[1], if dim == 3 { p[2] } else { 0.0 });
+            let rot: [f64; 3] = if dim == 2 {
+                [-y, x, 0.0]
+            } else {
+                match r {
+                    0 => [0.0, -z, y],
+                    1 => [z, 0.0, -x],
+                    _ => [-y, x, 0.0],
+                }
+            };
+            for c in 0..dim {
+                v[node * ncomp + c] = rot[c];
+            }
+        }
+        ns.push(v);
+    }
+    for v in ns.iter_mut() {
+        for (r, x) in v.iter_mut().enumerate() {
+            if is_fixed[perm[r]] {
+                *x = 0.0;
+            }
+        }
+    }
+    ns
+}
+
+fn solve_static_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    spec: &Problem,
+    st: &Setup,
+    ie_domains: &ResolvedIeDomains,
+    asm: &StaticAssembly,
+) -> Result<(Vec<f64>, Option<String>), String> {
+    let n = asm.k.nrows();
+    let n_free = n - st.fixed.len();
+    let iterative = match spec.solver {
+        LinearSolver::Direct => false,
+        LinearSolver::Iterative => true,
+        LinearSolver::Auto => femcore::fem::amg_wanted(mixed.dim, n_free) && !ie_domains.has_rational(),
+    };
+    if !iterative || dof_map.space == LagrangeSpace::Order2Tensor {
+        return Ok((solve_dirichlet(&asm.k, &asm.f, &st.fixed, &st.vals)?, None));
+    }
+
+    let t_setup = Instant::now();
+    let n1 = dof_map.n_dofs;
+    let ncomp = st.d;
+    let mut is_fixed = vec![false; n];
+    for &i in &st.fixed {
+        is_fixed[i] = true;
+    }
+    let diag = asm.k.diagonal();
+    let dscale = {
+        let (mut s, mut cnt) = (0.0, 0usize);
+        for i in 0..n {
+            if !is_fixed[i] {
+                s += diag[i].abs();
+                cnt += 1;
+            }
+        }
+        if cnt > 0 && s > 0.0 {
+            s / cnt as f64
+        } else {
+            1.0
+        }
+    };
+
+    let mut uvec = vec![0.0; n];
+    for (&i, &v) in st.fixed.iter().zip(&st.vals) {
+        uvec[i] = v;
+    }
+    let ku = asm.k.matvec(&uvec);
+    let mut rhs: Vec<f64> = (0..n).map(|i| if is_fixed[i] { 0.0 } else { asm.f[i] - ku[i] }).collect();
+    for (&i, &v) in st.fixed.iter().zip(&st.vals) {
+        rhs[i] = dscale * v;
+    }
+
+    let perm: Vec<usize> = (0..n).map(|r| (r % ncomp) * n1 + r / ncomp).collect();
+    let mp = {
+        let (mut indptr, mut indices, mut data) = (vec![0usize], Vec::<usize>::new(), Vec::<f64>::new());
+        for r in 0..n {
+            if is_fixed[r] {
+                indices.push(r);
+                data.push(dscale);
+            } else {
+                for p in asm.k.indptr()[r]..asm.k.indptr()[r + 1] {
+                    let col = asm.k.indices()[p] as usize;
+                    if !is_fixed[col] {
+                        indices.push(col);
+                        data.push(asm.k.values()[p]);
+                    }
+                }
+            }
+            indptr.push(indices.len());
+        }
+        Csr::from_raw(n, n, indptr, indices, data).submatrix(&perm, &perm)
+    };
+
+    let ns = near_nullspace_mixed(mixed, dof_map, ncomp, &is_fixed, &perm);
+    let opts = femcore::linalg::amg_elastic::AmgOptions::default();
+    let amg_res = if dof_map.space == LagrangeSpace::Order2Serendipity {
+        let nv = dof_map.n_vertices;
+        let mut indptr = vec![0usize];
+        let (mut indices, mut data) = (Vec::new(), Vec::new());
+        for node in 0..n1 {
+            if node < nv {
+                indices.push(node);
+                data.push(1.0);
+            } else {
+                let (p, q) = mixed.edges[node - nv];
+                indices.extend_from_slice(&[p as usize, q as usize]);
+                data.extend_from_slice(&[0.5, 0.5]);
+            }
+            indptr.push(indices.len());
+        }
+        let lin = Csr::from_raw(n1, nv, indptr, indices, data);
+        femcore::linalg::amg_elastic::Amg::new_p2(&mp, ns, ncomp, &opts, &lin)
+    } else {
+        femcore::linalg::amg_elastic::Amg::new(&mp, ns, ncomp, &opts)
+    };
+    let amg = match amg_res {
+        Ok(a) => a,
+        Err(_) if spec.solver == LinearSolver::Auto => {
+            return Ok((solve_dirichlet(&asm.k, &asm.f, &st.fixed, &st.vals)?, None));
+        }
+        Err(e) => return Err(e),
+    };
+    let setup_s = t_setup.elapsed().as_secs_f64();
+
+    let rp: Vec<f64> = perm.iter().map(|&i| rhs[i]).collect();
+    let t_solve = Instant::now();
+    let res = femcore::linalg::amg_elastic::pcg(&mp, &rp, &amg, 1e-10, 800);
+    let solve_s = t_solve.elapsed().as_secs_f64();
+    femcore::progress::check()?;
+
+    if res.relative_residual > 1e-7 {
+        if spec.solver == LinearSolver::Auto {
+            let u = solve_dirichlet(&asm.k, &asm.f, &st.fixed, &st.vals)?;
+            return Ok((
+                u,
+                Some(format!(
+                    "multigrid did not converge ({} iterations, residual {:.1e}); used the direct solver",
+                    res.iterations, res.relative_residual
+                )),
+            ));
+        }
+        return Err(format!(
+            "the iterative solver did not converge ({} iterations, residual {:.2e}); choose the direct solver",
+            res.iterations, res.relative_residual
+        ));
+    }
+
+    let mut u = vec![0.0; n];
+    for r in 0..n {
+        u[perm[r]] = res.x[r];
+    }
+    for (&i, &v) in st.fixed.iter().zip(&st.vals) {
+        u[i] = v;
+    }
+    let note = format!(
+        "AMG-CG: {} levels {:?}, {} iterations, residual {:.1e} (setup {:.1} s, solve {:.1} s)",
+        amg.n_levels(),
+        amg.sizes(),
+        res.iterations,
+        res.relative_residual,
+        setup_s,
+        solve_s
+    );
+    Ok((u, Some(note)))
+}
+
 pub(crate) use femcore::progress::lap_since as lap;
 
 /// Density per cell; domains in `inactive` get `0.0` without requiring `"rho"`, while active domains without `"rho"` return an error.
@@ -568,7 +2304,7 @@ pub(crate) fn cell_rho(
     mesh: &Discretisation,
     inactive: &[i32],
 ) -> Result<Vec<f64>, String> {
-    let mut by_domain = std::collections::BTreeMap::new();
+    let mut by_domain = BTreeMap::new();
     for d in mesh.domain_labels() {
         let v = if inactive.contains(&d) {
             0.0
@@ -583,11 +2319,17 @@ pub(crate) fn cell_rho(
 /// Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting
 /// boundaries in their own modules. The result carries `physics`, `study`, `order`, `dim`, the solutions, scalars, log, time and dofs.
 pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    spec.check_study_open_domains().map_err(|e| e.to_string())?;
     if matches!(spec.study, Study::AxisymmetricEigenfrequency { .. }) {
         return crate::cross_section::solve_axisymmetric(mesh, spec);
     }
     if matches!(spec.study, Study::Modes { .. }) {
         return crate::cross_section::solve_waveguide_modes(mesh, spec);
+    }
+    if spec.has_infinite_elements() {
+        let raw = Mesh::from_solver_mesh(mesh)?;
+        let mixed = nyx_physics::discretise_mixed(&raw).map_err(|e| e.to_string())?;
+        return solve_solid_mixed(&raw, &mixed, spec);
     }
     let t0 = Instant::now();
     let mut tl = Instant::now();
@@ -595,6 +2337,216 @@ pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
     result.physics = "sms".into();
     result.study = spec.study.kind().into();
     Ok(result)
+}
+
+/// Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) and Static Infinite Element solid solver.
+pub fn solve_solid_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String> {
+    spec.check_study_open_domains().map_err(|e| e.to_string())?;
+    if matches!(spec.study, Study::AxisymmetricEigenfrequency { .. }) {
+        return crate::cross_section::solve_axisymmetric_mixed(raw_mesh, mixed, spec);
+    }
+    if matches!(spec.study, Study::Modes { .. }) {
+        return crate::cross_section::solve_waveguide_modes_mixed(raw_mesh, mixed, spec);
+    }
+    let t0 = Instant::now();
+    let mut tl = Instant::now();
+    let mut result = solve_variant_mixed(raw_mesh, mixed, spec, t0, &mut tl)?;
+    result.physics = "sms".into();
+    result.study = spec.study.kind().into();
+    Ok(result)
+}
+
+fn solve_variant_mixed(
+    raw_mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    spec: &Problem,
+    t0: Instant,
+    tl: &mut Instant,
+) -> Result<SolveResult, String> {
+    let order = spec.order;
+    if spec.materials.has_pml() {
+        return match spec.study {
+            Study::Eigenfrequency { .. } => crate::pml::solve_solid_pml_mixed(raw_mesh, mixed, spec),
+            Study::AxisymmetricEigenfrequency { .. } => {
+                crate::cross_section::solve_axisymmetric_mixed(raw_mesh, mixed, spec)
+            }
+            Study::Modes { .. } => crate::cross_section::solve_waveguide_modes_mixed(raw_mesh, mixed, spec),
+            _ => Err(
+                "perfectly matched layers are used with the Eigenfrequency study (they give complex frequencies and Q)"
+                    .into(),
+            ),
+        };
+    }
+
+    let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+    let dof_map = MixedLagrangeDofMap::new(mixed, space);
+    let ie_domains = if matches!(spec.study, Study::Static) {
+        ResolvedIeDomains::from_mixed(mixed, spec)
+    } else {
+        ResolvedIeDomains::default()
+    };
+    let st = setup_mixed(mixed, &dof_map, spec, &ie_domains)?;
+    lap(tl, "setup (materials, constraints)");
+    let (d, n1) = (st.d, st.n1);
+    let n = d * n1;
+    let thk = spec.thickness;
+    let k = assemble_solid_mixed_with_ie(mixed, &dof_map, &st.c6, spec.plane, thk, &ie_domains, &spec.inactive);
+    lap(tl, "stiffness assembly");
+
+    match &spec.study {
+        Study::AxisymmetricEigenfrequency { .. } => {
+            Err("the axisymmetric study is solved by cross_section::solve_axisymmetric_mixed".into())
+        }
+        Study::Modes { .. } => {
+            Err("the waveguide modes study is solved by cross_section::solve_waveguide_modes_mixed".into())
+        }
+        Study::Static => {
+            let (simplex, proj) = MixedToSimplexProjector::from_mesh(raw_mesh, mixed).map_err(|e| e.to_string())?;
+            let asm = assemble_static_mixed(mixed, &dof_map, &simplex, spec, &st, &ie_domains, k)?;
+            lap(tl, "loads");
+            let (u, note) = solve_static_mixed(mixed, &dof_map, spec, &st, &ie_domains, &asm)?;
+            lap(tl, "linear solve");
+            let (fields, cell_fields) = fields_of_mixed(
+                mixed,
+                &dof_map,
+                &simplex,
+                &proj,
+                &u,
+                "m",
+                order,
+                &st,
+                spec.plane,
+                asm.thermal.as_ref(),
+                &ie_domains,
+                &spec.inactive,
+                true,
+            );
+            lap(tl, "fields (gradients, stress, projection)");
+            let unorm = |i: usize| (0..d).map(|k| u[k * n1 + i] * u[k * n1 + i]).sum::<f64>().sqrt();
+            let umax = (0..n1).map(unorm).fold(0.0, f64::max);
+            let vmax =
+                fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
+            let mut log = ie_domains.diagnostics;
+            log.extend(note);
+            Ok(SolveResult {
+                order: order as u8,
+                dim: d as u8,
+                solutions: vec![Solution { label: "static".into(), fields, cell_fields, ..Default::default() }],
+                scalars: vec![
+                    ("max |u| (m)".into(), Scalar::Num(umax)),
+                    ("max von Mises (Pa)".into(), Scalar::Num(vmax)),
+                ],
+                log,
+                seconds: t0.elapsed().as_secs_f64(),
+                dofs: n,
+                ..Default::default()
+            })
+        }
+        Study::Eigenfrequency { n_modes, f_search } => {
+            let rho = mixed_cell_rho(&spec.materials, mixed, &spec.inactive)?;
+            let rho_t: Vec<f64> = rho.iter().map(|r| r * if d == 2 { thk } else { 1.0 }).collect();
+            let m1 = assemble_mass_mixed(mixed, &dof_map, &rho_t);
+            let blocks: Vec<&Csr> = (0..d).map(|_| &m1).collect();
+            let m = Csr::block_diag(&blocks);
+            if !spec.periodic.is_empty() {
+                return crate::floquet::solve_floquet_mixed(
+                    raw_mesh, mixed, &dof_map, spec, &st.fixed, &k, &m, *n_modes, *f_search, t0,
+                );
+            }
+            let lrb_labels: Vec<i32> = spec
+                .bcs
+                .iter()
+                .filter(|b| matches!(b.kind, BcKind::LowReflecting))
+                .flat_map(|b| b.labels.iter().copied())
+                .collect();
+            if !lrb_labels.is_empty() || (spec.materials.has_viscosity() && *f_search > 0.0) {
+                return crate::lrb::solve_lrb_mixed(
+                    raw_mesh,
+                    mixed,
+                    &dof_map,
+                    spec,
+                    &st.c6,
+                    &st.fixed,
+                    &k,
+                    &m,
+                    &rho,
+                    &lrb_labels,
+                    *n_modes,
+                    *f_search,
+                    t0,
+                );
+            }
+            let free = free_dofs(n, &st.fixed);
+            let nm = *n_modes;
+            if nm < 1 || nm + 1 >= free.len() {
+                return Err("number of modes must be between 1 and the number of free dofs".into());
+            }
+            let kff = k.submatrix(&free, &free);
+            let mff = m.submatrix(&free, &free);
+            let sigma = if *f_search > 0.0 { (2.0 * std::f64::consts::PI * *f_search).powi(2) } else { -1.0 };
+            let pairs = eigs_sym(&kff, &mff, sigma, nm, &EigOpts::default(), None)?;
+
+            let (simplex, proj) = MixedToSimplexProjector::from_mesh(raw_mesh, mixed).map_err(|e| e.to_string())?;
+            let mut order_idx: Vec<usize> = (0..pairs.values.len()).collect();
+            order_idx.sort_by(|&a, &b| pairs.values[a].partial_cmp(&pairs.values[b]).unwrap());
+            let mut solutions = Vec::new();
+            let mut scalars = Vec::new();
+            for (j, &i) in order_idx.iter().enumerate() {
+                let freq = pairs.values[i].max(0.0).sqrt() / (2.0 * std::f64::consts::PI);
+                let mut u = vec![0.0; n];
+                for (a, &dof) in free.iter().enumerate() {
+                    u[dof] = pairs.vectors[i][a];
+                }
+                let mx = u.iter().fold(0.0f64, |acc, x| acc.max(x.abs()));
+                if mx > 0.0 {
+                    u.iter_mut().for_each(|x| *x /= mx);
+                }
+                let (fields, cell_fields) = fields_of_mixed(
+                    mixed,
+                    &dof_map,
+                    &simplex,
+                    &proj,
+                    &u,
+                    "a.u.",
+                    order,
+                    &st,
+                    spec.plane,
+                    None,
+                    &ie_domains,
+                    &spec.inactive,
+                    false,
+                );
+                solutions.push(Solution {
+                    label: format!("mode {}: {:.6} Hz", j + 1, freq),
+                    fields,
+                    cell_fields,
+                    value: Some(freq),
+                    ..Default::default()
+                });
+                scalars.push((format!("f{} (Hz)", j + 1), Scalar::Num(freq)));
+            }
+            let mut log = vec![format!(
+                "Krylov dimension {}{}",
+                pairs.dim,
+                if pairs.converged { "" } else { " (not fully converged)" }
+            )];
+            if st.fixed.is_empty() {
+                log.push(
+                    "no fixed boundary: the first six (3D) or three (2D) modes are rigid-body motions at ~0 Hz".into(),
+                );
+            }
+            Ok(SolveResult {
+                order: order as u8,
+                dim: d as u8,
+                solutions,
+                scalars,
+                log,
+                seconds: t0.elapsed().as_secs_f64(),
+                dofs: n,
+                ..Default::default()
+            })
+        }
+    }
 }
 
 fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut Instant) -> Result<SolveResult, String> {

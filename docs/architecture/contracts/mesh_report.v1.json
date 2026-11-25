@@ -17,7 +17,16 @@
       "wave_size": "number"
     }
   ],
+  "element_counts": {
+    "hex": "integer",
+    "prism": "integer",
+    "tet": "integer"
+  },
   "facets": "integer",
+  "min_pml_scaled_jacobian": "number",
+  "pml_warnings": [
+    "string"
+  ],
   "structured_layers": [
     [
       "integer"

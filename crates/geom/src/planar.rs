@@ -384,6 +384,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
     let diag = model_box(&b.prims).diagonal();
     let after = list.features.iter().position(|f| f.id == overlay.id).unwrap_or(0);
     let mut auto_tags = vec![];
+    let mut outward_pmls = vec![];
     for f in list.features[after..].iter().filter(|f| !f.suppressed) {
         match &f.op {
             Op::Cut { normal, offset, keep } => {
@@ -420,25 +421,121 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                 }
                 auto_tags.push((f.id, "cut".to_string(), "symmetry".to_string()));
             }
-            Op::Pml { window, sides, thickness, layers, grading, regions: only } => {
-                let (t, nl, gr) =
-                    (b.ev(thickness, f, "thickness")?, b.ev(layers, f, "layers")?, b.ev(grading, f, "grading")?);
-                if t <= 0.0 || nl < 1.0 || gr <= 0.0 {
-                    return Err(GeomError(format!(
-                        "Pml '{}' needs thickness > 0, layers >= 1 and grading > 0",
-                        f.name
-                    )));
-                }
+            Op::Pml {
+                window,
+                sides,
+                thickness,
+                layers,
+                grading,
+                regions: only,
+                mode,
+                coord,
+                center,
+                axis: pml_axis,
+                layer_grading,
+            } => {
                 let mark = b.prims.len();
-                let wnode = b.inst(*window, &Aff3::ID, "")?;
-                let win = wnode.bbox(&b.prims);
+                let win = match window.filter(|&w| w != 0) {
+                    Some(win_id) => {
+                        let wnode = b.inst(win_id, &Aff3::ID, "")?;
+                        wnode.bbox(&b.prims)
+                    }
+                    None => {
+                        if *mode == PmlGrowMode::Inward {
+                            return Err(GeomError(format!(
+                                "Pml '{}' in Inward mode requires a window feature (or set mode = Outward)",
+                                f.name
+                            )));
+                        }
+                        let mut bb = Aabb::EMPTY;
+                        for r in rx.iter() {
+                            let candidate = r.pml.is_none()
+                                && r.parent.is_none()
+                                && matches!(r.kind, RegionKind::Material)
+                                && (only.is_empty() || only.contains(&r.name));
+                            if candidate && r.expr != Node::Empty {
+                                bb = bb.union(&r.expr.bbox(&b.prims));
+                            }
+                        }
+                        bb
+                    }
+                };
                 b.prims.truncate(mark);
                 b.memo.retain(|_, v| *v < mark);
                 if win.is_empty() {
                     return Err(GeomError(format!("Pml '{}' has an empty window", f.name)));
                 }
+                let resolved_coord = if *coord == PmlCoordKind::Auto { PmlCoordKind::Cartesian } else { *coord };
+                let pml_center = match center {
+                    Some(ce) => b.ev3(ce, f, "center")?,
+                    None => win.center(),
+                };
+                let pml_axis_vec = match pml_axis {
+                    Some(Axis::X) => [1.0, 0.0, 0.0],
+                    Some(Axis::Y) => [0.0, 1.0, 0.0],
+                    _ => [0.0, 0.0, 1.0],
+                };
+                let z_range = [win.lo[2], win.hi[2]];
+                let is_auto_expr = |e: &crate::expr::Expr| -> bool {
+                    match e {
+                        crate::expr::Expr::Text(s) => {
+                            s.trim().eq_ignore_ascii_case("auto") && b.env.get(s.trim()).is_none()
+                        }
+                        crate::expr::Expr::Num(v) => *mode == PmlGrowMode::Outward && *v <= 0.0,
+                    }
+                };
+                let char_span = (win.hi[0] - win.lo[0]).max(win.hi[1] - win.lo[1]).max(win.hi[2] - win.lo[2]);
+                let t = if is_auto_expr(thickness) {
+                    (0.1 * char_span).max(1e-6)
+                } else {
+                    b.ev(thickness, f, "thickness")?
+                };
+                let nl = if is_auto_expr(layers) { 6.0 } else { b.ev(layers, f, "layers")? };
+                let gr = if is_auto_expr(grading) { 2.0 } else { b.ev(grading, f, "grading")? };
+                let lg = match layer_grading {
+                    Some(e) => {
+                        if is_auto_expr(e) {
+                            2.0
+                        } else {
+                            b.ev(e, f, "layer_grading")?
+                        }
+                    }
+                    None => {
+                        if *mode == PmlGrowMode::Outward {
+                            2.0
+                        } else {
+                            1.0
+                        }
+                    }
+                };
+                if t <= 0.0 || nl < 1.0 || gr <= 0.0 || lg <= 0.0 {
+                    return Err(GeomError(format!(
+                        "Pml '{}' needs thickness > 0, layers >= 1 and grading > 0",
+                        f.name
+                    )));
+                }
                 let all = [Side::XMin, Side::XMax, Side::YMin, Side::YMax, Side::ZMin, Side::ZMax];
                 let sel: Vec<Side> = if sides.is_empty() { all.to_vec() } else { sides.clone() };
+                if *mode == PmlGrowMode::Outward {
+                    outward_pmls.push(crate::scene::OutwardPmlSpec {
+                        feature: f.id,
+                        name: f.name.clone(),
+                        sides: sel,
+                        window: win,
+                        thickness: t,
+                        layers: nl,
+                        grading: gr,
+                        layer_grading: lg,
+                        coord: resolved_coord,
+                        center: pml_center,
+                        axis: pml_axis_vec,
+                        r_in: 0.0,
+                        z_range,
+                        regions: only.clone(),
+                        curved_outer: false,
+                    });
+                    continue;
+                }
                 let mut combos: Vec<[i8; 3]> = vec![];
                 for code in 0..27 {
                     let (mut c, mut k) = ([0i8; 3], code);
@@ -458,7 +555,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                     let single = (0..3).find(|&a| c[a] != 0).map_or(0, |a| 2 * a + (c[a] > 0) as usize);
                     (n, if n == 1 { single } else { 0 }, (0..3).rev().map(|a| c[a] + 1).collect::<Vec<_>>())
                 });
-                let mut pieces: Vec<(Node, [i8; 3], String)> = vec![];
+                let mut pieces: Vec<(Node, [i8; 3], String, PmlRole)> = vec![];
                 for c in &combos {
                     let rng = |k: usize| match c[k] {
                         -1 => (win.lo[k] - t, win.lo[k]),
@@ -477,9 +574,14 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                         Poly3::new(rings_of_box([x.0, y.0, z.0], [x.1, y.1, z.1])),
                         true,
                     )));
-                    pieces.push((Node::Prim(b.prims.len() - 1), *c, piece));
+                    let role = match c.iter().filter(|&&x| x != 0).count() {
+                        1 => PmlRole::Face,
+                        2 => PmlRole::Edge,
+                        _ => PmlRole::Corner,
+                    };
+                    pieces.push((Node::Prim(b.prims.len() - 1), *c, piece, role));
                 }
-                let pad_bb: Vec<Aabb> = pieces.iter().map(|(n, _, _)| n.bbox(&b.prims)).collect();
+                let pad_bb: Vec<Aabb> = pieces.iter().map(|(n, _, _, _)| n.bbox(&b.prims)).collect();
                 let mut out: Vec<RegionX> = vec![];
                 for r in rx.iter() {
                     let candidate = r.pml.is_none()
@@ -494,7 +596,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                     let mut phys = r.clone();
                     phys.expr = Node::Diff(Box::new(r.expr.clone()), pieces.iter().map(|p| p.0.clone()).collect());
                     out.push(phys);
-                    for ((node, c, piece), bb) in pieces.iter().zip(&pad_bb) {
+                    for ((node, c, piece, role), bb) in pieces.iter().zip(&pad_bb) {
                         if eb.overlaps(bb) {
                             out.push(RegionX {
                                 name: format!("{}.pml_{piece}", r.name),
@@ -510,6 +612,14 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                                     thickness: t,
                                     layers: nl,
                                     grading: gr,
+                                    coord: resolved_coord,
+                                    mode: PmlGrowMode::Inward,
+                                    center: pml_center,
+                                    axis: pml_axis_vec,
+                                    r_in: 0.0,
+                                    z_range,
+                                    layer_grading: lg,
+                                    role: *role,
                                 }),
                             });
                         }
@@ -548,6 +658,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         naming: *naming,
         axis: 2,
         auto_tags,
+        outward_pmls,
     })
 }
 
@@ -764,6 +875,7 @@ pub fn build(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex> {
             naming: NameScheme::Feature,
             axis: 2,
             auto_tags: vec![],
+            outward_pmls: vec![],
         };
         let cx2 = arrange_with(&ps, cache, &classify, &synth).map_err(|e| {
             GeomError(format!("plane n = ({:.3}, {:.3}, {:.3}), d = {:.6e}: {}", pl.n[0], pl.n[1], pl.n[2], pl.d, e.0))

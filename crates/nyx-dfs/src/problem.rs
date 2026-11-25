@@ -7,12 +7,103 @@
 
 use crate::Dfs;
 use femcore::material::{bcs_surface_impedance, FilmModel};
-use femcore::props::{LinearSolver, Materials};
+use femcore::props::{LinearSolver, Materials, PmlDir};
 use nyx_physics::decode::{
     domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec, Params,
 };
 use nyx_physics::{Ctx, Error, Physics, ProblemSpec, TlsInterfaces};
 use std::collections::BTreeMap;
+
+/// Coordinate topology of a domain-applied static Infinite Element (`BcKind::InfiniteElement`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IeCoordKind {
+    #[default]
+    Auto,
+    Cartesian,
+    Cylindrical,
+    Spherical,
+}
+
+impl IeCoordKind {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "auto" => Ok(Self::Auto),
+            "cartesian" => Ok(Self::Cartesian),
+            "cylindrical" => Ok(Self::Cylindrical),
+            "spherical" => Ok(Self::Spherical),
+            other => Err(format!(
+                "unknown infinite_element coord '{other}' (expected 'auto', 'cartesian', 'cylindrical', or 'spherical')"
+            )),
+        }
+    }
+}
+
+/// Radial/normal coordinate-stretching profile inside a static Infinite Element domain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IeProfile {
+    /// Rational mapping `[R_in, R_out) -> [R_in, inf)` (locking-free on native `Quad`/`Prism`/`Hex`).
+    #[default]
+    Rational,
+    /// Bounded exponential stretching `chi = exp(beta)` paired with outer Order-1 `far_field` Robin.
+    Exponential,
+}
+
+impl IeProfile {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "" | "rational" => Ok(Self::Rational),
+            "exponential" => Ok(Self::Exponential),
+            other => Err(format!("unknown infinite_element profile '{other}' (expected 'rational' or 'exponential')")),
+        }
+    }
+}
+
+/// Configuration of a domain-applied static Infinite Element (`BcKind::InfiniteElement`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct InfiniteElementSpec {
+    pub coord: IeCoordKind,
+    pub profile: IeProfile,
+    pub x: PmlDir,
+    pub y: PmlDir,
+    pub z: PmlDir,
+    pub center: Option<[f64; 3]>,
+    pub axis: [f64; 3],
+    pub r_in: Option<f64>,
+    pub thickness: Option<f64>,
+    pub pole_dist: Option<f64>,
+    pub decay: f64,
+    pub bounds_lo: Option<[f64; 3]>,
+    pub bounds_hi: Option<[f64; 3]>,
+}
+
+impl Default for InfiniteElementSpec {
+    fn default() -> Self {
+        Self {
+            coord: IeCoordKind::Auto,
+            profile: IeProfile::Rational,
+            x: PmlDir::Off,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            center: None,
+            axis: [0.0, 0.0, 1.0],
+            r_in: None,
+            thickness: None,
+            pole_dist: None,
+            decay: 30.0,
+            bounds_lo: None,
+            bounds_hi: None,
+        }
+    }
+}
+
+fn parse_pml_dir(s: &str) -> Result<PmlDir, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "" | "off" => Ok(PmlDir::Off),
+        "plus" => Ok(PmlDir::Plus),
+        "minus" => Ok(PmlDir::Minus),
+        other => Err(format!("unknown infinite_element direction '{other}' (expected 'off', 'plus', or 'minus')")),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BcKind {
@@ -32,6 +123,8 @@ pub enum BcKind {
         decay_power: f64,
         center: Option<[f64; 3]>,
     },
+    /// domain-applied static Infinite Element (Rational or Bounded Exponential + Order-1 Robin)
+    InfiniteElement(InfiniteElementSpec),
     Temperature(f64),
     /// inward heat flux, W/m^2
     Flux(f64),
@@ -65,6 +158,7 @@ impl BcKind {
             BcKind::Terminal(_) => "Terminal",
             BcKind::Open { .. } => "Open boundary",
             BcKind::FarField { .. } => "Far-field open boundary",
+            BcKind::InfiniteElement(_) => "Infinite element",
             BcKind::Temperature(_) => "Temperature",
             BcKind::Flux(_) => "Heat flux",
             BcKind::Convection { .. } => "Convective cooling",
@@ -83,17 +177,30 @@ impl BcKind {
                 | BcKind::Terminal(_)
                 | BcKind::Open { .. }
                 | BcKind::FarField { .. }
+                | BcKind::InfiniteElement(_)
         )
     }
 
     pub fn is_heat(&self) -> bool {
-        matches!(self, BcKind::Temperature(_) | BcKind::Flux(_) | BcKind::Convection { .. })
+        matches!(
+            self,
+            BcKind::Temperature(_)
+                | BcKind::Flux(_)
+                | BcKind::Convection { .. }
+                | BcKind::FarField { .. }
+                | BcKind::InfiniteElement(_)
+        )
     }
 
     pub fn is_magnetostatic(&self) -> bool {
         matches!(
             self,
-            BcKind::LondonSheet { .. } | BcKind::CurrentTerminal { .. } | BcKind::FluxLoop { .. } | BcKind::Ground
+            BcKind::LondonSheet { .. }
+                | BcKind::CurrentTerminal { .. }
+                | BcKind::FluxLoop { .. }
+                | BcKind::Ground
+                | BcKind::FarField { .. }
+                | BcKind::InfiniteElement(_)
         )
     }
 }
@@ -170,6 +277,8 @@ pub struct Problem {
     pub flux_bounds: String,
     /// operating frequency in Hz for AC quasi-static dielectric loss (`>= 0`, default `0.0`)
     pub freq: f64,
+    /// far-field ambient temperature `T_inf` (K) for `heat_stationary` `far_field` / `infinite_element` BCs (default `293.15`)
+    pub farfield_t_inf: f64,
     /// optional 1-based boundary label -> physical metal film thickness `t_m` (m) from `LabelMap`
     pub sheet_thickness_m: BTreeMap<i32, f64>,
     /// optional 1-based boundary label -> substrate over-etch trench depth `t_e` (m) from `LabelMap`
@@ -199,6 +308,7 @@ impl Problem {
             adapt_estimator: "flux_jump_goal".into(),
             flux_bounds: "none".into(),
             freq: 0.0,
+            farfield_t_inf: 293.15,
             sheet_thickness_m: BTreeMap::new(),
             sheet_etch_depth_m: BTreeMap::new(),
         }
@@ -217,6 +327,16 @@ impl Problem {
     pub fn with_freq(mut self, freq: f64) -> Self {
         self.freq = freq;
         self
+    }
+
+    pub fn with_farfield_t_inf(mut self, t_inf: f64) -> Self {
+        self.farfield_t_inf = t_inf;
+        self
+    }
+
+    /// True if any condition is an `InfiniteElement` or `materials.pml` has an active domain.
+    pub fn has_infinite_element(&self) -> bool {
+        self.bcs.iter().any(|bc| matches!(bc.kind, BcKind::InfiniteElement(_))) || self.materials.has_pml()
     }
 
     pub fn with_adapt_passes(mut self, adapt_passes: usize) -> Self {
@@ -272,6 +392,9 @@ impl Problem {
                 }
             }
         }
+        if !self.farfield_t_inf.is_finite() {
+            return Err(format!("far_field ambient temperature t_inf is {}: it must be finite", self.farfield_t_inf));
+        }
         for (i, bc) in self.bcs.iter().enumerate() {
             let vals: Vec<f64> = match &bc.kind {
                 BcKind::Potential(v) | BcKind::SurfaceCharge(v) | BcKind::Temperature(v) | BcKind::Flux(v) => vec![*v],
@@ -286,6 +409,28 @@ impl Problem {
                     let mut v = vec![*decay_power];
                     if let Some(c) = center {
                         v.extend_from_slice(c);
+                    }
+                    v
+                }
+                BcKind::InfiniteElement(ie) => {
+                    let mut v = vec![ie.decay, ie.axis[0], ie.axis[1], ie.axis[2]];
+                    if let Some(c) = ie.center {
+                        v.extend_from_slice(&c);
+                    }
+                    if let Some(r) = ie.r_in {
+                        v.push(r);
+                    }
+                    if let Some(t) = ie.thickness {
+                        v.push(t);
+                    }
+                    if let Some(p) = ie.pole_dist {
+                        v.push(p);
+                    }
+                    if let Some(lo) = ie.bounds_lo {
+                        v.extend_from_slice(&lo);
+                    }
+                    if let Some(hi) = ie.bounds_hi {
+                        v.extend_from_slice(&hi);
                     }
                     v
                 }
@@ -315,6 +460,43 @@ impl Problem {
                         bc.kind.name(),
                         bc.labels
                     ));
+                }
+            }
+            if let BcKind::InfiniteElement(ie) = &bc.kind {
+                if ie.decay < 1.0 {
+                    return Err(format!(
+                        "condition {} (Infinite element on domains {:?}) has decay {}: it must be >= 1.0",
+                        i + 1,
+                        bc.labels,
+                        ie.decay
+                    ));
+                }
+                if let Some(r) = ie.r_in {
+                    if r < 0.0 {
+                        return Err(format!(
+                            "condition {} (Infinite element on domains {:?}) has r_in {r}: it must be >= 0",
+                            i + 1,
+                            bc.labels
+                        ));
+                    }
+                }
+                if let Some(t) = ie.thickness {
+                    if t < 0.0 {
+                        return Err(format!(
+                            "condition {} (Infinite element on domains {:?}) has thickness {t}: it must be >= 0",
+                            i + 1,
+                            bc.labels
+                        ));
+                    }
+                }
+                if let Some(p) = ie.pole_dist {
+                    if p <= 0.0 {
+                        return Err(format!(
+                            "condition {} (Infinite element on domains {:?}) has pole_dist {p}: it must be > 0",
+                            i + 1,
+                            bc.labels
+                        ));
+                    }
                 }
             }
         }
@@ -360,6 +542,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let mut adapt_estimator = "flux_jump_goal".to_string();
     let mut flux_bounds = "none".to_string();
     let mut freq = 0.0_f64;
+    let mut farfield_t_inf = 293.15_f64;
     let study = match sd.kind.as_str() {
         "electrostatic" => {
             formulation = sp.text("formulation");
@@ -453,7 +636,78 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 } else {
                     None
                 };
+                if p.has("t_inf") {
+                    let t_val = p.number("t_inf");
+                    if !t_val.is_finite() {
+                        return Err(Error::invalid("far_field condition 't_inf' must be a finite number"));
+                    }
+                    farfield_t_inf = t_val;
+                }
                 BcKind::FarField { order: order_i as usize, decay_power, center }
+            }
+            "infinite_element" => {
+                let coord = IeCoordKind::parse(&p.text("coord")).map_err(Error::invalid)?;
+                let profile = IeProfile::parse(&p.text("profile")).map_err(Error::invalid)?;
+                let x = parse_pml_dir(&p.text("x")).map_err(Error::invalid)?;
+                let y = parse_pml_dir(&p.text("y")).map_err(Error::invalid)?;
+                let z = parse_pml_dir(&p.text("z")).map_err(Error::invalid)?;
+                let center = if p.has("center") {
+                    let cv = p.vector("center");
+                    if cv.len() != 3 || cv.iter().any(|v| !v.is_finite()) {
+                        return Err(Error::invalid("infinite_element 'center' must be 3 finite numbers [cx, cy, cz]"));
+                    }
+                    Some([cv[0], cv[1], cv[2]])
+                } else {
+                    None
+                };
+                let ax_v = p.vector("axis");
+                if ax_v.len() != 3 || ax_v.iter().any(|v| !v.is_finite()) {
+                    return Err(Error::invalid("infinite_element 'axis' must be 3 finite numbers [ax, ay, az]"));
+                }
+                let axis = [ax_v[0], ax_v[1], ax_v[2]];
+                if axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2] <= 1e-30 {
+                    return Err(Error::invalid("infinite_element 'axis' must be a non-zero vector"));
+                }
+                let r_in = p.optional_number("r_in").filter(|&r| r > 0.0);
+                let thickness = p.optional_number("thickness").filter(|&t| t > 0.0);
+                let pole_dist = p.optional_number("pole_dist").filter(|&pd| pd > 0.0);
+                let decay = p.number("decay");
+                if !decay.is_finite() || decay < 1.0 {
+                    return Err(Error::invalid(format!("infinite_element 'decay' (chi) must be >= 1.0, got {decay}")));
+                }
+                let bounds_lo = if p.has("bounds_lo") {
+                    let v = p.vector("bounds_lo");
+                    if v.len() != 3 || v.iter().any(|x| !x.is_finite()) {
+                        return Err(Error::invalid("infinite_element 'bounds_lo' must be 3 finite numbers [x, y, z]"));
+                    }
+                    Some([v[0], v[1], v[2]])
+                } else {
+                    None
+                };
+                let bounds_hi = if p.has("bounds_hi") {
+                    let v = p.vector("bounds_hi");
+                    if v.len() != 3 || v.iter().any(|x| !x.is_finite()) {
+                        return Err(Error::invalid("infinite_element 'bounds_hi' must be 3 finite numbers [x, y, z]"));
+                    }
+                    Some([v[0], v[1], v[2]])
+                } else {
+                    None
+                };
+                BcKind::InfiniteElement(InfiniteElementSpec {
+                    coord,
+                    profile,
+                    x,
+                    y,
+                    z,
+                    center,
+                    axis,
+                    r_in,
+                    thickness,
+                    pole_dist,
+                    decay,
+                    bounds_lo,
+                    bounds_hi,
+                })
             }
             "temperature" => BcKind::Temperature(p.number("value")),
             "flux" => BcKind::Flux(p.number("value")),
@@ -511,6 +765,18 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             }
             other => return Err(Error::Unsupported(format!("dfs has no condition '{other}'"))),
         };
+        if matches!(study, Study::HeatTransient { .. }) {
+            if matches!(kind, BcKind::InfiniteElement(_)) {
+                return Err(Error::invalid(
+                    "infinite_element cannot be used with heat_transient: frequency-independent spatial coordinate stretching distorts volumetric heat capacity (rho * Cp * det(J_IE)) across transient diffusion timescales; use unstretched (s_u = 1) geometrically graded layers of diffusion-length thickness d = sqrt(4 * D_max * t_end * ln(1/R_0)) instead",
+                ));
+            }
+            if matches!(kind, BcKind::FarField { .. }) {
+                return Err(Error::invalid(
+                    "far_field asymptotic Laplace Robin boundary condition is only valid for stationary heat transfer (heat_stationary), not heat_transient; use unstretched geometrically graded diffusion-length layers d = sqrt(4 * D_max * t_end * ln(1/R_0))",
+                ));
+            }
+        }
         let ok = match &study {
             Study::Electrostatic => kind.is_electrostatic(),
             Study::HeatStationary | Study::HeatTransient { .. } => kind.is_heat(),
@@ -538,9 +804,9 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             ));
         }
         if formulation == "planar_bem" {
-            if bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. })) {
+            if bcs.iter().any(|bc| matches!(bc.kind, BcKind::FarField { .. } | BcKind::InfiniteElement(_))) {
                 return Err(Error::Unsupported(
-                    "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+                    "planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' or 'infinite_element' conditions".into(),
                 ));
             }
             if flux_bounds != "none" {
@@ -599,6 +865,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         adapt_estimator,
         flux_bounds,
         freq,
+        farfield_t_inf,
         sheet_thickness_m: ctx.resolver.sheet_thickness_m(),
         sheet_etch_depth_m: ctx.resolver.sheet_etch_depth_m(),
     })

@@ -30,7 +30,7 @@ use crate::mesh::SimplexMesh;
 use crate::meshing::geomdrive::MeshedGeom;
 use crate::meshing::mesher::{mesh_chains_with_seeds, Chain, Fill, MeshParams, SheetChainExtras};
 use crate::meshing::physics_size::PhysicsSizing;
-use crate::meshing::{wave_sizes_by_region, MeshPlan, Mesher, PmlMode, Sizing};
+use crate::meshing::{wave_sizes_by_region, MeshPlan, Mesher, Sizing};
 use geom::complex::{EdgeGeom, FaceGeom};
 use geom::curve::Curve;
 use geom::eval::Evaluated;
@@ -978,12 +978,19 @@ fn compute_sheet3d_sizing(
     let tol = cx.tol;
 
     let nr = ev.regions().len();
+    let structured_pml = plan.pml.is_structured(!ev.pml_regions().is_empty());
     let mut region_h = vec![h_global; nr];
-    for p in ev.pml_regions() {
-        region_h[p.region as usize] = region_h[p.region as usize].min((p.thickness / p.layers) * scale_factor);
+    if !structured_pml {
+        for p in ev.pml_regions() {
+            region_h[p.region as usize] = region_h[p.region as usize].min((p.thickness / p.layers) * scale_factor);
+        }
     }
     if let Some((sizing, sz)) = waves {
-        for (r, w) in wave_sizes_by_region(ev, labels, sizing, sz)?.into_iter().enumerate().take(nr) {
+        let mut eff_sz = *sz;
+        if structured_pml {
+            eff_sz.pml_relax = 1.0;
+        }
+        for (r, w) in wave_sizes_by_region(ev, labels, sizing, &eff_sz)?.into_iter().enumerate().take(nr) {
             if w.is_finite() && w > 0.0 {
                 region_h[r] = region_h[r].min(w * scale_factor);
             }
@@ -1030,7 +1037,7 @@ fn compute_sheet3d_sizing(
     }
 
     let mut skip_region = vec![false; nr];
-    if matches!(plan.pml, PmlMode::Structured) {
+    if structured_pml {
         for p in ev.pml_regions() {
             skip_region[p.region as usize] = true;
         }
@@ -1788,6 +1795,16 @@ fn apply_quarter_point_on_meshed_geom(
         .quarter_point_xi
         .unwrap_or(crate::meshing::singularity::DEFAULT_QUARTER_POINT_XI);
     crate::meshing::singularity::apply_quarter_point_nodes(&mut g.mesh, &rim_verts, xi, &curved_rim_edges);
+    if let Some(crate::mesh::Mesh::D3(ref mut cm)) = g.cells {
+        if cm.n_points() == g.mesh.n_points() && cm.types.iter().all(|&t| t == crate::mesh::cells::CellType::Tet) {
+            cm.set_edge_nodes(g.mesh.edge_node_list());
+            let mut qp: Vec<[u32; 2]> =
+                g.mesh.qp_edge_list().into_iter().map(|[a, b]| [a.min(b), a.max(b)]).collect();
+            qp.sort_unstable();
+            qp.dedup();
+            cm.qp_edges = qp;
+        }
+    }
 }
 
 /// Applies post-adaptation `AF-5` (`curved`) and `AF-2` (`singular_edges = "quarter_point"`) `EdgeNodes`
@@ -1798,8 +1815,25 @@ pub fn apply_sheet_post_enrichment(
     waves: Option<(&Sizing, &PhysicsSizing)>,
 ) {
     if plan.opts.curved {
-        if let Ok(dom) = crate::meshing::geomdrive3::GeomDomain3::new(&g.eval, &g.labels, plan.opts.h) {
+        let nr = g.eval.regions().len();
+        let mut skip = vec![false; nr];
+        if plan.pml.is_structured(!g.eval.pml_regions().is_empty()) {
+            for p in g.eval.pml_regions() {
+                skip[p.region as usize] = true;
+            }
+        }
+        if let Ok(dom) = crate::meshing::geomdrive3::GeomDomain3::new_with(
+            &g.eval,
+            &g.labels,
+            plan.opts.h,
+            &crate::meshing::geomdrive3::Sizes3 { region_h: vec![], skip },
+        ) {
             crate::meshing::curve3::curve_solver_mesh(&mut g.mesh, &dom);
+            if let Some(crate::mesh::Mesh::D3(ref mut cm)) = g.cells {
+                if cm.n_points() == g.mesh.n_points() && cm.types.iter().all(|&t| t == crate::mesh::cells::CellType::Tet) {
+                    cm.set_edge_nodes(g.mesh.edge_node_list());
+                }
+            }
         }
     }
     apply_quarter_point_on_meshed_geom(g, plan, waves);
@@ -2329,31 +2363,31 @@ fn extrude_overlay_2d_inner(
         }
 
         let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
-        let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
-        let ran_pml = matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty();
-        if ran_pml {
-            g = crate::meshing::pml_geom3::structured_pml_3d(g)?.0;
-        }
-        // Cross-Feature Compatibility Rule 4: AF-5 (`curved`) runs FIRST, AF-2 (`quarter_point`) runs SECOND.
+        let mut g = MeshedGeom {
+            mesh,
+            cells: None,
+            labels,
+            eval: std::sync::Arc::new(ev),
+            warnings,
+        };
+        // Cross-Feature Compatibility Rule 4: curve & quarter-point enrich the physical interior FIRST,
+        // then extrude structured PML layers in lockstep so PML `edge_nodes` are never overwritten!
         if plan.opts.curved {
-            if ran_pml {
-                crate::meshing::sheet3d_curve::apply_sheet3d_curved_edges(&mut g);
-            } else {
-                let level_zero = vec![0usize; nz];
-                crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
-                    g.eval.complex(),
-                    m2,
-                    &bnd_edges2,
-                    &z_planes,
-                    &used_v,
-                    &slab_layer,
-                    &level_zero,
-                    &[],
-                    &mut g.mesh,
-                );
-            }
+            let level_zero = vec![0usize; nz];
+            crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
+                g.eval.complex(),
+                m2,
+                &bnd_edges2,
+                &z_planes,
+                &used_v,
+                &slab_layer,
+                &level_zero,
+                &[],
+                &mut g.mesh,
+            );
         }
         apply_quarter_point_on_meshed_geom(&mut g, plan, waves);
+        g.cells = Some(crate::mesh::Mesh::from_solver_mesh(&g.mesh)?);
         return Ok(g);
     }
 
@@ -2892,42 +2926,42 @@ fn extrude_overlay_2d_inner(
     }
 
     let mesh = SimplexMesh::new(3, points, cells, cell_labels, facets, facet_labels);
-    let mut g = MeshedGeom { mesh, labels, eval: std::sync::Arc::new(ev), warnings };
-    let ran_pml = matches!(plan.pml, PmlMode::Structured) && !g.eval.pml_regions().is_empty();
-    if ran_pml {
-        g = crate::meshing::pml_geom3::structured_pml_3d(g)?.0;
-    }
-    // Cross-Feature Compatibility Rule 4: AF-5 (`curved`) runs FIRST, AF-2 (`quarter_point`) runs SECOND.
+    let mut g = MeshedGeom {
+        mesh,
+        cells: None,
+        labels,
+        eval: std::sync::Arc::new(ev),
+        warnings,
+    };
+    // Cross-Feature Compatibility Rule 4: curve & quarter-point enrich the physical interior FIRST,
+    // then extrude structured PML layers in lockstep so PML `edge_nodes` are never overwritten!
     if plan.opts.curved {
-        if ran_pml {
-            crate::meshing::sheet3d_curve::apply_sheet3d_curved_edges(&mut g);
-        } else {
-            let transition_refs: Vec<crate::meshing::sheet3d_curve::Sheet3dTransitionRef<'_>> = transitions
-                .iter()
-                .map(|tr| crate::meshing::sheet3d_curve::Sheet3dTransitionRef {
-                    map_v: &tr.map_v,
-                    rank: &tr.rank,
-                })
-                .collect();
-            crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
-                g.eval.complex(),
-                m2,
-                &bnd_edges2,
-                &z_planes,
-                &used_v,
-                &slab_layer,
-                &level_of_zp,
-                &transition_refs,
-                &mut g.mesh,
-            );
-        }
+        let transition_refs: Vec<crate::meshing::sheet3d_curve::Sheet3dTransitionRef<'_>> = transitions
+            .iter()
+            .map(|tr| crate::meshing::sheet3d_curve::Sheet3dTransitionRef {
+                map_v: &tr.map_v,
+                rank: &tr.rank,
+            })
+            .collect();
+        crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
+            g.eval.complex(),
+            m2,
+            &bnd_edges2,
+            &z_planes,
+            &used_v,
+            &slab_layer,
+            &level_of_zp,
+            &transition_refs,
+            &mut g.mesh,
+        );
     }
     apply_quarter_point_on_meshed_geom(&mut g, plan, waves);
+    g.cells = Some(crate::mesh::Mesh::from_solver_mesh(&g.mesh)?);
     Ok(g)
 }
 
 /// Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` using the full
-/// [`MeshPlan`] (`z_coarsen`, `AF-6` thin-slab single-layer extrusion, `PmlMode::Structured`,
+/// [`MeshPlan`] (`z_coarsen`, `AF-6` thin-slab single-layer extrusion, `PmlMode`,
 /// `AF-5` `curved` projection, and `AF-2` `quarter_point` enrichment).
 pub fn extrude_overlay_2d_with_plan(
     ev: Evaluated,
@@ -2938,7 +2972,11 @@ pub fn extrude_overlay_2d_with_plan(
 ) -> Result<MeshedGeom, String> {
     let labels = ev.label_map().map_err(|e| e.to_string())?;
     let sz = compute_sheet3d_sizing(&ev, &labels, plan, waves)?;
-    extrude_overlay_2d_inner(ev, labels, m2, plan, &sz, waves, sheet_dz_override, true, Vec::new())
+    let mut g = extrude_overlay_2d_inner(ev, labels, m2, plan, &sz, waves, sheet_dz_override, true, Vec::new())?;
+    if plan.pml.is_structured(!g.eval.pml_regions().is_empty()) {
+        g = crate::meshing::pml_geom3::structured_pml_3d_with_curved(g, plan.opts.curved)?.0;
+    }
+    Ok(g)
 }
 
 /// Extrudes a conformal 2D overlay triangulation `m2` across the 3D layers of `ev` at global
@@ -2952,17 +2990,63 @@ pub fn extrude_overlay_2d(
     extrude_overlay_2d_with_plan(ev, m2, &MeshPlan::simple(h_global), None, sheet_dz_override)
 }
 
+/// Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a [`MeshedGeom`], with
+/// optional [`PmlReport`].
+pub fn mesh_sheet_stack_3d_with_pml(
+    ev: Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<(MeshedGeom, Option<AdaptReport>, Option<crate::meshing::PmlReport>), String> {
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let sz = compute_sheet3d_sizing(&ev, &labels, plan, waves)?;
+    let (m2, warnings) = build_overlay_mesh_2d_with_sizing(&ev, plan, &sz)?;
+    let mut g = extrude_overlay_2d_inner(ev, labels, &m2, plan, &sz, waves, None, false, warnings)?;
+    let pml_rep = if plan.pml.is_structured(!g.eval.pml_regions().is_empty()) {
+        let (g2, rep) = crate::meshing::pml_geom3::structured_pml_3d_with_curved(g, plan.opts.curved)?;
+        g = g2;
+        Some(rep)
+    } else {
+        None
+    };
+    Ok((g, None, pml_rep))
+}
+
+/// Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) directly into an uncut
+/// [`crate::mesh::Mesh`] (`Tet` + `Prism` + `Hex`) with zero eager simplex splitting of PML layers.
+pub fn mesh_sheet_stack_3d_native(
+    ev: Evaluated,
+    plan: &MeshPlan,
+    waves: Option<(&Sizing, &PhysicsSizing)>,
+) -> Result<crate::meshing::NativeRawTuple, String> {
+    let labels = ev.label_map().map_err(|e| e.to_string())?;
+    let sz = compute_sheet3d_sizing(&ev, &labels, plan, waves)?;
+    let (m2, warnings) = build_overlay_mesh_2d_with_sizing(&ev, plan, &sz)?;
+    let g = extrude_overlay_2d_inner(ev, labels, &m2, plan, &sz, waves, None, false, warnings)?;
+    if plan.pml.is_structured(!g.eval.pml_regions().is_empty()) {
+        let (labels_out, eval_out, warnings_out) = (g.labels.clone(), g.eval.clone(), g.warnings.clone());
+        match crate::meshing::pml_geom3::structured_pml_3d_native_with_curved(g, plan.opts.curved)? {
+            crate::meshing::pml_geom3::Native3::Unchanged(g_unch, rep) => {
+                let m = g_unch.into_exchange_mesh()?;
+                Ok((m, g_unch.labels, g_unch.eval, None, Some(rep), g_unch.warnings))
+            }
+            crate::meshing::pml_geom3::Native3::Cells(cells, rep) => {
+                Ok((crate::mesh::Mesh::D3(cells), labels_out, eval_out, None, Some(rep), warnings_out))
+            }
+        }
+    } else {
+        let m = g.into_exchange_mesh()?;
+        Ok((m, g.labels, g.eval, None, None, g.warnings))
+    }
+}
+
 /// Meshes a 3D layer-stack model containing 2D sheets (`Op::Sheet`) into a conformal tetrahedral `MeshedGeom`.
 pub fn mesh_sheet_stack_3d(
     ev: Evaluated,
     plan: &MeshPlan,
     waves: Option<(&Sizing, &PhysicsSizing)>,
 ) -> Result<(MeshedGeom, Option<AdaptReport>), String> {
-    let labels = ev.label_map().map_err(|e| e.to_string())?;
-    let sz = compute_sheet3d_sizing(&ev, &labels, plan, waves)?;
-    let (m2, warnings) = build_overlay_mesh_2d_with_sizing(&ev, plan, &sz)?;
-    let g = extrude_overlay_2d_inner(ev, labels, &m2, plan, &sz, waves, None, false, warnings)?;
-    Ok((g, None))
+    let (g, adapt, _) = mesh_sheet_stack_3d_with_pml(ev, plan, waves)?;
+    Ok((g, adapt))
 }
 
 #[cfg(test)]

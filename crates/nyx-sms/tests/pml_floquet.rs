@@ -6,7 +6,7 @@
 mod common;
 use femcore::material::{Anisotropy, Stiffness};
 use femcore::meshing::mesher::{extrude_y, Layer};
-use femcore::props::{Periodic, Pml, PmlDir};
+use femcore::props::{Periodic, Pml, PmlDir, PmlStabilization};
 use nyx_physics::testkit::cell_fields_reproduce_the_plot_fields;
 use nyx_physics::SolveResult;
 use nyx_sms::*;
@@ -41,9 +41,20 @@ fn zero_strength_pml_with_floquet_phase_reproduces_lossless_floquet_2d_and_3d() 
     let r_floquet2 = common::solve(&mesh2, &floquet2);
 
     let mut pml2 = floquet2.clone();
-    pml2.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 2.0, re: 1.0 });
+    pml2.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.0,
+            order: 2.0,
+            re: 1.0,
+            clamp_outer: false,
+            stabilization: PmlStabilization::Off,
+            ..Default::default()
+        },
+    );
     let r_pml2 = common::solve(&mesh2, &pml2);
     cell_fields_reproduce_the_plot_fields(&mesh2, &r_pml2);
     assert_eq!(r_floquet2.solutions.len(), r_pml2.solutions.len());
@@ -62,9 +73,20 @@ fn zero_strength_pml_with_floquet_phase_reproduces_lossless_floquet_2d_and_3d() 
     let r_floquet3 = common::solve(&mesh3, &floquet3);
 
     let mut pml3 = floquet3.clone();
-    pml3.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.0, order: 2.0, re: 1.0 });
+    pml3.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.0,
+            order: 2.0,
+            re: 1.0,
+            clamp_outer: false,
+            stabilization: PmlStabilization::Off,
+            ..Default::default()
+        },
+    );
     let r_pml3 = common::solve(&mesh3, &pml3);
     cell_fields_reproduce_the_plot_fields(&mesh3, &r_pml3);
     assert_eq!(r_floquet3.solutions.len(), r_pml3.solutions.len());
@@ -120,11 +142,28 @@ fn swept_3d_si_on_sapphire_with_lateral_pml_respects_floquet_phase() {
         if with_pml {
             p.materials.pml.insert(
                 3,
-                Pml { x: PmlDir::Minus, y: PmlDir::Off, z: PmlDir::Off, strength: 1.0, order: 2.0, re: 1.0 },
+                Pml {
+                    x: PmlDir::Minus,
+                    y: PmlDir::Off,
+                    z: PmlDir::Off,
+                    strength: 1.0,
+                    order: 2.0,
+                    re: 1.0,
+                    ..Default::default()
+                },
             );
-            p.materials
-                .pml
-                .insert(4, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 1.0, order: 2.0, re: 1.0 });
+            p.materials.pml.insert(
+                4,
+                Pml {
+                    x: PmlDir::Plus,
+                    y: PmlDir::Off,
+                    z: PmlDir::Off,
+                    strength: 1.0,
+                    order: 2.0,
+                    re: 1.0,
+                    ..Default::default()
+                },
+            );
         }
         p.bcs.push(Bc { labels: fixed_labels.clone(), kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } });
         p.periodic = vec![Periodic { source: vec![ymin], dest: vec![ymax], phase }];
@@ -177,9 +216,18 @@ fn inactive_domain_without_rho_succeeds_in_solve_solid_pml() {
         p.materials.set(1, k, v);
     }
     p.inactive = vec![2];
-    p.materials
-        .pml
-        .insert(1, Pml { x: PmlDir::Plus, y: PmlDir::Off, z: PmlDir::Off, strength: 0.2, order: 2.0, re: 1.0 });
+    p.materials.pml.insert(
+        1,
+        Pml {
+            x: PmlDir::Plus,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 0.2,
+            order: 2.0,
+            re: 1.0,
+            ..Default::default()
+        },
+    );
     p.bcs.push(Bc { labels: vec![1], kind: BcKind::Fixed { fixed: [true; 3], values: [0.0; 3] } });
 
     let r = common::solve(&mesh, &p);

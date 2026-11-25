@@ -27,11 +27,13 @@
 #![allow(clippy::needless_range_loop, clippy::neg_cmp_op_on_partial_ord)]
 pub mod optical;
 pub mod edge;
+pub mod edge_mixed;
 pub mod expr;
 pub mod farfield;
 pub mod fieldexpr;
 pub mod formula;
 pub mod fem;
+pub mod fem_mixed;
 pub mod rt;
 pub mod fields;
 pub mod material;

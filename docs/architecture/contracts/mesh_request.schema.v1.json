@@ -10,7 +10,7 @@
     },
     "curved": {
       "default": false,
-      "description": "3D: quadratic (isoparametric) geometry for the cells on a curved surface",
+      "description": "3D / curvilinear shells: quadratic (isoparametric) geometry for the cells on a curved surface",
       "type": "boolean"
     },
     "dz_min": {
@@ -111,6 +111,16 @@
         }
       ]
     },
+    "pml_mode": {
+      "default": "auto",
+      "description": "how absorbing layers are meshed ('auto' [default], 'structured', or 'inline')",
+      "enum": [
+        "auto",
+        "structured",
+        "inline"
+      ],
+      "type": "string"
+    },
     "quarter_point_xi": {
       "description": "3D sheet mesher: Barsoum quarter-point mid-edge parameter in [0.25, 0.50] (default 0.25)",
       "maximum": 0.5,
@@ -138,8 +148,11 @@
       "type": "boolean"
     },
     "structured_pml": {
-      "default": false,
-      "type": "boolean"
+      "description": "legacy alias for pml_mode (true -> 'structured', false -> 'inline')",
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "waves": {
       "additionalProperties": false,

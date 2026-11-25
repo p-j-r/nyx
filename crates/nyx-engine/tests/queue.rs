@@ -518,14 +518,20 @@ fn set_mesh_takes_every_field_it_lists_and_refuses_others() {
     let m = &e.project().mesh;
     assert_eq!(
         (m.h, m.points_per_wavelength, m.structured_pml, m.max_dev, m.adapt_scale),
-        (2e-7, Some(9.0), true, Some(1e-9), Some(0.5))
+        (2e-7, Some(9.0), Some(true), Some(1e-9), Some(0.5))
     );
-    e.call("set_mesh", &json!({ "points_per_wavelength": null, "max_dev": null })).unwrap();
+    assert_eq!(m.resolved_pml_mode(), nyx_engine::PmlModeRequest::Structured);
+    e.call("set_mesh", &json!({ "points_per_wavelength": null, "max_dev": null, "pml_mode": "inline" })).unwrap();
     assert_eq!((e.project().mesh.points_per_wavelength, e.project().mesh.max_dev), (None, None));
+    assert_eq!(e.project().mesh.pml_mode, nyx_engine::PmlModeRequest::Inline);
     assert!(e.call("set_mesh", &json!({ "no_such_field": 1 })).is_err());
     // a refused call changes nothing
-    assert!(e.call("set_mesh", &json!({ "h": -1.0, "structured_pml": false })).is_err());
-    assert!(e.project().mesh.structured_pml, "a refused set_mesh left the settings as they were");
+    assert!(e.call("set_mesh", &json!({ "h": -1.0, "pml_mode": "structured" })).is_err());
+    assert_eq!(
+        e.project().mesh.pml_mode,
+        nyx_engine::PmlModeRequest::Inline,
+        "a refused set_mesh left the settings as they were"
+    );
 }
 
 #[test]

@@ -13,14 +13,29 @@
 //!   reference `phi_s` vertex per connected sheet component and supporting `current_terminal` and `flux_loop` cohomology excitations,
 //!   yielding `L_{ij}` (H).
 
-use crate::common::{cell_gradient, components, minmax, norm_of};
+use crate::common::{
+    assemble_boundary_load_mixed, assemble_boundary_mass_mixed, assemble_farfield_robin_mixed,
+    assemble_ie_outer_robin_mixed, assemble_laplace_ie_mixed, boundary_measure_mixed, build_facet_to_cell_mixed,
+    cell_gradient, cell_values_mixed, check_boundary_labels_mixed, classify_ie_outer_facets_mixed, components,
+    farfield_centroid_mixed, minmax, norm_of, resolve_ie_domains_mixed, sample_mixed_gradients_on_simplex,
+    ResolvedIeDomain,
+};
 use crate::problem::{BcKind, Problem, Study};
+use femcore::edge_mixed::{eval_cell_basis_3d, NedEvalScratch, NedMixed};
 use femcore::fem::*;
+use femcore::fem_mixed::{
+    cell_corner_ref_coords, eval_facet_jacobian, facet_lagrange_shape, facet_rule_mixed, quad_rule_mixed,
+    IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap,
+};
 use femcore::fields::{local_bary, node_average, CellFields};
-use femcore::linalg::csr::Coo;
+use femcore::linalg::csr::{Coo, RCsr as Csr};
 use femcore::linalg::driver::{dense_eigh, DirectSolver};
+use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::LinearSolver;
-use nyx_physics::{cell_fields_of, Discretisation, Field, InductanceMatrixData, Scalar, Solution, SolveResult};
+use nyx_physics::{
+    cell_fields_of, discretise, discretise_mixed, Discretisation, Field, InductanceMatrixData, Mesh,
+    MixedToSimplexProjector, Scalar, Solution, SolveResult,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
 use std::time::Instant;
@@ -87,7 +102,20 @@ fn collect_excitations(spec: &Problem) -> Result<Vec<Excitation>, String> {
                     });
                 }
             }
-            BcKind::LondonSheet { .. } | BcKind::Ground => {}
+            BcKind::FarField { order: ff_order, decay_power, center } => {
+                if !(1..=2).contains(ff_order) {
+                    return Err(format!("far_field condition 'order' must be 1 or 2, got {ff_order}"));
+                }
+                if !decay_power.is_finite() || *decay_power <= 0.0 {
+                    return Err(format!("far_field condition 'decay_power' must be positive, got {decay_power}"));
+                }
+                if let Some(c) = center {
+                    if c.iter().any(|x| !x.is_finite()) {
+                        return Err("far_field condition 'center' has a NaN or infinite coordinate".into());
+                    }
+                }
+            }
+            BcKind::LondonSheet { .. } | BcKind::Ground | BcKind::InfiniteElement(_) => {}
             other => return Err(format!("'{}' is not a magnetostatics boundary condition", other.name())),
         }
     }
@@ -146,22 +174,34 @@ fn cross_section_fields(mesh: &Discretisation, order: usize, az: &[f64]) -> (Vec
 }
 
 fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    if spec.has_infinite_element() {
+        let cm = Mesh::from_solver_mesh(mesh).map_err(|e| e.to_string())?;
+        return solve_cross_section_mixed(&cm, spec);
+    }
     let t0 = Instant::now();
     if mesh.dim != 2 {
         return Err("the 'cross_section' magnetostatic formulation requires a 2D mesh".into());
     }
     let order = spec.order;
-    check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
+    check_boundary_labels(
+        mesh,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
     let excitations = collect_excitations(spec)?;
     let mu_r = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     if mu_r.iter().any(|&m| m <= 0.0) {
         return Err("material property 'mu_r' must be positive".into());
     }
-    let coeff: Vec<f64> = mu_r.iter().map(|&m| 1.0 / (MU0 * m)).collect();
+    let inv_mur: Vec<f64> = mu_r.iter().map(|&m| 1.0 / m).collect();
+    let coeff: Vec<f64> = inv_mur.iter().map(|&im| im / MU0).collect();
     let mut k = assemble_laplace(mesh, order, &coeff);
 
     let mut sheet_lk: BTreeMap<i32, f64> = BTreeMap::new();
     let mut ground_labels: Vec<i32> = Vec::new();
+    let mut ff_label_set: BTreeSet<i32> = BTreeSet::new();
     for bc in &spec.bcs {
         match &bc.kind {
             BcKind::LondonSheet { l_k_sq } => {
@@ -176,11 +216,38 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
                     }
                 }
             }
+            BcKind::FarField { .. } => {
+                for &lab in &bc.labels {
+                    ff_label_set.insert(lab);
+                }
+            }
             _ => {}
         }
     }
 
     let term_label_set: BTreeSet<i32> = excitations.iter().flat_map(|e| e.labels.iter().copied()).collect();
+    let ref_labels: Vec<i32> = term_label_set.iter().copied().collect();
+    let mut has_far_field = false;
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !ground_labels.contains(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid(mesh, &ref_labels));
+                let k_far = assemble_farfield_robin(
+                    mesh,
+                    &ff_labs,
+                    order,
+                    *ff_order,
+                    *decay_power,
+                    c,
+                    1.0 / MU0,
+                    FarFieldPermittivity::Scalar(&inv_mur),
+                );
+                k = k.add_scaled(&k_far, 1.0);
+                has_far_field = true;
+            }
+        }
+    }
 
     // Passive London sheets (not driven as current terminals): add int_{Gamma_SC} L_k_sq^(-1) A_z v ds
     for (&lab, &l_k_sq) in &sheet_lk {
@@ -193,13 +260,14 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         }
     }
 
-    if ground_labels.is_empty() {
+    if ground_labels.is_empty() && !has_far_field {
         let exterior = mesh.exterior_facets();
         for f in 0..mesh.n_facets() {
             let lab = mesh.facet_labels[f];
             if exterior[f]
                 && !term_label_set.contains(&lab)
                 && !sheet_lk.contains_key(&lab)
+                && !ff_label_set.contains(&lab)
                 && !ground_labels.contains(&lab)
             {
                 ground_labels.push(lab);
@@ -207,8 +275,11 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         }
     }
     let fixed = boundary_dofs(mesh, &ground_labels, order);
-    if fixed.is_empty() {
-        return Err("2D cross_section magnetostatics needs an exterior or ground reference boundary (A_z = 0)".into());
+    if fixed.is_empty() && !has_far_field {
+        return Err(
+            "2D cross_section magnetostatics needs an exterior, ground, or far_field reference boundary (A_z = 0)"
+                .into(),
+        );
     }
 
     let n = k.nrows();
@@ -711,12 +782,22 @@ fn mixed_3d_fields(mesh: &Discretisation, order: usize, a_edges: &[f64]) -> (Vec
 }
 
 fn solve_mixed_3d(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    if spec.has_infinite_element() || spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+        let cm = Mesh::from_solver_mesh(mesh).map_err(|e| e.to_string())?;
+        return solve_mixed_3d_mixed(&cm, spec);
+    }
     let t0 = Instant::now();
     if mesh.dim != 3 {
         return Err("the 'mixed_3d' magnetostatic formulation requires a 3D mesh".into());
     }
     let order = spec.order;
-    check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
+    check_boundary_labels(
+        mesh,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
     let excitations = collect_excitations(spec)?;
     let mu_r = spec.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     if mu_r.iter().any(|&m| m <= 0.0) {
@@ -1121,6 +1202,919 @@ pub fn solve_magnetostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         "cross_section" => solve_cross_section(mesh, spec),
         "planar_stream" => solve_planar_stream(mesh, spec),
         "mixed_3d" => solve_mixed_3d(mesh, spec),
+        other => Err(format!(
+            "unknown magnetostatic formulation '{other}' (expected 'auto', 'cross_section', 'planar_stream', or 'mixed_3d')"
+        )),
+    }
+}
+
+// ------------------------------------------------------------------ Native Mixed-Cell & Open-Boundary Magnetostatics
+
+fn cross_section_fields_mixed(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    order: usize,
+    az_mixed: &[f64],
+) -> (Vec<Field>, CellFields) {
+    let az_simplex = proj.project_lagrange_blocks(mixed, dof_map, az_mixed, 1, order);
+    let ones = vec![1.0; mixed.n_cells()];
+    let grad_az = sample_mixed_gradients_on_simplex(mixed, dof_map, proj, az_mixed, None, &ones, order);
+    let mut bcell = vec![0.0; grad_az.len()];
+    for p in 0..(grad_az.len() / 2) {
+        let dax = grad_az[2 * p];
+        let daz = grad_az[2 * p + 1];
+        bcell[2 * p] = -daz;
+        bcell[2 * p + 1] = dax;
+    }
+    let b_avg = node_average(simplex, &bcell, 2, order);
+    let bc = components(&b_avg, 2);
+    let names = femcore::section::component_names(2);
+    let fields = vec![Field::scalar("A", "T m", az_simplex.clone()), Field::vector("B", "T", names, &bc)];
+    let mut cf = CellFields::new(simplex, order);
+    cf.push_real("A", "T m", cell_values_at_nodes(simplex, &az_simplex, order));
+    cf.push_components("B", names, "T", &bcell);
+    (fields, cf)
+}
+
+fn solve_cross_section_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String> {
+    if mesh.is_pure_simplex() && !spec.has_infinite_element() {
+        let d = discretise(mesh).map_err(|e| e.to_string())?;
+        return solve_cross_section(&d, spec);
+    }
+    let t0 = Instant::now();
+    if mesh.dim() != 2 {
+        return Err("the 'cross_section' magnetostatic formulation requires a 2D mesh".into());
+    }
+    let order = spec.order;
+    let mixed = discretise_mixed(mesh).map_err(|e| e.to_string())?;
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, &mixed).map_err(|e| e.to_string())?;
+    let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+    let dof_map = MixedLagrangeDofMap::new(&mixed, space);
+
+    check_boundary_labels_mixed(
+        &mixed,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
+    let excitations = collect_excitations(spec)?;
+    let ie_map = resolve_ie_domains_mixed(&mixed, spec)?;
+    let mu_r = cell_values_mixed(&spec.materials, &mixed, "mu_r", Some(1.0))?;
+    if mu_r.iter().any(|&m| m <= 0.0) {
+        return Err("material property 'mu_r' must be positive".into());
+    }
+    let inv_mur: Vec<f64> = mu_r.iter().map(|&m| 1.0 / m).collect();
+    let coeff: Vec<f64> = inv_mur.iter().map(|&im| im / MU0).collect();
+    let mut k = assemble_laplace_ie_mixed(&mixed, &dof_map, &coeff, None, &ie_map);
+
+    let mut sheet_lk: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut ground_labels: Vec<i32> = Vec::new();
+    let mut ff_label_set: BTreeSet<i32> = BTreeSet::new();
+    for bc in &spec.bcs {
+        match &bc.kind {
+            BcKind::LondonSheet { l_k_sq } => {
+                for &lab in &bc.labels {
+                    sheet_lk.insert(lab, *l_k_sq);
+                }
+            }
+            BcKind::Ground => {
+                for &lab in &bc.labels {
+                    if !ground_labels.contains(&lab) {
+                        ground_labels.push(lab);
+                    }
+                }
+            }
+            BcKind::FarField { .. } => {
+                for &lab in &bc.labels {
+                    ff_label_set.insert(lab);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let term_label_set: BTreeSet<i32> = excitations.iter().flat_map(|e| e.labels.iter().copied()).collect();
+    let ref_labels: Vec<i32> = term_label_set.iter().copied().collect();
+    let mut has_far_field = false;
+    let mur_perm = FarFieldPermittivity::Scalar(&inv_mur);
+    for bc in &spec.bcs {
+        if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !ground_labels.contains(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid_mixed(&mixed, &ref_labels));
+                let k_far = assemble_farfield_robin_mixed(
+                    &mixed,
+                    &dof_map,
+                    &ff_labs,
+                    *ff_order,
+                    *decay_power,
+                    c,
+                    1.0 / MU0,
+                    mur_perm,
+                );
+                k = k.add_scaled(&k_far, 1.0);
+                has_far_field = true;
+            }
+        }
+    }
+
+    let (ie_rat_facets, ie_exp_facets) = classify_ie_outer_facets_mixed(&mixed, &ie_map);
+    let mut ie_exp_facet_set = BTreeSet::new();
+    if !ie_exp_facets.is_empty() {
+        for &(f_idx, _, _) in &ie_exp_facets {
+            ie_exp_facet_set.insert(f_idx);
+        }
+        let k_ie_rob = assemble_ie_outer_robin_mixed(&mixed, &dof_map, &ie_exp_facets, &ie_map, 1.0 / MU0, mur_perm);
+        k = k.add_scaled(&k_ie_rob, 1.0);
+        has_far_field = true;
+    }
+
+    for (&lab, &l_k_sq) in &sheet_lk {
+        if !term_label_set.contains(&lab) {
+            if l_k_sq > 0.0 {
+                k = k.add_scaled(&assemble_boundary_mass_mixed(&mixed, &dof_map, &[lab], 1.0 / l_k_sq), 1.0);
+            } else if !ground_labels.contains(&lab) {
+                ground_labels.push(lab);
+            }
+        }
+    }
+
+    let mut fixed_set: BTreeSet<usize> = dof_map.boundary_dofs(&mixed, &ground_labels).into_iter().collect();
+    if !ie_rat_facets.is_empty() {
+        let mut fbuf = Vec::new();
+        for &f_idx in &ie_rat_facets {
+            dof_map.facet_dofs(&mixed, f_idx, &mut fbuf);
+            fixed_set.extend(fbuf.iter().copied());
+        }
+    }
+
+    if fixed_set.is_empty() && !has_far_field {
+        let mut fbuf = Vec::new();
+        for f in 0..mixed.n_facets() {
+            let lab = mixed.facet_labels[f];
+            if mixed.exterior_facets[f]
+                && !term_label_set.contains(&lab)
+                && !sheet_lk.contains_key(&lab)
+                && !ff_label_set.contains(&lab)
+                && !ie_exp_facet_set.contains(&f)
+            {
+                dof_map.facet_dofs(&mixed, f, &mut fbuf);
+                fixed_set.extend(fbuf.iter().copied());
+            }
+        }
+    }
+    let fixed: Vec<usize> = fixed_set.into_iter().collect();
+    if fixed.is_empty() && !has_far_field {
+        return Err(
+            "2D cross_section magnetostatics needs an exterior, ground, or far_field reference boundary (A_z = 0)"
+                .into(),
+        );
+    }
+
+    let n = dof_map.n_dofs;
+    let free = free_dofs(n, &fixed);
+    let n_free = free.len();
+    let n_exc = excitations.len();
+
+    let mut rhs_full_list = Vec::with_capacity(n_exc);
+    let mut term_kin_self = vec![0.0; n_exc];
+    for (p, ex) in excitations.iter().enumerate() {
+        let width = boundary_measure_mixed(&mixed, &ex.labels);
+        if width <= 0.0 {
+            return Err(format!("current_terminal '{}' has zero boundary measure", ex.name));
+        }
+        let j_surf = ex.amplitude / width;
+        rhs_full_list.push(assemble_boundary_load_mixed(&mixed, &dof_map, &ex.labels, j_surf));
+
+        let mut lk_int = 0.0;
+        for (&lab, &lk) in &sheet_lk {
+            if lk > 0.0 && ex.labels.contains(&lab) {
+                lk_int += lk * boundary_measure_mixed(&mixed, &[lab]);
+            }
+        }
+        term_kin_self[p] = lk_int / (width * width);
+    }
+
+    let kff = k.submatrix(&free, &free);
+    let rhs_free_list: Vec<Vec<f64>> = rhs_full_list.iter().map(|r| free.iter().map(|&i| r[i]).collect()).collect();
+    let solver = DirectSolver::new(&kff, true)?;
+    let sols_free = solver.solve_many(&rhs_free_list);
+    let log = vec![format!(
+        "2D cross_section magnetostatics: 1 factorization ({n_free} free mixed-cell dofs) served {n_exc} excitation(s)"
+    )];
+
+    let mut az_all = vec![vec![0.0; n]; n_exc];
+    for p in 0..n_exc {
+        for (a, &i) in free.iter().enumerate() {
+            az_all[p][i] = sols_free[p][a];
+        }
+    }
+
+    let kaz_all: Vec<Vec<f64>> = az_all.iter().map(|a| k.matvec(a)).collect();
+    let mut l_mat = vec![vec![0.0; n_exc]; n_exc];
+    for i in 0..n_exc {
+        for j in i..n_exc {
+            let e_ij = az_all[i].iter().zip(&kaz_all[j]).map(|(a, b)| a * b).sum::<f64>();
+            let e_ji = if i == j { e_ij } else { az_all[j].iter().zip(&kaz_all[i]).map(|(a, b)| a * b).sum::<f64>() };
+            let mut lij = 0.5 * (e_ij + e_ji) / (excitations[i].amplitude * excitations[j].amplitude);
+            if i == j {
+                lij += term_kin_self[i];
+            }
+            l_mat[i][j] = lij;
+            l_mat[j][i] = lij;
+        }
+    }
+
+    let mut solutions = Vec::with_capacity(n_exc);
+    let mut scalars = Vec::new();
+    for p in 0..n_exc {
+        let (fields, cell_fields) = cross_section_fields_mixed(&mixed, &dof_map, &simplex, &proj, order, &az_all[p]);
+        if p == 0 {
+            let bn = norm_of(&components(&fields[1].values, 2));
+            let w_m = 0.5 * l_mat[0][0] * excitations[0].amplitude.powi(2);
+            scalars.push(("stored magnetic energy W_m (J/m)".into(), Scalar::Num(w_m)));
+            scalars.push(("max |B| (T)".into(), Scalar::Num(minmax(&bn).1)));
+        }
+        solutions.push(Solution {
+            label: format!("terminal {}", excitations[p].name),
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            value: Some(l_mat[p][p]),
+            ..Default::default()
+        });
+    }
+
+    push_inductance_scalars(&mut scalars, &excitations, &l_mat, "cross_section");
+
+    Ok(SolveResult {
+        physics: "dfs".into(),
+        study: spec.study.kind().into(),
+        order: order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: n,
+    })
+}
+
+/// Assembles the 3D 1st-order asymptotic curl-Robin boundary stiffness
+/// `K_{far,ab} = \int_{\Gamma} (\gamma s_\Omega / (\mu_r r)) (\hat{\mathbf{n}} \times \mathbf{w}_a) \cdot (\hat{\mathbf{n}} \times \mathbf{w}_b) dS`
+/// (`\mu_0`-scaled to match `k_vol`) over 3D `Tri3` and `Quad4` exterior facets.
+#[allow(clippy::too_many_arguments)]
+fn assemble_curl_robin_3d_mixed(
+    mixed: &MixedDiscretisation,
+    ned: &NedMixed,
+    n_total: usize,
+    mu_r: &[f64],
+    facets_with_meta: &[(usize, usize, f64, [f64; 3], f64)], // (facet_idx, cell_idx, gamma, center, s_omega)
+) -> Csr {
+    if facets_with_meta.is_empty() {
+        return Csr::zeros(n_total, n_total);
+    }
+    let mut coo = Coo::new(n_total, n_total);
+    let mut scratch = NedEvalScratch::default();
+    let mut w_out = Vec::new();
+    let mut curl_out = Vec::new();
+    let mut nw: Vec<[f64; 3]> = Vec::new();
+    let mut ke = Vec::new();
+
+    for &(f, c_f, gamma, center, s_omega) in facets_with_meta {
+        let ct = mixed.cell_type(c_f);
+        let vs = mixed.cell(c_f);
+        let fv = mixed.facet(f);
+        let ft = mixed.facet_type(f);
+        let corner_refs = cell_corner_ref_coords(ct);
+
+        let mut facet_corner_refs = Vec::with_capacity(fv.len());
+        let mut all_found = true;
+        for &v_id in fv {
+            if let Some(pos) = vs.iter().position(|&x| x == v_id) {
+                facet_corner_refs.push(corner_refs[pos]);
+            } else {
+                all_found = false;
+                break;
+            }
+        }
+        if !all_found {
+            continue;
+        }
+
+        let iso = IsoparametricCell::from_mesh(mixed, c_f);
+        let dofs = ned.cell_dofs(c_f);
+        let nloc = dofs.len();
+        ke.clear();
+        ke.resize(nloc * nloc, 0.0);
+
+        let rule = facet_rule_mixed(ft, if iso.curved { 4 } else { 2 });
+        let inv_mur = 1.0 / mu_r[c_f];
+
+        for (eta, &wq) in rule.pts.iter().zip(&rule.w) {
+            let (x_q, ds_factor, n_hat) = eval_facet_jacobian(mixed, f, eta);
+            if ds_factor <= 1e-30 {
+                continue;
+            }
+            let r_vec = sub3(x_q, center);
+            let r = dot3(r_vec, r_vec).sqrt();
+            if r <= 1e-30 {
+                continue;
+            }
+
+            let (n_f, _) = facet_lagrange_shape(ft, LagrangeSpace::Order1, eta);
+            let mut xi_cell = [0.0; 3];
+            for (k, &nk) in n_f.iter().enumerate() {
+                xi_cell[0] += nk * facet_corner_refs[k][0];
+                xi_cell[1] += nk * facet_corner_refs[k][1];
+                xi_cell[2] += nk * facet_corner_refs[k][2];
+            }
+
+            eval_cell_basis_3d(mixed, ned, c_f, &iso, &xi_cell, &mut scratch, &mut w_out, &mut curl_out);
+            nw.clear();
+            for w_a in &w_out {
+                nw.push(cross3(n_hat, *w_a));
+            }
+
+            let w = wq * ds_factor * (gamma * s_omega * inv_mur / r);
+            for a in 0..nloc {
+                for b in 0..nloc {
+                    ke[a * nloc + b] += w * dot3(nw[a], nw[b]);
+                }
+            }
+        }
+        coo.push_block(dofs, dofs, &ke);
+    }
+    coo.to_csr()
+}
+
+fn mixed_3d_fields_mixed(
+    mixed: &MixedDiscretisation,
+    ned: &NedMixed,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    order: usize,
+    a_edges: &[f64],
+    ie_map: &BTreeMap<i32, ResolvedIeDomain>,
+) -> (Vec<Field>, CellFields) {
+    let iso_cells: Vec<IsoparametricCell> =
+        (0..mixed.n_cells()).map(|c| IsoparametricCell::from_mesh(mixed, c)).collect();
+    let mut scratch = NedEvalScratch::default();
+    let mut w_out = Vec::new();
+    let mut curl_out = Vec::new();
+
+    let samples: Vec<(f64, [f64; 3])> = proj.sample_simplex_cell_nodes(mixed, order, |mc, xi| {
+        let jac_k = eval_cell_basis_3d(mixed, ned, mc, &iso_cells[mc], xi, &mut scratch, &mut w_out, &mut curl_out);
+        let dofs = ned.cell_dofs(mc);
+        let mut aval = [0.0; 3];
+        let mut bval = [0.0; 3];
+        for (s, &gd) in dofs.iter().enumerate() {
+            let coef = a_edges[gd];
+            for k in 0..3 {
+                aval[k] += coef * w_out[s][k];
+                bval[k] += coef * curl_out[s][k];
+            }
+        }
+        if let Some(ie) = ie_map.get(&mixed.cell_labels[mc]) {
+            let jac_ie = ie.eval_jacobian(jac_k.x, 3);
+            let inv_det = 1.0 / jac_ie.det.re.abs().max(1e-30);
+            let mut b_ie = [0.0; 3];
+            for i in 0..3 {
+                for m in 0..3 {
+                    b_ie[i] += jac_ie.j[i][m].re * bval[m] * inv_det;
+                }
+            }
+            bval = b_ie;
+        }
+        (dot3(aval, aval).sqrt(), bval)
+    });
+
+    let mut a_mag_cell = Vec::with_capacity(samples.len());
+    let mut b_cell = Vec::with_capacity(samples.len() * 3);
+    for (amag, b) in samples {
+        a_mag_cell.push(amag);
+        b_cell.extend_from_slice(&b);
+    }
+
+    let a_nodal = node_average(simplex, &a_mag_cell, 1, order);
+    let b_nodal = node_average(simplex, &b_cell, 3, order);
+    let bc = components(&b_nodal, 3);
+    let names = femcore::section::component_names(3);
+    let fields = vec![Field::scalar("A", "T m", a_nodal), Field::vector("B", "T", names, &bc)];
+    let mut cf = CellFields::new(simplex, order);
+    cf.push_real("A", "T m", a_mag_cell);
+    cf.push_components("B", names, "T", &b_cell);
+    (fields, cf)
+}
+
+fn solve_mixed_3d_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String> {
+    if mesh.is_pure_simplex()
+        && !spec.has_infinite_element()
+        && !spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. }))
+    {
+        let d = discretise(mesh).map_err(|e| e.to_string())?;
+        return solve_mixed_3d(&d, spec);
+    }
+    let t0 = Instant::now();
+    if mesh.dim() != 3 {
+        return Err("the 'mixed_3d' magnetostatic formulation requires a 3D mesh".into());
+    }
+    let order = spec.order;
+    let mixed = discretise_mixed(mesh).map_err(|e| e.to_string())?;
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, &mixed).map_err(|e| e.to_string())?;
+    let ned = NedMixed::new(&mixed, 1);
+
+    check_boundary_labels_mixed(
+        &mixed,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
+    let excitations = collect_excitations(spec)?;
+    let ie_map = resolve_ie_domains_mixed(&mixed, spec)?;
+    let mu_r = cell_values_mixed(&spec.materials, &mixed, "mu_r", Some(1.0))?;
+    if mu_r.iter().any(|&m| m <= 0.0) {
+        return Err("material property 'mu_r' must be positive".into());
+    }
+
+    let (lo, hi) = mixed.bbox();
+    let l_dom = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt().max(1e-12);
+    let eps_reg = 1e-6 / (l_dom * l_dom);
+
+    let mut sheet_lk_by_label: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut ground_labels: Vec<i32> = Vec::new();
+    for bc in &spec.bcs {
+        match &bc.kind {
+            BcKind::LondonSheet { l_k_sq } => {
+                for &lab in &bc.labels {
+                    sheet_lk_by_label.insert(lab, *l_k_sq);
+                }
+            }
+            BcKind::Ground => {
+                for &lab in &bc.labels {
+                    if !ground_labels.contains(&lab) {
+                        ground_labels.push(lab);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Single-facet deduplication of london_sheet triangles by sorted [v0, v1, v2]
+    let mut dedup_sheets: BTreeMap<[u32; 3], f64> = BTreeMap::new();
+    for f in 0..mixed.n_facets() {
+        let lab = mixed.facet_labels[f];
+        if let Some(&lk) = sheet_lk_by_label.get(&lab) {
+            let fv = mixed.facet(f);
+            if fv.len() == 3 {
+                let mut key = [fv[0], fv[1], fv[2]];
+                key.sort_unstable();
+                let lk_eff = if lk > 0.0 { lk } else { 1e-6 * MU0 * l_dom };
+                dedup_sheets.entry(key).or_insert(lk_eff);
+            }
+        }
+    }
+
+    let n_edges = ned.n_dofs;
+    let mut sheet_verts_set = BTreeSet::new();
+    let mut sheet_edges_set = BTreeSet::new();
+    for &[v0, v1, v2] in dedup_sheets.keys() {
+        sheet_verts_set.insert(v0);
+        sheet_verts_set.insert(v1);
+        sheet_verts_set.insert(v2);
+        if let Some(e) = mixed.edge_index(v0, v1) {
+            sheet_edges_set.insert(e);
+        }
+        if let Some(e) = mixed.edge_index(v0, v2) {
+            sheet_edges_set.insert(e);
+        }
+        if let Some(e) = mixed.edge_index(v1, v2) {
+            sheet_edges_set.insert(e);
+        }
+    }
+    let sheet_verts: Vec<u32> = sheet_verts_set.into_iter().collect();
+    let vert_to_sidx: BTreeMap<u32, usize> = sheet_verts.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+    let n_sverts = sheet_verts.len();
+    let n_total = n_edges + n_sverts;
+
+    // 1. Assemble 3D volume curl-curl + gauge regularization matrix over Nedelec edges 0..n_edges
+    //    (transforming curl-curl inside IE domains via (1 / det J_IE) (J_IE curl w_a)^T mu_r^-1 (J_IE curl w_b))
+    let nc = mixed.n_cells();
+    let k_vol = assemble_parallel(nc, n_total, n_total, |range, coo| {
+        let mut scratch = NedEvalScratch::default();
+        let mut sn = Vec::new();
+        let mut sdn = Vec::new();
+        let mut w_out = Vec::new();
+        let mut curl_out = Vec::new();
+        let mut tilde_c: Vec<[f64; 3]> = Vec::new();
+        let mut ke = Vec::new();
+
+        for c in range {
+            let ct = mixed.cell_type(c);
+            let iso = IsoparametricCell::from_mesh(&mixed, c);
+            let ie_opt = ie_map.get(&mixed.cell_labels[c]);
+            let deg = if ie_opt.is_some() || iso.curved { 4 } else { 2 };
+            let rule = quad_rule_mixed(ct, deg);
+            let dofs = ned.cell_dofs(c);
+            let nloc = dofs.len();
+            ke.clear();
+            ke.resize(nloc * nloc, 0.0);
+            let inv_mur = 1.0 / mu_r[c];
+
+            for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+                let jac_k = eval_cell_basis_3d(&mixed, &ned, c, &iso, xi, &mut scratch, &mut w_out, &mut curl_out);
+                let w_phys = wq * jac_k.det.abs();
+
+                if let Some(ie) = ie_opt {
+                    let _ = iso.eval_into(xi, &mut sn, &mut sdn);
+                    let jac_ie = ie.eval_cell_jacobian(&iso, &jac_k, &sn, &sdn, 3);
+                    let det_ie = jac_ie.det.re.abs().max(1e-30);
+                    let w_curl = w_phys * inv_mur / det_ie;
+                    tilde_c.clear();
+                    for cu in &curl_out {
+                        let mut tc = [0.0; 3];
+                        for i in 0..3 {
+                            for m in 0..3 {
+                                tc[i] += jac_ie.j[i][m].re * cu[m];
+                            }
+                        }
+                        tilde_c.push(tc);
+                    }
+                    for i in 0..nloc {
+                        for j in 0..nloc {
+                            let curl_dot = dot3(tilde_c[i], tilde_c[j]);
+                            let mass_dot = dot3(w_out[i], w_out[j]);
+                            ke[i * nloc + j] += w_curl * curl_dot + w_phys * eps_reg * mass_dot;
+                        }
+                    }
+                } else {
+                    for i in 0..nloc {
+                        for j in 0..nloc {
+                            let curl_dot = dot3(curl_out[i], curl_out[j]);
+                            let mass_dot = dot3(w_out[i], w_out[j]);
+                            ke[i * nloc + j] += w_phys * (inv_mur * curl_dot + eps_reg * mass_dot);
+                        }
+                    }
+                }
+            }
+            coo.push_block(dofs, dofs, &ke);
+        }
+    });
+
+    // 2. Assemble 2D surface kinetic coupling term on deduplicated london_sheet triangles
+    let qtri = quad_rule(2, 2);
+    let mut coo_surf = Coo::new(n_total, n_total);
+    let pt3 = |v: u32| -> [f64; 3] { mixed.point3(v as usize) };
+
+    for (&[v0, v1, v2], &lk) in &dedup_sheets {
+        let (p0, p1, p2) = (pt3(v0), pt3(v1), pt3(v2));
+        let (area, _normal, g_surf) = triangle_surface_gradients(p0, p1, p2);
+        if area <= 1e-30 {
+            continue;
+        }
+        let e01 = mixed.edge_index(v0, v1).unwrap();
+        let e02 = mixed.edge_index(v0, v2).unwrap();
+        let e12 = mixed.edge_index(v1, v2).unwrap();
+        let s0 = n_edges + vert_to_sidx[&v0];
+        let s1 = n_edges + vert_to_sidx[&v1];
+        let s2 = n_edges + vert_to_sidx[&v2];
+        let dofs = [e01, e02, e12, s0, s1, s2];
+        let coeff = (MU0 / lk) * area;
+
+        let mut ke = [0.0; 36];
+        for q in 0..qtri.w.len() {
+            let l = &qtri.lam[q];
+            let w01 = sub3(scale3(l[0], g_surf[1]), scale3(l[1], g_surf[0]));
+            let w02 = sub3(scale3(l[0], g_surf[2]), scale3(l[2], g_surf[0]));
+            let w12 = sub3(scale3(l[1], g_surf[2]), scale3(l[2], g_surf[1]));
+            let basis = [w01, w02, w12, scale3(-1.0, g_surf[0]), scale3(-1.0, g_surf[1]), scale3(-1.0, g_surf[2])];
+            let wq = coeff * qtri.w[q];
+            for i in 0..6 {
+                for j in 0..6 {
+                    ke[i * 6 + j] += wq * dot3(basis[i], basis[j]);
+                }
+            }
+        }
+        coo_surf.push_block(&dofs, &dofs, &ke);
+    }
+
+    let mut k_mag = k_vol.add_scaled(&coo_surf.to_csr(), 1.0);
+
+    // 3. Assemble 1st-order asymptotic curl-Robin boundary term on `far_field` and `Exponential` IE exterior facets
+    let ref_labels: Vec<i32> = excitations.iter().flat_map(|e| e.labels.iter().copied()).collect();
+    let f2c = build_facet_to_cell_mixed(&mixed);
+    let mut robin_facets: Vec<(usize, usize, f64, [f64; 3], f64)> = Vec::new();
+    for bc in &spec.bcs {
+        if let BcKind::FarField { decay_power, center, .. } = &bc.kind {
+            let ff_labs: Vec<i32> = bc.labels.iter().copied().filter(|l| !ground_labels.contains(l)).collect();
+            if !ff_labs.is_empty() {
+                let c = center.unwrap_or_else(|| farfield_centroid_mixed(&mixed, &ref_labels));
+                let gamma = if decay_power.is_finite() && *decay_power > 0.0 { *decay_power } else { 1.0 };
+                for f in 0..mixed.n_facets() {
+                    if ff_labs.contains(&mixed.facet_labels[f]) {
+                        if let Some(c_f) = f2c[f] {
+                            robin_facets.push((f, c_f, gamma, c, 1.0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let (ie_rat_facets, ie_exp_facets) = classify_ie_outer_facets_mixed(&mixed, &ie_map);
+    for &(f_idx, c_f, s_omega) in &ie_exp_facets {
+        let dom = mixed.cell_labels[c_f];
+        let c = ie_map.get(&dom).map_or_else(|| farfield_centroid_mixed(&mixed, &ref_labels), |ie| ie.center);
+        robin_facets.push((f_idx, c_f, 1.0, c, s_omega));
+    }
+    if !robin_facets.is_empty() {
+        let k_rob = assemble_curl_robin_3d_mixed(&mixed, &ned, n_total, &mu_r, &robin_facets);
+        k_mag = k_mag.add_scaled(&k_rob, 1.0);
+    }
+
+    // 4. Pin one reference phi_s vertex per connected sheet component (plus terminal end-pins)
+    let mut fixed_set = BTreeSet::new();
+    if n_sverts > 0 {
+        let mut parent: Vec<usize> = (0..n_sverts).collect();
+        fn find(p: &mut [usize], mut i: usize) -> usize {
+            while p[i] != i {
+                p[i] = p[p[i]];
+                i = p[i];
+            }
+            i
+        }
+        for &[v0, v1, v2] in dedup_sheets.keys() {
+            let (i0, i1, i2) = (vert_to_sidx[&v0], vert_to_sidx[&v1], vert_to_sidx[&v2]);
+            for (a, b) in [(i0, i1), (i1, i2), (i0, i2)] {
+                let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+                if ra != rb {
+                    parent[ra.max(rb)] = ra.min(rb);
+                }
+            }
+        }
+        let mut seen_roots = BTreeSet::new();
+        for i in 0..n_sverts {
+            let r = find(&mut parent, i);
+            if seen_roots.insert(r) {
+                fixed_set.insert(n_edges + r);
+            }
+        }
+    }
+
+    // Exterior PEC / Ground Nedelec edge constraints + outer Rational IE facets (`\tilde{R} = \infty`)
+    for f in 0..mixed.n_facets() {
+        let lab = mixed.facet_labels[f];
+        if ground_labels.contains(&lab) {
+            for e in ned.facet_dofs(&mixed, f) {
+                if !sheet_edges_set.contains(&e) {
+                    fixed_set.insert(e);
+                }
+            }
+        }
+    }
+    for &f_idx in &ie_rat_facets {
+        for e in ned.facet_dofs(&mixed, f_idx) {
+            if !sheet_edges_set.contains(&e) {
+                fixed_set.insert(e);
+            }
+        }
+    }
+
+    // 5. Build right-hand sides mu_0 * I_p * b_p for all current_terminal and flux_loop excitations
+    let n_exc = excitations.len();
+    let mut rhs_full_list = vec![vec![0.0; n_total]; n_exc];
+
+    for (p, ex) in excitations.iter().enumerate() {
+        let mut ex_tris: BTreeSet<[u32; 3]> = BTreeSet::new();
+        for f in 0..mixed.n_facets() {
+            if ex.labels.contains(&mixed.facet_labels[f]) {
+                let fv = mixed.facet(f);
+                if fv.len() == 3 {
+                    let mut key = [fv[0], fv[1], fv[2]];
+                    key.sort_unstable();
+                    ex_tris.insert(key);
+                }
+            }
+        }
+        if ex_tris.is_empty() {
+            return Err(format!("excitation '{}' has no boundary facets", ex.name));
+        }
+
+        let mut cx = [0.0; 3];
+        let mut total_area = 0.0;
+        for &[v0, v1, v2] in &ex_tris {
+            let (p0, p1, p2) = (pt3(v0), pt3(v1), pt3(v2));
+            let (area, _, _) = triangle_surface_gradients(p0, p1, p2);
+            let cen = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0, (p0[2] + p1[2] + p2[2]) / 3.0];
+            for k in 0..3 {
+                cx[k] += area * cen[k];
+            }
+            total_area += area;
+        }
+        if total_area <= 1e-30 {
+            return Err(format!("excitation '{}' has zero facet area", ex.name));
+        }
+        for k in 0..3 {
+            cx[k] /= total_area;
+        }
+
+        let d_norm = dot3(ex.direction, ex.direction).sqrt().max(1e-30);
+        let d_unit = scale3(1.0 / d_norm, ex.direction);
+        let (mut s_min, mut s_max) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &[v0, v1, v2] in &ex_tris {
+            for v in [v0, v1, v2] {
+                let s = dot3(pt3(v), d_unit);
+                s_min = s_min.min(s);
+                s_max = s_max.max(s);
+            }
+        }
+        let span = (s_max - s_min).max(0.0);
+        let density_scale = if span > 1e-12 { span / total_area } else { 1.0 / total_area };
+
+        if !ex.is_flux_loop && span > 1e-12 {
+            let end_tol = 0.05 * span;
+            for &[v0, v1, v2] in &ex_tris {
+                for v in [v0, v1, v2] {
+                    if let Some(&sidx) = vert_to_sidx.get(&v) {
+                        let s = dot3(pt3(v), d_unit);
+                        if (s - s_min).abs() <= end_tol || (s_max - s).abs() <= end_tol {
+                            fixed_set.insert(n_edges + sidx);
+                        }
+                    }
+                }
+            }
+        }
+
+        let rhs = &mut rhs_full_list[p];
+        for &[v0, v1, v2] in &ex_tris {
+            let (p0, p1, p2) = (pt3(v0), pt3(v1), pt3(v2));
+            let (area, normal, g_surf) = triangle_surface_gradients(p0, p1, p2);
+            if area <= 1e-30 {
+                continue;
+            }
+            let e01 = mixed.edge_index(v0, v1).unwrap();
+            let e02 = mixed.edge_index(v0, v2).unwrap();
+            let e12 = mixed.edge_index(v1, v2).unwrap();
+
+            for q in 0..qtri.w.len() {
+                let l = &qtri.lam[q];
+                let rq = [
+                    l[0] * p0[0] + l[1] * p1[0] + l[2] * p2[0],
+                    l[0] * p0[1] + l[1] * p1[1] + l[2] * p2[1],
+                    l[0] * p0[2] + l[1] * p1[2] + l[2] * p2[2],
+                ];
+                let dir_vec = if ex.is_flux_loop {
+                    let n_up = if normal[2] < -1e-12
+                        || (normal[2].abs() <= 1e-12
+                            && (normal[1] < -1e-12 || (normal[1].abs() <= 1e-12 && normal[0] < 0.0)))
+                    {
+                        scale3(-1.0, normal)
+                    } else {
+                        normal
+                    };
+                    let rel = sub3(rq, cx);
+                    let tan = cross3(n_up, rel);
+                    let r_len = dot3(tan, tan).sqrt();
+                    if r_len > 1e-30 {
+                        scale3(density_scale / r_len, tan)
+                    } else {
+                        [0.0; 3]
+                    }
+                } else {
+                    let d_proj = sub3(d_unit, scale3(dot3(d_unit, normal), normal));
+                    let dp_len = dot3(d_proj, d_proj).sqrt();
+                    if dp_len > 1e-12 {
+                        scale3(density_scale / dp_len, d_proj)
+                    } else {
+                        scale3(density_scale, d_unit)
+                    }
+                };
+
+                let w01 = sub3(scale3(l[0], g_surf[1]), scale3(l[1], g_surf[0]));
+                let w02 = sub3(scale3(l[0], g_surf[2]), scale3(l[2], g_surf[0]));
+                let w12 = sub3(scale3(l[1], g_surf[2]), scale3(l[2], g_surf[1]));
+                let wq = MU0 * ex.amplitude * area * qtri.w[q];
+
+                rhs[e01] += wq * dot3(dir_vec, w01);
+                rhs[e02] += wq * dot3(dir_vec, w02);
+                rhs[e12] += wq * dot3(dir_vec, w12);
+
+                if ex.is_flux_loop {
+                    if let (Some(&i0), Some(&i1), Some(&i2)) =
+                        (vert_to_sidx.get(&v0), vert_to_sidx.get(&v1), vert_to_sidx.get(&v2))
+                    {
+                        rhs[n_edges + i0] -= wq * dot3(dir_vec, g_surf[0]);
+                        rhs[n_edges + i1] -= wq * dot3(dir_vec, g_surf[1]);
+                        rhs[n_edges + i2] -= wq * dot3(dir_vec, g_surf[2]);
+                    }
+                }
+            }
+        }
+    }
+
+    let fixed: Vec<usize> = fixed_set.into_iter().collect();
+    let free = free_dofs(n_total, &fixed);
+    let n_free = free.len();
+
+    let kff = k_mag.submatrix(&free, &free);
+    let rhs_free_list: Vec<Vec<f64>> = rhs_full_list.iter().map(|r| free.iter().map(|&i| r[i]).collect()).collect();
+
+    let solver = DirectSolver::new(&kff, true)?;
+    let sols_free = solver.solve_many(&rhs_free_list);
+    let log = vec![format!(
+        "3D mixed_3d London magnetostatics: 1 factorization ({n_free} free dofs: {n_edges} Nedelec edges + {n_sverts} sheet phi_s nodes on {} deduplicated triangles) served {n_exc} excitation(s)",
+        dedup_sheets.len()
+    )];
+
+    let mut u_all = vec![vec![0.0; n_total]; n_exc];
+    for p in 0..n_exc {
+        for (a, &i) in free.iter().enumerate() {
+            u_all[p][i] = sols_free[p][a];
+        }
+    }
+
+    let ku_all: Vec<Vec<f64>> = u_all.iter().map(|u| k_mag.matvec(u)).collect();
+    let mut l_mat = vec![vec![0.0; n_exc]; n_exc];
+    for i in 0..n_exc {
+        for j in i..n_exc {
+            let e_ij: f64 = u_all[i].iter().zip(&ku_all[j]).map(|(a, b)| a * b).sum();
+            let e_ji: f64 = if i == j { e_ij } else { u_all[j].iter().zip(&ku_all[i]).map(|(a, b)| a * b).sum() };
+            let lij = 0.5 * (e_ij + e_ji) / (MU0 * excitations[i].amplitude * excitations[j].amplitude);
+            l_mat[i][j] = lij;
+            l_mat[j][i] = lij;
+        }
+    }
+
+    let mut solutions = Vec::with_capacity(n_exc);
+    let mut scalars = Vec::new();
+    for p in 0..n_exc {
+        let a_edges = &u_all[p][..n_edges];
+        let (fields, cell_fields) = mixed_3d_fields_mixed(&mixed, &ned, &simplex, &proj, order, a_edges, &ie_map);
+        if p == 0 {
+            let bn = norm_of(&components(&fields[1].values, 3));
+            let w_m = 0.5 * l_mat[0][0] * excitations[0].amplitude.powi(2);
+            scalars.push(("stored magnetic energy W_m (J)".into(), Scalar::Num(w_m)));
+            scalars.push(("max |B| (T)".into(), Scalar::Num(minmax(&bn).1)));
+        }
+        solutions.push(Solution {
+            label: format!("terminal {}", excitations[p].name),
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            value: Some(l_mat[p][p]),
+            ..Default::default()
+        });
+    }
+
+    push_inductance_scalars(&mut scalars, &excitations, &l_mat, "mixed_3d");
+
+    Ok(SolveResult {
+        physics: "dfs".into(),
+        study: spec.study.kind().into(),
+        order: order as u8,
+        dim: 3,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: n_total,
+    })
+}
+
+/// Solves a magnetostatic problem natively on a mixed mesh (`Quad`, `Prism`, `Hex`) and/or with
+/// domain-applied static Infinite Elements (`BcKind::InfiniteElement`), preserving the pure-simplex
+/// fast path when `mesh.is_pure_simplex() && !spec.has_infinite_element()`.
+pub fn solve_magnetostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String> {
+    if mesh.is_pure_simplex()
+        && !spec.has_infinite_element()
+        && !spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. }))
+    {
+        let d = discretise(mesh).map_err(|e| e.to_string())?;
+        return solve_magnetostatics(&d, spec);
+    }
+    let Study::Magnetostatic { formulation } = &spec.study else {
+        return Err("solve_magnetostatics requires a magnetostatic study".into());
+    };
+    let lower = formulation.trim().to_ascii_lowercase();
+    let form = match lower.as_str() {
+        "" | "auto" => {
+            if mesh.dim() == 2 {
+                "cross_section"
+            } else {
+                "mixed_3d"
+            }
+        }
+        other => other,
+    };
+    match form {
+        "cross_section" => solve_cross_section_mixed(mesh, spec),
+        "planar_stream" => {
+            let d = discretise(mesh).map_err(|e| e.to_string())?;
+            solve_planar_stream(&d, spec)
+        }
+        "mixed_3d" => solve_mixed_3d_mixed(mesh, spec),
         other => Err(format!(
             "unknown magnetostatic formulation '{other}' (expected 'auto', 'cross_section', 'planar_stream', or 'mixed_3d')"
         )),

@@ -176,24 +176,26 @@ fn sapphire_cantilever() -> B {
 }
 
 fn pml_slab() -> B {
-    let (lx, lz) = (40e-3, 10e-3);
+    let lz = 10e-3;
     let mut b = B::new("Dielectric slab guide with PML ends (EM waves, complex modes)", 2, 0.8e-3);
-    b.rect("air_box", [0.0, 0.0], [lx, lz]);
+    b.rect("air_box", [8e-3, 0.0], [32e-3, lz]);
     b.rect("slab_box", [15e-3, 0.0], [25e-3, lz]);
-    b.rect("pml_left_box", [0.0, 0.0], [8e-3, lz]);
-    b.rect("pml_right_box", [32e-3, 0.0], [lx, lz]);
-    b.overlay(&[
-        ("air", "air_box"),
-        ("slab", "slab_box"),
-        ("pml_left", "pml_left_box"),
-        ("pml_right", "pml_right_box"),
-    ]);
+    b.overlay(&[("air", "air_box"), ("slab", "slab_box")]);
+    b.c(
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "sides": ["XMin", "XMax"],
+            "thickness": 8e-3,
+            "layers": 6.0,
+            "grading": 2.0,
+            "layer_grading": 2.0
+        }),
+    );
     b.physics("ems", "modes", json!({ "freq": 12e9, "n_target": 1.9, "n_modes": 6 }), 2);
-    for (n, eps) in [("air", 1.0), ("slab", 4.0), ("pml_left", 1.0), ("pml_right", 1.0)] {
-        b.material("ems", n, json!({ "eps_r": eps, "mu_r": 1.0 }));
-    }
-    b.bc("ems", "pml_left", "pml", json!({ "x": "minus", "strength": 4.0, "order": 2.0 }));
-    b.bc("ems", "pml_right", "pml", json!({ "x": "plus", "strength": 4.0, "order": 2.0 }));
+    b.material("ems", "air*", json!({ "eps_r": 1.0, "mu_r": 1.0 }));
+    b.material("ems", "slab", json!({ "eps_r": 4.0, "mu_r": 1.0 }));
+    b.c("add_pml_conditions", json!({ "physics": "ems", "strength": 4.0 }));
     b
 }
 
@@ -216,38 +218,26 @@ fn plate_with_hole() -> B {
 fn anchor_loss() -> B {
     let mut b =
         B::new("Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)", 2, 0.03);
-    b.rect("substrate_box", [0.0, 0.0], [1.0, 0.5]);
-    b.rect("pml_left_box", [0.0, 0.15], [0.2, 0.5]);
-    b.rect("pml_right_box", [0.8, 0.15], [1.0, 0.5]);
-    b.rect("pml_bottom_box", [0.2, 0.0], [0.8, 0.15]);
-    b.rect("pml_bottom_left_box", [0.0, 0.0], [0.2, 0.15]);
-    b.rect("pml_bottom_right_box", [0.8, 0.0], [1.0, 0.15]);
+    b.rect("substrate_box", [0.2, 0.15], [0.8, 0.5]);
     b.rect("beam_box", [0.49, 0.5], [0.51, 0.8]);
-    b.overlay(&[
-        ("substrate", "substrate_box"),
-        ("pml_left", "pml_left_box"),
-        ("pml_right", "pml_right_box"),
-        ("pml_bottom", "pml_bottom_box"),
-        ("pml_bottom_left", "pml_bottom_left_box"),
-        ("pml_bottom_right", "pml_bottom_right_box"),
-        ("beam", "beam_box"),
-    ]);
+    b.overlay(&[("substrate", "substrate_box"), ("beam", "beam_box")]);
+    b.c(
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "sides": ["XMin", "XMax", "ZMin"],
+            "thickness": 0.2,
+            "layers": 5.0,
+            "grading": 2.0,
+            "layer_grading": 2.0,
+            "regions": ["substrate"]
+        }),
+    );
     b.physics("sms", "eigenfrequency", json!({ "n_modes": 6, "f_search": 0.0 }), 2);
     b.params("sms", json!({ "plane": "strain" }));
-    for r in ["substrate", "pml_left", "pml_right", "pml_bottom", "pml_bottom_left", "pml_bottom_right", "beam"] {
-        steel_like(&mut b, r);
-    }
-    for (name, x, z) in [
-        ("pml_left", "minus", "off"),
-        ("pml_right", "plus", "off"),
-        ("pml_bottom", "off", "minus"),
-        ("pml_bottom_left", "minus", "minus"),
-        ("pml_bottom_right", "plus", "minus"),
-    ] {
-        b.bc("sms", name, "pml", json!({ "x": x, "z": z, "strength": 3.0, "order": 2.0 }));
-    }
-    // clamped on the outer edge of the layers: every boundary below the substrate surface
-    b.bc("sms", "(outer & in_box([-1, 0, -1], [2, 0, 0.5000000001], within)) - plane(z = 0.5)", "fixed", FIXED());
+    steel_like(&mut b, "substrate*");
+    steel_like(&mut b, "beam");
+    b.c("add_pml_conditions", json!({ "physics": "sms", "strength": 3.0 }));
     b
 }
 
@@ -275,14 +265,12 @@ fn sos_strip() -> B {
     let um = 1e-6;
     let (xin, hin, ztop, lp) = (6.0 * um, 10.0 * um, 3.0 * um, 1.0 * um);
     let (w_si, h_si, zone) = (450e-9, 230e-9, 1.5 * um);
-    let x = xin + lp;
     let mut b = B::new("Silicon strip on sapphire at 1550 nm: optical modes (EM waves) and acoustic modes in plane strain (solid mechanics)", 2, 0.4 * um);
-    b.rect("air_box", [-x, -hin - lp], [x, ztop + lp]);
-    b.rect("sapphire_box", [-x, -hin - lp], [x, 0.0]);
+    b.rect("air_box", [-xin, -hin], [xin, ztop]);
+    b.rect("sapphire_box", [-xin, -hin], [xin, 0.0]);
     b.rect("sapphire_near_box", [-zone, -zone], [zone, 0.0]);
     b.rect("air_near_box", [-zone, 0.0], [zone, zone]);
     b.rect("silicon_box", [-w_si / 2.0, 0.0], [w_si / 2.0, h_si]);
-    b.rect("window", [-xin, -hin], [xin, ztop]);
     b.overlay(&[
         ("air", "air_box"),
         ("sapphire", "sapphire_box"),
@@ -290,7 +278,16 @@ fn sos_strip() -> B {
         ("air_near", "air_near_box"),
         ("silicon", "silicon_box"),
     ]);
-    b.c("add_pml", json!({ "name": "pml", "window": "window", "thickness": lp, "layers": 3.0, "grading": 2.0 }));
+    b.c(
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "thickness": lp,
+            "layers": 5.0,
+            "grading": 2.0,
+            "layer_grading": 2.0
+        }),
+    );
     b.c("add_size", json!({ "name": "size_near", "sel": "region(sapphire_near) | region(air_near)", "h": 0.08 * um }));
     b.c("add_size", json!({ "name": "size_si", "sel": "region(silicon)", "h": 40e-9 }));
     // r-plane sapphire: the c axis in the y-z plane, 57.6 degrees from the surface normal
@@ -310,7 +307,6 @@ fn sos_strip() -> B {
     b.material("sms", "sapphire_near*", json!({ "material": "sapphire", "euler_deg": euler }));
     b.material("sms", "silicon", json!("silicon"));
     b.c("add_pml_conditions", json!({ "physics": "sms", "strength": 3.0 }));
-    b.bc("sms", "outer & in_box([-1, 0, -1], [1, 0, 1e-12], within)", "fixed", FIXED());
     b.active("ems");
     b
 }
@@ -374,15 +370,22 @@ fn disk_anchor_loss() -> B {
         2,
         um,
     );
-    b.rect("substrate_box", [0.0, -zw - 0.5 * um - t], [xw + t, -0.5 * um]);
+    b.rect("substrate_box", [0.0, -zw - 0.5 * um], [xw, -0.5 * um]);
     b.rect("post_box", [0.0, -0.5 * um], [0.8 * um, 0.0]);
     b.rect("disk_box", [0.0, 0.0], [6.0 * um, um]);
-    b.rect("window", [0.0, -zw - 0.5 * um], [xw, 3.0 * um]);
     b.overlay(&[("substrate", "substrate_box"), ("post", "post_box"), ("disk", "disk_box")]);
     // layers to the right and below only: the axis is x = 0 and the top is free
     b.c(
-        "add_pml",
-        json!({ "name": "pml", "window": "window", "sides": ["XMax", "ZMin"], "thickness": t, "layers": 3.0, "grading": 2.0, "regions": ["substrate"] }),
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "sides": ["XMax", "ZMin"],
+            "thickness": t,
+            "layers": 5.0,
+            "grading": 2.0,
+            "layer_grading": 2.0,
+            "regions": ["substrate"]
+        }),
     );
     b.c("add_size", json!({ "name": "size_disk", "sel": "region(disk) | region(post)", "h": 0.4 * um }));
     b.physics(
@@ -395,8 +398,101 @@ fn disk_anchor_loss() -> B {
         b.material("sms", r, json!({ "E": 160e9, "nu": 0.22, "rho": 2330.0 }));
     }
     b.c("add_pml_conditions", json!({ "physics": "sms", "strength": 3.0 }));
-    b.bc("sms", &format!("outer & plane(x = {})", xw + t), "fixed", FIXED());
-    b.bc("sms", &format!("outer & plane(z = {})", -zw - 0.5 * um - t), "fixed", FIXED());
+    b
+}
+
+/// 2D cylindrical dielectric resonator surrounded by an outward cylindrical absorbing annulus (`Quad` rings).
+fn wgm_cylindrical_pml() -> B {
+    let um = 1e-6;
+    let mut b = B::new(
+        "Dielectric cylinder with outward cylindrical PML annulus (EM waves, 2D cylindrical Quad shells)",
+        2,
+        0.35 * um,
+    );
+    b.c("add_circle", json!({ "name": "cladding_circle", "center": [0.0, 0.0], "r": 2.2 * um }));
+    b.c("add_circle", json!({ "name": "core_circle", "center": [0.0, 0.0], "r": 1.2 * um }));
+    b.overlay(&[("cladding", "cladding_circle"), ("core", "core_circle")]);
+    b.c(
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "coord": "Cylindrical",
+            "thickness": 0.8 * um,
+            "layers": 5.0,
+            "grading": 2.0,
+            "layer_grading": 2.0
+        }),
+    );
+    b.physics("ems", "modes", json!({ "freq": 299792458.0 / 1.55e-6, "n_target": 2.4, "n_modes": 4 }), 2);
+    b.material("ems", "core", json!({ "eps_r": 12.0, "mu_r": 1.0 }));
+    b.material("ems", "cladding*", json!({ "eps_r": 1.0, "mu_r": 1.0 }));
+    b.c("add_pml_conditions", json!({ "physics": "ems", "auto_scale": true }));
+    b
+}
+
+/// 2D axisymmetric spherical resonator surrounded by an outward spherical semicircle absorbing shell (`Quad` semicircle).
+fn sphere_axisym_pml() -> B {
+    let um = 1e-6;
+    let mut b = B::new(
+        "Axisymmetric dielectric sphere with outward spherical PML shell (EM waves, axisymmetric modes)",
+        2,
+        0.4 * um,
+    );
+    b.c("add_circle", json!({ "name": "air_disk", "center": [0.0, 0.0], "r": 2.5 * um }));
+    b.c("add_circle", json!({ "name": "sphere_disk", "center": [0.0, 0.0], "r": 1.5 * um }));
+    b.overlay(&[("air", "air_disk"), ("sphere", "sphere_disk")]);
+    b.c(
+        "add_cut",
+        json!({
+            "name": "half_plane",
+            "normal": [1.0, 0.0, 0.0],
+            "offset": 0.0,
+            "keep": "Above"
+        }),
+    );
+    b.c(
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "coord": "Spherical",
+            "center": [0.0, 0.0, 0.0],
+            "thickness": 0.8 * um,
+            "layers": 5.0,
+            "grading": 2.0,
+            "layer_grading": 2.0
+        }),
+    );
+    b.physics("ems", "axisymmetric_modes", json!({ "f_search": 1.2e14, "azimuthal_order": 4, "n_modes": 4 }), 2);
+    b.material("ems", "sphere", json!({ "eps_r": 9.0, "mu_r": 1.0 }));
+    b.material("ems", "air*", json!({ "eps_r": 1.0, "mu_r": 1.0 }));
+    b.c("add_pml_conditions", json!({ "physics": "ems", "auto_scale": true }));
+    b
+}
+
+/// 3D spherical cavity surrounded by an outward spherical absorbing shell (`Prism` layers).
+fn cavity_3d_spherical_pml() -> B {
+    let mut b = B::new(
+        "3D open spherical resonator with outward spherical PML shell (EM waves, 3D cavity eigenfrequencies)",
+        3,
+        0.012,
+    );
+    b.c("add_sphere", json!({ "name": "air_sphere", "center": [0.0, 0.0, 0.0], "r": 0.025 }));
+    b.overlay(&[("air", "air_sphere")]);
+    b.c(
+        "add_absorbing_layer",
+        json!({
+            "name": "pml",
+            "coord": "Spherical",
+            "center": [0.0, 0.0, 0.0],
+            "thickness": 0.01,
+            "layers": 5.0,
+            "grading": 2.0,
+            "layer_grading": 2.0
+        }),
+    );
+    b.physics("ems", "cavity", json!({ "n_modes": 4, "f_search": 6.0e9 }), 1);
+    b.material("ems", "air*", json!({ "eps_r": 1.0, "mu_r": 1.0 }));
+    b.c("add_pml_conditions", json!({ "physics": "ems", "auto_scale": true }));
     b
 }
 
@@ -420,4 +516,7 @@ fn write_the_examples() {
     soi_wire().save("15_soi_wire");
     soi_hybrid_wire().save("16_soi_hybrid_wire");
     disk_anchor_loss().save("17_disk_anchor_loss");
+    wgm_cylindrical_pml().save("18_wgm_cylindrical_pml");
+    sphere_axisym_pml().save("19_sphere_axisym_pml");
+    cavity_3d_spherical_pml().save("20_cavity_3d_spherical_pml");
 }

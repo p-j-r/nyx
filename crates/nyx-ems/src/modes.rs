@@ -23,17 +23,25 @@
 //! gradients of edge bubbles, 2 interior) with P2 phi, the accuracy of quadratic
 //! elements on the same mesh.
 
-use crate::ibc::{add_ibc_2d_waveguide, pec_edges_and_nodes_2d};
+use crate::ibc::{
+    add_ibc_2d_waveguide, add_ibc_2d_waveguide_mixed, pec_edges_and_nodes_2d, pec_edges_and_nodes_2d_mixed,
+};
+use crate::mixed_ops::MixedCellMaterials;
 use crate::problem::{pec_edges_and_nodes_2d_with_symmetry, Problem, Study, SurfaceImpedanceBc, Symmetry};
 use femcore::edge::{cell_data, edge_basis, tri_g};
+use femcore::edge_mixed::{eval_cell_basis_2d, nedelec_nloc, NedEvalScratch, NedMixed};
 use femcore::fem::*;
+use femcore::fem_mixed::{lagrange_shape_into, quad_rule_mixed, IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap};
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::{c, CCoo, Coo, RCsr as Csr};
 use femcore::linalg::driver::eigs_general;
 use femcore::linalg::driver::EigOpts;
+use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::TensorKind;
 use femcore::section::{local_component, local_tensor};
-use nyx_physics::{cell_fields_of, Discretisation, Field, Scalar, Solution, SolveResult};
+use nyx_physics::{
+    cell_fields_of, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
+};
 use std::time::Instant;
 
 pub use femcore::optical::C0;
@@ -522,4 +530,320 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
 /// Number of edge-element dofs plus phi dofs (for reporting).
 pub fn n_unknowns(mesh: &Discretisation, order: usize) -> usize {
     cell_data(mesh, order).net + mesh.n_dofs(order)
+}
+
+// ------------------------------------------------------------------ Native 2D MixedDiscretisation (`Tri + Quad`) real waveguide solver
+
+/// Solves a 2D `Modes` study natively on `Tri + Quad` (`MixedDiscretisation`), delegating PML/complex/tilted models to `modes_complex`.
+pub fn solve_waveguide_mixed(
+    mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    problem: &Problem,
+) -> Result<SolveResult, String> {
+    if problem.materials.has_pml()
+        || problem.materials.has_complex_permittivity()
+        || problem.surface_impedance.iter().any(|b| b.r_s > 0.0)
+    {
+        return crate::modes_complex::solve_waveguide_complex_mixed(mesh, mixed, problem);
+    }
+    let t0 = Instant::now();
+    let Study::Modes { freq, n_target, evanescent, n_modes } = problem.study.clone() else {
+        return Err("mode analysis needs a Modes study".into());
+    };
+    if freq <= 0.0 {
+        return Err("frequency must be positive".into());
+    }
+    if n_modes < 1 {
+        return Err("at least one mode is needed".into());
+    }
+    let mats = MixedCellMaterials::from_problem(mixed, problem)?;
+    let tens: Vec<_> = mats.eps_phys_re.iter().map(local_tensor).collect();
+    for t in &tens {
+        let scale = t[0][0].abs().max(t[1][1].abs()).max(t[2][2].abs()).max(1e-300);
+        if t[0][2].abs() > 1e-9 * scale || t[1][2].abs() > 1e-9 * scale {
+            return crate::modes_complex::solve_waveguide_complex_mixed(mesh, mixed, problem);
+        }
+    }
+    let eps: Vec<EpsCell> =
+        tens.iter().map(|t| EpsCell { xx: t[0][0], xy: t[0][1], yy: t[1][1], zz: t[2][2] }).collect();
+
+    let (asm, ned, phi_map) = assemble_modes_mixed(
+        mixed,
+        freq,
+        &eps,
+        &mats.mur_phys,
+        problem.order,
+        &problem.pec,
+        &problem.surface_impedance,
+        &problem.pmc,
+        problem.symmetry,
+    )?;
+    let modes = solve_mode_pairs(&asm, n_target, evanescent, n_modes)?;
+    if modes.complex_wanted {
+        femcore::progress::note(
+            "a complex eigenvalue pair of the real mode pencil is among the wanted modes: solving again in complex arithmetic",
+        );
+        return crate::modes_complex::solve_waveguide_complex_mixed(mesh, mixed, problem);
+    }
+
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
+    let neff_c: Vec<_> = modes.neff.iter().map(|&(re, im)| c(re, im)).collect();
+    let et_c: Vec<Vec<_>> = modes.et.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+    let phi_c: Vec<Vec<_>> = modes.phi.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+    let mode_metrics = crate::modes_complex::compute_waveguide_2d_metrics_mixed(
+        mixed, &ned, &phi_map, problem, freq, &neff_c, &et_c, &phi_c,
+    )?;
+
+    let mut solutions = Vec::with_capacity(modes.neff.len());
+    let mut scalars = Vec::new();
+    for j in 0..modes.neff.len() {
+        let (re, im) = modes.neff[j];
+        let txt = if im.abs() > 1e-9 * re.abs().max(1.0) { format!("{re:.6} {im:+.4}i") } else { format!("{re:.6}") };
+        let (fields, cell_fields) =
+            mode_fields_cells_mixed(mixed, &ned, &phi_map, &simplex, &proj, &modes, j, freq, problem.order);
+        solutions.push(Solution {
+            label: format!("mode {}: neff = {txt}", j + 1),
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            eigenvalue: Some([re, im]),
+            ..Default::default()
+        });
+        scalars.push((format!("neff {}", j + 1), Scalar::Text(txt)));
+        mode_metrics[j].push_scalars(j + 1, &mut scalars);
+    }
+    let mut log = Vec::new();
+    if !modes.converged {
+        log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
+    }
+    if modes.neff.len() < n_modes {
+        log.push(format!("only {} of {} real-valued modes were found near the target", modes.neff.len(), n_modes));
+    }
+    scalars.push(crate::optical::mode_frame(problem).scalar());
+    Ok(SolveResult {
+        physics: "ems".into(),
+        study: "modes".into(),
+        order: problem.order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: phi_map.n_dofs,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_modes_mixed(
+    mesh: &MixedDiscretisation,
+    freq: f64,
+    eps_r: &[EpsCell],
+    mu_r: &[f64],
+    order: usize,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    pmc_labels: &[i32],
+    symmetry: Symmetry,
+) -> Result<(ModeAssembly, NedMixed, MixedLagrangeDofMap), String> {
+    if mesh.dim != 2 {
+        return Err("mode analysis needs a 2D cross-section mesh".into());
+    }
+    if order != 1 && order != 2 {
+        return Err("element order must be 1 or 2".into());
+    }
+    let ned = NedMixed::new(mesh, order);
+    let phi_space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Tensor };
+    let phi_map = MixedLagrangeDofMap::new(mesh, phi_space);
+    let net = ned.n_dofs;
+    let nphi = phi_map.n_dofs;
+    let n_tot = net + nphi;
+    let k0 = 2.0 * std::f64::consts::PI * freq / C0;
+    let k2 = k0 * k0;
+
+    let mut a_coo = Coo::new(n_tot, n_tot);
+    let mut b_coo = Coo::new(n_tot, n_tot);
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut curl = Vec::new();
+    let mut nv_s = Vec::new();
+    let mut dxi_s = Vec::new();
+    let mut gn = Vec::new();
+
+    for ci in 0..mesh.n_cells() {
+        let iso = IsoparametricCell::from_mesh(mesh, ci);
+        let deg = if iso.curved { 6 } else { 4 };
+        let rule = quad_rule_mixed(iso.cell_type, deg);
+        let nloc_e = nedelec_nloc(iso.cell_type, order);
+        let pd = phi_map.cell_dofs(ci);
+        let nl = pd.len();
+        gn.resize(nl, [0.0; 2]);
+
+        let (ec, imu) = (eps_r[ci], 1.0 / mu_r[ci]);
+        let mut s_minus = vec![0.0; nloc_e * nloc_e];
+        let mut tm = vec![0.0; nloc_e * nloc_e];
+        let mut gm = vec![0.0; nloc_e * nl];
+        let mut pp = vec![0.0; nl * nl];
+
+        for (xi, &w_ref) in rule.pts.iter().zip(&rule.w) {
+            let jac = eval_cell_basis_2d(mesh, &ned, ci, &iso, xi, &mut scratch, &mut w, &mut curl);
+            lagrange_shape_into(iso.cell_type, phi_space, xi, &mut nv_s, &mut dxi_s);
+            for a in 0..nl {
+                let g3 = jac.map_grad(dxi_s[a]);
+                gn[a] = [g3[0], g3[1]];
+            }
+            let wq = w_ref * jac.det.abs();
+            for s in 0..nloc_e {
+                let ws = w[s];
+                for t in 0..nloc_e {
+                    let wt = w[t];
+                    let wme = ws[0] * (ec.xx * wt[0] + ec.xy * wt[1]) + ws[1] * (ec.xy * wt[0] + ec.yy * wt[1]);
+                    s_minus[s * nloc_e + t] += wq * (imu * curl[s] * curl[t] - k2 * wme);
+                    tm[s * nloc_e + t] += wq * imu * (ws[0] * wt[0] + ws[1] * wt[1]);
+                }
+                for a in 0..nl {
+                    gm[s * nl + a] += wq * imu * (ws[0] * gn[a][0] + ws[1] * gn[a][1]);
+                }
+            }
+            for a in 0..nl {
+                for b in 0..nl {
+                    pp[a * nl + b] +=
+                        wq * (imu * (gn[a][0] * gn[b][0] + gn[a][1] * gn[b][1]) - k2 * ec.zz * nv_s[a] * nv_s[b]);
+                }
+            }
+        }
+
+        let rows_e = ned.cell_dofs(ci);
+        let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+        a_coo.push_block(rows_e, rows_e, &s_minus);
+        b_coo.push_block(rows_e, rows_e, &tm);
+        b_coo.push_block(rows_e, &cols_p, &gm);
+        let gt: Vec<f64> = (0..nl * nloc_e).map(|i| gm[(i % nloc_e) * nl + i / nloc_e]).collect();
+        b_coo.push_block(&cols_p, rows_e, &gt);
+        b_coo.push_block(&cols_p, &cols_p, &pp);
+    }
+
+    let mut a_full = a_coo.to_csr();
+    let mut b_full = b_coo.to_csr();
+    if !ibc_bcs.is_empty() {
+        let mut a_ibc = CCoo::new(n_tot, n_tot);
+        let mut b_ibc = CCoo::new(n_tot, n_tot);
+        add_ibc_2d_waveguide_mixed(mesh, &ned, &phi_map, freq, pec_labels, ibc_bcs, &mut a_ibc, &mut b_ibc)?;
+        let ar = a_ibc.to_csr().real_part();
+        let br = b_ibc.to_csr().real_part();
+        if ar.nnz() > 0 {
+            a_full = a_full.add_scaled(&ar, 1.0);
+        }
+        if br.nnz() > 0 {
+            b_full = b_full.add_scaled(&br, 1.0);
+        }
+    }
+
+    let (be, bn) = pec_edges_and_nodes_2d_mixed(mesh, pec_labels, ibc_bcs, pmc_labels, symmetry)?;
+    let nv = mesh.n_points();
+    let mut fixed = Vec::new();
+    if order == 1 {
+        fixed.extend(be.iter().copied());
+    } else {
+        for &e in &be {
+            fixed.push(2 * e);
+            fixed.push(2 * e + 1);
+        }
+    }
+    fixed.extend(bn.iter().map(|&v| net + v));
+    if order == 2 {
+        fixed.extend(be.iter().map(|&e| net + nv + e));
+    }
+    let free = free_dofs(n_tot, &fixed);
+    let scale: Vec<f64> = (0..n_tot).map(|i| if i < net { 1.0 } else { 1.0 / k0 }).collect();
+    let mut bs = b_full;
+    for r in 0..bs.nrows() {
+        for p in bs.row_range(r) {
+            let s = scale[r] * scale[bs.indices()[p] as usize];
+            bs.values_mut()[p] *= s;
+        }
+    }
+    Ok((
+        ModeAssembly { a: a_full.submatrix(&free, &free), b: bs.submatrix(&free, &free), free, n_tot, net, k0 },
+        ned,
+        phi_map,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mode_fields_cells_mixed(
+    mixed: &MixedDiscretisation,
+    ned: &NedMixed,
+    phi_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
+    proj: &MixedToSimplexProjector,
+    modes: &Modes,
+    j: usize,
+    freq: f64,
+    order: usize,
+) -> (Vec<Field>, CellFields) {
+    let k0 = 2.0 * std::f64::consts::PI * freq / C0;
+    let beta = (modes.neff[j].0 * k0, modes.neff[j].1 * k0);
+    let bmag = beta.0.hypot(beta.1);
+    let isos: Vec<IsoparametricCell> = (0..mixed.n_cells()).map(|ci| IsoparametricCell::from_mesh(mixed, ci)).collect();
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut curl = Vec::new();
+    let mut nv_s = Vec::new();
+    let mut dxi_s = Vec::new();
+
+    let sampled = proj.sample_simplex_cell_nodes(mixed, order, |mc, xi| {
+        eval_cell_basis_2d(mixed, ned, mc, &isos[mc], xi, &mut scratch, &mut w, &mut curl);
+        lagrange_shape_into(isos[mc].cell_type, phi_map.space, xi, &mut nv_s, &mut dxi_s);
+        let cdofs = ned.cell_dofs(mc);
+        let pd = phi_map.cell_dofs(mc);
+        let (mut x, mut y, mut pval) = (0.0, 0.0, 0.0);
+        for (s, &gd) in cdofs.iter().enumerate() {
+            let cf = modes.et[j][gd];
+            x += cf * w[s][0];
+            y += cf * w[s][1];
+        }
+        for (a, &gp) in pd.iter().enumerate() {
+            pval += modes.phi[j][gp] * nv_s[a];
+        }
+        [x, y, bmag * pval]
+    });
+
+    let etx: Vec<f64> = sampled.iter().map(|v| v[0]).collect();
+    let ety: Vec<f64> = sampled.iter().map(|v| v[1]).collect();
+    let ez_cell_raw: Vec<f64> = sampled.iter().map(|v| v[2]).collect();
+    let etn_c: Vec<f64> = (0..etx.len()).map(|i| etx[i].hypot(ety[i])).collect();
+    let ezn_c: Vec<f64> = ez_cell_raw.iter().map(|v| v.abs()).collect();
+
+    let n = simplex.n_dofs(order);
+    let etn = node_average(simplex, &etn_c, 1, order);
+    let ezn = node_average(simplex, &ezn_c, 1, order);
+    let etxn = node_average(simplex, &etx, 1, order);
+    let etyn = node_average(simplex, &ety, 1, order);
+    let ez_nodal_signed = proj.project_lagrange_blocks(
+        mixed,
+        phi_map,
+        &modes.phi[j].iter().map(|&p| bmag * p).collect::<Vec<_>>(),
+        1,
+        order,
+    );
+
+    let tot: Vec<f64> = (0..n).map(|i| etn[i].hypot(ezn[i])).collect();
+    let s = 1.0 / tot.iter().cloned().fold(0.0, f64::max).max(1e-300);
+    let sc = |v: &[f64]| v.iter().map(|x| x * s).collect::<Vec<_>>();
+    let big = etxn.iter().chain(etyn.iter()).cloned().fold(0.0f64, |m, x| if x.abs() > m.abs() { x } else { m });
+    let sg = if big < 0.0 { -1.0 } else { 1.0 };
+    let f = |name: &str, v: Vec<f64>| Field::scalar(name, "a.u.", v);
+    let (lat, nor, prop) = (local_component(0), local_component(1), local_component(2));
+    let mut cells = CellFields::new(simplex, order);
+    cells.push_real(format!("E{}", lat.0), "a.u.", etx.iter().map(|x| x * s * sg * lat.1).collect());
+    cells.push_real(format!("E{}", nor.0), "a.u.", ety.iter().map(|x| x * s * sg * nor.1).collect());
+    cells.push_real(format!("E{}", prop.0), "a.u.", ez_cell_raw.iter().map(|x| x * s * sg * prop.1).collect());
+    let fields = vec![
+        f("|E|", sc(&tot)),
+        f("|Exz|", sc(&etn)),
+        f(&format!("|E{}|", prop.0), sc(&ezn)),
+        f(&format!("E{}", prop.0), ez_nodal_signed.iter().map(|x| x * s * sg * prop.1).collect()),
+        f(&format!("E{}", lat.0), etxn.iter().map(|x| x * s * sg * lat.1).collect()),
+        f(&format!("E{}", nor.0), etyn.iter().map(|x| x * s * sg * nor.1).collect()),
+    ];
+    (fields, cells)
 }

@@ -609,7 +609,7 @@ pub fn can_use_planar_bem(mesh: &Discretisation, spec: &Problem) -> bool {
     if spec.flux_bounds != "none" {
         return false;
     }
-    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. } | BcKind::InfiniteElement(_))) {
         return false;
     }
     if has_thick_sheet_or_trench_geometry(mesh, spec) {
@@ -1329,10 +1329,16 @@ pub fn solve_planar_bem_with_stack(
 ) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let order = spec.order;
-    check_boundary_labels(mesh, spec.bcs.iter().flat_map(|b| b.labels.iter().copied()))?;
-    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. })) {
+    check_boundary_labels(
+        mesh,
+        spec.bcs
+            .iter()
+            .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
+            .flat_map(|b| b.labels.iter().copied()),
+    )?;
+    if spec.bcs.iter().any(|b| matches!(b.kind, BcKind::FarField { .. } | BcKind::InfiniteElement(_))) {
         return Err(
-            "unsupported: planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' boundary conditions".into(),
+            "unsupported: planar_bem models open half-spaces via its layered Green's function and does not support volumetric 'far_field' or 'infinite_element' conditions".into(),
         );
     }
     if spec.flux_bounds != "none" {

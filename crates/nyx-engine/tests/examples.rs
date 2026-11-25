@@ -128,6 +128,9 @@ solves! {
     drilled_plate_solves: "12_drilled_plate",
     silicon_on_sapphire_solves: "13_silicon_on_sapphire",
     soi_hybrid_wire_solves: "16_soi_hybrid_wire",
+    wgm_cylindrical_pml_solves: "18_wgm_cylindrical_pml",
+    sphere_axisym_pml_solves: "19_sphere_axisym_pml",
+    cavity_3d_spherical_pml_solves: "20_cavity_3d_spherical_pml",
 }
 
 #[test]
@@ -300,4 +303,38 @@ fn a_convergence_check_follows_the_modes_when_their_order_changes() {
     assert!(e.call("convergence_check", &args(json!({ "track": { "g": 1.0 } }))).is_err());
     assert!(e.call("convergence_check", &args(json!({ "match": "index", "track": { "f": 4.6e8 } }))).is_err());
     assert_eq!(e.project().to_json(), before, "the project is not changed");
+}
+
+#[test]
+fn pml_diagnostics_reports_mixed_elements_jacobian_s_dist_and_christoffel_check() {
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": file("13_silicon_on_sapphire").to_str().unwrap() })).unwrap();
+    let d = e.call("pml_diagnostics", &json!({})).unwrap();
+    assert!(d["element_counts"]["quad"].as_u64().unwrap_or(0) > 0, "expected structured Quad PML elements: {d}");
+    assert!(d["min_pml_scaled_jacobian"].as_f64().unwrap_or(0.0) > 0.5, "expected positive PML scaled Jacobian: {d}");
+    assert_eq!(d["s_dist_bounds"], json!([0.0, 1.0]), "{d}");
+    assert!(d["min_projection"].as_f64().is_some(), "{d}");
+    assert!(d["recommended_mpml_ratio"].as_f64().is_some(), "{d}");
+    assert!(!d["domains"].as_array().unwrap().is_empty(), "{d}");
+}
+
+#[test]
+fn add_pml_conditions_emits_infinite_element_for_dfs_and_static_sms() {
+    let mut e = Engine::new();
+    e.call("project_new", &json!({ "title": "ie_test", "dim": 2, "h": 0.2 })).unwrap();
+    e.call("add_rect", &json!({ "name": "core", "min": [-1.0, -1.0], "max": [1.0, 1.0] })).unwrap();
+    e.call("add_overlay", &json!({ "name": "regions", "regions": [{ "name": "diel", "input": "core" }] })).unwrap();
+    e.call("add_absorbing_layer", &json!({ "name": "ie", "thickness": 0.5, "layers": 5.0 })).unwrap();
+    e.call("add_physics", &json!({ "physics": "dfs", "study": "electrostatic", "order": 2 })).unwrap();
+    e.call("set_material", &json!({ "physics": "dfs", "region": "diel*", "material": { "eps_r": 4.0 } })).unwrap();
+    let r_dfs = e.call("add_pml_conditions", &json!({ "physics": "dfs", "auto_scale": true })).unwrap();
+    assert_eq!(r_dfs["kind"], "infinite_element", "{r_dfs}");
+    e.call("check_project", &json!({})).unwrap();
+
+    e.call("add_physics", &json!({ "physics": "sms", "study": "static", "order": 2 })).unwrap();
+    e.call("set_material", &json!({ "physics": "sms", "region": "diel*", "material": { "E": 100e9, "nu": 0.25 } }))
+        .unwrap();
+    let r_sms = e.call("add_pml_conditions", &json!({ "physics": "sms", "auto_scale": true })).unwrap();
+    assert_eq!(r_sms["kind"], "infinite_element", "{r_sms}");
+    e.call("check_project", &json!({})).unwrap();
 }

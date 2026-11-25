@@ -45,7 +45,7 @@ fn optical_spec() -> Problem {
         spec.materials.set(d, "eps_r", n * n);
         spec.materials.set(d, "mu_r", 1.0);
     }
-    let pml = |x, z| Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0 };
+    let pml = |x, z| Pml { x, y: PmlDir::Off, z, strength: 3.0, order: 2.0, re: 1.0, ..Default::default() };
     for (d, p) in [
         (4, pml(PmlDir::Minus, PmlDir::Off)),
         (5, pml(PmlDir::Plus, PmlDir::Off)),

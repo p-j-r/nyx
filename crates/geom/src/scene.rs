@@ -160,6 +160,36 @@ pub struct PmlInfo {
     pub thickness: f64,
     pub layers: f64,
     pub grading: f64,
+    pub coord: PmlCoordKind,
+    pub mode: PmlGrowMode,
+    pub center: [f64; 3],
+    pub axis: [f64; 3],
+    pub r_in: f64,
+    pub z_range: [f64; 2],
+    pub layer_grading: f64,
+    pub role: PmlRole,
+}
+
+/// Specification of an outward boundary-extruded absorbing layer evaluated at the `Scene` tier
+/// and expanded into outward `Region`s and `PmlRegion`s at the `Complex` tier (`compute_sim`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutwardPmlSpec {
+    pub feature: FeatureId,
+    pub name: String,
+    pub sides: Vec<Side>,
+    pub window: Aabb,
+    pub thickness: f64,
+    pub layers: f64,
+    pub grading: f64,
+    pub layer_grading: f64,
+    pub coord: PmlCoordKind,
+    pub center: [f64; 3],
+    pub axis: [f64; 3],
+    pub r_in: f64,
+    pub z_range: [f64; 2],
+    pub regions: Vec<String>,
+    /// True when the outer boundary in 2D/3D is an actual curved circle/cylinder/sphere rather than a box/rect.
+    pub curved_outer: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -202,6 +232,8 @@ pub struct Scene {
     pub axis: usize,
     /// (feature, role, tag) added by the operations (Cut: `symmetry`)
     pub auto_tags: Vec<(FeatureId, String, String)>,
+    /// outward boundary-extruded absorbing layer specs to attach to the evaluated physical `Complex`
+    pub outward_pmls: Vec<OutwardPmlSpec>,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1226,25 +1258,147 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         }
         auto_tags.push((f.id, role.to_string(), "symmetry".to_string()));
     }
-    // Pml: split matching regions into the physical part and one piece per side combination
+    // Pml: split matching regions into the physical part and one piece per side combination (Inward)
+    // or record outward absorbing-layer specifications (Outward)
+    let mut outward_pmls: Vec<OutwardPmlSpec> = vec![];
     for f in list.features[after..].iter().filter(|f| !f.suppressed) {
-        let Op::Pml { window, sides, thickness, layers, grading, regions: only } = &f.op else { continue };
-        let (t, nl, gr) = (b.ev(thickness, f, "thickness")?, b.ev(layers, f, "layers")?, b.ev(grading, f, "grading")?);
-        if t <= 0.0 || nl < 1.0 || gr <= 0.0 {
-            return Err(GeomError(format!("Pml '{}' needs thickness > 0, layers >= 1 and grading > 0", f.name)));
-        }
+        let Op::Pml {
+            window,
+            sides,
+            thickness,
+            layers,
+            grading,
+            regions: only,
+            mode,
+            coord,
+            center,
+            axis: pml_axis,
+            layer_grading,
+        } = &f.op
+        else {
+            continue;
+        };
         let mark = b.prims.len();
-        let wnode = b.inst(*window, Xf3::ID, "")?;
-        let win = wnode.bbox(&b.prims);
-        b.prims.truncate(mark);
-        b.memo.retain(|_, v| *v < mark);
+        let mut target_leaves: Vec<usize> = vec![];
+        let win = match window.filter(|&w| w != 0) {
+            Some(win_id) => {
+                let wnode = b.inst(win_id, Xf3::ID, "")?;
+                wnode.leaves(&mut target_leaves);
+                wnode.bbox(&b.prims)
+            }
+            None => {
+                if *mode == PmlGrowMode::Inward {
+                    return Err(GeomError(format!(
+                        "Pml '{}' in Inward mode requires a window feature (or set mode = Outward)",
+                        f.name
+                    )));
+                }
+                let mut bb = Aabb::EMPTY;
+                for r in rx.iter() {
+                    let candidate = r.pml.is_none()
+                        && r.parent.is_none()
+                        && matches!(r.kind, RegionKind::Material)
+                        && (only.is_empty() || only.contains(&r.name));
+                    if candidate && r.expr != Node::Empty {
+                        bb = bb.union(&r.expr.bbox(&b.prims));
+                        r.expr.leaves(&mut target_leaves);
+                    }
+                }
+                bb
+            }
+        };
+        target_leaves.sort_unstable();
+        target_leaves.dedup();
         if win.is_empty() {
+            b.prims.truncate(mark);
+            b.memo.retain(|_, v| *v < mark);
             return Err(GeomError(format!("Pml '{}' has an empty window", f.name)));
         }
+
+        let tol = (1e-5 * win.diagonal()).max(1e-12);
+        let (detected_coord, det_center, det_axis, det_r_in, det_z_range, curved_outer) =
+            detect_pml_shape(dim, &win, &target_leaves, &b.prims, tol);
+
+        b.prims.truncate(mark);
+        b.memo.retain(|_, v| *v < mark);
+
+        let resolved_coord = if *coord == PmlCoordKind::Auto { detected_coord } else { *coord };
+        let mut pml_center = match center {
+            Some(ce) => b.ev3(ce, f, "center")?,
+            None => det_center,
+        };
+        let mut pml_axis_vec = match pml_axis {
+            Some(ax) => {
+                let mut w = [0.0; 3];
+                w[ax.index()] = 1.0;
+                [w[b.perm[0]], w[b.perm[1]], w[b.perm[2]]]
+            }
+            None => det_axis,
+        };
+        let mut r_in = det_r_in;
+        let z_range = det_z_range;
+        if dim == 2 && resolved_coord == PmlCoordKind::Cylindrical && r_in <= 0.0 {
+            if win.lo[0].abs() <= tol && win.hi[0] > tol {
+                r_in = win.hi[0];
+                if center.is_none() {
+                    pml_center = [0.0, 0.5 * (win.lo[1] + win.hi[1]), 0.0];
+                }
+                if pml_axis.is_none() {
+                    pml_axis_vec = [0.0, 1.0, 0.0];
+                }
+            } else {
+                r_in = 0.5 * (win.hi[0] - win.lo[0]).max(win.hi[1] - win.lo[1]);
+            }
+        }
+        if resolved_coord == PmlCoordKind::Spherical && r_in <= 0.0 {
+            r_in = if dim == 2 && win.lo[0].abs() <= tol {
+                win.hi[0]
+            } else {
+                0.5 * (win.hi[0] - win.lo[0]).max(win.hi[1] - win.lo[1])
+            };
+            if dim == 2 && pml_axis.is_none() {
+                pml_axis_vec = [0.0, 1.0, 0.0];
+            }
+        }
+
+        let is_auto_expr = |e: &crate::expr::Expr| -> bool {
+            match e {
+                crate::expr::Expr::Text(s) => s.trim().eq_ignore_ascii_case("auto") && b.env.get(s.trim()).is_none(),
+                crate::expr::Expr::Num(v) => *mode == PmlGrowMode::Outward && *v <= 0.0,
+            }
+        };
+        let char_span = if r_in > 0.0 {
+            2.0 * r_in
+        } else {
+            (win.hi[0] - win.lo[0]).max(win.hi[1] - win.lo[1]).max(if dim == 3 { win.hi[2] - win.lo[2] } else { 0.0 })
+        };
+        let t = if is_auto_expr(thickness) { (0.1 * char_span).max(1e-6) } else { b.ev(thickness, f, "thickness")? };
+        let nl = if is_auto_expr(layers) { 6.0 } else { b.ev(layers, f, "layers")? };
+        let gr = if is_auto_expr(grading) { 2.0 } else { b.ev(grading, f, "grading")? };
+        let lg = match layer_grading {
+            Some(e) => {
+                if is_auto_expr(e) {
+                    2.0
+                } else {
+                    b.ev(e, f, "layer_grading")?
+                }
+            }
+            None => {
+                if *mode == PmlGrowMode::Outward {
+                    2.0
+                } else {
+                    1.0
+                }
+            }
+        };
+        if t <= 0.0 || nl < 1.0 || gr <= 0.0 || lg <= 0.0 {
+            return Err(GeomError(format!("Pml '{}' needs thickness > 0, layers >= 1 and grading > 0", f.name)));
+        }
+
         let all: Vec<Side> = vec![Side::XMin, Side::XMax, Side::YMin, Side::YMax, Side::ZMin, Side::ZMax];
         // the sides that exist: those of the axes of the profile plane (x and z in 2D) and of the sweep axis in 3D
         let present: Vec<Side> = (0..dim).flat_map(|a| [all[2 * b.perm[a]], all[2 * b.perm[a] + 1]]).collect();
-        let sel: Vec<Side> = if sides.is_empty() { present.clone() } else { sides.clone() };
+        let mut sel: Vec<Side> = if sides.is_empty() { present.clone() } else { sides.clone() };
         if let Some(bad) = sel.iter().find(|s| !present.contains(s)) {
             return Err(GeomError(format!(
                 "Pml '{}' lists the side {} in a 2D model, whose cross-section is the x-z plane",
@@ -1252,59 +1406,245 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                 bad.name()
             )));
         }
-        // side combinations: fewer sides first (faces, then edges, then corners); deterministic order
-        let mut combos: Vec<[i8; 3]> = vec![];
-        let total = 3usize.pow(dim as u32);
-        for code in 0..total {
-            let mut c = [0i8; 3];
-            let mut k = code;
-            for ci in c.iter_mut().take(dim) {
-                *ci = (k % 3) as i8 - 1;
-                k /= 3;
-            }
-            let ok = c != [0, 0, 0]
-                && (0..dim).all(|a| {
-                    c[a] == 0 || sel.contains(&if c[a] < 0 { all[2 * b.perm[a]] } else { all[2 * b.perm[a] + 1] })
+        // 2D axisymmetric Rect touching x = 0: auto-omit XMin when sides are not explicitly specified
+        if dim == 2 && sides.is_empty() && win.lo[0].abs() <= tol && win.hi[0] > tol {
+            let model_touches_neg_x = *mode == PmlGrowMode::Inward
+                && rx.iter().any(|r| {
+                    r.pml.is_none()
+                        && matches!(r.kind, RegionKind::Material)
+                        && (only.is_empty() || only.contains(&r.name))
+                        && r.expr.bbox(&b.prims).lo[0] < -tol
                 });
-            if ok {
-                combos.push(c);
+            if !model_touches_neg_x {
+                sel.retain(|&s| s != Side::XMin);
             }
         }
-        combos.sort_by_key(|c| {
-            let n = c.iter().filter(|&&x| x != 0).count();
-            let single = (0..dim).find(|&a| c[a] != 0).map_or(0, |a| 2 * a + (c[a] > 0) as usize);
-            (n, if n == 1 { single } else { 0 }, (0..dim).rev().map(|a| c[a] + 1).collect::<Vec<_>>())
-        });
-        let mut pieces: Vec<(Node, [i8; 3], String)> = vec![];
-        for c in &combos {
-            let rng = |k: usize| match c[k] {
-                -1 => (win.lo[k] - t, win.lo[k]),
-                0 => (win.lo[k], win.hi[k]),
-                _ => (win.hi[k], win.hi[k] + t),
+
+        if *mode == PmlGrowMode::Outward {
+            outward_pmls.push(OutwardPmlSpec {
+                feature: f.id,
+                name: f.name.clone(),
+                sides: sel,
+                window: win,
+                thickness: t,
+                layers: nl,
+                grading: gr,
+                layer_grading: lg,
+                coord: resolved_coord,
+                center: pml_center,
+                axis: pml_axis_vec,
+                r_in,
+                z_range,
+                regions: only.clone(),
+                curved_outer,
+            });
+            continue;
+        }
+
+        let mut pieces: Vec<(Node, [i8; 3], String, PmlRole)> = vec![];
+        if resolved_coord == PmlCoordKind::Spherical && dim == 3 && r_in > 0.0 {
+            let find_or_add_sphere = |prims: &mut Vec<Arc<Prim>>, r_val: f64, label: String| -> usize {
+                if let Some((idx, _)) = prims.iter().enumerate().find(|(_, p)| {
+                    matches!(p.body, Some(Body::Sphere { c, r }) if norm3(sub3(c, pml_center)) <= tol && (r - r_val).abs() <= tol)
+                }) {
+                    idx
+                } else {
+                    prims.push(Arc::new(Prim::new_body(f.id, label, Body::Sphere { c: pml_center, r: r_val })));
+                    prims.len() - 1
+                }
             };
-            let mut toks: Vec<(usize, String)> = (0..dim)
-                .filter(|&a| c[a] != 0)
-                .map(|a| (b.perm[a], format!("{}{}", ["x", "y", "z"][b.perm[a]], if c[a] < 0 { "min" } else { "max" })))
-                .collect();
-            toks.sort();
-            let piece = toks.into_iter().map(|t| t.1).collect::<Vec<_>>().join("_");
-            let (x, y) = (rng(0), rng(1));
-            let (style, z) = if dim == 3 { (Style::Box, rng(2)) } else { (Style::Plain, (0.0, 0.0)) };
-            let prim = Prim::new_styled(
+            let inner_idx = find_or_add_sphere(&mut b.prims, r_in, format!("{}[spherical_in]", f.name));
+            let outer_idx = find_or_add_sphere(&mut b.prims, r_in + t, format!("{}[spherical_out]", f.name));
+            let shell = Node::Diff(Box::new(Node::Prim(outer_idx)), vec![Node::Prim(inner_idx)]);
+            pieces.push((shell, [1, 1, 1], "spherical".to_string(), PmlRole::SphericalShell));
+        } else if resolved_coord == PmlCoordKind::Spherical && dim == 2 && r_in > 0.0 {
+            let c2 = [pml_center[0], pml_center[1]];
+            let p_in = Prim::new_styled(
                 f.id,
-                format!("{}[{piece}]", f.name),
-                LShape::Rect { lo: [x.0, y.0], hi: [x.1, y.1] },
+                format!("{}[spherical_in]", f.name),
+                LShape::Circle { c: c2, r: r_in },
                 Xf2::ID,
                 true,
-                style,
-                z,
+                Style::Plain,
+                (0.0, 0.0),
                 b.perm[2],
             )?;
-            b.prims.push(Arc::new(prim));
-            pieces.push((Node::Prim(b.prims.len() - 1), *c, piece));
+            let p_out = Prim::new_styled(
+                f.id,
+                format!("{}[spherical_out]", f.name),
+                LShape::Circle { c: c2, r: r_in + t },
+                Xf2::ID,
+                true,
+                Style::Plain,
+                (0.0, 0.0),
+                b.perm[2],
+            )?;
+            b.prims.push(Arc::new(p_in));
+            let in_idx = b.prims.len() - 1;
+            b.prims.push(Arc::new(p_out));
+            let out_idx = b.prims.len() - 1;
+            let shell = Node::Diff(Box::new(Node::Prim(out_idx)), vec![Node::Prim(in_idx)]);
+            pieces.push((shell, [1, 1, 0], "spherical".to_string(), PmlRole::SphericalShell));
+        } else if resolved_coord == PmlCoordKind::Cylindrical && dim == 2 && curved_outer && r_in > 0.0 {
+            let c2 = [pml_center[0], pml_center[1]];
+            let p_in = Prim::new_styled(
+                f.id,
+                format!("{}[radial_in]", f.name),
+                LShape::Circle { c: c2, r: r_in },
+                Xf2::ID,
+                true,
+                Style::Plain,
+                (0.0, 0.0),
+                b.perm[2],
+            )?;
+            let p_out = Prim::new_styled(
+                f.id,
+                format!("{}[radial_out]", f.name),
+                LShape::Circle { c: c2, r: r_in + t },
+                Xf2::ID,
+                true,
+                Style::Plain,
+                (0.0, 0.0),
+                b.perm[2],
+            )?;
+            b.prims.push(Arc::new(p_in));
+            let in_idx = b.prims.len() - 1;
+            b.prims.push(Arc::new(p_out));
+            let out_idx = b.prims.len() - 1;
+            let shell = Node::Diff(Box::new(Node::Prim(out_idx)), vec![Node::Prim(in_idx)]);
+            pieces.push((shell, [1, 0, 0], "radial".to_string(), PmlRole::RadialShell));
+        } else if resolved_coord == PmlCoordKind::Cylindrical && dim == 3 && curved_outer && r_in > 0.0 {
+            let c2 = [pml_center[0], pml_center[1]];
+            let (z0, z1) = (z_range[0], z_range[1]);
+            let (cap_min_name, cap_max_name) = match b.perm[2] {
+                0 => ("xmin", "xmax"),
+                1 => ("ymin", "ymax"),
+                _ => ("zmin", "zmax"),
+            };
+            let (min_side, max_side) = (all[2 * b.perm[2]], all[2 * b.perm[2] + 1]);
+            let radial_active = sides.is_empty() || sel.iter().any(|&s| s != min_side && s != max_side);
+            let min_cap_active = sel.contains(&min_side);
+            let max_cap_active = sel.contains(&max_side);
+            let mut add_cyl = |tag: &str, r_val: f64, zr: (f64, f64)| -> GeomResult<Node> {
+                let p = Prim::new_styled(
+                    f.id,
+                    format!("{}[{tag}]", f.name),
+                    LShape::Circle { c: c2, r: r_val },
+                    Xf2::ID,
+                    true,
+                    Style::Cylinder,
+                    zr,
+                    b.perm[2],
+                )?;
+                b.prims.push(Arc::new(p));
+                Ok(Node::Prim(b.prims.len() - 1))
+            };
+            if radial_active {
+                let c_in = add_cyl("radial_in", r_in, (z0, z1))?;
+                let c_out = add_cyl("radial_out", r_in + t, (z0, z1))?;
+                pieces.push((
+                    Node::Diff(Box::new(c_out), vec![c_in]),
+                    [0, 0, 0],
+                    "radial".to_string(),
+                    PmlRole::RadialShell,
+                ));
+            }
+            if min_cap_active {
+                let cap = add_cyl(cap_min_name, r_in, (z0 - t, z0))?;
+                pieces.push((cap, [0, 0, -1], cap_min_name.to_string(), PmlRole::EndCap));
+            }
+            if max_cap_active {
+                let cap = add_cyl(cap_max_name, r_in, (z1, z1 + t))?;
+                pieces.push((cap, [0, 0, 1], cap_max_name.to_string(), PmlRole::EndCap));
+            }
+            if radial_active && min_cap_active {
+                let tag = format!("radial_{cap_min_name}");
+                let c_in = add_cyl(&format!("{tag}_in"), r_in, (z0 - t, z0))?;
+                let c_out = add_cyl(&format!("{tag}_out"), r_in + t, (z0 - t, z0))?;
+                pieces.push((Node::Diff(Box::new(c_out), vec![c_in]), [0, 0, -1], tag, PmlRole::CornerAnnulus));
+            }
+            if radial_active && max_cap_active {
+                let tag = format!("radial_{cap_max_name}");
+                let c_in = add_cyl(&format!("{tag}_in"), r_in, (z1, z1 + t))?;
+                let c_out = add_cyl(&format!("{tag}_out"), r_in + t, (z1, z1 + t))?;
+                pieces.push((Node::Diff(Box::new(c_out), vec![c_in]), [0, 0, 1], tag, PmlRole::CornerAnnulus));
+            }
+        } else {
+            // side combinations: fewer sides first (faces, then edges, then corners); deterministic order
+            let mut combos: Vec<[i8; 3]> = vec![];
+            let total = 3usize.pow(dim as u32);
+            for code in 0..total {
+                let mut c = [0i8; 3];
+                let mut k = code;
+                for ci in c.iter_mut().take(dim) {
+                    *ci = (k % 3) as i8 - 1;
+                    k /= 3;
+                }
+                let ok = c != [0, 0, 0]
+                    && (0..dim).all(|a| {
+                        c[a] == 0 || sel.contains(&if c[a] < 0 { all[2 * b.perm[a]] } else { all[2 * b.perm[a] + 1] })
+                    });
+                if ok {
+                    combos.push(c);
+                }
+            }
+            combos.sort_by_key(|c| {
+                let n = c.iter().filter(|&&x| x != 0).count();
+                let single = (0..dim).find(|&a| c[a] != 0).map_or(0, |a| 2 * a + (c[a] > 0) as usize);
+                (n, if n == 1 { single } else { 0 }, (0..dim).rev().map(|a| c[a] + 1).collect::<Vec<_>>())
+            });
+            for c in &combos {
+                let rng = |k: usize| match c[k] {
+                    -1 => (win.lo[k] - t, win.lo[k]),
+                    0 => (win.lo[k], win.hi[k]),
+                    _ => (win.hi[k], win.hi[k] + t),
+                };
+                let mut toks: Vec<(usize, String)> = (0..dim)
+                    .filter(|&a| c[a] != 0)
+                    .map(|a| {
+                        (b.perm[a], format!("{}{}", ["x", "y", "z"][b.perm[a]], if c[a] < 0 { "min" } else { "max" }))
+                    })
+                    .collect();
+                toks.sort();
+                let piece = toks.into_iter().map(|t| t.1).collect::<Vec<_>>().join("_");
+                let (x, y) = (rng(0), rng(1));
+                let (style, z) = if dim == 3 { (Style::Box, rng(2)) } else { (Style::Plain, (0.0, 0.0)) };
+                let prim = Prim::new_styled(
+                    f.id,
+                    format!("{}[{piece}]", f.name),
+                    LShape::Rect { lo: [x.0, y.0], hi: [x.1, y.1] },
+                    Xf2::ID,
+                    true,
+                    style,
+                    z,
+                    b.perm[2],
+                )?;
+                b.prims.push(Arc::new(prim));
+                let nz = c.iter().filter(|&&x| x != 0).count();
+                let role = if dim == 2 && resolved_coord == PmlCoordKind::Cylindrical {
+                    match (c[0], c[1]) {
+                        (1, 0) => PmlRole::RadialShell,
+                        (0, _) => PmlRole::EndCap,
+                        _ => PmlRole::CornerAnnulus,
+                    }
+                } else if dim == 2 {
+                    if nz == 1 {
+                        PmlRole::Face
+                    } else {
+                        PmlRole::Corner
+                    }
+                } else {
+                    match nz {
+                        1 => PmlRole::Face,
+                        2 => PmlRole::Edge,
+                        _ => PmlRole::Corner,
+                    }
+                };
+                pieces.push((Node::Prim(b.prims.len() - 1), *c, piece, role));
+            }
         }
         let mut out: Vec<RegionX> = vec![];
-        let pad_bb: Vec<Aabb> = pieces.iter().map(|(n, _, _)| n.bbox(&b.prims)).collect();
+        let pad_bb: Vec<Aabb> = pieces.iter().map(|(n, _, _, _)| n.bbox(&b.prims)).collect();
         for r in rx.iter() {
             let candidate = r.pml.is_none()
                 && r.parent.is_none()
@@ -1319,7 +1659,7 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
             let mut phys = r.clone();
             phys.expr = Node::Diff(Box::new(r.expr.clone()), all_pieces);
             out.push(phys);
-            for ((node, c, piece), bb) in pieces.iter().zip(&pad_bb) {
+            for ((node, c, piece, role), bb) in pieces.iter().zip(&pad_bb) {
                 if !eb.overlaps(bb) {
                     continue;
                 }
@@ -1330,7 +1670,22 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
                     pinned_id: None,
                     expr: Node::Inter(vec![r.expr.clone(), node.clone()]),
                     parent: Some(r.name.clone()),
-                    pml: Some(PmlInfo { feature: f.id, sides: *c, window: win, thickness: t, layers: nl, grading: gr }),
+                    pml: Some(PmlInfo {
+                        feature: f.id,
+                        sides: *c,
+                        window: win,
+                        thickness: t,
+                        layers: nl,
+                        grading: gr,
+                        coord: resolved_coord,
+                        mode: PmlGrowMode::Inward,
+                        center: pml_center,
+                        axis: pml_axis_vec,
+                        r_in,
+                        z_range,
+                        layer_grading: lg,
+                        role: *role,
+                    }),
                 });
             }
         }
@@ -1384,7 +1739,144 @@ pub fn build_scene(list: &FeatureList, cache: &mut Cache) -> GeomResult<Scene> {
         naming: *naming,
         axis,
         auto_tags,
+        outward_pmls,
     })
+}
+
+/// Auto-detects the canonical coordinate system (`Cartesian`, `Cylindrical`, `Spherical`) and reference parameters
+/// `(center, axis, r_in, z_range, curved_outer)` in the internal sweep frame from the window/host primitives.
+fn detect_pml_shape(
+    dim: usize,
+    win: &Aabb,
+    leaves: &[usize],
+    prims: &[Arc<Prim>],
+    tol: f64,
+) -> (PmlCoordKind, [f64; 3], [f64; 3], f64, [f64; 2], bool) {
+    if dim == 3 {
+        // 1. Check for outer 3D Sphere host
+        for &li in leaves {
+            if let Some(Body::Sphere { c, r }) = prims[li].body {
+                let sb = Body::Sphere { c, r }.bbox();
+                if (0..3).all(|k| (sb.lo[k] - win.lo[k]).abs() <= tol && (sb.hi[k] - win.hi[k]).abs() <= tol) {
+                    return (PmlCoordKind::Spherical, c, [0.0, 0.0, 1.0], r, [c[2] - r, c[2] + r], true);
+                }
+            }
+        }
+        // 2. Check for outer 3D Cylinder host (or stack of coaxial cylinders)
+        let mut outer_cyl: Option<(V2, f64)> = None;
+        let mut has_outer_rect = false;
+        for &li in leaves {
+            let p = &prims[li];
+            if p.aux {
+                continue;
+            }
+            match &p.shape {
+                LShape::Circle { c, r } => {
+                    let c_uv = p.xf.apply(*c);
+                    let r_uv = *r * p.xf.scale();
+                    if (c_uv[0] - r_uv - win.lo[0]).abs() <= tol
+                        && (c_uv[0] + r_uv - win.hi[0]).abs() <= tol
+                        && (c_uv[1] - r_uv - win.lo[1]).abs() <= tol
+                        && (c_uv[1] + r_uv - win.hi[1]).abs() <= tol
+                    {
+                        outer_cyl = Some((c_uv, r_uv));
+                    }
+                }
+                LShape::Rect { .. } | LShape::Rounded { .. } | LShape::Poly { .. } => {
+                    let pb = p.bbox3();
+                    if (pb.lo[0] - win.lo[0]).abs() <= tol
+                        && (pb.hi[0] - win.hi[0]).abs() <= tol
+                        && (pb.lo[1] - win.lo[1]).abs() <= tol
+                        && (pb.hi[1] - win.hi[1]).abs() <= tol
+                    {
+                        has_outer_rect = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some((c_uv, r_uv)) = outer_cyl {
+            if !has_outer_rect {
+                return (
+                    PmlCoordKind::Cylindrical,
+                    [c_uv[0], c_uv[1], 0.5 * (win.lo[2] + win.hi[2])],
+                    [0.0, 0.0, 1.0],
+                    r_uv,
+                    [win.lo[2], win.hi[2]],
+                    true,
+                );
+            }
+        }
+        return (PmlCoordKind::Cartesian, win.center(), [0.0, 0.0, 1.0], 0.0, [win.lo[2], win.hi[2]], false);
+    }
+
+    // 2D model: internal frame `(u, v)` is world `(x, z)`
+    let mut outer_circle: Option<(V2, f64)> = None;
+    let mut has_outer_rect = false;
+    for &li in leaves {
+        let p = &prims[li];
+        if p.aux {
+            continue;
+        }
+        match &p.shape {
+            LShape::Circle { c, r } => {
+                let c_uv = p.xf.apply(*c);
+                let r_uv = *r * p.xf.scale();
+                let full_match = (c_uv[0] - r_uv - win.lo[0]).abs() <= tol
+                    && (c_uv[0] + r_uv - win.hi[0]).abs() <= tol
+                    && (c_uv[1] - r_uv - win.lo[1]).abs() <= tol
+                    && (c_uv[1] + r_uv - win.hi[1]).abs() <= tol;
+                let semi_match = c_uv[0].abs() <= tol
+                    && win.lo[0].abs() <= tol
+                    && (r_uv - win.hi[0]).abs() <= tol
+                    && (c_uv[1] - r_uv - win.lo[1]).abs() <= tol
+                    && (c_uv[1] + r_uv - win.hi[1]).abs() <= tol;
+                if full_match || semi_match {
+                    outer_circle = Some((c_uv, r_uv));
+                }
+            }
+            LShape::Rect { .. } | LShape::Rounded { .. } | LShape::Poly { .. } => {
+                let pb = p.bbox3();
+                // An intersecting half-plane bounding box `[0, R_in]` used to clip a semicircle has corners outside the circle;
+                // only treat a Rect/Poly as the outer boundary if no Circle matches or if it is the sole outer shape.
+                if outer_circle.is_none()
+                    && (pb.lo[0] - win.lo[0]).abs() <= tol
+                    && (pb.hi[0] - win.hi[0]).abs() <= tol
+                    && (pb.lo[1] - win.lo[1]).abs() <= tol
+                    && (pb.hi[1] - win.hi[1]).abs() <= tol
+                {
+                    has_outer_rect = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some((c_uv, r_uv)) = outer_circle {
+        // Check if a rect with larger or equal area was painted AFTER the circle to overwrite the outer boundary
+        let _ = has_outer_rect;
+        if c_uv[0].abs() <= tol && win.lo[0] >= -tol {
+            // 2D axisymmetric semicircle centered at x = 0 in x >= 0 -> Spherical
+            return (
+                PmlCoordKind::Spherical,
+                [0.0, c_uv[1], 0.0],
+                [0.0, 1.0, 0.0],
+                r_uv,
+                [c_uv[1] - r_uv, c_uv[1] + r_uv],
+                true,
+            );
+        } else {
+            // 2D full circle or off-axis circle -> Cylindrical
+            return (
+                PmlCoordKind::Cylindrical,
+                [c_uv[0], c_uv[1], 0.0],
+                [0.0, 0.0, 1.0],
+                r_uv,
+                [c_uv[1] - r_uv, c_uv[1] + r_uv],
+                true,
+            );
+        }
+    }
+    (PmlCoordKind::Cartesian, win.center(), [0.0, 0.0, 1.0], 0.0, [win.lo[1], win.hi[1]], false)
 }
 
 /// Lower corner of the non-auxiliary primitives along an axis.

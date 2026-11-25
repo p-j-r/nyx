@@ -148,7 +148,7 @@ fn absorbing_pieces_are_relaxed_by_pml_relax() {
     let win = m.box_("window", (-1.0, -1.0, -1.0), (1.0, 1.0, 1.0));
     m.overlay(&[("air", air)]);
     m.pml("pml", win, &[], 1.0, 2.0, 2.0);
-    let plan = MeshPlan::simple(0.8);
+    let plan = MeshPlan { pml: PmlMode::Inline, ..MeshPlan::simple(0.8) };
     let s = waves(1, &[("air", 2.4), ("air.pml_xmax", 2.4)]);
     let strict = PhysicsSizing { pml_relax: 1.0, ..PhysicsSizing::default() };
     let relaxed = PhysicsSizing { pml_relax: 2.0, ..PhysicsSizing::default() };
@@ -269,11 +269,18 @@ fn structured(plan: MeshPlan) -> MeshPlan {
     MeshPlan { pml: PmlMode::Structured, ..plan }
 }
 
+fn inline_pml(plan: MeshPlan) -> MeshPlan {
+    MeshPlan { pml: PmlMode::Inline, ..plan }
+}
+
 #[test]
 fn structured_layers_have_the_labels_volumes_and_walls_of_the_inline_ones() {
     let m = boxed_pml();
-    let inline = mesh_model(&m.list, &MeshPlan::simple(0.5)).unwrap();
+    let inline = mesh_model(&m.list, &inline_pml(MeshPlan::simple(0.5))).unwrap();
     let st = mesh_model(&m.list, &structured(MeshPlan::simple(0.5))).unwrap();
+    // Default `MeshPlan::simple` (`PmlMode::Auto`) selects structured layers automatically
+    let auto_st = mesh_model(&m.list, &MeshPlan::simple(0.5)).unwrap();
+    assert_eq!(auto_st.mesh.cells, st.mesh.cells);
     assert_eq!(st.labels, inline.labels, "the same names mean the same numbers");
     assert_conforming(&st.mesh);
     let (vi, vs) = (volumes(&inline.mesh), volumes(&st.mesh));
@@ -328,7 +335,11 @@ fn structured_layers_keep_the_physical_vertex_and_cell_numbers_and_have_the_aske
     assert!(lo.iter().all(|x| (x + 2.0).abs() < 1e-12) && hi.iter().all(|x| (x - 2.0).abs() < 1e-12), "{lo:?} {hi:?}");
     let total: f64 = (0..cells.n_cells()).map(|c| cells.measure(c)).sum();
     assert!((total - 64.0).abs() < 1e-9, "{total}");
-    cells.check().unwrap();
+    assert!((0..cells.n_cells()).all(|c| cells.measure(c) > 0.0));
+    femcore::mesh::mixed::MixedDiscretisation::from_cell_mesh(&cells)
+        .unwrap()
+        .validate_conforming()
+        .unwrap();
 }
 
 #[test]
@@ -369,7 +380,7 @@ fn layers_can_replace_the_inline_pieces_of_a_mesh_made_the_ordinary_way() {
     // the same entry point as in 2D: mesh the pieces inline, then replace them. The window planes are surfaces of the model, so the lattice
     // mesher cuts them exactly even where they are off the lattice, and the physical mesh is box-shaped
     let m = boxed_pml();
-    let inline = mesh_model(&m.list, &MeshPlan::simple(0.37)).unwrap();
+    let inline = mesh_model(&m.list, &inline_pml(MeshPlan::simple(0.37))).unwrap();
     let (st, report) = femcore::meshing::pml_geom::structured_pml(inline.clone()).unwrap();
     assert!(report.dropped_cells > 0 && report.layer_quads > 0);
     assert_eq!(report.layers3, [[2, 2], [2, 2], [2, 2]]);

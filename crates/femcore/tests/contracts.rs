@@ -487,7 +487,10 @@ fn mesh_geom3d_structured_pml_keeps_the_physical_vertex_and_cell_numbers() {
 fn mesh_request_and_report_match_their_exemplars_and_schemas() {
     // ADR 54: the serialisable request and report of a mesh job, in 2D and 3D. The request exemplar is compared as a value; the report
     // exemplar by structure (the counts depend on the mesher); both validate against the checked-in schemas, which are the generated ones.
-    use femcore::meshing::request::{mesh_request, report_schema, request_schema, MeshReport, MeshRequest, MesherRequest, WavesRequest};
+    use femcore::meshing::request::{
+        mesh_request, report_schema, request_schema, MeshReport, MeshRequest, MesherRequest,
+        PmlModeRequest, WavesRequest,
+    };
     use femcore::meshing::Sizing;
     check_exemplar_value("mesh_request.schema.v1.json", &request_schema());
     check_exemplar_value("mesh_report.schema.v1.json", &report_schema());
@@ -495,7 +498,8 @@ fn mesh_request_and_report_match_their_exemplars_and_schemas() {
         h: 0.6,
         max_dev: None,
         mesher: MesherRequest::Adaptive { scale: 0.7, grade: 0.4, max_cells: Some(200_000) },
-        structured_pml: true,
+        pml_mode: PmlModeRequest::Structured,
+        structured_pml: None,
         curved: false,
         gap_cells: None,
         z_coarsen: false,
@@ -520,7 +524,18 @@ fn mesh_request_and_report_match_their_exemplars_and_schemas() {
     validate(&request_schema(), &rv, "request").unwrap();
     assert_eq!(serde_json::from_value::<MeshRequest>(rv).unwrap(), req, "the request round-trips");
     let minimal: MeshRequest = serde_json::from_value(json!({ "h": 0.1, "mesher": { "kind": "simple" } })).unwrap();
-    assert!(!minimal.structured_pml && minimal.waves.is_none() && matches!(minimal.mesher, MesherRequest::Simple));
+    assert!(
+        minimal.pml_mode == PmlModeRequest::Auto
+            && minimal.resolved_pml_mode() == PmlModeRequest::Auto
+            && minimal.waves.is_none()
+            && matches!(minimal.mesher, MesherRequest::Simple)
+    );
+    let legacy_true: MeshRequest =
+        serde_json::from_value(json!({ "h": 0.1, "mesher": { "kind": "simple" }, "structured_pml": true })).unwrap();
+    assert_eq!(legacy_true.resolved_pml_mode(), PmlModeRequest::Structured);
+    let legacy_false: MeshRequest =
+        serde_json::from_value(json!({ "h": 0.1, "mesher": { "kind": "simple" }, "structured_pml": false })).unwrap();
+    assert_eq!(legacy_false.resolved_pml_mode(), PmlModeRequest::Inline);
     let (_, report) = mesh_request(&ball_in_box_with_pml().list, &req).unwrap();
     let pv = serde_json::to_value(&report).unwrap();
     validate(&report_schema(), &pv, "report").unwrap();

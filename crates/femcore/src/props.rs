@@ -36,9 +36,83 @@ pub enum PmlDir {
     Minus,
 }
 
-/// A perfectly matched layer by coordinate stretching, `s = re - j strength t^order` with `t`
-/// running from 0 at the interface to 1 at the outer edge of the domain along each active axis.
-/// With `order` 0 the stretch is the constant `re - j strength`.
+/// Coordinate system and reference geometry of a perfectly matched layer (or infinite element).
+/// All 3D position and axis vectors (`center`, `axis`) are expressed in the global wafer frame `(x, y, z)`,
+/// where a 2D mesh lies in the `(x, z)` cross-section (`y = 0`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum PmlCoord {
+    /// Axis-aligned Cartesian slab, edge, or corner (`Pml::x`, `Pml::y`, `Pml::z`).
+    #[default]
+    Cartesian,
+    /// Cylindrical shell (`radial_on`: `r_in .. r_in + r_thickness` perpendicular to unit `axis`),
+    /// axial endcap (`axial`: `Plus` runs `z_in .. z_in + z_thickness`, `Minus` runs `z_in - z_thickness .. z_in`
+    /// along `axis` measured from `center`), or corner annulus (`radial_on && axial != Off`).
+    Cylindrical {
+        center: [f64; 3],
+        axis: [f64; 3],
+        r_in: f64,
+        r_thickness: f64,
+        radial_on: bool,
+        axial: PmlDir,
+        z_in: f64,
+        z_thickness: f64,
+    },
+    /// Concentric spherical shell (`r_in .. r_in + thickness`) around `center`.
+    Spherical {
+        center: [f64; 3],
+        r_in: f64,
+        thickness: f64,
+    },
+}
+
+/// Radial/normal coordinate-stretching law inside a PML (`t` in `[0, 1]`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PmlProfile {
+    /// Bounded ABCS complex dilation `s(t) = 1 + (kappa_max - 1) t^m - i * strength * t^m`
+    /// (with legacy constant `re` honored when `kappa_max == 1.0 && re != 1.0`).
+    /// Default for eigenfrequency studies, waveguides, and iterative `AMS`/`GMRES` solves.
+    KappaPolynomial { kappa_max: f64 },
+    /// Locking-free rational stretching `s(t) = (1 - i * strength * t^m) / (1 - curvature * t)^2`
+    /// (`0 <= curvature < 1`) for direct-solved open radiation/scattering problems.
+    Rational { curvature: f64 },
+}
+
+impl Default for PmlProfile {
+    fn default() -> Self {
+        PmlProfile::KappaPolynomial { kappa_max: 1.0 }
+    }
+}
+
+/// Stabilization mode against backward-propagating anisotropic elastic or guided Lamb waves.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum PmlStabilization {
+    /// Pure analytic continuation along the normal ray only (`s_perp = 1`).
+    Off,
+    /// Pre-solve Christoffel check enables M-PML automatically when bulk backward waves exist.
+    #[default]
+    Auto,
+    /// Multi-axial PML auxiliary tangential damping `s_parallel = 1 - i * ratio * psi(t)`.
+    Mpml { ratio: f64 },
+    /// Adiabatic stiffness loss ramp `C_tilde(t) = (1 + i * eta_max * t^2) C`.
+    Adiabatic { eta_max: f64 },
+}
+
+fn pml_off() -> PmlDir {
+    PmlDir::Off
+}
+
+fn default_target_reflection() -> f64 {
+    1e-6
+}
+
+fn default_clamp_outer() -> bool {
+    true
+}
+
+/// A perfectly matched layer by coordinate stretching. Along each active axis `t` runs from `0` at
+/// the physical interface to `1` at the outer termination wall. Legacy fields (`x`, `y`, `z`,
+/// `strength`, `order`, `re`) remain fully compatible; curvilinear coordinates, explicit slab
+/// bounds, dual profiles, physics-based auto-scaling, and elastic stabilization extend it cleanly.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pml {
     pub x: PmlDir,
@@ -49,15 +123,68 @@ pub struct Pml {
     pub strength: f64,
     pub order: f64,
     pub re: f64,
-}
-
-fn pml_off() -> PmlDir {
-    PmlDir::Off
+    /// Coordinate topology (`Cartesian`, `Cylindrical`, or `Spherical`).
+    #[serde(default)]
+    pub coord: PmlCoord,
+    /// Explicit `(lo, hi)` bounding box in wafer coordinates `(x, y, z)` for Cartesian slabs so
+    /// disconnected or shared PML domains never miscompute domain-local bounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<([f64; 3], [f64; 3])>,
+    /// Stretching law (`KappaPolynomial` or `Rational`).
+    #[serde(default)]
+    pub profile: PmlProfile,
+    /// When `true`, `strength`, `profile`, and thickness/layer counts calibrate from wavelengths.
+    #[serde(default)]
+    pub auto_scale: bool,
+    /// Target normal-incidence amplitude reflection `R_0` (default `1e-6`, i.e. `-120 dB` power).
+    #[serde(default = "default_target_reflection")]
+    pub target_reflection: f64,
+    /// Backward-wave stabilization strategy for elastodynamics (`nyx-sms`).
+    #[serde(default)]
+    pub stabilization: PmlStabilization,
+    /// Whether exterior PML termination walls are clamped (`u = 0` Dirichlet) in `nyx-sms`.
+    #[serde(default = "default_clamp_outer")]
+    pub clamp_outer: bool,
 }
 
 impl Default for Pml {
     fn default() -> Self {
-        Pml { x: PmlDir::Off, y: PmlDir::Off, z: PmlDir::Off, strength: 3.0, order: 2.0, re: 1.0 }
+        Pml {
+            x: PmlDir::Off,
+            y: PmlDir::Off,
+            z: PmlDir::Off,
+            strength: 3.0,
+            order: 2.0,
+            re: 1.0,
+            coord: PmlCoord::Cartesian,
+            bounds: None,
+            profile: PmlProfile::default(),
+            auto_scale: false,
+            target_reflection: default_target_reflection(),
+            stabilization: PmlStabilization::Auto,
+            clamp_outer: default_clamp_outer(),
+        }
+    }
+}
+
+impl Pml {
+    /// Creates an auto-scaled PML with the given coordinate topology (`auto_scale = true`).
+    pub fn auto(coord: PmlCoord) -> Self {
+        Pml { coord, auto_scale: true, ..Self::default() }
+    }
+
+    /// Creates an auto-scaled Cartesian PML along `(x, y, z)` in wafer axes (`auto_scale = true`).
+    pub fn auto_cartesian(x: PmlDir, y: PmlDir, z: PmlDir) -> Self {
+        Pml { x, y, z, auto_scale: true, ..Self::default() }
+    }
+
+    /// True if this PML actively stretches at least one coordinate direction.
+    pub fn is_active(&self) -> bool {
+        match self.coord {
+            PmlCoord::Cartesian => self.x != PmlDir::Off || self.y != PmlDir::Off || self.z != PmlDir::Off,
+            PmlCoord::Cylindrical { radial_on, axial, .. } => radial_on || axial != PmlDir::Off,
+            PmlCoord::Spherical { thickness, .. } => thickness > 0.0,
+        }
     }
 }
 
@@ -91,7 +218,7 @@ impl TensorKind {
 impl Materials {
     /// True if any domain has an active perfectly matched layer.
     pub fn has_pml(&self) -> bool {
-        self.pml.values().any(|p| p.x != PmlDir::Off || p.y != PmlDir::Off || p.z != PmlDir::Off)
+        self.pml.values().any(Pml::is_active)
     }
 
     /// True if any domain carries a non-zero imaginary permittivity (dielectric/optical loss).
@@ -262,4 +389,57 @@ impl LinearSolver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_pml_json_deserializes_with_curvilinear_defaults() {
+        let raw = r#"{"x":"Plus","y":"Off","z":"Minus","strength":4.5,"order":2.0,"re":1.0}"#;
+        let p: Pml = serde_json::from_str(raw).unwrap();
+        assert_eq!(p.x, PmlDir::Plus);
+        assert_eq!(p.y, PmlDir::Off);
+        assert_eq!(p.z, PmlDir::Minus);
+        assert_eq!(p.coord, PmlCoord::Cartesian);
+        assert_eq!(p.bounds, None);
+        assert_eq!(p.profile, PmlProfile::KappaPolynomial { kappa_max: 1.0 });
+        assert!(!p.auto_scale);
+        assert_eq!(p.target_reflection, 1e-6);
+        assert_eq!(p.stabilization, PmlStabilization::Auto);
+        assert!(p.clamp_outer);
+    }
+
+    #[test]
+    fn has_pml_recognizes_cartesian_cylindrical_and_spherical_layers() {
+        let mut m = Materials::default();
+        assert!(!m.has_pml());
+
+        m.pml.insert(1, Pml::default());
+        assert!(!m.has_pml(), "inactive default Pml must not trigger has_pml");
+
+        m.pml.insert(1, Pml::auto(PmlCoord::Spherical { center: [0.0; 3], r_in: 1.0, thickness: 0.0 }));
+        assert!(!m.has_pml(), "zero-thickness spherical Pml is inactive");
+
+        m.pml.insert(1, Pml::auto(PmlCoord::Spherical { center: [0.0; 3], r_in: 1.0, thickness: 0.2 }));
+        assert!(m.has_pml());
+        assert!(m.pml[&1].auto_scale);
+
+        m.pml.insert(
+            1,
+            Pml::auto(PmlCoord::Cylindrical {
+                center: [0.0; 3],
+                axis: [0.0, 0.0, 1.0],
+                r_in: 1.0,
+                r_thickness: 0.2,
+                radial_on: false,
+                axial: PmlDir::Plus,
+                z_in: 0.5,
+                z_thickness: 0.2,
+            }),
+        );
+        assert!(m.has_pml(), "axial-only cylindrical endcap PML must be recognized as active");
+    }
+}
+
 

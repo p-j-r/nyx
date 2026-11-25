@@ -59,7 +59,7 @@ pub use engine::Engine;
 pub use estimate::{Estimate, History};
 pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, Submit, WorkerRun};
 pub use meshing::{FemcoreMesher, MeshedModel, Mesher};
-pub use project::{MeshSettings, Project, SweepLayer};
+pub use project::{MeshSettings, PmlModeRequest, Project, SweepLayer};
 pub use queue::QueueOpts;
 
 use nyx_physics::{Error, Registry};
@@ -95,6 +95,7 @@ pub mod facade {
     pub use femcore::mesh::SimplexMesh;
     /// Evaluation of a feature list (what the geometry editor previews).
     pub use femcore::meshing::geomdrive;
+    pub use femcore::meshing::request::PmlModeRequest;
     pub use femcore::progress::Progress;
     /// The geometry kernel: the feature list the geometry editor changes, evaluation, selectors.
     pub use geom;

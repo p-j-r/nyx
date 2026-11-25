@@ -59,6 +59,7 @@ fn mesh_args(m: &MeshSettings) -> Value {
     put("adapt_scale", json!(m.adapt_scale), json!(d.adapt_scale));
     put("physics_sizing", json!(m.physics_sizing), json!(d.physics_sizing));
     put("points_per_wavelength", json!(m.points_per_wavelength), json!(d.points_per_wavelength));
+    put("pml_mode", json!(m.pml_mode), json!(d.pml_mode));
     put("structured_pml", json!(m.structured_pml), json!(d.structured_pml));
     put("max_dev", json!(m.max_dev), json!(d.max_dev));
     put("curved", json!(m.curved), json!(d.curved));

@@ -11,6 +11,7 @@
 pub mod cells;
 pub mod exchange;
 pub mod fixtures;
+pub mod mixed;
 
 pub mod io;
 
@@ -18,6 +19,7 @@ pub mod quality;
 pub mod view;
 
 pub use exchange::Mesh;
+pub use mixed::{FacetType, MixedDiscretisation};
 use crate::mesh::cells::CellMesh as NativeCells;
 use std::collections::BTreeSet;
 
@@ -222,10 +224,10 @@ impl SimplexMesh {
         SimplexMesh { dim, points, cells, cell_labels, facets, facet_labels, edges, cell_edges, edge_nodes: Vec::new(), qp_edges: Vec::new() }
     }
 
-    /// Sets the curved edges of a 3D mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the
+    /// Sets the curved edges of a mesh: `(vertex pair, node position)`; pairs that are not an edge of the mesh are ignored (the
     /// connectivity is what decides), and the list is kept sorted by edge index.
     pub fn set_edge_nodes(&mut self, nodes: &[([u32; 2], [f64; 3])]) {
-        if self.dim != 3 {
+        if self.dim != 2 && self.dim != 3 {
             self.edge_nodes.clear();
             self.qp_edges.clear();
             return;
@@ -242,7 +244,7 @@ impl SimplexMesh {
 
     /// Marks which curved edges carry Barsoum quarter-point singularity shifts (`AF-2`), sorted by edge index.
     pub fn set_qp_edges(&mut self, edges: &[[u32; 2]]) {
-        if self.dim != 3 {
+        if self.dim != 2 && self.dim != 3 {
             self.qp_edges.clear();
             return;
         }
@@ -527,7 +529,22 @@ impl SimplexMesh {
         let mut points: Vec<f64> = nm.points.iter().flat_map(|p| p.iter().copied()).collect();
         let (mut cells, mut cell_labels) = (vec![], vec![]);
         let (mut facets, mut facet_labels) = (vec![], vec![]);
-        let dist2 = |pts: &[f64], a: u32, b: u32| -> f64 { (0..d).map(|k| (pts[a as usize * d + k] - pts[b as usize * d + k]).powi(2)).sum() };
+        let orient_tet = |pts: &[f64], mut tet: [u32; 4]| -> [u32; 4] {
+            let p = |v: u32| [pts[v as usize * 3], pts[v as usize * 3 + 1], pts[v as usize * 3 + 2]];
+            let (p0, p1, p2, p3) = (p(tet[0]), p(tet[1]), p(tet[2]), p(tet[3]));
+            let (u, v, w) = (
+                [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]],
+                [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]],
+                [p3[0] - p0[0], p3[1] - p0[1], p3[2] - p0[2]],
+            );
+            let det = u[0] * (v[1] * w[2] - v[2] * w[1])
+                - u[1] * (v[0] * w[2] - v[2] * w[0])
+                + u[2] * (v[0] * w[1] - v[1] * w[0]);
+            if det < 0.0 {
+                tet.swap(2, 3);
+            }
+            tet
+        };
         let cell_kind = |c: usize| match nm.types[c] {
             CellType::Tri => "tri",
             CellType::Quad => "quad",
@@ -581,9 +598,14 @@ impl SimplexMesh {
                 }
                 (2, "quad") => {
                     for c in (0..nm.n_cells()).filter(|&c| cell_kind(c) == kind) {
-                        let [a, b, cc, e] = tensor_quad(nm.cell(c));
-                        let tris = if dist2(&points, a, e) <= dist2(&points, b, cc) { [[a, b, e], [a, e, cc]] } else { [[a, b, cc], [b, e, cc]] };
-                        for tr in tris {
+                        let vs = nm.cell(c);
+                        for mut tr in quad_tris([vs[0], vs[1], vs[2], vs[3]]) {
+                            let (ax, ay) = (points[tr[0] as usize * 2], points[tr[0] as usize * 2 + 1]);
+                            let (bx, by) = (points[tr[1] as usize * 2], points[tr[1] as usize * 2 + 1]);
+                            let (cx, cy) = (points[tr[2] as usize * 2], points[tr[2] as usize * 2 + 1]);
+                            if (bx - ax) * (cy - ay) - (cx - ax) * (by - ay) < 0.0 {
+                                tr.swap(1, 2);
+                            }
                             cells.extend_from_slice(&tr);
                             cell_labels.push(nm.label[c]);
                         }
@@ -639,7 +661,7 @@ impl SimplexMesh {
                                 }
                             }
                             for tr in far {
-                                cells.extend_from_slice(&[r[v0], tr[0], tr[1], tr[2]]);
+                                cells.extend_from_slice(&orient_tet(&points, [r[v0], tr[0], tr[1], tr[2]]));
                                 cell_labels.push(label);
                             }
                             if hex {
@@ -673,7 +695,7 @@ impl SimplexMesh {
                             tris.push([r[3], r[4], r[5]]);
                         }
                         for tr in tris {
-                            cells.extend_from_slice(&[cid, tr[0], tr[1], tr[2]]);
+                            cells.extend_from_slice(&orient_tet(&points, [cid, tr[0], tr[1], tr[2]]));
                             cell_labels.push(label);
                         }
                         if hex {
@@ -691,9 +713,17 @@ impl SimplexMesh {
         }
         report.cells_after = cells.len() / (d + 1);
         let mut mesh = SimplexMesh::new(d, points, cells, cell_labels, facets, facet_labels);
-        // curved edges (ADR 82) survive only where the cells are the cells that were given: a mesh that had to be split keeps none
-        if d == 3 && !nm.edge_nodes.is_empty() && report.is_empty() {
-            let nodes: Vec<([u32; 2], [f64; 3])> = nm.edge_nodes.iter().map(|e| (e.0, [e.1[0], e.1[1], e.1[2]])).collect();
+        // Retain all curved edges and quarter-point edges whose endpoints remain an edge in `mesh` (even when outer PML cells were split).
+        if !nm.edge_nodes.is_empty() {
+            let nodes: Vec<([u32; 2], [f64; 3])> = nm
+                .edge_nodes
+                .iter()
+                .map(|&(pr, p)| {
+                    let mut p3 = [0.0; 3];
+                    p3[..d].copy_from_slice(&p);
+                    (pr, p3)
+                })
+                .collect();
             mesh.set_edge_nodes(&nodes);
             if !nm.qp_edges.is_empty() {
                 mesh.set_qp_edges(&nm.qp_edges);

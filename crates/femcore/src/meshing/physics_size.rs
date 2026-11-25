@@ -189,6 +189,167 @@ pub fn elastic_wavelength(c: &M6, rho: f64, f: f64) -> f64 {
     wave_speed_range(c, rho).0 / f
 }
 
+/// Pre-solve Christoffel stability diagnostic for an anisotropic elastic PML with outward normal `n`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BackwardWaveCheck {
+    /// Minimum normalized group-velocity projection `(v_g . n_hat) / |v_g|` over outgoing-phase
+    /// bulk acoustic branches (`k_hat . n_hat > 0`). Negative whenever a backward wave exists.
+    pub min_projection: f64,
+    /// True when at least one bulk acoustic branch exhibits antiparallel phase and group normal
+    /// components (`(k_hat . n_hat) * (v_g . n_hat) < 0`).
+    pub has_backward_wave: bool,
+    /// Recommended M-PML auxiliary tangential damping ratio `p = 1.25 * p_min` (`0.0` if stable).
+    pub recommended_mpml_ratio: f64,
+}
+
+/// Evaluates bulk acoustic group velocities `v_g = d omega / d k` via the Hellmann-Feynman / acoustic
+/// Poynting theorem across the 400-point Fibonacci sphere (plus targeted near-grazing rings relative
+/// to `outward_normal`) to detect antiparallel backward-wave branches `(k . n_hat)(v_g . n_hat) < 0`
+/// and compute the stabilizing M-PML tangential damping ratio (`1.25 * p_min`).
+pub fn backward_wave_mpml_ratio(c: &M6, rho: f64, outward_normal: [f64; 3]) -> BackwardWaveCheck {
+    let n_norm = (outward_normal[0] * outward_normal[0]
+        + outward_normal[1] * outward_normal[1]
+        + outward_normal[2] * outward_normal[2])
+        .sqrt();
+    if !rho.is_finite() || rho <= 0.0 || !n_norm.is_finite() || n_norm <= 1e-30 {
+        return BackwardWaveCheck {
+            min_projection: 0.0,
+            has_backward_wave: false,
+            recommended_mpml_ratio: 0.0,
+        };
+    }
+    let n_hat = [outward_normal[0] / n_norm, outward_normal[1] / n_norm, outward_normal[2] / n_norm];
+
+    // Orthonormal tangent basis `(t1, t2)` perpendicular to `n_hat` for high-resolution grazing scan
+    let ref_v = if n_hat[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let dot_rn = ref_v[0] * n_hat[0] + ref_v[1] * n_hat[1] + ref_v[2] * n_hat[2];
+    let mut t1 = [ref_v[0] - dot_rn * n_hat[0], ref_v[1] - dot_rn * n_hat[1], ref_v[2] - dot_rn * n_hat[2]];
+    let t1_len = (t1[0] * t1[0] + t1[1] * t1[1] + t1[2] * t1[2]).sqrt();
+    t1 = [t1[0] / t1_len, t1[1] / t1_len, t1[2] / t1_len];
+    let t2 = [
+        n_hat[1] * t1[2] - n_hat[2] * t1[1],
+        n_hat[2] * t1[0] - n_hat[0] * t1[2],
+        n_hat[0] * t1[1] - n_hat[1] * t1[0],
+    ];
+
+    let mut min_proj = 1.0_f64;
+    let mut p_min = 0.0_f64;
+
+    let mut eval_dir = |mut q: [f64; 3]| {
+        let mut q_dot_n = q[0] * n_hat[0] + q[1] * n_hat[1] + q[2] * n_hat[2];
+        if q_dot_n < 0.0 {
+            q = [-q[0], -q[1], -q[2]];
+            q_dot_n = -q_dot_n;
+        }
+        if q_dot_n <= 1e-6 {
+            return;
+        }
+        let b_op = |v: [f64; 3]| -> [f64; 6] {
+            [
+                q[0] * v[0],
+                q[1] * v[1],
+                q[2] * v[2],
+                q[1] * v[0] + q[0] * v[1],
+                q[2] * v[1] + q[1] * v[2],
+                q[2] * v[0] + q[0] * v[2],
+            ]
+        };
+        let cols: [[f64; 6]; 3] = [
+            b_op([1.0, 0.0, 0.0]),
+            b_op([0.0, 1.0, 0.0]),
+            b_op([0.0, 0.0, 1.0]),
+        ];
+        let mut g = [[0.0; 3]; 3];
+        for a in 0..3 {
+            for bb in 0..3 {
+                let mut s = 0.0;
+                for p_idx in 0..6 {
+                    for q_idx in 0..6 {
+                        s += cols[a][p_idx] * c[p_idx][q_idx] * cols[bb][q_idx];
+                    }
+                }
+                g[a][bb] = s / rho;
+            }
+        }
+        let (ev, vecs) = sym_eig::<3>(&g);
+        for m in 0..3 {
+            if ev[m] <= 1e-30 {
+                continue;
+            }
+            let vp = ev[m].sqrt();
+            let p = [vecs[0][m], vecs[1][m], vecs[2][m]];
+            let eps = b_op(p);
+            let mut sig = [0.0; 6];
+            for r_idx in 0..6 {
+                let mut acc = 0.0;
+                for c_idx in 0..6 {
+                    acc += c[r_idx][c_idx] * eps[c_idx];
+                }
+                sig[r_idx] = acc;
+            }
+            // Exact Hellmann-Feynman group velocity `v_{g,i} = ((B(e_i) p) . (C B(q) p)) / (rho v_p)`
+            // Solver Voigt order: 0=xx, 1=yy, 2=zz, 3=xy, 4=yz, 5=xz
+            let inv_rvp = 1.0 / (rho * vp);
+            let vg = [
+                (sig[0] * p[0] + sig[3] * p[1] + sig[5] * p[2]) * inv_rvp,
+                (sig[3] * p[0] + sig[1] * p[1] + sig[4] * p[2]) * inv_rvp,
+                (sig[5] * p[0] + sig[4] * p[1] + sig[2] * p[2]) * inv_rvp,
+            ];
+            let vg_norm = (vg[0] * vg[0] + vg[1] * vg[1] + vg[2] * vg[2]).sqrt();
+            if vg_norm <= 1e-30 {
+                continue;
+            }
+            let vg_dot_n = vg[0] * n_hat[0] + vg[1] * n_hat[1] + vg[2] * n_hat[2];
+            let proj = vg_dot_n / vg_norm;
+            min_proj = min_proj.min(proj);
+
+            let kn_vgn = q_dot_n * vg_dot_n;
+            if kn_vgn < -1e-9 * vp {
+                // Euler homogeneity: `q . v_g == v_p`, so `q_perp . v_{g,perp} == v_p - kn_vgn > v_p > 0`
+                let kp_vgp = (vp - kn_vgn).max(1e-30);
+                p_min = p_min.max((-kn_vgn) / kp_vgp);
+            }
+        }
+    };
+
+    // 1. Global 400-point Fibonacci sphere (folded into outgoing hemisphere `q . n_hat >= 0`)
+    const N_FIB: usize = 400;
+    let golden = std::f64::consts::PI * (3.0 - 5f64.sqrt());
+    for i in 0..N_FIB {
+        let z = 1.0 - 2.0 * (i as f64 + 0.5) / N_FIB as f64;
+        let r = (1.0 - z * z).sqrt();
+        eval_dir([r * (golden * i as f64).cos(), r * (golden * i as f64).sin(), z]);
+    }
+
+    // 2. Near-grazing rings in `(t1, t2, n_hat)` where slowness skewness backward wedges concentrate
+    for &sin_el in &[0.015_f64, 0.04, 0.08, 0.14, 0.22, 0.32] {
+        let cos_el = (1.0 - sin_el * sin_el).sqrt();
+        const N_AZ: usize = 36;
+        for j in 0..N_AZ {
+            let phi = 2.0 * std::f64::consts::PI * (j as f64) / (N_AZ as f64);
+            let (sp, cp) = phi.sin_cos();
+            let q = [
+                cos_el * (cp * t1[0] + sp * t2[0]) + sin_el * n_hat[0],
+                cos_el * (cp * t1[1] + sp * t2[1]) + sin_el * n_hat[1],
+                cos_el * (cp * t1[2] + sp * t2[2]) + sin_el * n_hat[2],
+            ];
+            eval_dir(q);
+        }
+    }
+
+    let has_backward_wave = p_min > 1e-6 && min_proj < -1e-6;
+    let recommended_mpml_ratio = if has_backward_wave {
+        (1.25 * p_min).clamp(0.01, 1.0)
+    } else {
+        0.0
+    };
+    BackwardWaveCheck {
+        min_projection: min_proj,
+        has_backward_wave,
+        recommended_mpml_ratio,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,5 +377,51 @@ mod tests {
         let c = isotropic_stiffness(169e9, 0.28);
         let (vs, _) = wave_speed_range(&c, 2330.0);
         assert!((elastic_wavelength(&c, 2330.0, 1e9) - vs / 1e9).abs() < 1e-18);
+    }
+
+    #[test]
+    fn christoffel_backward_wave_check_distinguishes_isotropic_from_skewed_crystals() {
+        use crate::material::{sapphire, silicon, stiffness_global, Stiffness};
+
+        // 1. Isotropic media have v_g || k everywhere: never backward-propagating for any normal
+        let iso = isotropic_stiffness(72e9, 0.17);
+        for n in [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 1.0, 1.0]] {
+            let chk = backward_wave_mpml_ratio(&iso, 2200.0, n);
+            assert!(!chk.has_backward_wave, "isotropic medium flagged backward wave: {chk:?}");
+            assert!(chk.min_projection > 0.0, "isotropic min_projection = {}", chk.min_projection);
+            assert_eq!(chk.recommended_mpml_ratio, 0.0);
+        }
+
+        // 2. Tilted R-plane sapphire (Al2O3, trigonal c14 = -23.5 GPa, R-cut ~57.6 deg)
+        let (saph_stiff, _, _, _, saph_rho) = sapphire();
+        let c_saph_rcut = stiffness_global(&saph_stiff, [0.0, 57.6, 0.0]);
+        let saph_y = backward_wave_mpml_ratio(&c_saph_rcut, saph_rho, [0.0, 1.0, 0.0]);
+        let saph_z = backward_wave_mpml_ratio(&c_saph_rcut, saph_rho, [0.0, 0.0, 1.0]);
+        assert!(
+            saph_y.has_backward_wave || saph_z.has_backward_wave,
+            "tilted R-plane sapphire must exhibit slowness skewness backward waves: y={saph_y:?}, z={saph_z:?}"
+        );
+        let best_saph = if saph_y.recommended_mpml_ratio >= saph_z.recommended_mpml_ratio { saph_y } else { saph_z };
+        assert!(best_saph.min_projection < 0.0);
+        assert!(best_saph.recommended_mpml_ratio > 0.01 && best_saph.recommended_mpml_ratio < 0.5);
+
+        // 3. Rotated cubic Silicon (euler = [22.5, 0.0, 0.0], Zener ratio A = 1.564) and rotated LiNbO3
+        let c_si_rot = stiffness_global(&silicon(), [22.5, 0.0, 0.0]);
+        let si_chk = backward_wave_mpml_ratio(&c_si_rot, 2329.0, [1.0, 0.0, 0.0]);
+        assert!(si_chk.has_backward_wave, "rotated Si [22.5 deg] must exhibit qSV backward wave: {si_chk:?}");
+        assert!(si_chk.min_projection < 0.0 && si_chk.recommended_mpml_ratio > 0.02);
+
+        let linbo3 = Stiffness::Trigonal {
+            c11: 203.0e9,
+            c12: 57.3e9,
+            c13: 75.2e9,
+            c14: 8.5e9,
+            c33: 242.4e9,
+            c44: 59.5e9,
+        };
+        let c_ln_ycut = stiffness_global(&linbo3, [0.0, 128.0, 0.0]); // 128-deg Y-X LiNbO3 SAW cut
+        let ln_chk = backward_wave_mpml_ratio(&c_ln_ycut, 4640.0, [0.0, 0.0, 1.0]);
+        assert!(ln_chk.has_backward_wave, "128Y-X LiNbO3 must exhibit backward wave: {ln_chk:?}");
+        assert!(ln_chk.recommended_mpml_ratio > 0.01);
     }
 }

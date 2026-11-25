@@ -315,7 +315,7 @@ impl App {
             let m = &self.mesh_edit;
             let args = json!({
                 "h": m.h, "adapt_scale": m.adapt_scale, "physics_sizing": m.physics_sizing, "points_per_wavelength": m.points_per_wavelength,
-                "structured_pml": m.structured_pml, "max_dev": m.max_dev, "curved": m.curved,
+                "pml_mode": m.pml_mode, "structured_pml": m.structured_pml, "max_dev": m.max_dev, "curved": m.curved,
                 "gap_cells": m.gap_cells, "z_coarsen": m.z_coarsen, "max_cells": m.max_cells,
                 "dz_min": m.dz_min, "max_z_slabs": m.max_z_slabs, "z_growth_ratio": m.z_growth_ratio,
                 "max_steiner_multiplier": m.max_steiner_multiplier, "strict_mesh": m.strict_mesh,
@@ -1502,13 +1502,31 @@ impl App {
                         *entry = material;
                     }
                 }
-                for bc in spec.bcs.iter().filter(|bc| bc.kind == "pml") {
-                    let strength = bc.params.get("strength").and_then(|v| v.as_f64()).unwrap_or(3.0);
+                for bc in spec
+                    .bcs
+                    .iter()
+                    .filter(|bc| matches!(bc.kind.as_str(), "pml" | "infinite_element"))
+                {
+                    let strength = bc
+                        .params
+                        .get("strength")
+                        .or_else(|| bc.params.get("decay"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(3.0);
                     for l in LabelResolver::domains(model.as_ref(), &bc.on).unwrap_or_default() {
                         let e = layers.entry(l).or_insert(strength);
                         *e = e.max(strength);
                     }
                 }
+            }
+            for d in &model.labels().domains {
+                if d.kind == nyx_engine::facade::geom::model::RegionKind::Pml {
+                    layers.entry(d.id).or_insert(3.0);
+                }
+            }
+        } else {
+            for &id in &self.geom_ui.pml_domain_ids() {
+                layers.entry(id).or_insert(3.0);
             }
         }
         let key: HashMap<i32, String> = match (by_material, self.doc.model.as_ref()) {
@@ -1910,7 +1928,7 @@ mod tests {
         a.mesh_edit.h = 2.0e-7;
         a.mesh_edit.max_dev = Some(1.0e-9);
         a.mesh_edit.points_per_wavelength = Some(10.0);
-        a.mesh_edit.structured_pml = true;
+        a.mesh_edit.pml_mode = nyx_engine::PmlModeRequest::Structured;
         assert!(a.push_edits(), "{:?}", a.error);
         assert_eq!(a.engine.project().mesh, a.mesh_edit);
         assert_eq!(a.engine.project().geometry, a.geom_edit);
@@ -2406,7 +2424,13 @@ mod tests {
             Box::new(|a| a.mesh_edit.h *= 0.5),
             Box::new(|a| a.mesh_edit.physics_sizing = !a.mesh_edit.physics_sizing),
             Box::new(|a| a.mesh_edit.adapt_scale = Some(0.8)),
-            Box::new(|a| a.mesh_edit.structured_pml = !a.mesh_edit.structured_pml),
+            Box::new(|a| {
+                a.mesh_edit.pml_mode = match a.mesh_edit.resolved_pml_mode() {
+                    nyx_engine::PmlModeRequest::Inline => nyx_engine::PmlModeRequest::Structured,
+                    _ => nyx_engine::PmlModeRequest::Inline,
+                };
+                a.mesh_edit.structured_pml = None;
+            }),
             Box::new(|a| a.mesh_edit.sweep = Some(vec![nyx_engine::SweepLayer { thickness: 1.0, n: 4, domain_offset: 0, fill: None, regions: None }])),
             Box::new(|a| a.mesh_edit.h = -1.0),
             Box::new(|a| a.mesh_edit.h = 0.02),
