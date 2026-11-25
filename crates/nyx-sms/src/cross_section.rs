@@ -69,7 +69,11 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
     };
     problem.check_axisymmetric().map_err(|e| e.to_string())?;
     check_half_plane(mesh)?;
-    let (mut result, _) = solve_cross_section(mesh, problem, CrossSection::Axisymmetric(azimuthal_order as f64))?;
+    let mut result = if problem.uses_piezoelectric() {
+        solve_axisymmetric_piezo(mesh, problem, azimuthal_order as f64)?
+    } else {
+        solve_cross_section(mesh, problem, CrossSection::Axisymmetric(azimuthal_order as f64))?.0
+    };
     result.physics = "sms".into();
     result.study = problem.study.kind().into();
     if problem.plane != Plane::Strain || problem.thickness != 1.0 {
@@ -88,8 +92,11 @@ pub fn solve_axisymmetric_mixed(
     };
     problem.check_axisymmetric().map_err(|e| e.to_string())?;
     check_half_plane_mixed(mixed)?;
-    let (mut result, _) =
-        solve_cross_section_mixed(raw_mesh, mixed, problem, CrossSection::Axisymmetric(azimuthal_order as f64))?;
+    let mut result = if problem.uses_piezoelectric() {
+        solve_axisymmetric_piezo_mixed(raw_mesh, mixed, problem, azimuthal_order as f64)?
+    } else {
+        solve_cross_section_mixed(raw_mesh, mixed, problem, CrossSection::Axisymmetric(azimuthal_order as f64))?.0
+    };
     result.physics = "sms".into();
     result.study = problem.study.kind().into();
     if problem.plane != Plane::Strain || problem.thickness != 1.0 {
@@ -1094,6 +1101,13 @@ fn solve_cross_section_piezo_common(inp: CrossPiezoSolveInput<'_>) -> Result<(Cr
     let n_mech = 3 * n1;
     let n_tot = 4 * n1;
     let spec = inp.spec;
+    if matches!(inp.kind, CrossSection::Axisymmetric(m) if m.abs() > 0.0)
+        && spec.bcs.iter().any(|b| {
+            matches!(b.kind, BcKind::FloatingPotential { .. } | BcKind::Conductor { role: ConductorRole::Floating, .. })
+        })
+    {
+        return Err("floating equipotential electrodes are only defined for axisymmetric azimuthal order m = 0".into());
+    }
 
     let mut fixed_u_set: BTreeSet<usize> = inp.mech_untouched.into_iter().collect();
     for bc in &spec.bcs {
@@ -1568,6 +1582,158 @@ fn solve_waveguide_piezo_mixed(
         rel_u,
         rel_p_local,
         lrb_labels: &lrb_labels,
+        pml_cells,
+        diagnostics,
+        has_pml,
+        k_full,
+        m_uu,
+        c_uu_full,
+        n_modes,
+        f_search,
+        get_cell_dofs: &get_cell_dofs,
+        get_bd: &get_bd,
+    })?;
+    let (_simplex, proj) = MixedToSimplexProjector::from_mesh(raw_mesh, mixed).map_err(|e| e.to_string())?;
+    let mut result = cross_section_fields_mixed(mixed, &dof_map, &proj, &asm, &solved)?;
+    result.seconds = t0.elapsed().as_secs_f64();
+    Ok(result)
+}
+
+fn solve_axisymmetric_piezo(mesh: &Discretisation, spec: &Problem, m: f64) -> Result<SolveResult, String> {
+    if mesh.dim != 2 {
+        return Err("an axisymmetric model needs a 2D mesh".into());
+    }
+    let t0 = Instant::now();
+    let Study::AxisymmetricEigenfrequency { n_modes, f_search, .. } = spec.study else {
+        return Err("solve_axisymmetric_piezo needs the axisymmetric_eigenfrequency study".into());
+    };
+    let order = spec.order;
+    check_labels(mesh, &spec.bcs)?;
+    let (_by_dom, mut mats) = crate::piezo_mat::resolve_piezo_mats_simplex(mesh, spec, true)?;
+    let mut diagnostics = crate::axisym::average_axisym_piezo_mats(&mut mats, &mesh.cell_labels)?;
+    let resolved = if spec.materials.has_pml() {
+        Some(ResolvedPmlDomains::from_simplex(mesh, spec, true, f_search)?)
+    } else {
+        None
+    };
+
+    let n1 = mesh.n_dofs(order);
+    let cond_domains = spec.conductor_domains();
+    let mech_untouched = untouched_dofs(mesh, order, 3, &spec.inactive);
+    let elec_untouched = untouched_dofs(mesh, order, 1, &cond_domains);
+    let axis_tol = crate::axisym::axis_tolerance(mesh);
+    let pml_clamped =
+        resolved.as_ref().map_or_else(Vec::new, |r| outer_clamped_dofs_simplex(mesh, order, spec, r, true, axis_tol));
+    let (axis_mech_pairs, axis_phi_fixed, axis_dofs) = crate::axisym::axis_constraints_piezo(mesh, order, m)?;
+
+    let (k_full, m_uu, c_uu_full) =
+        crate::axisym::assemble_axisym_piezo_simplex(mesh, &mats, order, m, resolved.as_ref())?;
+    let pml_cells: Vec<bool> =
+        (0..mesh.n_cells()).map(|ci| resolved.as_ref().is_some_and(|r| r.contains(mesh.cell_labels[ci]))).collect();
+    let has_pml = pml_cells.iter().any(|&p| p);
+    if let Some(res) = resolved {
+        diagnostics.extend(res.diagnostics);
+    }
+
+    let get_cell_dofs = |ci: usize, out: &mut Vec<usize>| mesh.cell_dofs(ci, order, out);
+    let get_bd = |labels: &[i32]| boundary_dofs(mesh, labels, order);
+    let (asm, solved) = solve_cross_section_piezo_common(CrossPiezoSolveInput {
+        kind: CrossSection::Axisymmetric(m),
+        spec,
+        n1,
+        n_cells: mesh.n_cells(),
+        cell_labels: &mesh.cell_labels,
+        mats: &mats,
+        mech_untouched,
+        elec_untouched,
+        pml_clamped,
+        axis_mech_pairs,
+        axis_phi_fixed,
+        axis_dofs,
+        rel_u: Vec::new(),
+        rel_p_local: Vec::new(),
+        lrb_labels: &[],
+        pml_cells,
+        diagnostics,
+        has_pml,
+        k_full,
+        m_uu,
+        c_uu_full,
+        n_modes,
+        f_search,
+        get_cell_dofs: &get_cell_dofs,
+        get_bd: &get_bd,
+    })?;
+    let mut result = cross_section_fields(mesh, &asm, &solved)?;
+    result.seconds = t0.elapsed().as_secs_f64();
+    Ok(result)
+}
+
+fn solve_axisymmetric_piezo_mixed(
+    raw_mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    spec: &Problem,
+    m: f64,
+) -> Result<SolveResult, String> {
+    if mixed.dim != 2 {
+        return Err("an axisymmetric model needs a 2D mesh".into());
+    }
+    let t0 = Instant::now();
+    let Study::AxisymmetricEigenfrequency { n_modes, f_search, .. } = spec.study else {
+        return Err("solve_axisymmetric_piezo_mixed needs the axisymmetric_eigenfrequency study".into());
+    };
+    let order = spec.order;
+    crate::solid::mixed_check_boundary_labels(mixed, &spec.bcs)?;
+
+    let space = if order == 1 { LagrangeSpace::Order1 } else { LagrangeSpace::Order2Serendipity };
+    let dof_map = MixedLagrangeDofMap::new(mixed, space);
+    let n1 = dof_map.n_dofs;
+    let (_by_dom, mut mats) = crate::piezo_mat::resolve_piezo_mats_mixed(mixed, spec, true)?;
+    let mut diagnostics = crate::axisym::average_axisym_piezo_mats(&mut mats, &mixed.cell_labels)?;
+    let resolved = if spec.materials.has_pml() {
+        Some(ResolvedPmlDomains::from_mixed(mixed, spec, true, f_search)?)
+    } else {
+        None
+    };
+
+    let cond_domains = spec.conductor_domains();
+    let mech_untouched = crate::solid::mixed_untouched_dofs(mixed, &dof_map, 3, &spec.inactive);
+    let elec_untouched = crate::solid::mixed_untouched_dofs(mixed, &dof_map, 1, &cond_domains);
+    let axis_tol = crate::axisym::axis_tolerance_mixed(mixed);
+    let pml_clamped =
+        resolved.as_ref().map_or_else(Vec::new, |r| outer_clamped_dofs_mixed(mixed, &dof_map, spec, r, true, axis_tol));
+    let (axis_mech_pairs, axis_phi_fixed, axis_dofs) = crate::axisym::axis_constraints_piezo_mixed(mixed, &dof_map, m)?;
+
+    let (k_full, m_uu, c_uu_full) =
+        crate::axisym::assemble_axisym_piezo_mixed(mixed, &dof_map, &mats, m, resolved.as_ref())?;
+    let pml_cells: Vec<bool> =
+        (0..mixed.n_cells()).map(|ci| resolved.as_ref().is_some_and(|r| r.contains(mixed.cell_labels[ci]))).collect();
+    let has_pml = pml_cells.iter().any(|&p| p);
+    if let Some(res) = resolved {
+        diagnostics.extend(res.diagnostics);
+    }
+
+    let get_cell_dofs = |ci: usize, out: &mut Vec<usize>| {
+        out.clear();
+        out.extend_from_slice(dof_map.cell_dofs(ci));
+    };
+    let get_bd = |labels: &[i32]| dof_map.boundary_dofs(mixed, labels);
+    let (asm, solved) = solve_cross_section_piezo_common(CrossPiezoSolveInput {
+        kind: CrossSection::Axisymmetric(m),
+        spec,
+        n1,
+        n_cells: mixed.n_cells(),
+        cell_labels: &mixed.cell_labels,
+        mats: &mats,
+        mech_untouched,
+        elec_untouched,
+        pml_clamped,
+        axis_mech_pairs,
+        axis_phi_fixed,
+        axis_dofs,
+        rel_u: Vec::new(),
+        rel_p_local: Vec::new(),
+        lrb_labels: &[],
         pml_cells,
         diagnostics,
         has_pml,

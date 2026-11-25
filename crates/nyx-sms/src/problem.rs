@@ -567,9 +567,9 @@ impl Problem {
     /// another study passes. The mesh rule (the half plane lies in `x >= 0`) is checked by `cross_section::solve_axisymmetric`.
     pub fn check_axisymmetric(&self) -> Result<(), Error> {
         self.check_study_open_domains()?;
-        if !matches!(self.study, Study::AxisymmetricEigenfrequency { .. }) {
+        let Study::AxisymmetricEigenfrequency { azimuthal_order, .. } = self.study else {
             return Ok(());
-        }
+        };
         if !self.periodic.is_empty() {
             return Err(Error::invalid(
                 "a Floquet-periodic pair has no meaning in an axisymmetric model (no translation to repeat)",
@@ -589,6 +589,13 @@ impl Problem {
                             "an eigenfrequency study takes zero constraints only: a fixed displacement must be 0",
                         ));
                     }
+                }
+                BcKind::FloatingPotential { .. } | BcKind::Conductor { role: ConductorRole::Floating, .. }
+                    if azimuthal_order != 0 =>
+                {
+                    return Err(Error::invalid(
+                        "floating equipotential electrodes are only defined for axisymmetric azimuthal order m = 0",
+                    ));
                 }
                 BcKind::Ground
                 | BcKind::Potential(_)

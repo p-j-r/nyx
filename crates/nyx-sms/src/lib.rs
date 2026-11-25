@@ -444,6 +444,18 @@ impl Physics for Sms {
                 FieldDesc::new("Re uz", "a.u.", &[], "real part of the axial component"),
                 FieldDesc::new("Re uy", "a.u.", &[], "real part of the azimuthal component"),
                 FieldDesc::new("|uy|", "a.u.", &[], "magnitude of the azimuthal component"),
+                FieldDesc::new(
+                    "Re phi",
+                    "a.u.",
+                    &[],
+                    "real part of the electric potential (coupled piezoelectric solves)",
+                ),
+                FieldDesc::new(
+                    "|phi|",
+                    "a.u.",
+                    &[],
+                    "magnitude of the electric potential (coupled piezoelectric solves)",
+                ),
             ],
             "modes" => vec![
                 FieldDesc::new("|u|", "a.u.", &[], "magnitude of the displacement of a mode, scaled to a maximum of 1"),
@@ -598,11 +610,6 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
         if matches!(problem.study, Study::AxisymmetricEigenfrequency { .. }) {
             if mixed.dim != 2 {
                 return Err(Error::invalid("the axisymmetric study needs a 2D mesh (the (r, z) half plane)"));
-            }
-            if problem.uses_piezoelectric() {
-                return Err(Error::Unsupported(
-                    "piezoelectric coupling in the axisymmetric study is not yet enabled".into(),
-                ));
             }
             problem.check_axisymmetric()?;
             if use_mixed {
