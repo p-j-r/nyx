@@ -53,6 +53,11 @@ pub struct Feedback {
 }
 
 impl Feedback {
+    /// True while a debounced edit-check timer or background trial-mesh job is still active.
+    pub fn is_busy(&self) -> bool {
+        self.due.is_some() || matches!(self.size, SizeView::Pending)
+    }
+
     #[cfg(test)]
     pub(crate) fn due_is_none(&self) -> bool {
         self.due.is_none()

@@ -9,12 +9,12 @@
 # Every source file of a crate must belong to exactly one component; gen.pl fails otherwise.
 
 [app | app | nyx]
-window    | Window | main.rs app.rs state.rs feedback.rs spans.rs | 23, 57, 92 | The application object around one Engine: window layout, the run-time state (mesh on show, result on show, plot settings) and the frame update loop.
-shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs examples.rs menu.rs activity.rs sweepui.rs | 14, 23, 87, 88, 123, 124 | The tab bar, the native menu and the table of actions it shares with the palette, the dashboard of workflows with live status, the busy chip and queue popover read from the engine queue, the workflow view (one bar, five tabs with the viewport always on, the runs page), the sheets (new, search, versions, share, settings) and the example starting points.
-inspector | Inspector tabs | tabs.rs forms.rs geomui.rs | 23, 57 | The tabs beside the viewport: geometry editor, materials, physics, study, results, analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
+window    | Window | main.rs app.rs state.rs feedback.rs spans.rs | 23, 57, 92, 130 | The application object around one Engine: WSLg display backend selection, opaque clear, repaint bursts, pointer/zoom handling, window layout, the run-time state and the frame update loop.
+shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs examples.rs menu.rs activity.rs sweepui.rs | 14, 23, 87, 88, 123, 124, 130 | The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
+inspector | Inspector tabs | tabs.rs forms.rs geomui.rs | 23, 57, 130 | The tabs beside the viewport: geometry editor with wrapped hints, materials, physics, study, results (with integer mode-plot ticks), analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 viewport  | Viewport | viewport.rs scene.rs colormap.rs regions.rs | 23, 88, 123 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
-style     | Look and widgets | theme.rs kit.rs tokens.rs fmt.rs cvd.rs | 23, 88, 123, 124 | The nyx look (the colour tokens as data, fonts, egui visuals, light and dark, contrast) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
-headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs console.rs matcmd.rs | 23, 89, 93, 123, 124 | Runs without a person at the window: scripted runs with screenshots (--script), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
+style     | Look and widgets | theme.rs kit.rs tokens.rs fmt.rs cvd.rs | 23, 88, 123, 124, 130 | The nyx look (colour tokens, fonts, egui visuals with full weak-text contrast, light and dark) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
+headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs console.rs matcmd.rs | 23, 89, 93, 123, 124, 130 | Runs without a person at the window: scripted runs with screenshots (--script driving ADR 124 shell and deterministic feedback waits), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 [mcp | nyx-mcp | nyx_mcp]
 protocol  | Protocol loop | main.rs#main,usage,serve,take_opt,session_id,default_dir,default_root,home,NAME,VERSION,PROTOCOLS,Server,Server::new,Server::header,Server::initialize,Server::handle | 15, 57, 94 | Newline-delimited JSON-RPC 2.0 over stdio, no async runtime and no SDK; initialize, ping, tools/list and tools/call. `--dir` (workflows and saved scripts), `--root` (the folder a script's file arguments may name); `--job` is the engine's solve worker.
@@ -53,7 +53,7 @@ meshing   | Meshing seam | meshing.rs pml.rs preview.rs amr.rs | 54, 50, 92 | Me
 materials | Materials | materials.rs material_fetch.rs | 58, 104 | The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point.
 analyse   | Analyses | analyse.rs figure.rs | 56, 99, 103, 105 | Runs the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG).
 resultsIO | Results files | h5io.rs xdmf.rs results_file.rs | 62, 63, 99, 107 | HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results.
-storeLink | Store link | store_link.rs | 39, 59 | Binds the project to a workflow of the workspace, commits versions, records runs (card and metrics made here).
+storeLink | Store link | store_link.rs | 39, 59, 130 | Binds the project to a workflow of the workspace, commits versions, records runs (card with swept 3D detection and metrics made here).
 registry  | Registry and facade | lib.rs | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
 edge engine.project -> @projectFile | Saves and loads
 edge engine.resultsIO -> @resultsFile | Writes and opens
@@ -108,7 +108,7 @@ figures       | Mode figures | section.rs modeview.rs canvas.rs raster.rs figure
 
 [store | nyx-store | nyx_store]
 model     | Data model and card | model.rs card.rs | 14, 39 | The workflow manifest, experiments, run digest and the concept card generated from an experiment's spec.
-workspace | Workspace | workspace.rs lib.rs | 14 | The folder behind the dashboard: settings, the list of workflows (manifests only) and the sections of the dashboard.
+workspace | Workspace | workspace.rs lib.rs | 14, 130 | The folder behind the dashboard: settings (`scale_mode`, `zoom`), the list of workflows (manifests only) and the sections of the dashboard.
 flow      | Workflow folder | flow.rs | 14, 59 | One workflow folder: workflow.json, history.jsonl, notes, specs and one folder per experiment.
 versions  | Versions | versions.rs | 14, 59 | Every change to an experiment's set-up kept in history.jsonl with the hash of its spec.
 runs      | Runs | runs.rs | 64 | Append-only run records in runs.jsonl, the digest derived from them and the filter language of the runs table.

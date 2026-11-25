@@ -62,13 +62,31 @@ impl App {
         let ctx = ui.ctx().clone();
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(40, 24))).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(kit::title("Workflows", 46.0));
-                        let days = self.shell.settings().hide_after_days;
-                        ui.label(kit::muted(ui, format!("Everything you touched in the last {days} days. Older work is one search away.")));
+                let days = self.shell.settings().hide_after_days;
+                let sub = format!("Everything you touched in the last {days} days. Older work is one search away.");
+                if ui.available_width() >= 820.0 {
+                    let text_w = (ui.available_width() - 320.0).max(260.0);
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui(egui::vec2(text_w, 0.0), |ui| {
+                            ui.vertical(|ui| {
+                                ui.label(kit::title("Workflows", 46.0));
+                                ui.add(egui::Label::new(kit::muted(ui, &sub)).wrap());
+                            });
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if kit::primary(ui, "+  New workflow   Ctrl N").clicked() {
+                                self.shell.sheet = Sheet::New;
+                            }
+                            if kit::ghost(ui, "Open .nyx").clicked() {
+                                self.pick_nyx_file();
+                            }
+                        });
                     });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                } else {
+                    ui.label(kit::title("Workflows", 46.0));
+                    ui.add(egui::Label::new(kit::muted(ui, &sub)).wrap());
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
                         if kit::primary(ui, "+  New workflow   Ctrl N").clicked() {
                             self.shell.sheet = Sheet::New;
                         }
@@ -76,7 +94,7 @@ impl App {
                             self.pick_nyx_file();
                         }
                     });
-                });
+                }
                 ui.add_space(14.0);
                 self.dashboard_search(ui);
                 ui.add_space(16.0);
@@ -218,8 +236,9 @@ impl App {
         if sec.recent.is_empty() {
             ui.label(kit::muted(ui, "Nothing was touched recently. Open one from Earlier below, or start a new workflow."));
         }
-        let cols = ((ui.available_width() + 14.0) / 280.0).floor().clamp(1.0, 4.0) as usize;
-        let w = (ui.available_width() - 14.0 * (cols as f32 - 1.0)) / cols as f32;
+        let cols = ((ui.available_width() + 14.0) / 300.0).floor().clamp(1.0, 4.0) as usize;
+        let raw_w = (ui.available_width() - 14.0 * (cols as f32 - 1.0)) / cols as f32;
+        let w = raw_w.min(420.0).max(240.0_f32.min(ui.available_width()));
         for row in sec.recent.chunks(cols) {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 14.0;

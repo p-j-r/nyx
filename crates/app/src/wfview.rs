@@ -445,8 +445,8 @@ impl App {
         egui::Panel::top("wf_bar").frame(egui::Frame::new().fill(theme::page(&ctx)).inner_margin(egui::Margin::symmetric(16, 8)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             // in a narrow window (or beside the script dock) what is shown goes to a row of its own: nothing overlaps
             let narrow = ui.available_width() < 960.0;
-            // narrower than the two menus and the buttons side by side (a 150 percent scale, or the script dock in a small window): the buttons go to the row below too
-            let stacked = ui.available_width() < 700.0 && !locked;
+            let mut show_inline = false;
+            let mut actions_inline = locked;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 self.experiment_menu(ui, w, acts, locked);
@@ -458,22 +458,25 @@ impl App {
                         ui.label(kit::muted(ui, "editing is locked until it finishes or you cancel"));
                     }
                 }
+                let rem = ui.available_width();
+                actions_inline = locked || rem >= 260.0;
+                show_inline = !locked && !narrow && rem >= 580.0;
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if !stacked {
+                    if actions_inline {
                         self.bar_actions(ui, acts, locked);
                     }
-                    if !narrow && !locked {
+                    if show_inline {
                         self.bar_show(ui, w, acts);
                     }
                 });
             });
-            if narrow && !locked {
+            if !show_inline && !locked {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.bar_show(ui, w, acts));
                 });
             }
-            if stacked {
+            if !actions_inline && !locked {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.bar_actions(ui, acts, locked));
@@ -549,7 +552,11 @@ impl App {
     /// The left panel: one row of five tabs, then the editor of the tab. The sweep is a part of Study; the polarization is a part of Results.
     fn wf_inspector(&mut self, ui: &mut egui::Ui, w: &mut OpenWf, acts: &mut Vec<Act>) {
         let ctx = ui.ctx().clone();
-        egui::Panel::left("wf_inspector").default_size(400.0).size_range(320.0..=640.0).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
+        let zoom = ctx.zoom_factor();
+        let avail = ui.available_width();
+        let max_panel = (avail * 0.62).max(460.0);
+        let default_w = (400.0 * zoom.clamp(1.0, 1.35)).min(max_panel);
+        egui::Panel::left("wf_inspector").default_size(default_w).size_range(300.0..=max_panel).resizable(true).frame(egui::Frame::new().fill(theme::card(&ctx)).inner_margin(egui::Margin::same(14)).stroke(egui::Stroke::new(1.0, theme::line(&ctx)))).show(ui, |ui| {
             const TABS: [Tab; 5] = [Tab::Geometry, Tab::Materials, Tab::Physics, Tab::Study, Tab::Results];
             let on = TABS.iter().position(|t| *t == w.tab).unwrap_or(0);
             let labels: Vec<&str> = TABS.iter().map(|t| t.name()).collect();

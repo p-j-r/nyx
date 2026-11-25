@@ -24,7 +24,12 @@ impl App {
             self.cancel_at = None;
             self.cancel_job();
         }
-        if ((self.busy.is_some() || !self.deferred.is_empty() || self.sweep.as_ref().is_some_and(|a| !a.complete())) && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
+        if self.feedback.is_busy() && !self.script_free {
+            self.feedback_tick(ctx);
+            ctx.request_repaint();
+            return;
+        }
+        if ((self.busy.is_some() || !self.deferred.is_empty() || self.sweep.as_ref().is_some_and(|a| !a.complete()) || self.feedback.is_busy()) && !self.script_free) || self.shot_pending.load(Ordering::SeqCst) {
             return;
         }
         if self.settle > 0 {
@@ -38,7 +43,14 @@ impl App {
         match name.as_str() {
             "example" => {
                 if let Ok(i) = arg.parse::<usize>() {
-                    self.load_example(i);
+                    if self.shell.active() {
+                        if let Some(e) = crate::examples::list().into_iter().nth(i) {
+                            let t = e.title.split('(').next().unwrap_or("Example").trim().to_string();
+                            self.new_draft(&t, crate::shell::Start::Example(e.path));
+                        }
+                    } else {
+                        self.load_example(i);
+                    }
                 }
             }
             "new" => {
@@ -46,15 +58,31 @@ impl App {
                 let physics = short_code(words.first().copied().unwrap_or(""));
                 let three_d = words.contains(&"3d");
                 let what = self.physics_name(physics);
-                self.new_project(physics, three_d, &what);
+                if self.shell.active() {
+                    let title = format!("{} ({})", what, if three_d { "3D" } else { "2D" });
+                    self.new_draft(&title, crate::shell::Start::Blank { physics: physics.into(), three_d });
+                } else {
+                    self.new_project(physics, three_d, &what);
+                }
             }
-            "open" => self.open_path(arg.into()),
+            "open" => {
+                self.shell.sheet = crate::shell::Sheet::None;
+                self.open_path(arg.into());
+            }
             "physics" => {
-                self.cmd("set_active", json!({ "physics": short_code(&arg) }));
+                let code = short_code(&arg);
+                if self.shell.active() {
+                    let _ = self.ensure_active_workflow();
+                }
+                if self.engine.project().spec(code).is_none() {
+                    let _ = self.cmd("add_physics", json!({ "physics": code }));
+                }
+                self.cmd("set_active", json!({ "physics": code }));
                 self.rules_dirty = true;
+                self.picking = None;
             }
             "tab" => {
-                self.tab = match arg.as_str() {
+                let target_tab = match arg.as_str() {
                     "geometry" => Tab::Geometry,
                     "materials" => Tab::Materials,
                     "physics" => Tab::Physics,
@@ -63,15 +91,28 @@ impl App {
                     "analysis" => Tab::Analysis,
                     _ => Tab::Geometry,
                 };
-                let shown = if self.tab == Tab::Analysis { Tab::Results } else { self.tab };
-                if let Some(w) = self.shell.current_mut() {
-                    w.tab = shown;
-                    w.sub = crate::shell::Sub::Main;
+                self.tab = target_tab;
+                if self.shell.active() {
+                    self.shell.sheet = crate::shell::Sheet::None;
+                    let _ = self.ensure_active_workflow();
+                    let shown = if target_tab == Tab::Analysis { Tab::Results } else { target_tab };
+                    if let Some(w) = self.shell.current_mut() {
+                        w.tab = shown;
+                        w.sub = crate::shell::Sub::Main;
+                    }
                 }
             }
-            "compute" => self.shell_compute(),
-            // `edit h xFACTOR | VALUE | reset`: the element size of the Geometry form, as typed (not applied); the script then waits long enough for
-            // the check and the trial mesh of the edit (`feedback.rs`), so a shot after it shows the problem line or the size line
+            "compute" => {
+                if self.shell.active() {
+                    self.shell.sheet = crate::shell::Sheet::None;
+                    let _ = self.ensure_active_workflow();
+                    self.shell_compute();
+                } else {
+                    self.compute();
+                }
+            }
+            // `edit h xFACTOR | VALUE | reset`: the element size of the Geometry form, as typed (not applied); the script then waits
+            // deterministically until the check and trial mesh finish (`feedback.is_busy()`), plus two settle frames for repaint.
             "edit" => {
                 let words: Vec<&str> = arg.split_whitespace().collect();
                 if let ["h", v] = words.as_slice() {
@@ -79,7 +120,7 @@ impl App {
                     self.mesh_edit.h = if *v == "reset" { now } else if let Some(f) = v.strip_prefix('x').and_then(|f| f.parse::<f64>().ok()) { self.mesh_edit.h * f } else { v.parse().unwrap_or(now) };
                     self.geometry_dirty = self.mesh_edit != self.engine.project().mesh || self.geom_edit != self.engine.project().geometry;
                     self.edits_changed(ctx);
-                    self.settle = 40;
+                    self.settle = 2;
                 }
             }
             // `check TOLERANCE [FACTOR]`: a mesh-convergence check of the active physics (the script waits for it); the state it leaves is drawn under Results
@@ -107,11 +148,17 @@ impl App {
                 "dashboard" => {
                     self.flush();
                     self.refresh_entries();
+                    self.shell.sheet = crate::shell::Sheet::None;
                     self.shell.page = crate::shell::Page::Dashboard;
                 }
-                "settings" => self.shell.page = crate::shell::Page::Settings,
+                "settings" => {
+                    self.flush();
+                    self.shell.sheet = crate::shell::Sheet::None;
+                    self.shell.page = crate::shell::Page::Settings;
+                }
                 n => {
                     if let Some(id) = n.parse::<usize>().ok().and_then(|i| self.shell.tabs.get(i).cloned()) {
+                        self.shell.sheet = crate::shell::Sheet::None;
                         self.show_workflow(&id);
                     }
                 }
@@ -168,7 +215,9 @@ impl App {
             "cvd" => self.shot_cvd = crate::cvd::Kind::parse(&arg),
             "scale" => {
                 if let Ok(f) = arg.parse::<f32>() {
-                    ctx.set_zoom_factor(f.clamp(0.5, 3.0));
+                    let clamped = f.clamp(0.5, 3.0);
+                    self.shell.script_scale = Some(clamped);
+                    self.apply_zoom_factor(ctx, clamped);
                 }
             }
             // `tick N M ...`: ticks those runs (1-based, in the order of the table's data) in the Analysis table, for a shot of the ringed runs
@@ -221,7 +270,10 @@ impl App {
                 use crate::shell::Sheet;
                 self.shell.sheet = match arg.as_str() {
                     "new" => Sheet::New,
-                    "palette" => Sheet::Palette,
+                    "palette" => {
+                        self.shell.palette_q.clear();
+                        Sheet::Palette
+                    }
                     "versions" => Sheet::Versions,
                     "share" => Sheet::Share,
                     "about" => Sheet::About,
@@ -337,5 +389,131 @@ fn short_code(s: &str) -> &'static str {
         "es" | "heat" | "dfs" => "dfs",
         "solid" | "sms" => "sms",
         _ => "ems",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::feedback::SizeView;
+    use crate::shell::{Page, Sheet};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn script_step_drives_adr124_shell_commands() {
+        let root = std::env::temp_dir().join(format!("nyx-script-shell-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut a = App::with_context(egui::Context::default());
+        a.feedback.slow_limit = Some(f64::INFINITY);
+        a.attach_workspace(root.clone());
+        assert!(a.shell.active());
+        assert_eq!(a.shell.page, Page::Dashboard);
+
+        let step = |app: &mut App, cmds: &[&str]| {
+            app.script = cmds.iter().map(|s| (*s).to_string()).collect();
+            let t0 = Instant::now();
+            while !app.script.is_empty() || app.busy.is_some() || !app.deferred.is_empty() {
+                app.settle = 0;
+                app.poll();
+                app.run_queued();
+                let ctx = app.ctx.clone();
+                app.script_step(&ctx);
+                assert!(t0.elapsed() < Duration::from_secs(30), "script timed out: {:?}", app.script);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+
+        step(&mut a, &["new emw", "tab physics"]);
+        let wid_new = match &a.shell.page {
+            Page::Workflow(id) => id.clone(),
+            other => panic!("expected workflow page after `new emw`, got {other:?}"),
+        };
+        assert_eq!(a.active().as_deref(), Some("ems"));
+        assert_eq!(a.shell.open[&wid_new].tab, Tab::Physics);
+
+        step(&mut a, &["physics dfs"]);
+        assert_eq!(a.active().as_deref(), Some("dfs"));
+
+        step(&mut a, &["page settings"]);
+        assert_eq!(a.shell.page, Page::Settings);
+        assert_eq!(a.shell.sheet, Sheet::None);
+
+        step(&mut a, &["sheet palette"]);
+        assert_eq!(a.shell.sheet, Sheet::Palette);
+        step(&mut a, &["sheet about"]);
+        assert_eq!(a.shell.sheet, Sheet::About);
+        step(&mut a, &["sheet new"]);
+        assert_eq!(a.shell.sheet, Sheet::New);
+        step(&mut a, &["sheet none"]);
+        assert_eq!(a.shell.sheet, Sheet::None);
+
+        step(&mut a, &["example 0", "tab geometry"]);
+        let wid_ex = match &a.shell.page {
+            Page::Workflow(id) => id.clone(),
+            other => panic!("expected example workflow page, got {other:?}"),
+        };
+        assert_ne!(wid_ex, wid_new);
+        assert_eq!(a.shell.tabs.len(), 2);
+        assert_eq!(a.shell.open[&wid_ex].tab, Tab::Geometry);
+
+        // `compute` through the shell starts/records a workflow solve and returns idle cleanly
+        step(&mut a, &["compute"]);
+        assert!(!a.results.is_empty(), "expected solve result in shell");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn script_edit_waits_deterministically_for_trial_mesh_feedback() {
+        let root = std::env::temp_dir().join(format!("nyx-script-edit-wait-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut a = App::with_context(egui::Context::default());
+        a.feedback.slow_limit = Some(f64::INFINITY);
+        a.attach_workspace(root.clone());
+
+        // Open example 0 in the shell and finish initial rebuild_mesh
+        let ctx = a.ctx.clone();
+        a.script = ["example 0"].into_iter().map(str::to_string).collect();
+        let t0 = Instant::now();
+        while !a.script.is_empty() || a.busy.is_some() || !a.deferred.is_empty() {
+            a.settle = 0;
+            a.poll();
+            a.run_queued();
+            a.script_step(&ctx);
+            assert!(t0.elapsed() < Duration::from_secs(20));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        // Queue `edit h x0.6` followed by `tab results` with zero extra settle delay
+        a.script = ["edit h x0.6", "tab results"].into_iter().map(str::to_string).collect();
+        a.settle = 0;
+        a.script_step(&ctx);
+        assert!(a.feedback.is_busy(), "feedback timer/trial mesh must be busy right after edit");
+
+        // While inside the REST window (first 50 ms), `tab results` MUST NOT advance even after many fast ticks
+        for _ in 0..20 {
+            a.poll();
+            a.script_step(&ctx);
+            assert_eq!(a.script.len(), 1, "`tab results` must wait while feedback is busy");
+            assert_eq!(a.shell.current_mut().unwrap().tab, Tab::Geometry);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        // Once the REST delay and background trial mesh complete, `tab results` executes with Ready size line
+        let wait_t = Instant::now();
+        while !a.script.is_empty() {
+            a.poll();
+            a.script_step(&ctx);
+            assert!(wait_t.elapsed() < Duration::from_secs(10), "edit wait timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            matches!(a.feedback.size, SizeView::Ready(_)),
+            "expected Ready trial-mesh feedback before advancing, got {:?}",
+            a.feedback.size
+        );
+        assert_eq!(a.shell.current_mut().unwrap().tab, Tab::Results);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

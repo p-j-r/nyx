@@ -108,7 +108,7 @@ impl App {
         }
     }
 
-    fn ensure_active_workflow(&mut self) -> Option<String> {
+    pub(crate) fn ensure_active_workflow(&mut self) -> Option<String> {
         if let Page::Workflow(id) = self.shell.page.clone() {
             return Some(id);
         }
@@ -190,9 +190,9 @@ impl App {
                 self.shell.sheet = Sheet::None;
                 self.shell.page = Page::Settings;
             }
-            Act::ZoomIn => ctx.set_zoom_factor((ctx.zoom_factor() * 1.1).clamp(0.5, 3.0)),
-            Act::ZoomOut => ctx.set_zoom_factor((ctx.zoom_factor() / 1.1).clamp(0.5, 3.0)),
-            Act::ZoomReset => ctx.set_zoom_factor(1.0),
+            Act::ZoomIn => self.step_user_zoom(ctx, 1.1),
+            Act::ZoomOut => self.step_user_zoom(ctx, 1.0 / 1.1),
+            Act::ZoomReset => self.reset_user_zoom(ctx),
             Act::Compute => {
                 self.shell.sheet = Sheet::None;
                 let _ = self.ensure_active_workflow();

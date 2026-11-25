@@ -14,6 +14,10 @@ use crate::flow::WorkflowDir;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+fn default_scale_mode() -> String {
+    "auto".into()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -47,6 +51,9 @@ pub struct Settings {
     pub region_colouring: String,
     /// the window zoom set with Ctrl and +/-, 1.0 = 100 %
     pub zoom: f32,
+    /// interface size preset: "auto", "100%", "125%", "150%", "175%" or "200%"
+    #[serde(default = "default_scale_mode")]
+    pub scale_mode: String,
     /// workflow ids open as tabs, in order
     pub open_tabs: Vec<String>,
 }
@@ -73,6 +80,7 @@ impl Default for Settings {
             reduce_motion: false,
             region_colouring: "material".into(),
             zoom: 1.0,
+            scale_mode: default_scale_mode(),
         }
     }
 }
@@ -246,9 +254,18 @@ mod tests {
         assert_eq!(l[0].wf.id, b.wf.id, "newest first");
         assert!(ws.find(&a.wf.id).is_some());
         ws.settings.hide_after_days = 7;
+        ws.settings.zoom = 1.5;
+        ws.settings.scale_mode = "150%".into();
         ws.settings.open_tabs = vec![a.wf.id.clone()];
         ws.save_settings().unwrap();
         assert_eq!(Workspace::open(&root).unwrap().settings, ws.settings);
+        // an older workspace.json without scale_mode still loads with "auto"
+        let legacy = serde_json::json!({ "zoom": 1.25, "theme": "dark" });
+        std::fs::write(root.join("workspace.json"), legacy.to_string()).unwrap();
+        let reopened = Workspace::open(&root).unwrap();
+        assert_eq!(reopened.settings.zoom, 1.25);
+        assert_eq!(reopened.settings.scale_mode, "auto");
+        assert_eq!(reopened.settings.theme, "dark");
         std::fs::write(root.join("workspace.json"), "{ broken").unwrap();
         assert_eq!(Workspace::open(&root).unwrap().settings, Settings::default(), "a damaged settings file does not stop nyx");
         let _ = std::fs::remove_dir_all(&root);
