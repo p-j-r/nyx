@@ -318,24 +318,23 @@ impl<T: Scalar> Csr<T> {
         }
         Self::try_new(nrows, ncols, indptr, indices, values).expect("valid block_diag CSR")
     }
-    /// Sum of matrices of one shape. Blocks of rows are merged on all cores; a row of the sum is a small merge of at most `parts.len()`
-    /// sorted lists.
+    /// Sum of matrices of one shape. Blocks of rows are merged on the shared pool in fixed row chunks.
     pub fn sum_all(mut parts: Vec<Csr<T>>) -> Csr<T> {
-        use rayon::prelude::*;
         assert!(!parts.is_empty(), "Csr::sum_all requires at least one part");
         if parts.len() == 1 {
             return parts.pop().unwrap();
         }
         let (nrows, ncols) = validate_sum_parts(&parts);
-        let chunk = nrows.div_ceil(crate::par::threads()).max(1);
+        const SUM_ROW_CHUNK: usize = 512;
         let parts_ref = &parts;
-        let blocks: Vec<SumBlock<T>> = (0..nrows.div_ceil(chunk))
-            .into_par_iter()
-            .map(|b| {
-                let (r0, r1) = (b * chunk, ((b + 1) * chunk).min(nrows));
+        let blocks: Vec<SumBlock<T>> = crate::par::chunk_map(
+            nrows.div_ceil(SUM_ROW_CHUNK),
+            nrows > SUM_ROW_CHUNK && crate::par::threads() > 1,
+            |b| {
+                let (r0, r1) = (b * SUM_ROW_CHUNK, ((b + 1) * SUM_ROW_CHUNK).min(nrows));
                 sum_block_rows(parts_ref, r0, r1)
-            })
-            .collect();
+            },
+        );
         // the parts are as large as the sum: free them before the blocks are copied into the final arrays
         drop(parts);
         assemble_sum_blocks(nrows, ncols, blocks)

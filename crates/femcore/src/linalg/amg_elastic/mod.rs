@@ -13,7 +13,6 @@ mod single;
 use crate::linalg::csr::RCsr as Csr;
 use crate::linalg::driver::DirectSolver;
 use single::{dot, Csr32};
-use rayon::prelude::*;
 
 #[derive(Clone, Debug)]
 pub struct AmgOptions {
@@ -204,7 +203,7 @@ impl LineSmoother {
         const PAR_MIN_COLS: usize = 8;
         if self.cols.len() >= PAR_MIN_COLS && crate::par::threads() > 1 {
             let z_cols = crate::linalg::par::RawCols::new(z, self.n, 1);
-            self.cols.par_chunks(COL_CHUNK).for_each(|chunk| {
+            crate::par::map_chunks(&self.cols, COL_CHUNK, |chunk| {
                 let mut y = Vec::new();
                 for col in chunk {
                     let m = col.nodes.len();
@@ -265,7 +264,7 @@ impl LineSmoother {
         const PAR_MIN_COLS: usize = 8;
         if self.cols.len() >= PAR_MIN_COLS && crate::par::threads() > 1 {
             let z_cols = crate::linalg::par::RawCols::new(z, nk, 1);
-            self.cols.par_chunks(COL_CHUNK).for_each(|chunk| {
+            crate::par::map_chunks(&self.cols, COL_CHUNK, |chunk| {
                 let mut y = Vec::new();
                 for col in chunk {
                     let m = col.nodes.len();
@@ -366,11 +365,11 @@ const PAR_SPMM_MIN_ROWS: usize = 20_000;
 #[cfg(miri)]
 const PAR_SPMM_MIN_ROWS: usize = 8;
 
-/// Sparse matrix product, on all cores by blocks of rows of `a` for large matrices.
+/// Sparse matrix product, on the shared pool by fixed row chunks of `a` for large matrices.
 pub fn spmm(a: &Csr, b: &Csr) -> Csr {
     assert_eq!(a.ncols(), b.nrows());
-    let nt = if a.nrows() < PAR_SPMM_MIN_ROWS { 1 } else { crate::par::threads() };
-    let chunk = a.nrows().div_ceil(nt).max(1);
+    const SPMM_ROW_CHUNK: usize = 512;
+    let par = a.nrows() >= PAR_SPMM_MIN_ROWS && crate::par::threads() > 1;
     let block = |r0: usize, r1: usize| -> (Vec<usize>, Vec<usize>, Vec<f64>) {
         let mut counts = Vec::with_capacity(r1 - r0);
         let (mut indices, mut data): (Vec<usize>, Vec<f64>) = (vec![], vec![]);
@@ -400,10 +399,12 @@ pub fn spmm(a: &Csr, b: &Csr) -> Csr {
         }
         (counts, indices, data)
     };
-    let blocks: Vec<(Vec<usize>, Vec<usize>, Vec<f64>)> = if nt == 1 {
+    let blocks: Vec<(Vec<usize>, Vec<usize>, Vec<f64>)> = if !par {
         vec![block(0, a.nrows())]
     } else {
-        (0..a.nrows().div_ceil(chunk)).into_par_iter().map(|t| block(t * chunk, ((t + 1) * chunk).min(a.nrows()))).collect()
+        crate::par::chunk_map(a.nrows().div_ceil(SPMM_ROW_CHUNK), true, |t| {
+            block(t * SPMM_ROW_CHUNK, ((t + 1) * SPMM_ROW_CHUNK).min(a.nrows()))
+        })
     };
     let mut indptr = Vec::with_capacity(a.nrows() + 1);
     indptr.push(0usize);

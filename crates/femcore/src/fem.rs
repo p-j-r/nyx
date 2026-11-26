@@ -19,7 +19,6 @@ pub use crate::farfield::{
 use crate::linalg::driver::DirectSolver;
 use crate::mesh::SimplexMesh;
 use crate::linalg::csr::{Coo, RCsr as Csr};
-use rayon::prelude::*;
 use std::collections::BTreeMap;
 
 // ------------------------------------------------------------------ quadrature
@@ -454,11 +453,7 @@ where
         }
         acc.unwrap()
     };
-    let parts: Vec<Csr> = if nt <= 1 || nparts <= 1 {
-        (0..nparts).map(build_part).collect()
-    } else {
-        (0..nparts).into_par_iter().map(build_part).collect()
-    };
+    let parts: Vec<Csr> = crate::par::chunk_map(nparts, nt > 1 && nparts > 1, build_part);
     crate::progress::lap_since(&mut tl, "    assembly: element loops and per-thread CSR");
     let c = Csr::sum_all(parts);
     crate::progress::lap_since(&mut tl, "    assembly: merge");

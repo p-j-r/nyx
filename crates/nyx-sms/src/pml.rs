@@ -32,7 +32,6 @@ use femcore::periodic::{congruence, match_vertices, nodal_relations, Reduction};
 use femcore::pml::{adiabatic_loss_factor, auto_scale_params, pml_jacobian, PmlJacobian};
 use femcore::props::{Pml, PmlCoord, PmlDir, PmlProfile, PmlStabilization};
 use nyx_physics::{cell_fields_of, Discretisation, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult};
-use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
@@ -945,109 +944,107 @@ pub fn solve_solid_pml_mixed(
 
     let nc = mixed.n_cells();
     let ns = if d == 2 { 3 } else { 6 };
-    let nt = if nc < 256 { 1 } else { femcore::par::threads_up_to(8) };
-    let chunk = nc.div_ceil(nt).max(1);
+    const PML_MIXED_CHUNK: usize = 256;
+    let nchunks = nc.div_ceil(PML_MIXED_CHUNK).max(1);
+    let par = nc >= 256 && femcore::par::threads() > 1;
 
-    let chunks: Vec<(CCoo, CCoo)> = (0..nt)
-        .into_par_iter()
-        .map(|tid| {
-            let mut kc = CCoo::new(n, n);
-            let mut mc = CCoo::new(n, n);
-            let mut vals = Vec::new();
-            let mut dxi = Vec::new();
-            let mut sn = Vec::new();
-            let mut sdn = Vec::new();
-            let mut gc = Vec::new();
-            let mut b = Vec::new();
-            let mut db = Vec::new();
-            let mut ke = Vec::new();
-            let mut me = Vec::new();
-            let mut full = Vec::new();
+    let chunks: Vec<(CCoo, CCoo)> = femcore::par::chunk_map(nchunks, par, |cid| {
+        let mut kc = CCoo::new(n, n);
+        let mut mc = CCoo::new(n, n);
+        let mut vals = Vec::new();
+        let mut dxi = Vec::new();
+        let mut sn = Vec::new();
+        let mut sdn = Vec::new();
+        let mut gc = Vec::new();
+        let mut b = Vec::new();
+        let mut db = Vec::new();
+        let mut ke = Vec::new();
+        let mut me = Vec::new();
+        let mut full = Vec::new();
 
-            for ci in (tid * chunk)..((tid + 1) * chunk).min(nc) {
-                let dom = mixed.cell_labels[ci];
-                if spec.inactive.contains(&dom) {
-                    continue;
-                }
-                let ct = mixed.cell_type(ci);
-                let iso = IsoparametricCell::from_mesh(mixed, ci);
-                let in_pml = resolved.contains(dom);
-                let deg = if in_pml || iso.curved { 2 * order + 4 } else { 2 * order + 2 };
-                let rule = quad_rule_mixed(ct, deg);
-                let cdofs = dof_map.cell_dofs(ci);
-                let nloc = cdofs.len();
-                let nd = d * nloc;
-                let dm = d_matrix(&c6[ci], d, spec.plane);
+        for ci in (cid * PML_MIXED_CHUNK)..((cid + 1) * PML_MIXED_CHUNK).min(nc) {
+            let dom = mixed.cell_labels[ci];
+            if spec.inactive.contains(&dom) {
+                continue;
+            }
+            let ct = mixed.cell_type(ci);
+            let iso = IsoparametricCell::from_mesh(mixed, ci);
+            let in_pml = resolved.contains(dom);
+            let deg = if in_pml || iso.curved { 2 * order + 4 } else { 2 * order + 2 };
+            let rule = quad_rule_mixed(ct, deg);
+            let cdofs = dof_map.cell_dofs(ci);
+            let nloc = cdofs.len();
+            let nd = d * nloc;
+            let dm = d_matrix(&c6[ci], d, spec.plane);
 
-                gc.resize(nloc * d, c(0.0, 0.0));
-                b.resize(ns * nd, c(0.0, 0.0));
-                db.resize(ns * nd, c(0.0, 0.0));
-                ke.clear();
-                ke.resize(nd * nd, c(0.0, 0.0));
-                me.clear();
-                me.resize(nloc * nloc, c(0.0, 0.0));
+            gc.resize(nloc * d, c(0.0, 0.0));
+            b.resize(ns * nd, c(0.0, 0.0));
+            db.resize(ns * nd, c(0.0, 0.0));
+            ke.clear();
+            ke.resize(nd * nd, c(0.0, 0.0));
+            me.clear();
+            me.resize(nloc * nloc, c(0.0, 0.0));
 
-                for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
-                    let jg = iso.eval_into(xi, &mut sn, &mut sdn);
-                    lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
-                    let x_w = femcore::section::wafer_point(&jg.x[..d], d);
-                    let (jp, loss) = resolved.eval_jacobian(dom, x_w, d, false);
+            for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+                let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+                lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+                let x_w = femcore::section::wafer_point(&jg.x[..d], d);
+                let (jp, loss) = resolved.eval_jacobian(dom, x_w, d, false);
 
-                    for a in 0..nloc {
-                        let gp = jg.map_grad(dxi[a]);
-                        for i in 0..d {
-                            let mut acc = c(0.0, 0.0);
-                            for k in 0..d {
-                                acc += jp.j_inv[k][i] * gp[k];
-                            }
-                            gc[a * d + i] = acc;
+                for a in 0..nloc {
+                    let gp = jg.map_grad(dxi[a]);
+                    for i in 0..d {
+                        let mut acc = c(0.0, 0.0);
+                        for k in 0..d {
+                            acc += jp.j_inv[k][i] * gp[k];
                         }
-                    }
-                    b_matrix_c(&gc, nloc, d, &mut b);
-
-                    let w_phys = wq * jg.det.abs() * thk;
-                    let w_k = jp.det * loss * w_phys;
-                    let w_m = jp.det * (w_phys * rho[ci]);
-
-                    for r in 0..ns {
-                        for j in 0..nd {
-                            let mut acc = c(0.0, 0.0);
-                            for t in 0..ns {
-                                acc += b[t * nd + j] * dm[r * ns + t];
-                            }
-                            db[r * nd + j] = acc;
-                        }
-                    }
-                    for i in 0..nd {
-                        for j in 0..nd {
-                            let mut acc = c(0.0, 0.0);
-                            for r in 0..ns {
-                                acc += b[r * nd + i] * db[r * nd + j];
-                            }
-                            ke[i * nd + j] += acc * w_k;
-                        }
-                    }
-                    for a in 0..nloc {
-                        let wa = w_m * vals[a];
-                        for bb in 0..nloc {
-                            me[a * nloc + bb] += wa * vals[bb];
-                        }
+                        gc[a * d + i] = acc;
                     }
                 }
+                b_matrix_c(&gc, nloc, d, &mut b);
 
-                full.clear();
-                for k in 0..d {
-                    full.extend(cdofs.iter().map(|&gd| gd + k * n1));
+                let w_phys = wq * jg.det.abs() * thk;
+                let w_k = jp.det * loss * w_phys;
+                let w_m = jp.det * (w_phys * rho[ci]);
+
+                for r in 0..ns {
+                    for j in 0..nd {
+                        let mut acc = c(0.0, 0.0);
+                        for t in 0..ns {
+                            acc += b[t * nd + j] * dm[r * ns + t];
+                        }
+                        db[r * nd + j] = acc;
+                    }
                 }
-                kc.push_block(&full, &full, &ke);
-                for k in 0..d {
-                    let comp_dofs: Vec<usize> = cdofs.iter().map(|&gd| gd + k * n1).collect();
-                    mc.push_block(&comp_dofs, &comp_dofs, &me);
+                for i in 0..nd {
+                    for j in 0..nd {
+                        let mut acc = c(0.0, 0.0);
+                        for r in 0..ns {
+                            acc += b[r * nd + i] * db[r * nd + j];
+                        }
+                        ke[i * nd + j] += acc * w_k;
+                    }
+                }
+                for a in 0..nloc {
+                    let wa = w_m * vals[a];
+                    for bb in 0..nloc {
+                        me[a * nloc + bb] += wa * vals[bb];
+                    }
                 }
             }
-            (kc, mc)
-        })
-        .collect();
+
+            full.clear();
+            for k in 0..d {
+                full.extend(cdofs.iter().map(|&gd| gd + k * n1));
+            }
+            kc.push_block(&full, &full, &ke);
+            for k in 0..d {
+                let comp_dofs: Vec<usize> = cdofs.iter().map(|&gd| gd + k * n1).collect();
+                mc.push_block(&comp_dofs, &comp_dofs, &me);
+            }
+        }
+        (kc, mc)
+    });
 
     let mut kc_all = CCoo::new(n, n);
     let mut mc_all = CCoo::new(n, n);
@@ -1181,135 +1178,133 @@ pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAs
     }
 
     let nc = mesh.n_cells();
-    let nt = if nc < 512 { 1 } else { femcore::par::threads_up_to(8) };
-    let chunk = nc.div_ceil(nt).max(1);
+    const PML_CHUNK: usize = 512;
+    let nchunks = nc.div_ceil(PML_CHUNK).max(1);
+    let par = nc >= 512 && femcore::par::threads() > 1;
 
-    let chunks: Vec<(CCoo, CCoo)> = (0..nt)
-        .into_par_iter()
-        .map(|tid| {
-            let mut kc = CCoo::new(n, n);
-            let mut mc = CCoo::new(n, n);
-            let (mut scratch, mut full) = (Vec::new(), Vec::new());
-            let mut grad = vec![0.0; nloc * d];
-            let mut gc = vec![c(0.0, 0.0); nloc * d];
-            let mut b = vec![c(0.0, 0.0); ns * nd];
-            let mut db = vec![c(0.0, 0.0); ns * nd];
-            let mut ke = vec![c(0.0, 0.0); nd * nd];
-            let mut me = vec![c(0.0, 0.0); nloc * nloc];
+    let chunks: Vec<(CCoo, CCoo)> = femcore::par::chunk_map(nchunks, par, |cid| {
+        let mut kc = CCoo::new(n, n);
+        let mut mc = CCoo::new(n, n);
+        let (mut scratch, mut full) = (Vec::new(), Vec::new());
+        let mut grad = vec![0.0; nloc * d];
+        let mut gc = vec![c(0.0, 0.0); nloc * d];
+        let mut b = vec![c(0.0, 0.0); ns * nd];
+        let mut db = vec![c(0.0, 0.0); ns * nd];
+        let mut ke = vec![c(0.0, 0.0); nd * nd];
+        let mut me = vec![c(0.0, 0.0); nloc * nloc];
 
-            for ci in (tid * chunk)..((tid + 1) * chunk).min(nc) {
-                let dom = mesh.cell_labels[ci];
-                if spec.inactive.contains(&dom) {
-                    continue;
+        for ci in (cid * PML_CHUNK)..((cid + 1) * PML_CHUNK).min(nc) {
+            let dom = mesh.cell_labels[ci];
+            if spec.inactive.contains(&dom) {
+                continue;
+            }
+            let dm = d_matrix(&st.c6[ci], d, spec.plane);
+            ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
+            let vol_thk = geo.vol[ci] * thk;
+
+            if resolved.contains(dom) {
+                me.iter_mut().for_each(|x| *x = c(0.0, 0.0));
+                let cv = mesh.cell(ci);
+                for q in 0..re_pml.w.len() {
+                    shape_gradients(&re_pml, &geo, ci, q, &mut grad);
+                    let lam = simplex_barycentric(&re_pml, q, d, order);
+                    let mut x_phys = [0.0; 3];
+                    for corner in 0..=d {
+                        let pt = mesh.point(cv[corner] as usize);
+                        for k in 0..d {
+                            x_phys[k] += lam[corner] * pt[k];
+                        }
+                    }
+                    let x_w = femcore::section::wafer_point(&x_phys[..d], d);
+                    let (jac, loss) = resolved.eval_jacobian(dom, x_w, d, false);
+
+                    for a in 0..nloc {
+                        for i in 0..d {
+                            let mut acc = c(0.0, 0.0);
+                            for k in 0..d {
+                                acc += jac.j_inv[k][i] * grad[a * d + k];
+                            }
+                            gc[a * d + i] = acc;
+                        }
+                    }
+                    b_matrix_c(&gc, nloc, d, &mut b);
+                    let w_k = jac.det * loss * (re_pml.w[q] * vol_thk);
+                    let w_m = jac.det * (re_pml.w[q] * vol_thk * rho[ci]);
+
+                    for r in 0..ns {
+                        for j in 0..nd {
+                            let mut acc = c(0.0, 0.0);
+                            for t in 0..ns {
+                                acc += b[t * nd + j] * dm[r * ns + t];
+                            }
+                            db[r * nd + j] = acc;
+                        }
+                    }
+                    for i in 0..nd {
+                        for j in 0..nd {
+                            let mut acc = c(0.0, 0.0);
+                            for r in 0..ns {
+                                acc += b[r * nd + i] * db[r * nd + j];
+                            }
+                            ke[i * nd + j] += acc * w_k;
+                        }
+                    }
+                    let nv = &re_pml.n[q];
+                    for a in 0..nloc {
+                        let wa = w_m * nv[a];
+                        for bb in 0..nloc {
+                            me[a * nloc + bb] += wa * nv[bb];
+                        }
+                    }
                 }
-                let dm = d_matrix(&st.c6[ci], d, spec.plane);
-                ke.iter_mut().for_each(|x| *x = c(0.0, 0.0));
-                let vol_thk = geo.vol[ci] * thk;
-
-                if resolved.contains(dom) {
-                    me.iter_mut().for_each(|x| *x = c(0.0, 0.0));
-                    let cv = mesh.cell(ci);
-                    for q in 0..re_pml.w.len() {
-                        shape_gradients(&re_pml, &geo, ci, q, &mut grad);
-                        let lam = simplex_barycentric(&re_pml, q, d, order);
-                        let mut x_phys = [0.0; 3];
-                        for corner in 0..=d {
-                            let pt = mesh.point(cv[corner] as usize);
-                            for k in 0..d {
-                                x_phys[k] += lam[corner] * pt[k];
-                            }
-                        }
-                        let x_w = femcore::section::wafer_point(&x_phys[..d], d);
-                        let (jac, loss) = resolved.eval_jacobian(dom, x_w, d, false);
-
-                        for a in 0..nloc {
-                            for i in 0..d {
-                                let mut acc = c(0.0, 0.0);
-                                for k in 0..d {
-                                    acc += jac.j_inv[k][i] * grad[a * d + k];
-                                }
-                                gc[a * d + i] = acc;
-                            }
-                        }
-                        b_matrix_c(&gc, nloc, d, &mut b);
-                        let w_k = jac.det * loss * (re_pml.w[q] * vol_thk);
-                        let w_m = jac.det * (re_pml.w[q] * vol_thk * rho[ci]);
-
-                        for r in 0..ns {
-                            for j in 0..nd {
-                                let mut acc = c(0.0, 0.0);
-                                for t in 0..ns {
-                                    acc += b[t * nd + j] * dm[r * ns + t];
-                                }
-                                db[r * nd + j] = acc;
-                            }
-                        }
-                        for i in 0..nd {
-                            for j in 0..nd {
-                                let mut acc = c(0.0, 0.0);
-                                for r in 0..ns {
-                                    acc += b[r * nd + i] * db[r * nd + j];
-                                }
-                                ke[i * nd + j] += acc * w_k;
-                            }
-                        }
-                        let nv = &re_pml.n[q];
-                        for a in 0..nloc {
-                            let wa = w_m * nv[a];
-                            for bb in 0..nloc {
-                                me[a * nloc + bb] += wa * nv[bb];
-                            }
+                dof_layout(mesh, order, ci, &mut scratch, &mut full);
+                kc.push_block(&full, &full, &ke);
+                mesh.cell_dofs(ci, order, &mut scratch);
+                for comp in 0..d {
+                    let dofs: Vec<usize> = scratch.iter().map(|&x| x + comp * n1).collect();
+                    mc.push_block(&dofs, &dofs, &me);
+                }
+            } else {
+                for q in 0..re.w.len() {
+                    shape_gradients(&re, &geo, ci, q, &mut grad);
+                    for a in 0..nloc {
+                        for k in 0..d {
+                            gc[a * d + k] = c(grad[a * d + k], 0.0);
                         }
                     }
-                    dof_layout(mesh, order, ci, &mut scratch, &mut full);
-                    kc.push_block(&full, &full, &ke);
-                    mesh.cell_dofs(ci, order, &mut scratch);
-                    for comp in 0..d {
-                        let dofs: Vec<usize> = scratch.iter().map(|&x| x + comp * n1).collect();
-                        mc.push_block(&dofs, &dofs, &me);
-                    }
-                } else {
-                    for q in 0..re.w.len() {
-                        shape_gradients(&re, &geo, ci, q, &mut grad);
-                        for a in 0..nloc {
-                            for k in 0..d {
-                                gc[a * d + k] = c(grad[a * d + k], 0.0);
+                    b_matrix_c(&gc, nloc, d, &mut b);
+                    for r in 0..ns {
+                        for j in 0..nd {
+                            let mut acc = c(0.0, 0.0);
+                            for t in 0..ns {
+                                acc += b[t * nd + j] * dm[r * ns + t];
                             }
-                        }
-                        b_matrix_c(&gc, nloc, d, &mut b);
-                        for r in 0..ns {
-                            for j in 0..nd {
-                                let mut acc = c(0.0, 0.0);
-                                for t in 0..ns {
-                                    acc += b[t * nd + j] * dm[r * ns + t];
-                                }
-                                db[r * nd + j] = acc;
-                            }
-                        }
-                        for i in 0..nd {
-                            for j in 0..nd {
-                                let mut acc = c(0.0, 0.0);
-                                for r in 0..ns {
-                                    acc += b[r * nd + i] * db[r * nd + j];
-                                }
-                                ke[i * nd + j] += acc * re.w[q];
-                            }
+                            db[r * nd + j] = acc;
                         }
                     }
-                    ke.iter_mut().for_each(|x| *x *= vol_thk);
-                    dof_layout(mesh, order, ci, &mut scratch, &mut full);
-                    kc.push_block(&full, &full, &ke);
-                    mesh.cell_dofs(ci, order, &mut scratch);
-                    let mrow: Vec<C> = mloc.iter().map(|m| c(rho[ci] * vol_thk * m, 0.0)).collect();
-                    for comp in 0..d {
-                        let dofs: Vec<usize> = scratch.iter().map(|&x| x + comp * n1).collect();
-                        mc.push_block(&dofs, &dofs, &mrow);
+                    for i in 0..nd {
+                        for j in 0..nd {
+                            let mut acc = c(0.0, 0.0);
+                            for r in 0..ns {
+                                acc += b[r * nd + i] * db[r * nd + j];
+                            }
+                            ke[i * nd + j] += acc * re.w[q];
+                        }
                     }
+                }
+                ke.iter_mut().for_each(|x| *x *= vol_thk);
+                dof_layout(mesh, order, ci, &mut scratch, &mut full);
+                kc.push_block(&full, &full, &ke);
+                mesh.cell_dofs(ci, order, &mut scratch);
+                let mrow: Vec<C> = mloc.iter().map(|m| c(rho[ci] * vol_thk * m, 0.0)).collect();
+                for comp in 0..d {
+                    let dofs: Vec<usize> = scratch.iter().map(|&x| x + comp * n1).collect();
+                    mc.push_block(&dofs, &dofs, &mrow);
                 }
             }
-            (kc, mc)
-        })
-        .collect();
+        }
+        (kc, mc)
+    });
 
     let mut kc_all = CCoo::new(n, n);
     let mut mc_all = CCoo::new(n, n);

@@ -40,7 +40,6 @@ use femcore::section::{component_names, stress_name};
 use nyx_physics::{
     cell_fields_of, CellField, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
 };
-use rayon::prelude::*;
 use std::f64::consts::PI;
 use std::time::Instant;
 
@@ -58,10 +57,11 @@ pub struct SchurShiftInvertOp<'a, T: FaerScalar> {
 
 impl<T: FaerScalar> SchurShiftInvertOp<'_, T> {
     fn solve_full_rhs(&self, rhs: &mut [T], nrhs: usize) {
-        if nrhs <= 1 || self.n_tot < 10_000 || femcore::par::threads() <= 1 {
+        let par = nrhs > 1 && self.n_tot >= 10_000 && femcore::par::threads() > 1;
+        if !par {
             self.fac.solve_block_in_place(rhs, nrhs).expect("SchurShiftInvertOp solver must be factored before apply");
         } else {
-            rhs.par_chunks_mut(self.n_tot).for_each(|col| {
+            femcore::par::for_chunks_mut(rhs, self.n_tot, true, |_, col| {
                 self.fac.solve_block_in_place(col, 1).expect("SchurShiftInvertOp solver must be factored before apply");
             });
         }
@@ -153,7 +153,7 @@ impl LinearOperator<C64> for SchurQepShiftInvertOp<'_> {
                 .solve_block_in_place(&mut rhs, nrhs)
                 .expect("SchurQepShiftInvertOp solver must be factored before apply");
         } else {
-            rhs.par_chunks_mut(self.n_tot).for_each(|col| {
+            femcore::par::for_chunks_mut(&mut rhs, self.n_tot, true, |_, col| {
                 self.fac
                     .solve_block_in_place(col, 1)
                     .expect("SchurQepShiftInvertOp solver must be factored before apply");

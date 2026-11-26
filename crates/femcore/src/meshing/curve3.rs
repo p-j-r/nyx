@@ -14,7 +14,6 @@ use crate::fem::{quad_rule_collapsed, CurvedTet};
 use crate::mesh::cells::{CellMesh, CellType};
 use crate::mesh::SimplexMesh;
 use crate::meshing::mesher3d::Domain3;
-use rayon::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// The curved edges: sorted vertex pair and the position of the mid-edge node.
@@ -87,20 +86,26 @@ pub fn curve_edges(
         }
     }
     let edges: Vec<[u32; 2]> = set.into_iter().collect();
-    let mut nodes: Vec<Option<[f64; 3]>> = edges
-        .par_iter()
-        .map(|&[a, b]| {
-            let (pa, pb) = (pos(a), pos(b));
-            let mid = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0, (pa[2] + pb[2]) / 2.0];
-            let len = norm(sub(pb, pa));
-            if len == 0.0 || dom.edge_on_crease(pa, pb) {
-                return None;
-            }
-            let q = dom.project_edge(mid, pa, pb)?;
-            let off = norm(sub(q, mid));
-            (off > MIN_OFFSET * len && off < MAX_OFFSET * len && q.iter().all(|x| x.is_finite())).then_some(q)
-        })
-        .collect();
+    const CURVE_CHUNK: usize = 256;
+    let mut nodes: Vec<Option<[f64; 3]>> = crate::par::map_chunks(&edges, CURVE_CHUNK, |slice| {
+        slice
+            .iter()
+            .map(|&[a, b]| {
+                let (pa, pb) = (pos(a), pos(b));
+                let mid = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0, (pa[2] + pb[2]) / 2.0];
+                let len = norm(sub(pb, pa));
+                if len == 0.0 || dom.edge_on_crease(pa, pb) {
+                    return None;
+                }
+                let q = dom.project_edge(mid, pa, pb)?;
+                let off = norm(sub(q, mid));
+                (off > MIN_OFFSET * len && off < MAX_OFFSET * len && q.iter().all(|x| x.is_finite())).then_some(q)
+            })
+            .collect::<Vec<_>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect();
 
     // Sync curved mid-edge projections across axis-aligned periodic boundary faces from parent (lo) to child (hi)
     let periodic_axes = dom.periodic_axes();
@@ -267,12 +272,25 @@ pub(crate) fn relax_edge_nodes_periodic_with_qp(
         let ct = CurvedTet::new(x);
         certify_curved_tet_bernstein(&ct, MIN_SCALED_JACOBIAN)
     };
+    const CERT_CHUNK: usize = 256;
     for _round in 0..=(MAX_HALVINGS as usize + 1) {
-        let failing: Vec<usize> = curved_cells
-            .par_iter()
-            .enumerate()
-            .filter_map(|(k, (ci, ids))| (!cell_cert(*ci, ids, &level).0).then_some(k))
-            .collect();
+        let failing: Vec<usize> = crate::par::chunk_map(
+            curved_cells.len().div_ceil(CERT_CHUNK),
+            curved_cells.len() > CERT_CHUNK && crate::par::threads() > 1,
+            |cid| {
+                let c0 = cid * CERT_CHUNK;
+                let c1 = (c0 + CERT_CHUNK).min(curved_cells.len());
+                (c0..c1)
+                    .filter(|&k| {
+                        let (ci, ids) = &curved_cells[k];
+                        !cell_cert(*ci, ids, &level).0
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        .into_iter()
+        .flatten()
+        .collect();
         if failing.is_empty() {
             break;
         }

@@ -1449,14 +1449,12 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
         parse_sweep_schedule(&nl_ports, &base_ej_sum_hz, sweep_port, params)?
     {
         let t_sw = Instant::now();
-        let n_pts = schedule.len();
-        let n_threads = femcore::par::threads_up_to(8).min(n_pts.max(1));
-        let chunk_size = n_pts.div_ceil(n_threads.max(1));
+        const SWEEP_CHUNK: usize = 1;
         let target_name = nl_ports[sweep_port].name.clone();
         let target_el = nl_ports[sweep_port].e_l_hz.unwrap_or(0.0);
 
         let chunks: Vec<Result<Vec<FluxSweepPoint>, Error>> =
-            femcore::par::map_chunks(&schedule, chunk_size, |slice| {
+            femcore::par::map_chunks(&schedule, SWEEP_CHUNK, |slice| {
                 let mut local = Vec::with_capacity(slice.len());
                 let mut phis = base_phi_exts.clone();
                 for &pt in slice {
@@ -1569,7 +1567,7 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
                 }
                 Ok(local)
             });
-        let mut out_pts = Vec::with_capacity(n_pts);
+        let mut out_pts = Vec::with_capacity(schedule.len());
         for ch in chunks {
             out_pts.extend(ch?);
         }
@@ -2485,13 +2483,11 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
     let (sweep, sweep_elapsed_s) =
         if let Some(schedule) = parse_sweep_schedule(&nl_ports, &base_ej_sum_hz, sweep_port, params)? {
             let t_sw = Instant::now();
-            let n_pts = schedule.len();
-            let n_threads = femcore::par::threads_up_to(8).min(n_pts.max(1));
-            let chunk_size = n_pts.div_ceil(n_threads.max(1));
+            const SWEEP_CHUNK: usize = 1;
             let target_el = nl_ports[sweep_port].e_l_hz.unwrap_or(0.0);
 
             let chunks: Vec<Result<Vec<FluxSweepPoint>, Error>> =
-                femcore::par::map_chunks(&schedule, chunk_size, |slice| {
+                femcore::par::map_chunks(&schedule, SWEEP_CHUNK, |slice| {
                     let mut local = Vec::with_capacity(slice.len());
                     let mut phis = base_phi_exts.clone();
                     let mut ej_ovs = vec![None; n_ports];
@@ -2553,7 +2549,7 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                     }
                     Ok(local)
                 });
-            let mut out_pts = Vec::with_capacity(n_pts);
+            let mut out_pts = Vec::with_capacity(schedule.len());
             for ch in chunks {
                 out_pts.extend(ch?);
             }

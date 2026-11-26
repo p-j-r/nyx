@@ -22,7 +22,6 @@ use crate::linalg::linop::LinearOperator;
 use crate::linalg::problem::Symmetry;
 use crate::linalg::scalar::{C64, Scalar};
 use crate::linalg::vecops::norm2;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
@@ -202,13 +201,13 @@ impl<T: FaerScalar> DirectSolver<T> {
 
     /// Several right-hand sides; the independent triangular solves are spread over the threads of the shared pool.
     pub fn solve_many(&self, bs: &[Vec<T>]) -> Vec<Vec<T>> {
-        let nt = if bs.len() > 1 && self.n > 5_000 { crate::par::threads().min(bs.len()) } else { 1 };
-        if nt <= 1 {
+        if bs.len() <= 1 || self.n <= 5_000 || crate::par::threads() <= 1 {
             return bs.iter().map(|b| self.solve(b)).collect();
         }
-        let chunk = bs.len().div_ceil(nt);
-        let parts: Vec<Vec<Vec<T>>> = bs.par_chunks(chunk).map(|cols| cols.iter().map(|b| self.solve(b)).collect::<Vec<Vec<T>>>()).collect();
-        parts.into_iter().flatten().collect()
+        crate::par::map_chunks(bs, 1, |cols| cols.iter().map(|b| self.solve(b)).collect::<Vec<Vec<T>>>())
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// Solves for several right-hand sides and checks the worst backward residual across RHS, triggering
@@ -902,19 +901,11 @@ impl<T: FaerScalar> ParShiftInvert<'_, T> {
         }
         // Always solve 1 column per call when column-parallel mode is enabled so `NYX_THREADS=1`
         // and `NYX_THREADS=N` execute the exact same triangular-solve kernel (`ADR 11`).
-        if crate::par::threads() <= 1 {
-            for chunk in y[..n * nrhs].chunks_mut(n) {
-                self.fac
-                    .solve_block_in_place(chunk, 1)
-                    .expect("ParShiftInvert solver must be factored before apply");
-            }
-        } else {
-            y[..n * nrhs].par_chunks_mut(n).for_each(|chunk| {
-                self.fac
-                    .solve_block_in_place(chunk, 1)
-                    .expect("ParShiftInvert solver must be factored before apply");
-            });
-        }
+        crate::par::for_chunks_mut(&mut y[..n * nrhs], n, crate::par::threads() > 1, |_, chunk| {
+            self.fac
+                .solve_block_in_place(chunk, 1)
+                .expect("ParShiftInvert solver must be factored before apply");
+        });
     }
 }
 
@@ -959,19 +950,11 @@ impl QepShiftInvert<'_> {
         }
         // Always solve 1 column per call when column-parallel mode is enabled so `NYX_THREADS=1`
         // and `NYX_THREADS=N` execute the exact same triangular-solve kernel (`ADR 11`).
-        if crate::par::threads() <= 1 {
-            for chunk in rhs[..n * nrhs].chunks_mut(n) {
-                self.fac
-                    .solve_block_in_place(chunk, 1)
-                    .expect("QepShiftInvert solver must be factored before apply");
-            }
-        } else {
-            rhs[..n * nrhs].par_chunks_mut(n).for_each(|chunk| {
-                self.fac
-                    .solve_block_in_place(chunk, 1)
-                    .expect("QepShiftInvert solver must be factored before apply");
-            });
-        }
+        crate::par::for_chunks_mut(&mut rhs[..n * nrhs], n, crate::par::threads() > 1, |_, chunk| {
+            self.fac
+                .solve_block_in_place(chunk, 1)
+                .expect("QepShiftInvert solver must be factored before apply");
+        });
     }
 }
 

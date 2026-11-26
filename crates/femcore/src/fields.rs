@@ -9,7 +9,6 @@
 
 use crate::fem::{geometry, shape, CurvedTet};
 use crate::mesh::SimplexMesh;
-use rayon::prelude::*;
 
 /// Barycentric coordinates of the local dofs (vertices, then edge midpoints).
 pub fn local_bary(dim: usize, order: usize) -> Vec<Vec<f64>> {
@@ -42,14 +41,14 @@ pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: us
     let dn: Vec<Vec<f64>> = lam.iter().map(|l| shape(l, order).1).collect(); // dn[point][a*(d+1)+b]
     let per_cell = nloc * ncomp * d;
     let mut out = vec![0.0; mesh.n_cells() * per_cell];
-    let nt = if mesh.n_cells() < 2000 { 1 } else { crate::par::threads() };
-    let chunk = mesh.n_cells().div_ceil(nt).max(1);
+    const FIELD_CELL_CHUNK: usize = 512;
+    let par = mesh.n_cells() >= 2000 && crate::par::threads() > 1;
     let (geo, dn, lam) = (&geo, &dn, &lam);
-    out.par_chunks_mut((chunk * per_cell).max(1)).enumerate().for_each(|(ci, block)| {
+    crate::par::for_chunks_mut(&mut out, (FIELD_CELL_CHUNK * per_cell).max(1), par, |ci, block| {
         let mut dofs = Vec::new();
         let mut s = vec![0.0; ncomp * d];
         for (lc, cell_out) in block.chunks_mut(per_cell).enumerate() {
-            let c = ci * chunk + lc;
+            let c = ci * FIELD_CELL_CHUNK + lc;
             mesh.cell_dofs(c, order, &mut dofs);
             let base = c * (d + 1) * d;
             if d == 3 && mesh.cell_is_curved(c) {

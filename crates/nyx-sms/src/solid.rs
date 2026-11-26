@@ -39,7 +39,6 @@ use femcore::vvuq::{SourceField, UniformSource};
 use nyx_physics::{
     cell_fields_of, CellField, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
 };
-use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
@@ -1293,46 +1292,50 @@ pub fn thermal_load(
     let ns = if d == 2 { 3 } else { 6 };
     let n1 = mesh.n_dofs(order);
     let nc = mesh.n_cells();
-    // cells in blocks on several threads, each with its own load vector, added up at the end
-    let nt = if nc < 4000 { 1 } else { femcore::par::threads_up_to(8) };
-    let chunk = nc.div_ceil(nt).max(1);
+    // Fixed-size cell chunks summed in exact ascending chunk/cell order so `NYX_THREADS` cannot alter bits.
+    const THERMAL_CHUNK: usize = 512;
+    let nchunks = nc.div_ceil(THERMAL_CHUNK).max(1);
+    let par = nc >= 4000 && femcore::par::threads() > 1;
     let (re, geo) = (&re, &geo);
-    let parts: Vec<Vec<f64>> = (0..nt)
-        .into_par_iter()
-        .map(|t| {
-            let mut f = vec![0.0; d * n1];
-            let (mut scratch, mut full) = (Vec::new(), Vec::new());
-            let mut grad = vec![0.0; nloc * d];
-            let mut b = vec![0.0; ns * nd];
-            for c in t * chunk..((t + 1) * chunk).min(nc) {
-                mesh.cell_dofs(c, order, &mut scratch);
-                let mut fe = vec![0.0; nd];
-                for q in 0..re.w.len() {
-                    let tq: f64 = (0..nloc).map(|a| re.n[q][a] * t_field[scratch[a]]).sum();
-                    let sig = thermal_stress(&c6[c], d, plane, &thermal_strain(&alpha[c], tq - tref));
-                    shape_gradients(re, geo, c, q, &mut grad);
-                    b_matrix(&grad, nloc, d, &mut b);
-                    for i in 0..nd {
-                        let mut acc = 0.0;
-                        for s in 0..ns {
-                            acc += b[s * nd + i] * sig[s];
-                        }
-                        fe[i] += re.w[q] * acc;
+    let parts: Vec<(Vec<usize>, Vec<f64>)> = femcore::par::chunk_map(nchunks, par, |cid| {
+        let c0 = cid * THERMAL_CHUNK;
+        let c1 = (c0 + THERMAL_CHUNK).min(nc);
+        let mut dofs_out = Vec::with_capacity((c1 - c0) * nd);
+        let mut vals_out = Vec::with_capacity((c1 - c0) * nd);
+        let (mut scratch, mut full) = (Vec::new(), Vec::new());
+        let mut grad = vec![0.0; nloc * d];
+        let mut b = vec![0.0; ns * nd];
+        let mut fe = vec![0.0; nd];
+        for c in c0..c1 {
+            mesh.cell_dofs(c, order, &mut scratch);
+            fe.fill(0.0);
+            for q in 0..re.w.len() {
+                let tq: f64 = (0..nloc).map(|a| re.n[q][a] * t_field[scratch[a]]).sum();
+                let sig = thermal_stress(&c6[c], d, plane, &thermal_strain(&alpha[c], tq - tref));
+                shape_gradients(re, geo, c, q, &mut grad);
+                b_matrix(&grad, nloc, d, &mut b);
+                for i in 0..nd {
+                    let mut acc = 0.0;
+                    for s in 0..ns {
+                        acc += b[s * nd + i] * sig[s];
                     }
-                }
-                let sc = geo.vol[c] * if d == 2 { thickness } else { 1.0 };
-                dof_layout(mesh, order, c, &mut scratch, &mut full);
-                for (i, &dof) in full.iter().enumerate() {
-                    f[dof] += fe[i] * sc;
+                    fe[i] += re.w[q] * acc;
                 }
             }
-            f
-        })
-        .collect();
-    let mut parts = parts.into_iter();
-    let mut f = parts.next().unwrap_or_else(|| vec![0.0; d * n1]);
-    for p in parts {
-        f.iter_mut().zip(&p).for_each(|(a, b)| *a += b);
+            let sc = geo.vol[c] * if d == 2 { thickness } else { 1.0 };
+            dof_layout(mesh, order, c, &mut scratch, &mut full);
+            for (i, &dof) in full.iter().enumerate() {
+                dofs_out.push(dof);
+                vals_out.push(fe[i] * sc);
+            }
+        }
+        (dofs_out, vals_out)
+    });
+    let mut f = vec![0.0; d * n1];
+    for (dofs_c, vals_c) in parts {
+        for (&dof, &val) in dofs_c.iter().zip(&vals_c) {
+            f[dof] += val;
+        }
     }
     f
 }
@@ -1357,93 +1360,96 @@ fn thermal_load_mixed(
     let nc = mixed.n_cells();
     let ns = if d == 2 { 3 } else { 6 };
     let thk = if d == 2 { thickness } else { 1.0 };
-    let nt = if nc < 2000 { 1 } else { femcore::par::threads_up_to(8) };
-    let chunk = nc.div_ceil(nt).max(1);
+    const THERMAL_MIXED_CHUNK: usize = 256;
+    let nchunks = nc.div_ceil(THERMAL_MIXED_CHUNK).max(1);
+    let par = nc >= 2000 && femcore::par::threads() > 1;
 
-    let parts: Vec<Vec<f64>> = (0..nt)
-        .into_par_iter()
-        .map(|tid| {
-            let mut f = vec![0.0; d * n1];
-            let mut vals = Vec::new();
-            let mut dxi = Vec::new();
-            let mut sn = Vec::new();
-            let mut sdn = Vec::new();
-            let mut grad = Vec::new();
-            let mut b = Vec::new();
-            for ci in (tid * chunk)..((tid + 1) * chunk).min(nc) {
-                let dom = mixed.cell_labels[ci];
-                if inactive.contains(&dom) {
+    let parts: Vec<(Vec<usize>, Vec<f64>)> = femcore::par::chunk_map(nchunks, par, |cid| {
+        let c0 = cid * THERMAL_MIXED_CHUNK;
+        let c1 = (c0 + THERMAL_MIXED_CHUNK).min(nc);
+        let mut dofs_out = Vec::new();
+        let mut vals_out = Vec::new();
+        let mut vals = Vec::new();
+        let mut dxi = Vec::new();
+        let mut sn = Vec::new();
+        let mut sdn = Vec::new();
+        let mut grad = Vec::new();
+        let mut b = Vec::new();
+        for ci in c0..c1 {
+            let dom = mixed.cell_labels[ci];
+            if inactive.contains(&dom) {
+                continue;
+            }
+            let ct = mixed.cell_type(ci);
+            let iso = IsoparametricCell::from_mesh(mixed, ci);
+            let in_ie = ie_domains.contains(dom);
+            let deg = if in_ie {
+                8
+            } else if iso.curved {
+                2 * order + 4
+            } else {
+                2 * order + 2
+            };
+            let rule = quad_rule_mixed(ct, deg);
+            let cdofs = dof_map.cell_dofs(ci);
+            let nloc = cdofs.len();
+            let nd = d * nloc;
+            grad.resize(nloc * d, 0.0);
+            b.resize(ns * nd, 0.0);
+            let mut fe = vec![0.0; nd];
+
+            for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+                let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+                lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+                let tq: f64 = (0..nloc).map(|a| vals[a] * t_field[cdofs[a]]).sum();
+                if (tq - tref).abs() == 0.0 {
                     continue;
                 }
-                let ct = mixed.cell_type(ci);
-                let iso = IsoparametricCell::from_mesh(mixed, ci);
-                let in_ie = ie_domains.contains(dom);
-                let deg = if in_ie {
-                    8
-                } else if iso.curved {
-                    2 * order + 4
-                } else {
-                    2 * order + 2
-                };
-                let rule = quad_rule_mixed(ct, deg);
-                let cdofs = dof_map.cell_dofs(ci);
-                let nloc = cdofs.len();
-                let nd = d * nloc;
-                grad.resize(nloc * d, 0.0);
-                b.resize(ns * nd, 0.0);
-                let mut fe = vec![0.0; nd];
-
-                for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
-                    let jg = iso.eval_into(xi, &mut sn, &mut sdn);
-                    lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
-                    let tq: f64 = (0..nloc).map(|a| vals[a] * t_field[cdofs[a]]).sum();
-                    if (tq - tref).abs() == 0.0 {
-                        continue;
-                    }
-                    let sig = thermal_stress(&c6[ci], d, plane, &thermal_strain(&alpha[ci], tq - tref));
-                    let w_eff = if in_ie {
-                        let ie_j = ie_domains.eval_cell_jacobian(dom, &iso, &jg, &sn, &sdn, d);
-                        for a in 0..nloc {
-                            let gp = jg.map_grad(dxi[a]);
-                            for i in 0..d {
-                                let mut acc = 0.0;
-                                for k in 0..d {
-                                    acc += ie_j.j_inv[k][i] * gp[k];
-                                }
-                                grad[a * d + i] = acc;
+                let sig = thermal_stress(&c6[ci], d, plane, &thermal_strain(&alpha[ci], tq - tref));
+                let w_eff = if in_ie {
+                    let ie_j = ie_domains.eval_cell_jacobian(dom, &iso, &jg, &sn, &sdn, d);
+                    for a in 0..nloc {
+                        let gp = jg.map_grad(dxi[a]);
+                        for i in 0..d {
+                            let mut acc = 0.0;
+                            for k in 0..d {
+                                acc += ie_j.j_inv[k][i] * gp[k];
                             }
+                            grad[a * d + i] = acc;
                         }
-                        wq * jg.det.abs() * ie_j.det * thk
-                    } else {
-                        for a in 0..nloc {
-                            let gp = jg.map_grad(dxi[a]);
-                            grad[a * d..a * d + d].copy_from_slice(&gp[..d]);
-                        }
-                        wq * jg.det.abs() * thk
-                    };
-                    b_matrix(&grad, nloc, d, &mut b);
-                    for i in 0..nd {
-                        let mut acc = 0.0;
-                        for s in 0..ns {
-                            acc += b[s * nd + i] * sig[s];
-                        }
-                        fe[i] += w_eff * acc;
                     }
-                }
-                for k in 0..d {
-                    for (a, &gd) in cdofs.iter().enumerate() {
-                        f[k * n1 + gd] += fe[k * nloc + a];
+                    wq * jg.det.abs() * ie_j.det * thk
+                } else {
+                    for a in 0..nloc {
+                        let gp = jg.map_grad(dxi[a]);
+                        grad[a * d..a * d + d].copy_from_slice(&gp[..d]);
                     }
+                    wq * jg.det.abs() * thk
+                };
+                b_matrix(&grad, nloc, d, &mut b);
+                for i in 0..nd {
+                    let mut acc = 0.0;
+                    for s in 0..ns {
+                        acc += b[s * nd + i] * sig[s];
+                    }
+                    fe[i] += w_eff * acc;
                 }
             }
-            f
-        })
-        .collect();
+            for k in 0..d {
+                for (a, &gd) in cdofs.iter().enumerate() {
+                    dofs_out.push(k * n1 + gd);
+                    vals_out.push(fe[k * nloc + a]);
+                }
+            }
+        }
+        (dofs_out, vals_out)
+    });
 
-    let mut parts = parts.into_iter();
-    let mut f = parts.next().unwrap_or_else(|| vec![0.0; d * n1]);
-    for p in parts {
-        f.iter_mut().zip(&p).for_each(|(a, b)| *a += b);
+    let mut f = vec![0.0; d * n1];
+    for (dofs_c, vals_c) in parts {
+        for (&dof, &val) in dofs_c.iter().zip(&vals_c) {
+            f[dof] += val;
+        }
     }
     f
 }

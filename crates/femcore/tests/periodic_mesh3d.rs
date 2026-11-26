@@ -193,35 +193,99 @@ fn periodic_boundary_rivara_bisection_and_adaptive_3d_keep_congruence() {
     );
 }
 
+fn push_mesh_bits(buf: &mut Vec<u8>, m: &SimplexMesh) {
+    let push_usize = |b: &mut Vec<u8>, v: usize| b.extend_from_slice(&(v as u64).to_le_bytes());
+    push_usize(buf, m.points.len());
+    for &p in &m.points {
+        buf.extend_from_slice(&p.to_bits().to_le_bytes());
+    }
+    push_usize(buf, m.cells.len());
+    for &c in &m.cells {
+        buf.extend_from_slice(&c.to_le_bytes());
+    }
+    push_usize(buf, m.cell_labels.len());
+    for &l in &m.cell_labels {
+        buf.extend_from_slice(&l.to_le_bytes());
+    }
+    push_usize(buf, m.facets.len());
+    for &f in &m.facets {
+        buf.extend_from_slice(&f.to_le_bytes());
+    }
+    push_usize(buf, m.facet_labels.len());
+    for &l in &m.facet_labels {
+        buf.extend_from_slice(&l.to_le_bytes());
+    }
+    let edge_nodes = m.edge_node_list();
+    push_usize(buf, edge_nodes.len());
+    for (pair, pos) in &edge_nodes {
+        buf.extend_from_slice(&pair[0].to_le_bytes());
+        buf.extend_from_slice(&pair[1].to_le_bytes());
+        for &x in pos {
+            buf.extend_from_slice(&x.to_bits().to_le_bytes());
+        }
+    }
+}
+
+fn push_periodic_match_bits(buf: &mut Vec<u8>, g: &MeshedGeom, src_sel: &str, dst_sel: &str) {
+    let m = &g.mesh;
+    let per = Periodic { source: g.select(src_sel).unwrap(), dest: g.select(dst_sel).unwrap(), phase: 0.0 };
+    let matched = match_vertices(m, &per).unwrap();
+    for s in matched.shift {
+        buf.extend_from_slice(&s.to_bits().to_le_bytes());
+    }
+    buf.extend_from_slice(&(matched.map.len() as u64).to_le_bytes());
+    let mut pairs: Vec<(u32, u32)> = matched.map.iter().map(|(&sv, &dv)| (sv, dv)).collect();
+    pairs.sort_unstable();
+    for (sv, dv) in pairs {
+        buf.extend_from_slice(&sv.to_le_bytes());
+        buf.extend_from_slice(&dv.to_le_bytes());
+    }
+}
+
+fn curved_periodic_cell(lambda: f64) -> geom::model::FeatureList {
+    let mut m = Model::new_3d();
+    let clad_2d = m.rect("clad_2d", (-0.8e-6, -0.6e-6), (0.8e-6, 0.6e-6));
+    let clad = m.extrude("clad", clad_2d, 0.0, lambda);
+    let cyl_2d = m.circle("cyl_2d", (0.0, 0.0), 0.22e-6);
+    let cyl = m.extrude("cyl", cyl_2d, 0.0, lambda);
+    m.overlay(&[("SiO2", clad), ("Si_Cyl", cyl)]);
+    let src = Selector::parse("outer & plane(y = 0)").unwrap();
+    let dst = Selector::parse(&format!("outer & plane(y = {lambda:e})")).unwrap();
+    m.periodic("py", src, dst, (0.0, lambda, 0.0));
+    m.list
+}
+
 #[test]
 fn periodic_3d_meshing_is_deterministic_across_thread_counts() {
     let lambda = 437e-9;
     if let Ok(out_path) = std::env::var("NYX_PERIODIC3D_OUT") {
-        let list = corrugated_grating(lambda, 0.085e-6);
-        let ev = evaluate(&list).unwrap();
-        let m = mesh_geom_3d(ev, &GeomMeshOpts::new(0.28e-6)).unwrap().mesh;
         let mut buf = Vec::new();
-        let push_usize = |b: &mut Vec<u8>, v: usize| b.extend_from_slice(&(v as u64).to_le_bytes());
-        push_usize(&mut buf, m.points.len());
-        for &p in &m.points {
-            buf.extend_from_slice(&p.to_bits().to_le_bytes());
-        }
-        push_usize(&mut buf, m.cells.len());
-        for &c in &m.cells {
-            buf.extend_from_slice(&c.to_le_bytes());
-        }
-        push_usize(&mut buf, m.cell_labels.len());
-        for &l in &m.cell_labels {
-            buf.extend_from_slice(&l.to_le_bytes());
-        }
-        push_usize(&mut buf, m.facets.len());
-        for &f in &m.facets {
-            buf.extend_from_slice(&f.to_le_bytes());
-        }
-        push_usize(&mut buf, m.facet_labels.len());
-        for &l in &m.facet_labels {
-            buf.extend_from_slice(&l.to_le_bytes());
-        }
+
+        // 1. Direct `mesh_geom_3d` lattice periodic corrugated grating
+        let list_lat = corrugated_grating(lambda, 0.085e-6);
+        let ev_lat = evaluate(&list_lat).unwrap();
+        let g_lat = mesh_geom_3d(ev_lat, &GeomMeshOpts::new(0.28e-6)).unwrap();
+        push_mesh_bits(&mut buf, &g_lat.mesh);
+        push_periodic_match_bits(&mut buf, &g_lat, "outer & plane(y = 0)", &format!("outer & plane(y = {lambda:e})"));
+
+        // 2. Rivara bisection on periodic boundaries via `mesh_model(..., Simple)`
+        let g_riv = mesh_model(&corrugated_grating(lambda, 0.065e-6), &MeshPlan::simple(0.30e-6)).unwrap();
+        push_mesh_bits(&mut buf, &g_riv.mesh);
+        push_periodic_match_bits(&mut buf, &g_riv, "outer & plane(y = 0)", &format!("outer & plane(y = {lambda:e})"));
+
+        // 3. Adaptive 3D periodic meshing
+        let g_adp = mesh_model(&corrugated_grating(lambda, 0.12e-6), &MeshPlan::adaptive(0.35e-6, 0.7)).unwrap();
+        push_mesh_bits(&mut buf, &g_adp.mesh);
+
+        // 4. Curved periodic cylinder cell exercising `curve3` parallel edge projection + periodic twin sync
+        let ev_curv = evaluate(&curved_periodic_cell(lambda)).unwrap();
+        let mut copts = GeomMeshOpts::new(0.24e-6);
+        copts.curved = true;
+        let g_curv = mesh_geom_3d(ev_curv, &copts).unwrap();
+        assert!(g_curv.mesh.has_curved(), "expected curved edges on periodic cylinder cell");
+        push_mesh_bits(&mut buf, &g_curv.mesh);
+        push_periodic_match_bits(&mut buf, &g_curv, "outer & plane(y = 0)", &format!("outer & plane(y = {lambda:e})"));
+
         std::fs::write(out_path, buf).unwrap();
         return;
     }
@@ -243,5 +307,6 @@ fn periodic_3d_meshing_is_deterministic_across_thread_counts() {
 
     let b1 = run_with_threads("1");
     let b4 = run_with_threads("4");
-    assert_eq!(b1, b4, "periodic 3D mesh must be bit-identical for NYX_THREADS=1 and 4");
+    assert!(!b1.is_empty());
+    assert_eq!(b1, b4, "periodic 3D mesh must be 0-ULP bit-identical for NYX_THREADS=1 and 4");
 }

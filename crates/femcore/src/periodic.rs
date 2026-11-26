@@ -117,7 +117,9 @@ pub fn nodal_relations(mesh: &SimplexMesh, order: usize, ncomp: usize, m: &Match
     let n1 = mesh.n_dofs(order);
     let nv = mesh.n_points();
     let mut out = vec![];
-    for (&s, &t) in &m.map {
+    let mut pairs: Vec<(u32, u32)> = m.map.iter().map(|(&s, &t)| (s, t)).collect();
+    pairs.sort_unstable();
+    for (s, t) in pairs {
         for k in 0..ncomp {
             out.push((t as usize + k * n1, s as usize + k * n1, f));
         }

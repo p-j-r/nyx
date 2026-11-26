@@ -37,7 +37,6 @@ use crate::adapt::metric::{intersect, isotropic, Sym};
 use crate::fem::{quad_rule, quad_rule_collapsed, shape, CurvedTet, TET_EDGES};
 use crate::linalg::csr::C;
 use crate::mesh::SimplexMesh;
-use rayon::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 
 /// Quadrature degree used on isoparametric [`CurvedTet`] cells (matching `CURVED_QUAD_DEGREE` in `nyx-ems`).
@@ -769,93 +768,101 @@ pub fn maxwell_indicators(mesh: &SimplexMesh, field: &dyn CurlField, opt: &Maxwe
         .then(|| quad_rule_collapsed(if mesh.has_qp() { 8 } else { CURVED_QUAD_DEGREE }));
     let face_rule = quad_rule(2, if mesh.has_curved() { 6 } else { 4 });
 
-    // interior terms, cell by cell
-    let interior: Vec<[f64; 2]> = (0..nc)
-        .into_par_iter()
-        .map(|c| {
-            if (opt.skip)(mesh.cell_labels[c]) {
-                return [0.0, 0.0];
-            }
-            let p = cell_pts(c);
-            let Some((g_straight, straight_vol)) = cell_geometry(&p) else {
-                return [0.0, 0.0];
-            };
-            let (eps, mu) = (opt.eps_r[c], opt.mu_r[c]);
+    // interior terms, cell by cell in fixed chunks
+    const MAXWELL_EST_CHUNK: usize = 256;
+    let eval_cell = |c: usize| -> [f64; 2] {
+        if (opt.skip)(mesh.cell_labels[c]) {
+            return [0.0, 0.0];
+        }
+        let p = cell_pts(c);
+        let Some((g_straight, straight_vol)) = cell_geometry(&p) else {
+            return [0.0, 0.0];
+        };
+        let (eps, mu) = (opt.eps_r[c], opt.mu_r[c]);
 
-            if mesh.cell_is_curved(c) {
-                let nodes10 = mesh.cell_geometry_nodes(c);
-                let ct = CurvedTet::new(nodes10);
-                let det0 = CurvedTet::straight(p).jacobian(&[0.25; 4]).1;
-                let det0_abs = det0.abs();
-                let h = diameter(&nodes10);
-                let cquad = curved_quad.as_ref().unwrap_or(&vol_rule);
-                let mut cache: Option<RefCellDerivativeCache> = None;
-                let mut cache_failed = false;
-                let (mut res, mut div) = (0.0, 0.0);
+        if mesh.cell_is_curved(c) {
+            let nodes10 = mesh.cell_geometry_nodes(c);
+            let ct = CurvedTet::new(nodes10);
+            let det0 = CurvedTet::straight(p).jacobian(&[0.25; 4]).1;
+            let det0_abs = det0.abs();
+            let h = diameter(&nodes10);
+            let cquad = curved_quad.as_ref().unwrap_or(&vol_rule);
+            let mut cache: Option<RefCellDerivativeCache> = None;
+            let mut cache_failed = false;
+            let (mut res, mut div) = (0.0, 0.0);
 
-                for (lam, w) in cquad.lam.iter().zip(&cquad.w) {
-                    let l4 = [lam[0], lam[1], lam[2], lam[3]];
-                    let (gq, det) = ct.jacobian(&l4);
-                    let det_abs = det.abs();
-                    if !det.is_finite() || det_abs <= 1e-14 * det0_abs.max(1e-300) {
+            for (lam, w) in cquad.lam.iter().zip(&cquad.w) {
+                let l4 = [lam[0], lam[1], lam[2], lam[3]];
+                let (gq, det) = ct.jacobian(&l4);
+                let det_abs = det.abs();
+                if !det.is_finite() || det_abs <= 1e-14 * det0_abs.max(1e-300) {
+                    continue;
+                }
+                let wq = w * det_abs / 6.0;
+                let (e, h_curl) = field.sample(c, l4);
+                let (div_e, cc_e) = if let Some(exact) = field.sample_derivatives(c, l4) {
+                    exact
+                } else {
+                    if cache.is_none() && !cache_failed {
+                        cache = RefCellDerivativeCache::build_curved(field, c, &ct, det0_abs);
+                        if cache.is_none() {
+                            cache_failed = true;
+                        }
+                    }
+                    if let Some(ref cc) = cache {
+                        let j_mat = ct.jacobian_matrix(&l4);
+                        cc.eval_div_and_curl_curl(&l4, &e, &h_curl, &j_mat, &gq, det)
+                    } else {
                         continue;
                     }
-                    let wq = w * det_abs / 6.0;
-                    let (e, h_curl) = field.sample(c, l4);
-                    let (div_e, cc_e) = if let Some(exact) = field.sample_derivatives(c, l4) {
-                        exact
-                    } else {
-                        if cache.is_none() && !cache_failed {
-                            cache = RefCellDerivativeCache::build_curved(field, c, &ct, det0_abs);
-                            if cache.is_none() {
-                                cache_failed = true;
-                            }
-                        }
-                        if let Some(ref cc) = cache {
-                            let j_mat = ct.jacobian_matrix(&l4);
-                            cc.eval_div_and_curl_curl(&l4, &e, &h_curl, &j_mat, &gq, det)
-                        } else {
-                            continue;
-                        }
-                    };
-                    let r = [
-                        cc_e[0] / mu - e[0] * (opt.k0_sq * eps),
-                        cc_e[1] / mu - e[1] * (opt.k0_sq * eps),
-                        cc_e[2] / mu - e[2] * (opt.k0_sq * eps),
-                    ];
-                    res += wq * cnorm2(r);
-                    let d = div_e * eps;
-                    div += wq * d.norm_sqr();
-                }
-                [h * h * res, h * h * div]
-            } else {
-                let h = diameter(&p);
-                let mut cache: Option<RefCellDerivativeCache> = None;
-                let (mut res, mut div) = (0.0, 0.0);
-                let dummy_j = [[0.0; 3]; 3];
-
-                for (lam, w) in vol_rule.lam.iter().zip(&vol_rule.w) {
-                    let l4 = [lam[0], lam[1], lam[2], lam[3]];
-                    let (e, h_curl) = field.sample(c, l4);
-                    let (div_e, cc_e) = if let Some(exact) = field.sample_derivatives(c, l4) {
-                        exact
-                    } else {
-                        let ref_cache = cache.get_or_insert_with(|| RefCellDerivativeCache::build_straight(field, c));
-                        ref_cache.eval_div_and_curl_curl(&l4, &e, &h_curl, &dummy_j, &g_straight, 1.0)
-                    };
-                    let r = [
-                        cc_e[0] / mu - e[0] * (opt.k0_sq * eps),
-                        cc_e[1] / mu - e[1] * (opt.k0_sq * eps),
-                        cc_e[2] / mu - e[2] * (opt.k0_sq * eps),
-                    ];
-                    res += w * straight_vol * cnorm2(r);
-                    let d = div_e * eps;
-                    div += w * straight_vol * d.norm_sqr();
-                }
-                [h * h * res, h * h * div]
+                };
+                let r = [
+                    cc_e[0] / mu - e[0] * (opt.k0_sq * eps),
+                    cc_e[1] / mu - e[1] * (opt.k0_sq * eps),
+                    cc_e[2] / mu - e[2] * (opt.k0_sq * eps),
+                ];
+                res += wq * cnorm2(r);
+                let d = div_e * eps;
+                div += wq * d.norm_sqr();
             }
-        })
-        .collect();
+            [h * h * res, h * h * div]
+        } else {
+            let h = diameter(&p);
+            let mut cache: Option<RefCellDerivativeCache> = None;
+            let (mut res, mut div) = (0.0, 0.0);
+            let dummy_j = [[0.0; 3]; 3];
+
+            for (lam, w) in vol_rule.lam.iter().zip(&vol_rule.w) {
+                let l4 = [lam[0], lam[1], lam[2], lam[3]];
+                let (e, h_curl) = field.sample(c, l4);
+                let (div_e, cc_e) = if let Some(exact) = field.sample_derivatives(c, l4) {
+                    exact
+                } else {
+                    let ref_cache = cache.get_or_insert_with(|| RefCellDerivativeCache::build_straight(field, c));
+                    ref_cache.eval_div_and_curl_curl(&l4, &e, &h_curl, &dummy_j, &g_straight, 1.0)
+                };
+                let r = [
+                    cc_e[0] / mu - e[0] * (opt.k0_sq * eps),
+                    cc_e[1] / mu - e[1] * (opt.k0_sq * eps),
+                    cc_e[2] / mu - e[2] * (opt.k0_sq * eps),
+                ];
+                res += w * straight_vol * cnorm2(r);
+                let d = div_e * eps;
+                div += w * straight_vol * d.norm_sqr();
+            }
+            [h * h * res, h * h * div]
+        }
+    };
+    let interior_chunks = crate::par::chunk_map(
+        nc.div_ceil(MAXWELL_EST_CHUNK),
+        nc > MAXWELL_EST_CHUNK && crate::par::threads() > 1,
+        |cid| {
+            let c0 = cid * MAXWELL_EST_CHUNK;
+            let c1 = (c0 + MAXWELL_EST_CHUNK).min(nc);
+            (c0..c1).map(eval_cell).collect::<Vec<_>>()
+        },
+    );
+    let interior: Vec<[f64; 2]> = interior_chunks.into_iter().flatten().collect();
 
     // faces: `(cell, opp_local_slot, sorted_face_local_slots)` keyed by sorted global vertex triple
     type FaceSide = (usize, usize, [usize; 3]);
@@ -888,9 +895,7 @@ pub fn maxwell_indicators(mesh: &SimplexMesh, field: &dyn CurlField, opt: &Maxwe
     }
 
     // jump terms: (cell, tangential part, normal part)
-    let face_terms: Vec<Vec<(usize, f64, f64)>> = keys
-        .par_iter()
-        .map(|k| {
+    let eval_face = |k: &[u32; 3]| -> Vec<(usize, f64, f64)> {
             let cs = &faces[k];
             let live = |cell: usize| !(opt.skip)(mesh.cell_labels[cell]);
             let mut out = Vec::new();
@@ -1014,8 +1019,10 @@ pub fn maxwell_indicators(mesh: &SimplexMesh, field: &dyn CurlField, opt: &Maxwe
                 out.push((c1, h_f * jt, 0.0));
             }
             out
-        })
-        .collect();
+        };
+    let face_terms = crate::par::map_chunks(&keys, MAXWELL_EST_CHUNK, |kslice| {
+        kslice.iter().flat_map(eval_face).collect::<Vec<_>>()
+    });
 
     let mut eta2 = vec![0.0; nc];
     let mut parts = [0.0; 4];

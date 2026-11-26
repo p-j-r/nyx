@@ -14,8 +14,9 @@
 //!   results (`results.h5`, `stderr.txt`) of an item; it also appends to `solve_history.jsonl`, so the estimates are learned whoever was watching.
 //!
 //! **The lease** is `queue/runner.lock`: created with `create_new` by the queue worker that takes the queue, kept alive by touching its modification
-//! time every second. A lease not touched for six seconds is dead (a process id alone is not trusted: Windows reuses them). Two programs that find
-//! a dead lease both try to take it; only one `create_new` succeeds, and each re-reads the file to see whose token it holds.
+//! time every second. A lease not touched for `lease_dead()` (six seconds by default, configurable via `NYX_QUEUE_LEASE_DEAD_SECS`) is dead
+//! (a process id alone is not trusted: Windows reuses them). Two programs that find a dead lease both try to take it; only one `create_new`
+//! succeeds, and each re-reads the file to see whose token it holds.
 //!
 //! Order, ageing and owners are the job runner's rules (ADR 87): priority first, lowered one level for each minute waited, then owners in turn,
 //! then submission order. The order never changes a number (ADR 11): an item is a frozen project and nothing carries from one to the next.
@@ -34,8 +35,23 @@ pub fn default_workspace() -> PathBuf {
     std::env::var_os("NYX_WORKSPACE").map(PathBuf::from).unwrap_or_else(nyx_store::workspace::default_root)
 }
 
-/// A lease not touched for this long belongs to a queue worker that is gone.
+/// Default timeout after which an untouched lease belongs to a queue worker that is gone.
 pub const LEASE_DEAD: Duration = Duration::from_secs(6);
+const MIN_LEASE_DEAD_SECS: f64 = 0.1;
+const MAX_LEASE_DEAD_SECS: f64 = 86_400.0;
+
+/// Timeout after which an untouched queue worker lease (`runner.lock`) is considered dead.
+///
+/// Configured via `NYX_QUEUE_LEASE_DEAD_SECS` (positive finite seconds, clamped to
+/// `[0.1, 86400.0]`); defaults to [`LEASE_DEAD`] (6 s) when unset or invalid.
+pub fn lease_dead() -> Duration {
+    std::env::var("NYX_QUEUE_LEASE_DEAD_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|secs| secs.is_finite() && *secs > 0.0)
+        .map(|secs| Duration::from_secs_f64(secs.clamp(MIN_LEASE_DEAD_SECS, MAX_LEASE_DEAD_SECS)))
+        .unwrap_or(LEASE_DEAD)
+}
 /// A finished item nobody collected is removed after this long.
 pub const KEEP_FINISHED: Duration = Duration::from_secs(24 * 3600);
 
@@ -416,7 +432,7 @@ impl SharedQueue {
 
     /// Whether a queue worker holds the lease now.
     pub fn runner_alive(&self) -> bool {
-        age_of(&self.lease_path()).is_some_and(|a| a < LEASE_DEAD)
+        age_of(&self.lease_path()).is_some_and(|a| a < lease_dead())
     }
 
     /// Starts a queue worker (`program --worker <workspace>`) unless one holds the lease. The program runs on its own (`process::spawn_detached`:
@@ -476,7 +492,7 @@ impl Lease {
         std::fs::create_dir_all(&q.root).ok()?;
         let path = q.lease_path();
         if path.exists() {
-            if age_of(&path).is_some_and(|a| a < LEASE_DEAD) {
+            if age_of(&path).is_some_and(|a| a < lease_dead()) {
                 return None;
             }
             let _ = std::fs::remove_file(&path);

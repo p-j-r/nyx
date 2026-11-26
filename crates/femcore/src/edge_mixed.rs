@@ -21,7 +21,6 @@ use crate::mesh::mixed::{
     d3_apply, d3_perm_for_keys, d4_apply, d4_dihedral_for_keys, FacetType, MixedDiscretisation, HEX_EDGES,
     HEX_QUAD_FACES, PRISM_QUAD_FACES, PRISM_TRI_FACES, QUAD_EDGES, TET_EDGES, TET_TRI_FACES, TRI_EDGES,
 };
-use rayon::prelude::*;
 use std::collections::BTreeSet;
 
 /// Number of local `H(curl)` basis functions on `cell_type` at polynomial `order` (`1` or `2`).
@@ -1360,11 +1359,7 @@ where
             }
             coo.to_csr()
         };
-        let parts: Vec<CCsr> = if nt <= 1 || nparts <= 1 {
-            (0..nparts).map(build_part).collect()
-        } else {
-            (0..nparts).into_par_iter().map(build_part).collect()
-        };
+        let parts: Vec<CCsr> = crate::par::chunk_map(nparts, nt > 1 && nparts > 1, build_part);
         CCsr::sum_all(parts)
     };
     (run(0), run(1))

@@ -317,12 +317,18 @@ impl Lattice {
     }
 }
 
-/// Runs `f(range)` on blocks of `0..n` in parallel and returns the results in order.
+/// Runs `f(range)` on fixed-size blocks of `0..n` in parallel and returns the results in order.
 fn par_blocks<T: Send, F: Fn(std::ops::Range<usize>) -> T + Sync>(n: usize, min_block: usize, f: F) -> Vec<T> {
-    let nt = crate::par::threads().min(n.div_ceil(min_block.max(1))).max(1);
-    let chunk = n.div_ceil(nt).max(1);
-    use rayon::prelude::*;
-    (0..n.div_ceil(chunk)).into_par_iter().map(|t| f(t * chunk..((t + 1) * chunk).min(n))).collect()
+    if n == 0 {
+        return Vec::new();
+    }
+    let chunk = min_block.max(1);
+    let nchunks = n.div_ceil(chunk);
+    let par = nchunks > 1 && crate::par::threads() > 1;
+    crate::par::chunk_map(nchunks, par, |ci| {
+        let start = ci * chunk;
+        f(start..(start + chunk).min(n))
+    })
 }
 
 /// The cutting surfaces: 0 is the boundary of the solid (the union of the regions); surface `1 + r` is the boundary of region `r` (only

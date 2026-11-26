@@ -303,27 +303,12 @@ where
         return CCsr::zeros(n, n);
     }
     let n_chunks = nc.div_ceil(FIXED_CELL_CHUNK);
-    let ranges: Vec<std::ops::Range<usize>> =
-        (0..n_chunks).map(|k| (k * FIXED_CELL_CHUNK)..((k + 1) * FIXED_CELL_CHUNK).min(nc)).collect();
-    let parts: Vec<CCsr> = if n_chunks == 1 || femcore::par::threads() <= 1 {
-        ranges
-            .into_iter()
-            .map(|range| {
-                let mut coo = CCoo::new(n, n);
-                f(range, &mut coo);
-                coo.to_csr()
-            })
-            .collect()
-    } else {
-        ranges
-            .into_par_iter()
-            .map(|range| {
-                let mut coo = CCoo::new(n, n);
-                f(range, &mut coo);
-                coo.to_csr()
-            })
-            .collect()
-    };
+    let parts: Vec<CCsr> = femcore::par::chunk_map(n_chunks, n_chunks > 1 && femcore::par::threads() > 1, |k| {
+        let range = (k * FIXED_CELL_CHUNK)..((k + 1) * FIXED_CELL_CHUNK).min(nc);
+        let mut coo = CCoo::new(n, n);
+        f(range, &mut coo);
+        coo.to_csr()
+    });
     reduce_tree_ccsr(parts)
 }
 

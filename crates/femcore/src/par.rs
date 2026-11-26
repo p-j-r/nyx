@@ -113,15 +113,20 @@ where
     })
 }
 
+pub use crate::linalg::par::{chunk_map, for_chunks_mut, for_each_mut, worth_parallel};
+
 /// Evaluates `f` on fixed `chunk`-sized slices of `data` on the shared worker pool, returning results in chunk order.
 pub fn map_chunks<T: Sync, R: Send, F: Fn(&[T]) -> R + Sync>(data: &[T], chunk: usize, f: F) -> Vec<R> {
-    use rayon::prelude::*;
     let c = chunk.max(1);
-    if threads() <= 1 || data.len() <= c {
-        data.chunks(c).map(f).collect()
-    } else {
-        data.par_chunks(c).map(&f).collect()
+    if data.is_empty() {
+        return Vec::new();
     }
+    let nchunks = data.len().div_ceil(c);
+    chunk_map(nchunks, threads() > 1 && nchunks > 1, |ci| {
+        let start = ci * c;
+        let end = (start + c).min(data.len());
+        f(&data[start..end])
+    })
 }
 
 #[cfg(test)]

@@ -5,9 +5,9 @@
 //! matrix type `Csr<f64>`.
 
 use crate::linalg::csr::RCsr;
-use rayon::prelude::*;
 
 const PAR_MIN_NNZ32: usize = 40_000;
+const ROW_CHUNK32: usize = 512;
 
 
 /// Compressed rows with 32-bit column indices and single-precision values, for matrix-vector
@@ -39,16 +39,10 @@ impl Csr32 {
         s
     }
     pub fn matvec_into(&self, x: &[f64], y: &mut [f64]) {
-        if self.nnz() < PAR_MIN_NNZ32 {
-            for r in 0..self.nrows {
-                y[r] = self.row_dot(r, x);
-            }
-            return;
-        }
-        let chunk = self.nrows.div_ceil(crate::par::threads()).max(1);
-        y.par_chunks_mut(chunk).enumerate().for_each(|(ci, ys)| {
+        let par = self.nnz() >= PAR_MIN_NNZ32 && crate::par::threads() > 1;
+        crate::par::for_chunks_mut(y, ROW_CHUNK32, par, |ci, ys| {
             for (i, v) in ys.iter_mut().enumerate() {
-                *v = self.row_dot(ci * chunk + i, x);
+                *v = self.row_dot(ci * ROW_CHUNK32 + i, x);
             }
         });
     }

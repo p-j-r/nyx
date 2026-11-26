@@ -522,9 +522,8 @@ where
     // 3. Evaluate Monte Carlo ensemble in fixed chunks on the shared pool.
     let mc_rows: Vec<Result<Vec<f64>, Error>> = if n_samples > 0 {
         let sample_indices: Vec<usize> = (0..n_samples).collect();
-        let n_threads = femcore::par::threads_up_to(8);
-        let chunk = (n_samples / n_threads.max(1)).clamp(4, 64);
-        map_chunks(&sample_indices, chunk, |idxs| {
+        const MC_CHUNK: usize = 16;
+        map_chunks(&sample_indices, MC_CHUNK, |idxs| {
             let mut local = Vec::with_capacity(idxs.len());
             for &si in idxs {
                 let x = &draws[si * n_v..(si + 1) * n_v];

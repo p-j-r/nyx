@@ -5,7 +5,7 @@
 //! killed with the system's own kill. Two `Engine`s in this test process stand for two front-ends (the window and the MCP server): they share
 //! nothing but the folder, which is all two programs would share.
 
-use nyx_engine::shared_queue::SharedQueue;
+use nyx_engine::shared_queue::{lease_dead, SharedQueue, LEASE_DEAD};
 use nyx_engine::Engine;
 use nyx_physics::{Error, SolveResult};
 use serde_json::{json, Value};
@@ -297,4 +297,83 @@ fn a_wait_with_no_timeout_for_a_job_in_a_paused_or_held_queue_is_refused_and_doe
     wait_for("the item to be held and unstarted", 10, || e.job_blocked(id).is_some_and(|w| w.contains("held")));
     assert!(q.release(&sid));
     e.call("queue_wait", &json!({ "id": id, "timeout_s": 120.0 })).unwrap();
+}
+
+#[test]
+fn configured_lease_dead_overrides_default_and_recovers_killed_worker_promptly() {
+    match std::env::var("NYX_SQ_LEASE_CHILD").ok().as_deref() {
+        Some("validate") => {
+            assert_eq!(lease_dead(), LEASE_DEAD);
+            for bad in ["", "   ", "0", "-2.5", "NaN", "inf", "-inf", "abc"] {
+                std::env::set_var("NYX_QUEUE_LEASE_DEAD_SECS", bad);
+                assert_eq!(lease_dead(), LEASE_DEAD, "invalid value {bad:?} must fall back to default");
+            }
+            std::env::set_var("NYX_QUEUE_LEASE_DEAD_SECS", "0.5");
+            assert_eq!(lease_dead(), Duration::from_millis(500));
+            std::env::set_var("NYX_QUEUE_LEASE_DEAD_SECS", " 45 ");
+            assert_eq!(lease_dead(), Duration::from_secs(45));
+            std::env::set_var("NYX_QUEUE_LEASE_DEAD_SECS", "0.001");
+            assert_eq!(lease_dead(), Duration::from_millis(100));
+            std::env::set_var("NYX_QUEUE_LEASE_DEAD_SECS", "9999999");
+            assert_eq!(lease_dead(), Duration::from_secs(86_400));
+            return;
+        }
+        Some("takeover") => {
+            assert_eq!(lease_dead(), Duration::from_secs(1));
+            let ws = workspace("lease-dead");
+            let q = SharedQueue::new(&ws);
+            let slow = slow_project(&ws);
+            let a = submit_from_a_process(&ws, &slow, &[]);
+            wait_for("slow item running in solver child", 90, || {
+                q.item(&a).and_then(|i| i.state).is_some_and(|s| s.state == "running" && s.child_pid.is_some())
+            });
+            let lease: Value =
+                serde_json::from_str(&std::fs::read_to_string(q.root().join("runner.lock")).unwrap()).unwrap();
+            kill(lease["pid"].as_u64().unwrap() as u32);
+            // With NYX_QUEUE_LEASE_DEAD_SECS=1, the dead lease must expire well before the 6s default.
+            let t_dead = Instant::now();
+            wait_for("custom 1s lease expires promptly", 4, || !q.runner_alive());
+            assert!(
+                t_dead.elapsed() < Duration::from_secs(4),
+                "expected < 4s lease expiry with NYX_QUEUE_LEASE_DEAD_SECS=1, took {:?}",
+                t_dead.elapsed()
+            );
+            let b = submit_from_a_process(&ws, &example("01_capacitor"), &[]);
+            wait_for("replacement worker fails killed item and runs next item", 90, || {
+                let _ = q.ensure_runner(&worker());
+                state_of(&q, &a) == "failed" && state_of(&q, &b) == "done"
+            });
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        _ => {}
+    }
+
+    let exe = std::env::current_exe().unwrap();
+    let out_val = Command::new(&exe)
+        .args(["--exact", "configured_lease_dead_overrides_default_and_recovers_killed_worker_promptly", "--nocapture"])
+        .env_remove("NYX_QUEUE_LEASE_DEAD_SECS")
+        .env("NYX_SQ_LEASE_CHILD", "validate")
+        .output()
+        .expect("spawn lease validation child");
+    assert!(
+        out_val.status.success(),
+        "lease validation child failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out_val.stdout),
+        String::from_utf8_lossy(&out_val.stderr)
+    );
+
+    let out_take = Command::new(&exe)
+        .args(["--exact", "configured_lease_dead_overrides_default_and_recovers_killed_worker_promptly", "--nocapture"])
+        .env("NYX_QUEUE_LEASE_DEAD_SECS", "1")
+        .env("NYX_QUEUE_IDLE_SECS", "3")
+        .env("NYX_SQ_LEASE_CHILD", "takeover")
+        .output()
+        .expect("spawn lease takeover child");
+    assert!(
+        out_take.status.success(),
+        "lease takeover child failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out_take.stdout),
+        String::from_utf8_lossy(&out_take.stderr)
+    );
 }

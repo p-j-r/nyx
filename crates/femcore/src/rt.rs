@@ -12,7 +12,6 @@ use crate::fem::{facet_rule, quad_rule, quad_rule_collapsed, shape, CurvedTet};
 use crate::linalg::driver::dense_eigh;
 use crate::material::M3;
 use crate::mesh::SimplexMesh;
-use rayon::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
 
 /// Per-cell permittivity `eps` (in F/m, e.g. `eps0 * eps_r` or `eps0 * eps_tensor`).
@@ -1218,11 +1217,19 @@ pub fn equilibrate_flux_patches(
         out
     };
 
-    let cell_rhs_vecs: Vec<Vec<f64>> = if nt > 1 && nc >= 256 {
-        (0..nc).into_par_iter().map(build_cell_rhs).collect()
-    } else {
-        (0..nc).map(build_cell_rhs).collect()
-    };
+    const RT_CELL_CHUNK: usize = 256;
+    let cell_rhs_vecs: Vec<Vec<f64>> = crate::par::chunk_map(
+        nc.div_ceil(RT_CELL_CHUNK),
+        nt > 1 && nc >= 256,
+        |cid| {
+            let c0 = cid * RT_CELL_CHUNK;
+            let c1 = (c0 + RT_CELL_CHUNK).min(nc);
+            (c0..c1).map(build_cell_rhs).collect::<Vec<_>>()
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect();
 
     // Assemble patch divergence vectors `patch_g[p]` of shape `(n_pcells * nq_per_cell) x n_term`
     let mut patch_g: Vec<Vec<f64>> = patches
@@ -1680,11 +1687,20 @@ pub fn equilibrate_flux_patches(
         Ok(cell_contrib)
     };
 
-    let patch_sols: Vec<Vec<f64>> = if nt > 1 && n_patches >= 64 {
-        (0..n_patches).into_par_iter().map(solve_patch).collect::<Result<Vec<_>, _>>()?
-    } else {
-        (0..n_patches).map(solve_patch).collect::<Result<Vec<_>, _>>()?
-    };
+    const RT_PATCH_CHUNK: usize = 16;
+    let patch_chunks: Vec<Result<Vec<Vec<f64>>, String>> = crate::par::chunk_map(
+        n_patches.div_ceil(RT_PATCH_CHUNK),
+        nt > 1 && n_patches >= 64,
+        |cid| {
+            let p0 = cid * RT_PATCH_CHUNK;
+            let p1 = (p0 + RT_PATCH_CHUNK).min(n_patches);
+            (p0..p1).map(solve_patch).collect::<Result<Vec<_>, _>>()
+        },
+    );
+    let mut patch_sols: Vec<Vec<f64>> = Vec::with_capacity(n_patches);
+    for chunk in patch_chunks {
+        patch_sols.extend(chunk?);
+    }
 
     // 6. Deterministically accumulate global `D_tilde^{(j)} = sum_p sigma_p^{(j)}` in ascending patch order `0..n_patches`
     let mut cell_rt_coeffs = vec![vec![0.0; nc * nrt]; n_term];
@@ -1787,11 +1803,18 @@ pub fn equilibrate_flux_patches(
         CellQuadSummary { w_flux, q_pair, c_up, eta2, div2 }
     };
 
-    let cell_summaries: Vec<CellQuadSummary> = if nt > 1 && nc >= 256 {
-        (0..nc).into_par_iter().map(eval_cell_integrals).collect()
-    } else {
-        (0..nc).map(eval_cell_integrals).collect()
-    };
+    let cell_summaries: Vec<CellQuadSummary> = crate::par::chunk_map(
+        nc.div_ceil(RT_CELL_CHUNK),
+        nt > 1 && nc >= 256,
+        |cid| {
+            let c0 = cid * RT_CELL_CHUNK;
+            let c1 = (c0 + RT_CELL_CHUNK).min(nc);
+            (c0..c1).map(eval_cell_integrals).collect::<Vec<_>>()
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect();
 
     let mut w_flux_matrix = vec![vec![0.0; n_term]; n_term];
     let mut q_pairing_matrix = vec![vec![0.0; n_term]; n_term];
