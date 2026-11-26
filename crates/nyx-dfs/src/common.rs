@@ -6,7 +6,7 @@
 
 use crate::problem::{BcKind, IeCoordKind, IeProfile, InfiniteElementSpec, Problem};
 use femcore::farfield::FarFieldPermittivity;
-use femcore::fem::{assemble_parallel, free_dofs};
+use femcore::fem::{assemble_parallel, free_dofs, geometry, quad_rule_collapsed, shape, CurvedTet, Quad};
 use femcore::fem_mixed::{
     eval_facet_jacobian, facet_lagrange_shape, facet_rule_mixed, lagrange_shape_into, quad_rule_mixed,
     IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap,
@@ -18,8 +18,9 @@ use femcore::material::{self, M3};
 use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES};
 use femcore::pml::{ie_exponential_jacobian, ie_rational_jacobian, PmlJacobian};
 use femcore::props::{LinearSolver, Materials, Pml, PmlCoord, PmlDir, TensorKind};
-use nyx_physics::{Discretisation, MixedToSimplexProjector};
-use std::collections::{BTreeMap, BTreeSet};
+use femcore::vvuq::SourceField;
+use nyx_physics::{Discretisation, Mesh, MixedToSimplexProjector};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const EPS_GEOM: f64 = 1.0e-3;
 const RADIAL_PROJ_REG: f64 = 0.05;
@@ -1592,4 +1593,468 @@ pub(crate) fn sample_mixed_gradients_on_simplex(
         flat.extend_from_slice(&s[..d]);
     }
     flat
+}
+
+/// Returns `true` if `mesh` carries any quadratic mid-edge node offsets (`edge_nodes` non-empty).
+pub(crate) fn mesh_has_curved_edges(mesh: &Mesh) -> bool {
+    match mesh {
+        Mesh::D2(m) => !m.edge_nodes.is_empty(),
+        Mesh::D3(m) => !m.edge_nodes.is_empty(),
+    }
+}
+
+/// 5-point Gauss-Legendre rule on the reference segment (exact degree 9; barycentric `[lam0, lam1]`).
+pub(crate) fn quad_seg_high() -> Quad {
+    const T5: [f64; 5] =
+        [-0.906_179_845_938_664, -0.538_469_310_105_683_1, 0.0, 0.538_469_310_105_683_1, 0.906_179_845_938_664];
+    const W5: [f64; 5] = [
+        0.236_926_885_056_189_1,
+        0.478_628_670_499_366_5,
+        0.568_888_888_888_888_9,
+        0.478_628_670_499_366_5,
+        0.236_926_885_056_189_1,
+    ];
+    let mut lam = Vec::with_capacity(5);
+    let mut w = Vec::with_capacity(5);
+    for (&t, &wi) in T5.iter().zip(&W5) {
+        let s = 0.5 * (t + 1.0);
+        lam.push(vec![1.0 - s, s]);
+        w.push(0.5 * wi);
+    }
+    Quad { lam, w }
+}
+
+/// 4x4 collapsed Gauss-Legendre rule on the reference triangle (exact degree 7; weights sum to 1).
+pub(crate) fn quad_tri_high() -> Quad {
+    const T4: [f64; 4] =
+        [-0.861_136_311_594_052_6, -0.339_981_043_584_856_3, 0.339_981_043_584_856_3, 0.861_136_311_594_052_6];
+    const W4: [f64; 4] =
+        [0.347_854_845_137_453_8, 0.652_145_154_862_546_1, 0.652_145_154_862_546_1, 0.347_854_845_137_453_8];
+    let mut lam = Vec::with_capacity(16);
+    let mut w = Vec::with_capacity(16);
+    for (&tu, &wu) in T4.iter().zip(&W4) {
+        let u = 0.5 * (1.0 + tu);
+        let du = 0.5 * wu;
+        for (&tv, &wv) in T4.iter().zip(&W4) {
+            let v = 0.5 * (1.0 + tv);
+            let dv = 0.5 * wv;
+            let l1 = u;
+            let l2 = (1.0 - u) * v;
+            let l0 = 1.0 - l1 - l2;
+            lam.push(vec![l0, l1, l2]);
+            w.push(2.0 * (1.0 - u) * du * dv);
+        }
+    }
+    Quad { lam, w }
+}
+
+/// Physical coordinate of scalar DOF `d` (`0..n_points` vertices, then curved or straight edge midpoints).
+pub(crate) fn dof_physical_coord<const D: usize>(mesh: &Discretisation, d: usize, order: usize) -> [f64; D] {
+    let nv = mesh.n_points();
+    if d < nv || order < 2 {
+        let p = mesh.point(d);
+        let mut out = [0.0; D];
+        out.copy_from_slice(&p[..D]);
+        return out;
+    }
+    let e = d - nv;
+    if let Some(en) = mesh.edge_node(e) {
+        let mut out = [0.0; D];
+        out.copy_from_slice(&en[..D]);
+        return out;
+    }
+    let (a, b) = mesh.edges()[e];
+    let pa = mesh.point(a as usize);
+    let pb = mesh.point(b as usize);
+    let mut out = [0.0; D];
+    for k in 0..D {
+        out[k] = 0.5 * (pa[k] + pb[k]);
+    }
+    out
+}
+
+/// Assembles `int_Omega f(x, t, dom) * phi_i(x) dV` via monomorphized [`SourceField<D>`].
+pub(crate) fn assemble_source_field<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    order: usize,
+    source: &S,
+    t: f64,
+    base_uniform: Option<&[f64]>,
+) -> Result<Vec<f64>, String> {
+    if mesh.dim != D {
+        return Err(format!("SourceField<{D}> called on {}D mesh", mesh.dim));
+    }
+    let n = mesh.n_dofs(order);
+    let mut f = vec![0.0; n];
+    let nloc = mesh.nloc(order);
+    let geo = geometry(mesh);
+    let mut dofs = Vec::new();
+    if D == 2 {
+        let qrule = quad_tri_high();
+        let shapes: Vec<Vec<f64>> = qrule.lam.iter().map(|lam| shape(lam, order).0).collect();
+        for c in 0..mesh.n_cells() {
+            let v = mesh.cell(c);
+            let dom = mesh.cell_labels[c] as u32;
+            let extra = base_uniform.map_or(0.0, |u| u[c]);
+            let pts = [mesh.point(v[0] as usize), mesh.point(v[1] as usize), mesh.point(v[2] as usize)];
+            mesh.cell_dofs(c, order, &mut dofs);
+            let vol = geo.vol[c];
+            for q in 0..qrule.w.len() {
+                let lam = &qrule.lam[q];
+                let mut xq = [0.0; D];
+                for (b, pb) in pts.iter().enumerate() {
+                    for k in 0..D {
+                        xq[k] += lam[b] * pb[k];
+                    }
+                }
+                let val = source.volume_rhs_re(xq, t, dom)[0] + extra;
+                let wq = vol * qrule.w[q] * val;
+                let nv = &shapes[q];
+                for a in 0..nloc {
+                    f[dofs[a]] += wq * nv[a];
+                }
+            }
+        }
+    } else {
+        let qstraight = quad_rule_collapsed(4);
+        let qcurved = quad_rule_collapsed(8);
+        let s_straight: Vec<Vec<f64>> = qstraight.lam.iter().map(|lam| shape(lam, order).0).collect();
+        let s_curved: Vec<Vec<f64>> = qcurved.lam.iter().map(|lam| shape(lam, order).0).collect();
+        for c in 0..mesh.n_cells() {
+            let v = mesh.cell(c);
+            let dom = mesh.cell_labels[c] as u32;
+            let extra = base_uniform.map_or(0.0, |u| u[c]);
+            mesh.cell_dofs(c, order, &mut dofs);
+            if mesh.cell_is_curved(c) {
+                let ct = CurvedTet::new(mesh.cell_geometry_nodes(c));
+                for q in 0..qcurved.w.len() {
+                    let lam = [qcurved.lam[q][0], qcurved.lam[q][1], qcurved.lam[q][2], qcurved.lam[q][3]];
+                    let x = ct.position(&lam);
+                    let mut xq = [0.0; D];
+                    xq.copy_from_slice(&x[..D]);
+                    let (_, det) = ct.jacobian(&lam);
+                    let val = source.volume_rhs_re(xq, t, dom)[0] + extra;
+                    let wq = (qcurved.w[q] * det.abs() / 6.0) * val;
+                    let nv = &s_curved[q];
+                    for a in 0..nloc {
+                        f[dofs[a]] += wq * nv[a];
+                    }
+                }
+            } else {
+                let pts = [
+                    mesh.point(v[0] as usize),
+                    mesh.point(v[1] as usize),
+                    mesh.point(v[2] as usize),
+                    mesh.point(v[3] as usize),
+                ];
+                let vol = geo.vol[c];
+                for q in 0..qstraight.w.len() {
+                    let lam = &qstraight.lam[q];
+                    let mut xq = [0.0; D];
+                    for (b, pb) in pts.iter().enumerate() {
+                        for k in 0..D {
+                            xq[k] += lam[b] * pb[k];
+                        }
+                    }
+                    let val = source.volume_rhs_re(xq, t, dom)[0] + extra;
+                    let wq = vol * qstraight.w[q] * val;
+                    let nv = &s_straight[q];
+                    for a in 0..nloc {
+                        f[dofs[a]] += wq * nv[a];
+                    }
+                }
+            }
+        }
+    }
+    Ok(f)
+}
+
+/// Collects Dirichlet `(fixed_dofs, values)` from [`SourceField<D>`] on facets whose label is in `labels`.
+pub(crate) fn dirichlet_constraints_field<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    labels: &BTreeSet<i32>,
+    order: usize,
+    source: &S,
+    t: f64,
+) -> (Vec<usize>, Vec<f64>) {
+    let mut acc: BTreeMap<usize, (f64, usize)> = BTreeMap::new();
+    let mut dofs = Vec::new();
+    for f in 0..mesh.n_facets() {
+        let lab = mesh.facet_labels[f];
+        if labels.contains(&lab) {
+            mesh.facet_dofs(f, order, &mut dofs);
+            for &d in &dofs {
+                let x = dof_physical_coord::<D>(mesh, d, order);
+                let val = source.dirichlet_re(x, t, lab as u32)[0];
+                let e = acc.entry(d).or_insert((0.0, 0));
+                e.0 += val;
+                e.1 += 1;
+            }
+        }
+    }
+    let fixed = acc.keys().copied().collect();
+    let vals = acc.values().map(|(s, cnt)| s / *cnt as f64).collect();
+    (fixed, vals)
+}
+
+fn facet_opp_vertices_2d(mesh: &Discretisation) -> HashMap<[u32; 2], u32> {
+    let mut map = HashMap::new();
+    for c in 0..mesh.n_cells() {
+        let cv = mesh.cell(c);
+        for (a, b, opp) in [(cv[0], cv[1], cv[2]), (cv[1], cv[2], cv[0]), (cv[2], cv[0], cv[1])] {
+            map.entry([a.min(b), a.max(b)]).or_insert(opp);
+        }
+    }
+    map
+}
+
+fn facet_opp_vertices_3d(mesh: &Discretisation) -> HashMap<[u32; 3], u32> {
+    let mut map = HashMap::new();
+    for c in 0..mesh.n_cells() {
+        let cv = mesh.cell(c);
+        for skip in 0..4 {
+            let [i0, i1, i2] = match skip {
+                0 => [1, 2, 3],
+                1 => [0, 2, 3],
+                2 => [0, 1, 3],
+                _ => [0, 1, 2],
+            };
+            let mut key = [cv[i0], cv[i1], cv[i2]];
+            key.sort_unstable();
+            map.entry(key).or_insert(cv[skip]);
+        }
+    }
+    map
+}
+
+fn facet_3d_geom_nodes(mesh: &Discretisation, fv: &[u32]) -> [[f64; 3]; 6] {
+    let pt = |v: u32| -> [f64; 3] {
+        let p = mesh.point(v as usize);
+        [p[0], p[1], p[2]]
+    };
+    let mid = |a: u32, b: u32| -> [f64; 3] {
+        if let Some(en) = mesh.edge_node(mesh.edge_index(a, b)) {
+            return en;
+        }
+        let (pa, pb) = (pt(a), pt(b));
+        [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1]), 0.5 * (pa[2] + pb[2])]
+    };
+    [pt(fv[0]), pt(fv[1]), pt(fv[2]), mid(fv[0], fv[1]), mid(fv[0], fv[2]), mid(fv[1], fv[2])]
+}
+
+/// Assembles `int_{Gamma} g(x, n, t, bnd) phi_i dS` via monomorphized [`SourceField<D>`], supporting curved 3D facets.
+pub(crate) fn assemble_boundary_load_field<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    labels: &[i32],
+    order: usize,
+    source: &S,
+    t: f64,
+) -> Result<Vec<f64>, String> {
+    if mesh.dim != D {
+        return Err(format!("SourceField<{D}> called on {}D mesh", mesh.dim));
+    }
+    let n = mesh.n_dofs(order);
+    let mut f_vec = vec![0.0; n];
+    let label_set: BTreeSet<i32> = labels.iter().copied().collect();
+    if label_set.is_empty() {
+        return Ok(f_vec);
+    }
+    let mut dofs = Vec::new();
+    if D == 2 {
+        let opp_map = facet_opp_vertices_2d(mesh);
+        let qrule = quad_seg_high();
+        let shapes: Vec<Vec<f64>> = qrule.lam.iter().map(|lam| shape(lam, order).0).collect();
+        for f_idx in 0..mesh.n_facets() {
+            let lab = mesh.facet_labels[f_idx];
+            if !label_set.contains(&lab) {
+                continue;
+            }
+            let fv = mesh.facet(f_idx);
+            let p0 = mesh.point(fv[0] as usize);
+            let p1 = mesh.point(fv[1] as usize);
+            let dx = p1[0] - p0[0];
+            let dy = p1[1] - p0[1];
+            let len = dx.hypot(dy);
+            if len <= 1e-30 {
+                continue;
+            }
+            let mut n_hat = [-dy / len, dx / len];
+            if let Some(&opp) = opp_map.get(&[fv[0].min(fv[1]), fv[0].max(fv[1])]) {
+                let po = mesh.point(opp as usize);
+                let cen = [0.5 * (p0[0] + p1[0]), 0.5 * (p0[1] + p1[1])];
+                if (cen[0] - po[0]) * n_hat[0] + (cen[1] - po[1]) * n_hat[1] < 0.0 {
+                    n_hat = [-n_hat[0], -n_hat[1]];
+                }
+            }
+            mesh.facet_dofs(f_idx, order, &mut dofs);
+            for (q, lam) in qrule.lam.iter().enumerate() {
+                let xq = [lam[0] * p0[0] + lam[1] * p1[0], lam[0] * p0[1] + lam[1] * p1[1]];
+                let mut x_arr = [0.0; D];
+                x_arr.copy_from_slice(&xq[..D]);
+                let mut n_arr = [0.0; D];
+                n_arr.copy_from_slice(&n_hat[..D]);
+                let gval = source.neumann_robin_re(x_arr, n_arr, t, lab as u32)[0];
+                let wq = len * qrule.w[q] * gval;
+                for (a, &d) in dofs.iter().enumerate() {
+                    f_vec[d] += wq * shapes[q][a];
+                }
+            }
+        }
+    } else {
+        let opp_map = facet_opp_vertices_3d(mesh);
+        let qrule = quad_tri_high();
+        let shapes_fe: Vec<Vec<f64>> = qrule.lam.iter().map(|lam| shape(lam, order).0).collect();
+        let shapes_g2: Vec<(Vec<f64>, Vec<f64>)> = qrule.lam.iter().map(|lam| shape(lam, 2)).collect();
+        for f_idx in 0..mesh.n_facets() {
+            let lab = mesh.facet_labels[f_idx];
+            if !label_set.contains(&lab) {
+                continue;
+            }
+            let fv = mesh.facet(f_idx);
+            let mut key = [fv[0], fv[1], fv[2]];
+            key.sort_unstable();
+            let p_opp = opp_map.get(&key).map(|&opp| {
+                let p = mesh.point(opp as usize);
+                [p[0], p[1], p[2]]
+            });
+            mesh.facet_dofs(f_idx, order, &mut dofs);
+            if mesh.has_curved() {
+                let x6 = facet_3d_geom_nodes(mesh, fv);
+                for (q, _) in qrule.lam.iter().enumerate() {
+                    let (ref nv2, ref dn2) = shapes_g2[q];
+                    let mut xq = [0.0; 3];
+                    let mut t1 = [0.0; 3];
+                    let mut t2 = [0.0; 3];
+                    for a in 0..6 {
+                        let d1 = dn2[a * 3 + 1] - dn2[a * 3];
+                        let d2 = dn2[a * 3 + 2] - dn2[a * 3];
+                        for k in 0..3 {
+                            xq[k] += nv2[a] * x6[a][k];
+                            t1[k] += d1 * x6[a][k];
+                            t2[k] += d2 * x6[a][k];
+                        }
+                    }
+                    let cx =
+                        [t1[1] * t2[2] - t1[2] * t2[1], t1[2] * t2[0] - t1[0] * t2[2], t1[0] * t2[1] - t1[1] * t2[0]];
+                    let n_len = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+                    if n_len <= 1e-30 {
+                        continue;
+                    }
+                    let mut n_hat = [cx[0] / n_len, cx[1] / n_len, cx[2] / n_len];
+                    if let Some(po) = p_opp {
+                        let d_out =
+                            (xq[0] - po[0]) * n_hat[0] + (xq[1] - po[1]) * n_hat[1] + (xq[2] - po[2]) * n_hat[2];
+                        if d_out < 0.0 {
+                            n_hat = [-n_hat[0], -n_hat[1], -n_hat[2]];
+                        }
+                    }
+                    let mut x_arr = [0.0; D];
+                    x_arr.copy_from_slice(&xq[..D]);
+                    let mut n_arr = [0.0; D];
+                    n_arr.copy_from_slice(&n_hat[..D]);
+                    let gval = source.neumann_robin_re(x_arr, n_arr, t, lab as u32)[0];
+                    let wq = (0.5 * n_len) * qrule.w[q] * gval;
+                    for (a, &d) in dofs.iter().enumerate() {
+                        f_vec[d] += wq * shapes_fe[q][a];
+                    }
+                }
+            } else {
+                let p0 = mesh.point(fv[0] as usize);
+                let p1 = mesh.point(fv[1] as usize);
+                let p2 = mesh.point(fv[2] as usize);
+                let a = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                let b = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                let cx = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+                let n_len = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+                if n_len <= 1e-30 {
+                    continue;
+                }
+                let area = 0.5 * n_len;
+                let mut n_hat = [cx[0] / n_len, cx[1] / n_len, cx[2] / n_len];
+                if let Some(po) = p_opp {
+                    let d_out = (p0[0] - po[0]) * n_hat[0] + (p0[1] - po[1]) * n_hat[1] + (p0[2] - po[2]) * n_hat[2];
+                    if d_out < 0.0 {
+                        n_hat = [-n_hat[0], -n_hat[1], -n_hat[2]];
+                    }
+                }
+                for (q, lam) in qrule.lam.iter().enumerate() {
+                    let xq = [
+                        lam[0] * p0[0] + lam[1] * p1[0] + lam[2] * p2[0],
+                        lam[0] * p0[1] + lam[1] * p1[1] + lam[2] * p2[1],
+                        lam[0] * p0[2] + lam[1] * p1[2] + lam[2] * p2[2],
+                    ];
+                    let mut x_arr = [0.0; D];
+                    x_arr.copy_from_slice(&xq[..D]);
+                    let mut n_arr = [0.0; D];
+                    n_arr.copy_from_slice(&n_hat[..D]);
+                    let gval = source.neumann_robin_re(x_arr, n_arr, t, lab as u32)[0];
+                    let wq = area * qrule.w[q] * gval;
+                    for (ia, &d) in dofs.iter().enumerate() {
+                        f_vec[d] += wq * shapes_fe[q][ia];
+                    }
+                }
+            }
+        }
+    }
+    Ok(f_vec)
+}
+
+/// Assembles `int_{Gamma} alpha * phi_i * phi_j dS` including curved 3D quadratic boundary triangles.
+pub(crate) fn assemble_boundary_mass_curved_aware(
+    mesh: &Discretisation,
+    labels: &[i32],
+    order: usize,
+    alpha: f64,
+) -> Csr {
+    let n = mesh.n_dofs(order);
+    let label_set: BTreeSet<i32> = labels.iter().copied().collect();
+    if label_set.is_empty() || alpha == 0.0 {
+        return Csr::zeros(n, n);
+    }
+    if mesh.dim != 3 || !mesh.has_curved() {
+        return femcore::fem::assemble_boundary_mass(mesh, labels, order, alpha);
+    }
+    let qrule = quad_tri_high();
+    let shapes_fe: Vec<Vec<f64>> = qrule.lam.iter().map(|lam| shape(lam, order).0).collect();
+    let shapes_g2: Vec<(Vec<f64>, Vec<f64>)> = qrule.lam.iter().map(|lam| shape(lam, 2)).collect();
+    let nloc = if order == 1 { 3 } else { 6 };
+    let mut coo = Coo::new(n, n);
+    let mut dofs = Vec::new();
+    let mut ke = vec![0.0; nloc * nloc];
+    for f_idx in 0..mesh.n_facets() {
+        if !label_set.contains(&mesh.facet_labels[f_idx]) {
+            continue;
+        }
+        let fv = mesh.facet(f_idx);
+        let x6 = facet_3d_geom_nodes(mesh, fv);
+        ke.fill(0.0);
+        for (q, _) in qrule.lam.iter().enumerate() {
+            let (_, ref dn2) = shapes_g2[q];
+            let mut t1 = [0.0; 3];
+            let mut t2 = [0.0; 3];
+            for a in 0..6 {
+                let d1 = dn2[a * 3 + 1] - dn2[a * 3];
+                let d2 = dn2[a * 3 + 2] - dn2[a * 3];
+                for k in 0..3 {
+                    t1[k] += d1 * x6[a][k];
+                    t2[k] += d2 * x6[a][k];
+                }
+            }
+            let cx = [t1[1] * t2[2] - t1[2] * t2[1], t1[2] * t2[0] - t1[0] * t2[2], t1[0] * t2[1] - t1[1] * t2[0]];
+            let n_len = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+            if n_len <= 1e-30 {
+                continue;
+            }
+            let wq = alpha * (0.5 * n_len) * qrule.w[q];
+            let nv = &shapes_fe[q];
+            for ia in 0..nloc {
+                for ib in 0..nloc {
+                    ke[ia * nloc + ib] += wq * nv[ia] * nv[ib];
+                }
+            }
+        }
+        mesh.facet_dofs(f_idx, order, &mut dofs);
+        coo.push_block(&dofs, &dofs, &ke);
+    }
+    coo.to_csr()
 }

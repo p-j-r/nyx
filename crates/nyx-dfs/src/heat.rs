@@ -6,10 +6,11 @@
 //! Three stages (ADR 9): `assemble_heat`, `solve_heat_states`, `heat_fields`; `solve_heat` runs them.
 
 use crate::common::{
-    assemble_boundary_load_mixed, assemble_boundary_mass_mixed, assemble_farfield_robin_mixed,
-    assemble_ie_outer_robin_mixed, assemble_laplace_ie_mixed, assemble_source_mixed, cell_tensor_gradient,
-    cell_tensor_mixed, cell_values_mixed, check_boundary_labels_mixed, classify_ie_outer_facets_mixed, components,
-    farfield_centroid_mixed, minmax, plane_tensors, plane_tensors_mixed, resolve_ie_domains_mixed,
+    assemble_boundary_load_field, assemble_boundary_load_mixed, assemble_boundary_mass_mixed,
+    assemble_farfield_robin_mixed, assemble_ie_outer_robin_mixed, assemble_laplace_ie_mixed, assemble_source_field,
+    assemble_source_mixed, cell_tensor_gradient, cell_tensor_mixed, cell_values_mixed, check_boundary_labels_mixed,
+    classify_ie_outer_facets_mixed, components, dirichlet_constraints_field, farfield_centroid_mixed,
+    mesh_has_curved_edges, minmax, plane_tensors, plane_tensors_mixed, resolve_ie_domains_mixed,
     sample_mixed_gradients_on_simplex, solve_spd_mixed,
 };
 use crate::problem::{BcKind, Problem, Study};
@@ -22,6 +23,7 @@ use femcore::linalg::driver::{dense_gen_eigh as gen_eigh, DirectSolver};
 use femcore::material::M3;
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::{LinearSolver, TensorKind};
+use femcore::vvuq::{SourceField, UniformSource};
 use nyx_physics::{
     cell_fields_of, discretise, discretise_mixed, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar,
     Solution, SolveResult,
@@ -47,6 +49,29 @@ fn check_transient_heat_guards(spec: &Problem) -> Result<(), String> {
     Ok(())
 }
 
+fn reject_curved_simplex(mesh: &Discretisation) -> Result<(), String> {
+    if mesh.has_curved() {
+        return Err("unsupported: heat transfer does not support curved simplex edge nodes (R32)".into());
+    }
+    Ok(())
+}
+
+/// Options controlling transient BDF2 time integration in [`solve_heat_states_with_source`] and
+/// [`solve_heat_bdf2_with_source`].
+#[derive(Clone, Copy, Debug)]
+pub struct TransientHeatOptions {
+    /// Substeps per output interval (`8` by default).
+    pub bdf2_substeps: usize,
+    /// Force BDF2 time integration even when `free <= 2500` (bypassing dense `gen_eigh`).
+    pub force_bdf2: bool,
+}
+
+impl Default for TransientHeatOptions {
+    fn default() -> Self {
+        Self { bdf2_substeps: 8, force_bdf2: false }
+    }
+}
+
 /// Stage 1 of heat transfer: conductivity matrix, load, Dirichlet dofs and the conductivity tensors (for the flux).
 pub struct HeatSystem {
     pub k: Csr,
@@ -58,7 +83,23 @@ pub struct HeatSystem {
 }
 
 pub fn assemble_heat(mesh: &Discretisation, spec: &Problem) -> Result<HeatSystem, String> {
+    match mesh.dim {
+        2 => assemble_heat_with_source::<2, UniformSource>(mesh, spec, &UniformSource),
+        3 => assemble_heat_with_source::<3, UniformSource>(mesh, spec, &UniformSource),
+        d => Err(format!("unsupported mesh dimension {d} in heat transfer")),
+    }
+}
+
+pub fn assemble_heat_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<HeatSystem, String> {
+    reject_curved_simplex(mesh)?;
     check_transient_heat_guards(spec)?;
+    if !source.is_uniform() && mesh.dim != D {
+        return Err(format!("SourceField<{D}> called on {}D mesh", mesh.dim));
+    }
     let order = spec.order;
     check_boundary_labels(
         mesh,
@@ -97,8 +138,18 @@ pub fn assemble_heat(mesh: &Discretisation, spec: &Problem) -> Result<HeatSystem
 
     let n = k.nrows();
     let q = spec.materials.cell_values(mesh, "Q", Some(0.0))?;
-    let mut f = if q.iter().any(|&x| x != 0.0) { assemble_source(mesh, order, &q) } else { vec![0.0; n] };
+    let mut f = if source.is_uniform() {
+        if q.iter().any(|&x| x != 0.0) {
+            assemble_source(mesh, order, &q)
+        } else {
+            vec![0.0; n]
+        }
+    } else {
+        let extra = q.iter().any(|&x| x != 0.0).then_some(q.as_slice());
+        assemble_source_field::<D, S>(mesh, order, source, 0.0, extra)?
+    };
     let mut tfix: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut dirichlet_labels: BTreeSet<i32> = BTreeSet::new();
     let mut has_convection = false;
     for bc in &spec.bcs {
         if let BcKind::FarField { order: ff_order, decay_power, center } = &bc.kind {
@@ -118,16 +169,27 @@ pub fn assemble_heat(mesh: &Discretisation, spec: &Problem) -> Result<HeatSystem
             match &bc.kind {
                 BcKind::Temperature(t) => {
                     tfix.insert(lab, *t);
+                    dirichlet_labels.insert(lab);
                 }
                 BcKind::Flux(q0) => {
-                    let l = assemble_boundary_load(mesh, &[lab], *q0, order);
-                    f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    if source.is_uniform() {
+                        let l = assemble_boundary_load(mesh, &[lab], *q0, order);
+                        f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    } else {
+                        let l = assemble_boundary_load_field::<D, S>(mesh, &[lab], order, source, 0.0)?;
+                        f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    }
                 }
                 BcKind::Convection { h, text } => {
                     has_convection |= *h != 0.0;
                     k = k.add_scaled(&assemble_boundary_mass(mesh, &[lab], order, *h), 1.0);
-                    let l = assemble_boundary_load(mesh, &[lab], h * text, order);
-                    f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    if source.is_uniform() {
+                        let l = assemble_boundary_load(mesh, &[lab], h * text, order);
+                        f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    } else {
+                        let l = assemble_boundary_load_field::<D, S>(mesh, &[lab], order, source, 0.0)?;
+                        f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                    }
                 }
                 BcKind::FarField { .. } | BcKind::InfiniteElement(_) => {}
                 other => return Err(format!("'{}' is not a heat-transfer boundary condition", other.name())),
@@ -177,8 +239,13 @@ pub fn assemble_heat(mesh: &Discretisation, spec: &Problem) -> Result<HeatSystem
         }
     }
 
-    let (mut fixed, mut vals) =
-        if tfix.is_empty() { (vec![], vec![]) } else { dirichlet_constraints(mesh, &tfix, order) };
+    let (mut fixed, mut vals) = if tfix.is_empty() {
+        (vec![], vec![])
+    } else if source.is_uniform() {
+        dirichlet_constraints(mesh, &tfix, order)
+    } else {
+        dirichlet_constraints_field::<D, S>(mesh, &dirichlet_labels, order, source, 0.0)
+    };
 
     if !ie_rat_facets.is_empty() {
         if let (Some(mixed), Some(dof_map)) = (&mixed_opt, &dof_map_opt) {
@@ -234,7 +301,50 @@ pub struct HeatStates {
     pub log: Vec<String>,
 }
 
+fn assemble_heat_forcing_and_dirichlet_at<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+    t: f64,
+    dirichlet_labels: &BTreeSet<i32>,
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let order = spec.order;
+    let q = spec.materials.cell_values(mesh, "Q", Some(0.0))?;
+    let extra = q.iter().any(|&x| x != 0.0).then_some(q.as_slice());
+    let mut f = assemble_source_field::<D, S>(mesh, order, source, t, extra)?;
+    for bc in &spec.bcs {
+        if matches!(bc.kind, BcKind::Flux(_) | BcKind::Convection { .. }) {
+            let l = assemble_boundary_load_field::<D, S>(mesh, &bc.labels, order, source, t)?;
+            f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+        }
+    }
+    let (_, u_dir) = if dirichlet_labels.is_empty() {
+        (vec![], vec![])
+    } else {
+        dirichlet_constraints_field::<D, S>(mesh, dirichlet_labels, order, source, t)
+    };
+    Ok((f, u_dir))
+}
+
 pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem) -> Result<HeatStates, String> {
+    match mesh.dim {
+        2 => solve_heat_states_with_source::<2, UniformSource>(mesh, spec, sys, &UniformSource, None),
+        3 => solve_heat_states_with_source::<3, UniformSource>(mesh, spec, sys, &UniformSource, None),
+        d => Err(format!("unsupported mesh dimension {d} in heat transfer")),
+    }
+}
+
+pub fn solve_heat_states_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    sys: &HeatSystem,
+    source: &S,
+    opts: Option<TransientHeatOptions>,
+) -> Result<HeatStates, String> {
+    reject_curved_simplex(mesh)?;
+    if !source.is_uniform() && mesh.dim != D {
+        return Err(format!("SourceField<{D}> called on {}D mesh", mesh.dim));
+    }
     let order = spec.order;
     let n = sys.k.nrows();
     let mut log = vec![];
@@ -258,37 +368,38 @@ pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem
             let kff = sys.k.submatrix(&free, &free);
             let mff = m.submatrix(&free, &free);
             let kfx = sys.k.submatrix(&free, &sys.fixed);
-            let kx = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { kfx.matvec(&sys.vals) };
-            let rhs0: Vec<f64> = free.iter().enumerate().map(|(a, &i)| sys.f[i] - kx[a]).collect();
+            let force_bdf2 = opts.is_some_and(|o| o.force_bdf2) || !source.is_uniform();
+            let dense_limit = 2500;
             let use_amg = match spec.solver {
                 LinearSolver::Direct => false,
                 LinearSolver::Iterative => true,
                 LinearSolver::Auto => femcore::fem::amg_wanted(mesh.dim, free.len()) && free.len() > 2500,
             } && !sys.fixed.is_empty();
-            let ts: Vec<f64> = if use_amg {
-                // steady part by multigrid-preconditioned CG (falls back to a factorisation if that fails)
-                match solve_spd(mesh, order, 1, spec.solver, &sys.k, &sys.f, &sys.fixed, &sys.vals) {
-                    Ok((u, _)) => free.iter().map(|&i| u[i]).collect(),
-                    Err(_) if spec.solver == LinearSolver::Auto => DirectSolver::new(&kff, true)?.solve(&rhs0),
-                    Err(e) => return Err(e),
-                }
-            } else {
-                DirectSolver::new(&kff, true)?.solve(&rhs0)
-            };
-            let coords = mesh.dof_coordinates(order);
-            let mut y0 = eval_at(t0_expr, &coords, mesh.dim).map_err(|e| format!("initial temperature: {e}"))?;
-            for (&i, &v) in sys.fixed.iter().zip(&sys.vals) {
-                y0[i] = v;
-            }
-            let y0f: Vec<f64> = free.iter().enumerate().map(|(a, &i)| y0[i] - ts[a]).collect();
-            let mut out = vec![vec![0.0; n]; times.len()];
-            for row in out.iter_mut() {
+
+            if free.len() <= dense_limit && !force_bdf2 {
+                let kx = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { kfx.matvec(&sys.vals) };
+                let rhs0: Vec<f64> = free.iter().enumerate().map(|(a, &i)| sys.f[i] - kx[a]).collect();
+                let ts: Vec<f64> = if use_amg {
+                    match solve_spd(mesh, order, 1, spec.solver, &sys.k, &sys.f, &sys.fixed, &sys.vals) {
+                        Ok((u, _)) => free.iter().map(|&i| u[i]).collect(),
+                        Err(_) if spec.solver == LinearSolver::Auto => DirectSolver::new(&kff, true)?.solve(&rhs0),
+                        Err(e) => return Err(e),
+                    }
+                } else {
+                    DirectSolver::new(&kff, true)?.solve(&rhs0)
+                };
+                let coords = mesh.dof_coordinates(order);
+                let mut y0 = eval_at(t0_expr, &coords, mesh.dim).map_err(|e| format!("initial temperature: {e}"))?;
                 for (&i, &v) in sys.fixed.iter().zip(&sys.vals) {
-                    row[i] = v;
+                    y0[i] = v;
                 }
-            }
-            let dense_limit = 2500;
-            if free.len() <= dense_limit {
+                let y0f: Vec<f64> = free.iter().enumerate().map(|(a, &i)| y0[i] - ts[a]).collect();
+                let mut out = vec![vec![0.0; n]; times.len()];
+                for row in out.iter_mut() {
+                    for (&i, &v) in sys.fixed.iter().zip(&sys.vals) {
+                        row[i] = v;
+                    }
+                }
                 let (lam, vecs) = gen_eigh(&kff.to_dense(), &mff.to_dense(), free.len())?;
                 let myf = mff.matvec(&y0f);
                 let c: Vec<f64> = vecs.iter().map(|v| v.iter().zip(&myf).map(|(a, b)| a * b).sum()).collect();
@@ -304,13 +415,12 @@ pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem
                     }
                 }
                 log.push(format!("exact semi-discrete solution (dense eigendecomposition, {} free dofs)", free.len()));
+                Ok(HeatStates { times, temps: out, log })
             } else {
-                // BDF2 with 8 substeps per output interval
-                let sub = 8usize;
+                let sub = opts.map_or(8, |o| o.bdf2_substeps).max(1);
                 let dt = times[1] / sub as f64;
                 let a1 = mff.scaled(1.0 / dt).add_scaled(&kff, 1.0);
                 let a2 = mff.scaled(1.5 / dt).add_scaled(&kff, 1.0);
-                // one multigrid hierarchy (built for the second matrix) serves every step of both systems
                 let amg_sys = if use_amg {
                     let a2_full = m.scaled(1.5 / dt).add_scaled(&sys.k, 1.0);
                     femcore::fem::AmgSystem::new(mesh, order, 1, &a2_full, &sys.fixed).ok()
@@ -327,16 +437,17 @@ pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem
                 } else {
                     (Some(DirectSolver::new(&a1, true)?), Some(DirectSolver::new(&a2, true)?))
                 };
+                let amg_tol = if spec.tol > 0.0 { spec.tol.min(1e-12) } else { 1e-12 };
                 let solve1 = |b: &[f64]| -> Result<Vec<f64>, String> {
                     match (&amg_sys, &s1) {
-                        (Some(a), _) => a.solve_free(a1_full.as_ref(), b, 1e-10),
+                        (Some(a), _) => a.solve_free(a1_full.as_ref(), b, amg_tol),
                         (None, Some(s)) => Ok(s.solve(b)),
                         _ => unreachable!(),
                     }
                 };
                 let solve2 = |b: &[f64]| -> Result<Vec<f64>, String> {
                     match (&amg_sys, &s2) {
-                        (Some(a), _) => a.solve_free(None, b, 1e-10),
+                        (Some(a), _) => a.solve_free(None, b, amg_tol),
                         (None, Some(s)) => Ok(s.solve(b)),
                         _ => unreachable!(),
                     }
@@ -349,38 +460,197 @@ pub fn solve_heat_states(mesh: &Discretisation, spec: &Problem, sys: &HeatSystem
                         a.setup_seconds
                     ));
                 }
-                let mut yprev = y0f.clone();
-                let my0 = mff.matvec(&y0f);
-                let mut y = solve1(&my0.iter().map(|v| v / dt).collect::<Vec<_>>())?;
-                for (a, &i) in free.iter().enumerate() {
-                    out[0][i] = ts[a] + y0f[a];
-                }
-                for s in 1..=sub * n_out {
-                    if s > 1 {
-                        let my = mff.matvec(&y);
-                        let mp = mff.matvec(&yprev);
-                        let rhs: Vec<f64> = my.iter().zip(&mp).map(|(a, b)| (2.0 * a - 0.5 * b) / dt).collect();
-                        let ynew = solve2(&rhs)?;
-                        yprev = std::mem::replace(&mut y, ynew);
+
+                let mut out = vec![vec![0.0; n]; times.len()];
+                if source.is_uniform() {
+                    let kx = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { kfx.matvec(&sys.vals) };
+                    let rhs0: Vec<f64> = free.iter().enumerate().map(|(a, &i)| sys.f[i] - kx[a]).collect();
+                    let ts: Vec<f64> = if use_amg {
+                        match solve_spd(mesh, order, 1, spec.solver, &sys.k, &sys.f, &sys.fixed, &sys.vals) {
+                            Ok((u, _)) => free.iter().map(|&i| u[i]).collect(),
+                            Err(_) if spec.solver == LinearSolver::Auto => DirectSolver::new(&kff, true)?.solve(&rhs0),
+                            Err(e) => return Err(e),
+                        }
+                    } else {
+                        DirectSolver::new(&kff, true)?.solve(&rhs0)
+                    };
+                    let coords = mesh.dof_coordinates(order);
+                    let mut y0 =
+                        eval_at(t0_expr, &coords, mesh.dim).map_err(|e| format!("initial temperature: {e}"))?;
+                    for (&i, &v) in sys.fixed.iter().zip(&sys.vals) {
+                        y0[i] = v;
                     }
-                    if s % sub == 0 {
+                    let y0f: Vec<f64> = free.iter().enumerate().map(|(a, &i)| y0[i] - ts[a]).collect();
+                    for row in out.iter_mut() {
+                        for (&i, &v) in sys.fixed.iter().zip(&sys.vals) {
+                            row[i] = v;
+                        }
+                    }
+                    let mut yprev = y0f.clone();
+                    let my0 = mff.matvec(&y0f);
+                    let mut y = solve1(&my0.iter().map(|v| v / dt).collect::<Vec<_>>())?;
+                    for (a, &i) in free.iter().enumerate() {
+                        out[0][i] = ts[a] + y0f[a];
+                    }
+                    for s in 1..=sub * n_out {
+                        if s > 1 {
+                            let my = mff.matvec(&y);
+                            let mp = mff.matvec(&yprev);
+                            let rhs: Vec<f64> = my.iter().zip(&mp).map(|(a, b)| (2.0 * a - 0.5 * b) / dt).collect();
+                            let ynew = solve2(&rhs)?;
+                            yprev = std::mem::replace(&mut y, ynew);
+                        }
+                        if s % sub == 0 {
+                            for (a, &i) in free.iter().enumerate() {
+                                out[s / sub][i] = ts[a] + y[a];
+                            }
+                        }
+                    }
+                } else {
+                    let mut dirichlet_labels = BTreeSet::new();
+                    for bc in &spec.bcs {
+                        if matches!(bc.kind, BcKind::Temperature(_)) {
+                            dirichlet_labels.extend(bc.labels.iter().copied());
+                        }
+                    }
+                    let mfx = m.submatrix(&free, &sys.fixed);
+                    let coords = mesh.dof_coordinates(order);
+                    let mut t0_vec =
+                        eval_at(t0_expr, &coords, mesh.dim).map_err(|e| format!("initial temperature: {e}"))?;
+                    let (_, mut ud_prev) = if dirichlet_labels.is_empty() {
+                        (vec![], vec![])
+                    } else {
+                        dirichlet_constraints_field::<D, S>(mesh, &dirichlet_labels, order, source, 0.0)
+                    };
+                    for (&i, &v) in sys.fixed.iter().zip(&ud_prev) {
+                        t0_vec[i] = v;
+                    }
+                    out[0].copy_from_slice(&t0_vec);
+                    let mut t_prev: Vec<f64> = free.iter().map(|&i| t0_vec[i]).collect();
+
+                    // Stage 1: Backward Euler at t_1 = dt (includes time-varying forcing f(x, t_1))
+                    let (f1, mut ud_cur) =
+                        assemble_heat_forcing_and_dirichlet_at::<D, S>(mesh, spec, source, dt, &dirichlet_labels)?;
+                    let kx1 = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { kfx.matvec(&ud_cur) };
+                    let ud_diff: Vec<f64> = ud_cur.iter().zip(&ud_prev).map(|(a, b)| (a - b) / dt).collect();
+                    let mxd1 = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { mfx.matvec(&ud_diff) };
+                    let mt0 = mff.matvec(&t_prev);
+                    let rhs1: Vec<f64> =
+                        free.iter().enumerate().map(|(a, &i)| mt0[a] / dt + f1[i] - kx1[a] - mxd1[a]).collect();
+                    let mut t_cur = solve1(&rhs1)?;
+                    if 1 % sub == 0 {
+                        for (&i, &v) in sys.fixed.iter().zip(&ud_cur) {
+                            out[1 / sub][i] = v;
+                        }
                         for (a, &i) in free.iter().enumerate() {
-                            out[s / sub][i] = ts[a] + y[a];
+                            out[1 / sub][i] = t_cur[a];
+                        }
+                    }
+
+                    // Stages s >= 2: BDF2 at t_s = s * dt
+                    for s in 2..=sub * n_out {
+                        let ts_eval = s as f64 * dt;
+                        let (fs, ud_s) = assemble_heat_forcing_and_dirichlet_at::<D, S>(
+                            mesh,
+                            spec,
+                            source,
+                            ts_eval,
+                            &dirichlet_labels,
+                        )?;
+                        let kxs = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { kfx.matvec(&ud_s) };
+                        let ud_bdf: Vec<f64> = (0..sys.fixed.len())
+                            .map(|k| (1.5 * ud_s[k] - 2.0 * ud_cur[k] + 0.5 * ud_prev[k]) / dt)
+                            .collect();
+                        let mxs = if sys.fixed.is_empty() { vec![0.0; free.len()] } else { mfx.matvec(&ud_bdf) };
+                        let mtc = mff.matvec(&t_cur);
+                        let mtp = mff.matvec(&t_prev);
+                        let rhs_s: Vec<f64> = free
+                            .iter()
+                            .enumerate()
+                            .map(|(a, &i)| (2.0 * mtc[a] - 0.5 * mtp[a]) / dt + fs[i] - kxs[a] - mxs[a])
+                            .collect();
+                        let t_new = solve2(&rhs_s)?;
+                        t_prev = std::mem::replace(&mut t_cur, t_new);
+                        ud_prev = std::mem::replace(&mut ud_cur, ud_s);
+                        if s % sub == 0 {
+                            let idx = s / sub;
+                            for (&i, &v) in sys.fixed.iter().zip(&ud_cur) {
+                                out[idx][i] = v;
+                            }
+                            for (a, &i) in free.iter().enumerate() {
+                                out[idx][i] = t_cur[a];
+                            }
                         }
                     }
                 }
                 log.push(format!(
-                    "BDF2, {} steps ({} free dofs; too large for the exact dense method)",
+                    "BDF2, {} steps ({} free dofs; {})",
                     sub * n_out,
-                    free.len()
+                    free.len(),
+                    if force_bdf2 && free.len() <= dense_limit {
+                        "opt-in BDF2 mode"
+                    } else {
+                        "too large for the exact dense method"
+                    }
                 ));
+                Ok(HeatStates { times, temps: out, log })
             }
-            Ok(HeatStates { times, temps: out, log })
         }
         Study::Electrostatic | Study::Magnetostatic { .. } => {
             Err("heat transfer supports the stationary and transient studies".into())
         }
     }
+}
+
+pub fn solve_heat_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<SolveResult, String> {
+    solve_heat_bdf2_with_source::<D, S>(mesh, spec, source, TransientHeatOptions::default())
+}
+
+pub fn solve_heat_bdf2_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+    opts: TransientHeatOptions,
+) -> Result<SolveResult, String> {
+    let t0 = Instant::now();
+    let order = spec.order;
+    let sys = assemble_heat_with_source::<D, S>(mesh, spec, source)?;
+    let use_opts = if opts.force_bdf2 || !source.is_uniform() { Some(opts) } else { None };
+    let st = solve_heat_states_with_source::<D, S>(mesh, spec, &sys, source, use_opts)?;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut solutions = vec![];
+    for (j, row) in st.temps.iter().enumerate() {
+        let (a, b) = minmax(row);
+        lo = lo.min(a);
+        hi = hi.max(b);
+        let (fields, cell_fields) = heat_fields(mesh, row, &sys.ktensor, order);
+        let (label, value) = match st.times.get(j) {
+            Some(&t) => (format!("t = {:.6} s", t).replace(".000000", ""), Some(t)),
+            None => ("stationary".to_string(), None),
+        };
+        solutions.push(Solution {
+            label,
+            fields,
+            cell_fields: cell_fields_of(&cell_fields),
+            value,
+            ..Default::default()
+        });
+    }
+    Ok(SolveResult {
+        physics: "dfs".into(),
+        study: spec.study.kind().into(),
+        order: order as u8,
+        dim: mesh.dim as u8,
+        solutions,
+        scalars: vec![("T min (K)".into(), Scalar::Num(lo)), ("T max (K)".into(), Scalar::Num(hi))],
+        log: st.log,
+        seconds: t0.elapsed().as_secs_f64(),
+        dofs: sys.k.nrows(),
+    })
 }
 
 pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
@@ -447,9 +717,14 @@ fn heat_fields_mixed(
 /// pure-simplex fast path when `mesh.is_pure_simplex() && !spec.has_infinite_element()`.
 pub fn solve_heat_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String> {
     check_transient_heat_guards(spec)?;
-    if mesh.is_pure_simplex() && !spec.has_infinite_element() {
-        let d = discretise(mesh).map_err(|e| e.to_string())?;
-        return solve_heat(&d, spec);
+    if mesh.is_pure_simplex() {
+        if mesh_has_curved_edges(mesh) {
+            return Err("unsupported: heat transfer does not support curved simplex edge nodes (R32)".into());
+        }
+        if !spec.has_infinite_element() {
+            let d = discretise(mesh).map_err(|e| e.to_string())?;
+            return solve_heat(&d, spec);
+        }
     }
 
     let t0 = Instant::now();

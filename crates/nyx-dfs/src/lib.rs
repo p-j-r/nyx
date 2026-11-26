@@ -523,6 +523,13 @@ impl Physics for Dfs {
     }
 }
 
+fn mesh_has_curved_edges(mesh: &Mesh) -> bool {
+    match mesh {
+        Mesh::D2(m) => !m.edge_nodes.is_empty(),
+        Mesh::D3(m) => !m.edge_nodes.is_empty(),
+    }
+}
+
 /// Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the
 /// stage log to the result. `Physics::solve` is this after `decode`; code that already has mesh numbers calls it directly.
 pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error> {
@@ -537,6 +544,19 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     check_mesh(mesh)?;
     problem.check_finite().map_err(Error::NonFinite)?;
     let d = discretise(mesh)?;
+    if mesh_has_curved_edges(mesh) || d.has_curved() {
+        match &problem.study {
+            Study::HeatStationary | Study::HeatTransient { .. } if mesh.is_pure_simplex() => {
+                return Err(Error::Unsupported(
+                    "heat transfer does not support curved simplex edge nodes (R32)".into(),
+                ));
+            }
+            Study::Magnetostatic { .. } => {
+                return Err(Error::Unsupported("magnetostatics does not support curved edges (R32)".into()));
+            }
+            _ => {}
+        }
+    }
     if matches!(problem.study, Study::Electrostatic) {
         if !(problem.adapt_rel_tol > 0.0
             && problem.adapt_passes >= 1
