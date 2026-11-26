@@ -240,50 +240,233 @@ impl Curves {
     }
 }
 
+struct Dsu {
+    parent: Vec<u32>,
+    size: Vec<u32>,
+}
+
+impl Dsu {
+    fn new(n: usize) -> Self {
+        Self { parent: (0..n as u32).collect(), size: vec![1; n] }
+    }
+    fn find(&mut self, mut x: u32) -> u32 {
+        while self.parent[x as usize] != x {
+            let p = self.parent[x as usize];
+            self.parent[x as usize] = self.parent[p as usize];
+            x = p;
+        }
+        x
+    }
+    fn union(&mut self, a: u32, b: u32) {
+        let (mut ra, mut rb) = (self.find(a), self.find(b));
+        if ra == rb {
+            return;
+        }
+        if self.size[ra as usize] < self.size[rb as usize] {
+            std::mem::swap(&mut ra, &mut rb);
+        }
+        self.parent[rb as usize] = ra;
+        self.size[ra as usize] += self.size[rb as usize];
+    }
+}
+
 struct Verts {
     p: Vec<V2>,
     who: Vec<String>,
-    grid: HashMap<(i64, i64), Vec<u32>>,
     tol: f64,
     band: f64,
 }
 
 impl Verts {
-    fn cell(&self, p: V2) -> (i64, i64) {
-        ((p[0] / self.band).floor() as i64, (p[1] / self.band).floor() as i64)
+    fn new(tol: f64, band: f64) -> Self {
+        Self { p: vec![], who: vec![], tol, band }
     }
-    fn intern(&mut self, p: V2, who: &dyn Fn() -> String) -> GeomResult<u32> {
-        let (cx, cy) = self.cell(p);
-        let mut best: Option<(f64, u32)> = None;
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                if let Some(v) = self.grid.get(&(cx + dx, cy + dy)) {
-                    for &k in v {
-                        let d = dist2(self.p[k as usize], p);
-                        if d <= self.band && best.is_none_or(|b| d < b.0) {
-                            best = Some((d, k));
+    fn push_raw(&mut self, p: V2, who: &dyn Fn() -> String) -> u32 {
+        self.p.push(p);
+        self.who.push(who());
+        (self.p.len() - 1) as u32
+    }
+    fn cell_with(p: V2, width: f64) -> (i64, i64) {
+        ((p[0] / width).floor() as i64, (p[1] / width).floor() as i64)
+    }
+    /// Clusters raw vertices by union-find over `d <= tol`, rejects clusters whose diameter exceeds
+    /// `band` (`64 * tol`) and near-miss vertex/centroid pairs, snaps every cluster to its deterministic
+    /// canonical centroid, and returns the canonicalized `Verts` plus the `raw_id -> cluster_id` map.
+    fn cluster(self) -> GeomResult<(Self, Vec<u32>)> {
+        let n = self.p.len();
+        if n == 0 {
+            return Ok((Self { p: vec![], who: vec![], tol: self.tol, band: self.band }, vec![]));
+        }
+        let cell_w = (self.band * (1.0 + 1e-9)).max(1e-300);
+        let mut grid: HashMap<(i64, i64), Vec<u32>> = HashMap::with_capacity(n);
+        for (i, &pt) in self.p.iter().enumerate() {
+            grid.entry(Self::cell_with(pt, cell_w)).or_default().push(i as u32);
+        }
+        let mut dsu = Dsu::new(n);
+        for (i, &pi) in self.p.iter().enumerate() {
+            let (cx, cy) = Self::cell_with(pi, cell_w);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if let Some(bucket) = grid.get(&(cx + dx, cy + dy)) {
+                        for &j in bucket {
+                            if (i as u32) < j && dist2(pi, self.p[j as usize]) <= self.tol {
+                                dsu.union(i as u32, j);
+                            }
                         }
                     }
                 }
             }
         }
-        match best {
-            Some((d, k)) if d <= self.tol => Ok(k),
-            Some((d, k)) => Err(GeomError(format!(
-                "{} and {} have corners {:.3e} m apart, which is close to but not within the tolerance {:.1e} m: make them coincide or move them apart",
-                who(),
-                self.who[k as usize],
-                d,
-                self.tol
-            ))),
-            None => {
-                self.p.push(p);
-                self.who.push(who());
-                let id = (self.p.len() - 1) as u32;
-                self.grid.entry((cx, cy)).or_default().push(id);
-                Ok(id)
+        // Reject raw points in distinct clusters that fall within the undecidable band `(tol, band]`.
+        let mut comp_map: HashMap<u32, Vec<usize>> = HashMap::new();
+        for i in 0..n {
+            comp_map.entry(dsu.find(i as u32)).or_default().push(i);
+        }
+        struct Cluster {
+            centroid: V2,
+            who: String,
+            members: Vec<usize>,
+        }
+        let mut clusters: Vec<Cluster> = Vec::with_capacity(comp_map.len());
+        for (_root, members) in comp_map {
+            // Check exact Euclidean diameter <= band (`64 * tol`).
+            let mut bb = Aabb::EMPTY;
+            for &m in &members {
+                bb.grow(to3(self.p[m]));
+            }
+            let bb_diag = norm2(sub2([bb.hi[0], bb.hi[1]], [bb.lo[0], bb.lo[1]]));
+            if bb_diag > self.band || members.len() > 1 {
+                let mut worst: Option<(f64, usize, usize)> = None;
+                for (a_idx, &u) in members.iter().enumerate() {
+                    for &v in &members[a_idx + 1..] {
+                        let d = dist2(self.p[u], self.p[v]);
+                        if d > self.band && worst.is_none_or(|w| d > w.0) {
+                            worst = Some((d, u, v));
+                        }
+                    }
+                }
+                if let Some((d, u, v)) = worst {
+                    return Err(GeomError(format!(
+                        "{} and {} span a near-coincident vertex cluster of diameter {:.3e} m (> {:.1e} m = 64 tolerances): make vertices coincide cleanly or separate them",
+                        self.who[u], self.who[v], d, self.band
+                    )));
+                }
+            }
+            // Deterministic order-independent centroid over sorted unique cluster coordinates.
+            let mut uniq: Vec<V2> = members
+                .iter()
+                .map(|&m| {
+                    let p = self.p[m];
+                    [if p[0] == 0.0 { 0.0 } else { p[0] }, if p[1] == 0.0 { 0.0 } else { p[1] }]
+                })
+                .collect();
+            uniq.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+            uniq.dedup_by(|a, b| a[0].to_bits() == b[0].to_bits() && a[1].to_bits() == b[1].to_bits());
+            let (mut sx, mut sy) = (0.0, 0.0);
+            for p in &uniq {
+                sx += p[0];
+                sy += p[1];
+            }
+            let inv = 1.0 / (uniq.len() as f64);
+            let centroid = [sx * inv, sy * inv];
+            let rep_who = members.iter().map(|&m| &self.who[m]).min().unwrap().clone();
+            clusters.push(Cluster { centroid, who: rep_who, members });
+        }
+        clusters.sort_by(|a, b| {
+            a.centroid[0]
+                .total_cmp(&b.centroid[0])
+                .then(a.centroid[1].total_cmp(&b.centroid[1]))
+                .then(a.who.cmp(&b.who))
+        });
+
+        // Assert minimum inter-cluster centroid separation > tol first, then reject pairs in `(tol, band]`.
+        let mut cgrid: HashMap<(i64, i64), Vec<usize>> = HashMap::with_capacity(clusters.len());
+        for (ci, c) in clusters.iter().enumerate() {
+            cgrid.entry(Self::cell_with(c.centroid, cell_w)).or_default().push(ci);
+        }
+        for (ci, ca) in clusters.iter().enumerate() {
+            let (cx, cy) = Self::cell_with(ca.centroid, cell_w);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if let Some(bucket) = cgrid.get(&(cx + dx, cy + dy)) {
+                        for &cj in bucket {
+                            if ci < cj {
+                                let d = dist2(ca.centroid, clusters[cj].centroid);
+                                if d <= self.tol {
+                                    return Err(GeomError(format!(
+                                        "{} and {} have vertex cluster centroids only {:.3e} m apart (<= tolerance {:.1e} m), preventing a near-miss split",
+                                        ca.who, clusters[cj].who, d, self.tol
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+        // Reject raw points in distinct clusters that fall within `(tol, band]`.
+        for (i, &pi) in self.p.iter().enumerate() {
+            let (cx, cy) = Self::cell_with(pi, cell_w);
+            let ri = dsu.find(i as u32);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if let Some(bucket) = grid.get(&(cx + dx, cy + dy)) {
+                        for &j in bucket {
+                            if (i as u32) < j && ri != dsu.find(j) {
+                                let d = dist2(pi, self.p[j as usize]);
+                                if d <= self.band {
+                                    return Err(GeomError(format!(
+                                        "{} and {} have corners {:.3e} m apart, which is close to but not within the tolerance {:.1e} m: make them coincide or move them apart",
+                                        self.who[i], self.who[j as usize], d, self.tol
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (ci, ca) in clusters.iter().enumerate() {
+            let (cx, cy) = Self::cell_with(ca.centroid, cell_w);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if let Some(bucket) = cgrid.get(&(cx + dx, cy + dy)) {
+                        for &cj in bucket {
+                            if ci < cj {
+                                let d = dist2(ca.centroid, clusters[cj].centroid);
+                                if d <= self.band {
+                                    return Err(GeomError(format!(
+                                        "{} and {} have corners {:.3e} m apart, which is close to but not within the tolerance {:.1e} m: make them coincide or move them apart",
+                                        ca.who, clusters[cj].who, d, self.tol
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut remap = vec![0u32; n];
+        let mut out_p = Vec::with_capacity(clusters.len());
+        let mut out_who = Vec::with_capacity(clusters.len());
+        for (cid, cl) in clusters.into_iter().enumerate() {
+            for m in cl.members {
+                remap[m] = cid as u32;
+            }
+            out_p.push(cl.centroid);
+            out_who.push(cl.who);
+        }
+        Ok((Self { p: out_p, who: out_who, tol: self.tol, band: self.band }, remap))
+    }
+}
+
+fn snapped_param(c: &Curve, p: V2, t_ref: f64) -> f64 {
+    let t = c.closest(p).0;
+    if c.periodic() {
+        t_ref + (t - t_ref + std::f64::consts::PI).rem_euclid(TAU) - std::f64::consts::PI
+    } else {
+        t
     }
 }
 
@@ -334,11 +517,11 @@ pub fn arrange_with(
         [c[0], c[1]]
     };
     let mut curves = Curves::new(tol, scene_center);
-    let mut verts = Verts { p: vec![], who: vec![], grid: HashMap::new(), tol, band };
+    let mut verts = Verts::new(tol, band);
     let pname =
         |pi: u32, role: u32| format!("{}.{}", prims[pi as usize].name, prims[pi as usize].segs[role as usize].role);
 
-    // 1. interned boundary pieces
+    // 1. boundary pieces with raw endpoint observations
     let mut segs: Vec<Seg> = vec![];
     for (pi, prim) in prims.iter().enumerate() {
         for (ri, ds) in prim.segs.iter().enumerate() {
@@ -379,7 +562,7 @@ pub fn arrange_with(
             }
             let cv = &curves.list[cid as usize];
             let (va, vb) = match ends {
-                Some((p, q)) => (verts.intern(p, &who)?, verts.intern(q, &who)?),
+                Some((p, q)) => (verts.push_raw(p, &who), verts.push_raw(q, &who)),
                 None => (0, 0),
             };
             let mut h = Hasher64::new();
@@ -496,7 +679,7 @@ pub fn arrange_with(
                     let t = c.param_in(tb, a.a);
                     let _ = ib;
                     if a.closed || (t > a.a + eps_t(a) && t < a.b - eps_t(a)) {
-                        splits[ia].push(verts.intern(c.eval(tb), &|| pname(b.prim, b.role))?);
+                        splits[ia].push(verts.push_raw(c.eval(tb), &|| pname(b.prim, b.role)));
                         let _ = vb;
                         overlap = true;
                     } else if c.in_range(tb, a.a, a.b, eps_t(a)) {
@@ -565,7 +748,7 @@ pub fn arrange_with(
                         who_j()
                     )));
                 }
-                let v = verts.intern(h, &|| format!("the crossing of {} and {}", who_i(), who_j()))?;
+                let v = verts.push_raw(h, &|| format!("the crossing of {} and {}", who_i(), who_j()));
                 splits[i].push(v);
                 splits[j].push(v);
             }
@@ -595,15 +778,51 @@ pub fn arrange_with(
         }
     }
 
+    // 4b. canonical union-find vertex clustering over `d <= tol`, then snap endpoints and update `t0`/`t1`
+    let mut closed_seam: Vec<Option<u32>> = vec![None; segs.len()];
+    for (i, s) in segs.iter().enumerate() {
+        if s.closed && splits[i].is_empty() {
+            let p = curves.list[s.cid as usize].eval(s.a);
+            closed_seam[i] = Some(verts.push_raw(p, &|| pname(s.prim, s.role)));
+        }
+    }
+    let (verts, remap) = verts.cluster()?;
+    for (i, s) in segs.iter_mut().enumerate() {
+        for v in &mut splits[i] {
+            *v = remap[*v as usize];
+        }
+        if let Some(seam) = &mut closed_seam[i] {
+            *seam = remap[*seam as usize];
+        }
+        if !s.closed {
+            s.va = remap[s.va as usize];
+            s.vb = remap[s.vb as usize];
+            let c = &curves.list[s.cid as usize];
+            s.a = snapped_param(c, verts.p[s.va as usize], s.a);
+            s.b = snapped_param(c, verts.p[s.vb as usize], s.b);
+        }
+    }
+
     // 5. sub-pieces
     let mut subs: Vec<Sub> = vec![];
     for (i, s) in segs.iter().enumerate() {
         let c = &curves.list[s.cid as usize];
         let eps = eps_t(s);
-        let mut inner: Vec<(f64, u32)> = splits[i]
+        let mut uniq_splits = splits[i].clone();
+        uniq_splits.sort_unstable();
+        uniq_splits.dedup();
+        let ref_mid = 0.5 * (s.a + s.b);
+        let mut inner: Vec<(f64, u32)> = uniq_splits
             .iter()
             .filter_map(|&v| {
-                let t = c.param_in(c.closest(verts.p[v as usize]).0, s.a);
+                if !s.closed && (v == s.va || v == s.vb) {
+                    return None;
+                }
+                let t = if s.closed {
+                    c.param_in(c.closest(verts.p[v as usize]).0, s.a)
+                } else {
+                    snapped_param(c, verts.p[v as usize], ref_mid)
+                };
                 if s.closed || (t > s.a + eps && t < s.b - eps) {
                     Some((t, v))
                 } else {
@@ -613,14 +832,16 @@ pub fn arrange_with(
             .collect();
         inner.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
         inner.dedup_by_key(|x| x.1);
+        let span_s = (s.b - s.a).max(1e-300);
         let mut push = |t0: f64, t1: f64, v0: u32, v1: u32| {
-            let owner = Owner { prim: s.prim, role: s.role, in_left: s.in_left, frac: (t0 - s.a) / (s.b - s.a) };
+            let owner = Owner { prim: s.prim, role: s.role, in_left: s.in_left, frac: (t0 - s.a) / span_s };
             subs.push(Sub { cid: s.cid, t0, t1, v0, v1, owners: vec![owner] })
         };
         if s.closed {
             if inner.is_empty() {
-                let v = verts.intern(c.eval(s.a), &|| pname(s.prim, s.role))?;
-                push(s.a, s.a + TAU, v, v);
+                let v = closed_seam[i].expect("closed seam vertex clustered");
+                let t0 = snapped_param(c, verts.p[v as usize], s.a);
+                push(t0, t0 + TAU, v, v);
             } else {
                 for k in 0..inner.len() {
                     let (t0, v0) = inner[k];
@@ -759,7 +980,12 @@ pub fn arrange_with(
             let b_span = b.t1 - b.t0;
             let b_v1 = b.v1;
             let ax = &mut kept[x];
-            ax.t1 = ax.t0 + (ax.t1 - ax.t0) + b_span;
+            let target_t1 = ax.t0 + (ax.t1 - ax.t0) + b_span;
+            ax.t1 = if c.periodic() && ax.v0 == b_v1 {
+                ax.t0 + TAU
+            } else {
+                snapped_param(c, verts.p[b_v1 as usize], target_t1)
+            };
             ax.v1 = b_v1;
             inc[v as usize].clear();
             for slot in &mut inc[b_v1 as usize] {
@@ -1144,20 +1370,74 @@ fn finish(
 }
 
 /// Parity of crossings of one directed edge against the horizontal ray `[p[0], +inf) x {p[1]}`.
+/// Uses exact linear/quadratic conic root solving over y-monotone sub-arcs for circles and ellipses.
 pub(crate) fn edge_crosses_ray_x(ed: &Edge, curves: &[Curve], fwd: bool, p: V2) -> bool {
-    let mut inside = false;
     let c = &curves[ed.curve as usize];
-    let n = if matches!(c, Curve::Line { .. }) { 1 } else { 256 };
-    let mut prev = c.eval(if fwd { ed.t0 } else { ed.t1 });
-    for k in 1..=n {
-        let u = k as f64 / n as f64;
-        let t = if fwd { ed.t0 + (ed.t1 - ed.t0) * u } else { ed.t1 - (ed.t1 - ed.t0) * u };
-        let q = c.eval(t);
-        if (prev[1] > p[1]) != (q[1] > p[1]) && p[0] < (q[0] - prev[0]) * (p[1] - prev[1]) / (q[1] - prev[1]) + prev[0]
-        {
-            inside = !inside;
+    match *c {
+        Curve::Line { .. } => {
+            let (a, b) = if fwd { (c.eval(ed.t0), c.eval(ed.t1)) } else { (c.eval(ed.t1), c.eval(ed.t0)) };
+            (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
         }
-        prev = q;
+        Curve::Circle { .. } | Curve::Ellipse { .. } => ellipse_arc_crosses_ray_x(ed, c, p),
+    }
+}
+
+/// Exact quadratic horizontal ray-crossing test on an elliptical/circular arc `[t0, t1]` partitioned at vertical extrema.
+fn ellipse_arc_crosses_ray_x(ed: &Edge, curve: &Curve, p: V2) -> bool {
+    let (cc, rx, ry, phi) = match *curve {
+        Curve::Circle { c, r } => (c, r, r, 0.0),
+        Curve::Ellipse { c, a, b, phi } => (c, a, b, phi),
+        Curve::Line { .. } => return false,
+    };
+    let (t0, t1) = (ed.t0, ed.t1);
+    let (sphi, cphi) = phi.sin_cos();
+    let ay = rx * sphi;
+    let by = ry * cphi;
+    let ry_ext_sq = ay * ay + by * by;
+    if ry_ext_sq <= 0.0 {
+        return false;
+    }
+    let ty = by.atan2(ay);
+    let dy = p[1] - cc[1];
+    // Collect vertical extrema ty + k*PI strictly inside (t0, t1) to split into at most 3 y-monotone pieces.
+    let mut cuts = [t0, 0.0, 0.0, 0.0, t1];
+    let mut n = 1usize;
+    let mut k = ((t0 - ty) / std::f64::consts::PI).floor() as i64 - 1;
+    loop {
+        let tk = ty + (k as f64) * std::f64::consts::PI;
+        if tk >= t1 {
+            break;
+        }
+        if tk > t0 {
+            cuts[n] = tk;
+            n += 1;
+            if n == 4 {
+                break;
+            }
+        }
+        k += 1;
+    }
+    cuts[n] = t1;
+    n += 1;
+    cuts[..n].sort_by(f64::total_cmp);
+
+    let shift_x = sphi * cphi * (rx * rx - ry * ry) * dy / ry_ext_sq;
+    let disc_scale = rx * ry / ry_ext_sq;
+    let mut inside = false;
+    let mut prev_y = curve.eval(cuts[0])[1];
+    for w in cuts[..n].windows(2) {
+        let (ta, tb) = (w[0], w[1]);
+        let next_y = curve.eval(tb)[1];
+        if ta < tb && (prev_y > p[1]) != (next_y > p[1]) {
+            let mid_sin = (0.5 * (ta + tb) - ty).sin();
+            let sgn = if mid_sin <= 0.0 { 1.0 } else { -1.0 };
+            let dx = sgn * disc_scale * (ry_ext_sq - dy * dy).max(0.0).sqrt();
+            let x_hit = cc[0] + shift_x + dx;
+            if p[0] < x_hit {
+                inside = !inside;
+            }
+        }
+        prev_y = next_y;
     }
     inside
 }
@@ -1171,4 +1451,112 @@ pub(crate) fn point_in_loop(l: &Loop, edges: &[Edge], curves: &[Curve], p: V2) -
         }
     }
     inside
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verts_cluster_order_independent_canonical_centroid() {
+        let tol = 1e-9;
+        let band = GRAZE_K * tol;
+        let raw = [
+            ([0.0, 0.0], "a.p0"),
+            ([0.4e-9, 0.0], "b.p0"),
+            ([0.0, 0.3e-9], "c.p0"),
+            ([0.5e-9, 0.5e-9], "d.p0"),
+            ([1.0, 2.0], "far.p0"),
+        ];
+        let mut results = vec![];
+        for perm in [[0, 1, 2, 3, 4], [3, 4, 1, 0, 2], [4, 2, 0, 3, 1]] {
+            let mut v = Verts::new(tol, band);
+            let mut ids = [0u32; 5];
+            for idx in perm {
+                let (pt, nm) = raw[idx];
+                ids[idx] = v.push_raw(pt, &|| nm.to_string());
+            }
+            let (cv, remap) = v.cluster().unwrap();
+            assert_eq!(cv.p.len(), 2);
+            let c0 = remap[ids[0] as usize];
+            for k in 1..4 {
+                assert_eq!(remap[ids[k] as usize], c0);
+            }
+            assert_ne!(remap[ids[4] as usize], c0);
+            results.push(cv.p[c0 as usize]);
+        }
+        assert_eq!(results[0][0].to_bits(), results[1][0].to_bits());
+        assert_eq!(results[0][1].to_bits(), results[1][1].to_bits());
+        assert_eq!(results[0][0].to_bits(), results[2][0].to_bits());
+        assert_eq!(results[0][1].to_bits(), results[2][1].to_bits());
+    }
+
+    #[test]
+    fn verts_cluster_rejects_chain_diameter_exceeding_64_tol() {
+        let tol = 1e-9;
+        let band = GRAZE_K * tol;
+        let mut v = Verts::new(tol, band);
+        for k in 0..80 {
+            let _ = v.push_raw([(k as f64) * 0.9 * tol, 0.0], &|| format!("chain.{k}"));
+        }
+        let err = v.cluster().err().expect("chain > 64*tol diameter must fail").0;
+        assert!(err.contains("diameter"), "{err}");
+    }
+
+    #[test]
+    fn verts_cluster_rejects_inter_cluster_centroid_within_tol() {
+        let tol = 1e-9;
+        let band = GRAZE_K * tol;
+        let mut v = Verts::new(tol, band);
+        // Symmetric ring of 12 points at radius 1.05 * tol around the origin: adjacent ring points are ~0.54*tol
+        // apart (connected within tol, diameter = 2.1*tol <= 64*tol), while every ring point is 1.05*tol > tol
+        // from the center point (0, 0). The canonical centroid of the ring collides with (0, 0)!
+        let r = 1.05 * tol;
+        for k in 0..12 {
+            let th = TAU * (k as f64) / 12.0;
+            v.push_raw([r * th.cos(), r * th.sin()], &|| format!("ring.{k}"));
+        }
+        v.push_raw([0.0, 0.0], &|| "center".to_string());
+        let err = v.cluster().err().expect("centroid collision within tol must fail").0;
+        assert!(err.contains("centroids"), "{err}");
+    }
+
+    #[test]
+    fn exact_circle_and_ellipse_ray_crossing_sub_chord_precision() {
+        // Test sub-sagitta (1e-11) accuracy around both Circle and rotated Ellipse.
+        // At 256 chords on R=1, sagitta error was ~7.5e-5; exact solver must classify points at 1e-11 offset.
+        let curves =
+            vec![Curve::Circle { c: [0.0, 0.0], r: 1.0 }, Curve::Ellipse { c: [2.0, 1.0], a: 1.8, b: 0.6, phi: 0.55 }];
+        let mk_edge = |cid: u32, t0: f64, t1: f64| Edge {
+            name: String::new(),
+            curve: cid,
+            t0,
+            t1,
+            v0: 0,
+            v1: 0,
+            left: None,
+            right: None,
+            prov: vec![],
+            owner_prims: vec![],
+            length: 0.0,
+            bbox: Aabb::EMPTY,
+        };
+        let circle_edges = [mk_edge(0, 0.0, TAU)];
+        let ell_edges = [mk_edge(1, 0.0, 2.3), mk_edge(1, 2.3, TAU)];
+        for &ang in &[0.123, 1.4, 2.7, 4.1, 5.5] {
+            let p_c = curves[0].eval(ang);
+            let r_in = [p_c[0] * (1.0 - 1e-11), p_c[1] * (1.0 - 1e-11)];
+            let r_out = [p_c[0] * (1.0 + 1e-11), p_c[1] * (1.0 + 1e-11)];
+            assert!(edge_crosses_ray_x(&circle_edges[0], &curves, true, r_in), "circle inside at {ang}");
+            assert!(!edge_crosses_ray_x(&circle_edges[0], &curves, true, r_out), "circle outside at {ang}");
+
+            let p_e = curves[1].eval(ang);
+            let d_in = [2.0 + (p_e[0] - 2.0) * (1.0 - 1e-11), 1.0 + (p_e[1] - 1.0) * (1.0 - 1e-11)];
+            let d_out = [2.0 + (p_e[0] - 2.0) * (1.0 + 1e-11), 1.0 + (p_e[1] - 1.0) * (1.0 + 1e-11)];
+            let parity =
+                |pt: V2| ell_edges.iter().fold(false, |acc, ed| acc ^ edge_crosses_ray_x(ed, &curves, true, pt));
+            assert!(parity(d_in), "ellipse inside at {ang}");
+            assert!(!parity(d_out), "ellipse outside at {ang}");
+        }
+    }
 }

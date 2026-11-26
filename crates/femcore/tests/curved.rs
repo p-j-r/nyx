@@ -241,3 +241,109 @@ fn sheet3d_circular_disk_curved_mid_edge_nodes_converge_area_and_stay_positive_j
     assert!(cs.edges > 0 && cs.cells > 0);
     assert!(cs.min_scaled_jacobian > 0.1, "min_scaled_jacobian = {}", cs.min_scaled_jacobian);
 }
+
+#[test]
+fn r33_curved_creases_project_onto_exact_curves_while_straight_creases_stay_straight() {
+    use femcore::meshing::geomdrive::{evaluate, GeomMeshOpts};
+    use femcore::meshing::geomdrive3::{mesh_geom_3d, GeomDomain3, Sizes3};
+    use femcore::meshing::mesher3d::Domain3;
+    use geom::model::Model;
+    use std::collections::HashMap;
+
+    // 1. Conical frustum (r0 = 0.8 at z=0, r1 = 0.5 at z=1.0) inside clear host box:
+    //    circular rim at z = 1.0 (r = 0.5) is a curved ConeSide / Disk crease.
+    let mut m_cone = Model::new_3d();
+    let host0 = m_cone.box_("host", (-1.4, -1.4, -0.4), (1.4, 1.4, 1.4));
+    let frustum = m_cone.cone("frustum", (0.0, 0.0, 0.0), 0.8, 0.5, 1.0);
+    m_cone.overlay(&[("Host", host0), ("Frustum", frustum)]);
+
+    let ev0 = evaluate(&m_cone.list).unwrap();
+    let labels0 = ev0.label_map().unwrap();
+    let dom0 = GeomDomain3::new_with(&ev0, &labels0, 0.35, &Sizes3::default()).unwrap();
+
+    let a = [0.5, 0.0, 1.0];
+    let b = [0.5 * (0.4f64).cos(), 0.5 * (0.4f64).sin(), 1.0];
+    let mid = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 1.0];
+    assert!(
+        !dom0.edge_on_crease(a, b),
+        "circular cone-cap crease must NOT be suppressed as an unprojectable crease"
+    );
+    let q = dom0.project_edge(mid, a, b).expect("must project curved crease midpoint");
+    assert!((q[0].hypot(q[1]) - 0.5).abs() < 1e-12 && (q[2] - 1.0).abs() < 1e-12, "got {q:?}");
+
+    // Straight host box corner edge remains uncurved
+    let ba = [-1.4, -1.4, -0.4];
+    let bb = [-1.4, -1.4, 1.4];
+    let bmid = [-1.4, -1.4, 0.5];
+    if !dom0.edge_on_crease(ba, bb) {
+        if let Some(bq) = dom0.project_edge(bmid, ba, bb) {
+            let off = ((bq[0] - bmid[0]).powi(2) + (bq[1] - bmid[1]).powi(2) + (bq[2] - bmid[2]).powi(2)).sqrt();
+            assert!(off < 1e-12);
+        }
+    }
+
+    // 2. Interior curved creases between nested extruded circular cylinders + planar cap interfaces (`z = 0, 0.5, 1.0`):
+    //    notice `inner` cylinder rim at z = 0.5 sits inside `outer` cylinder (`r = 0.4` vs `r = 0.8`) -> interior crease!
+    let mut m_cyl = Model::new_3d();
+    let host1 = m_cyl.box_("host", (-1.2, -1.2, -0.4), (1.2, 1.2, 1.4));
+    let c_out = m_cyl.circle("c_out", (0.0, 0.0), 0.8);
+    let c_in = m_cyl.circle("c_in", (0.0, 0.0), 0.4);
+    let outer_cyl = m_cyl.extrude_along("outer_cyl", geom::model::Axis::Z, c_out, 0.0, 1.0);
+    let inner_cyl = m_cyl.extrude_along("inner_cyl", geom::model::Axis::Z, c_in, 0.0, 0.5);
+    m_cyl.overlay(&[("Host", host1), ("OuterCyl", outer_cyl), ("InnerCyl", inner_cyl)]);
+
+    let ev1 = evaluate(&m_cyl.list).unwrap();
+    let labels1 = ev1.label_map().unwrap();
+    let dom1 = GeomDomain3::new_with(&ev1, &labels1, 0.20, &Sizes3::default()).unwrap();
+    // Directly verify GeomDomain3 curves BOTH the interior crease (r=0.4, z=0.5) and outer crease (r=0.8, z=1.0)
+    for (r_c, z_c, label) in [(0.4, 0.5, "interior z=0.5"), (0.8, 1.0, "outer z=1.0")] {
+        let p0 = [r_c, 0.0, z_c];
+        let p1 = [r_c * 0.25f64.cos(), r_c * 0.25f64.sin(), z_c];
+        let pmid = [0.5 * (p0[0] + p1[0]), 0.5 * (p0[1] + p1[1]), z_c];
+        assert!(!dom1.edge_on_crease(p0, p1), "{label} circular crease must not be suppressed");
+        let q = dom1.project_edge(pmid, p0, p1).expect("curved crease projection");
+        assert!((q[0].hypot(q[1]) - r_c).abs() < 1e-12 && (q[2] - z_c).abs() < 1e-12, "{label} got {q:?}");
+    }
+
+    let mut opts = GeomMeshOpts::new(0.20);
+    opts.curved = true;
+    let g = mesh_geom_3d(ev1, &opts).unwrap();
+    assert!(g.mesh.has_curved());
+
+    let edge_map: HashMap<[u32; 2], [f64; 3]> = g.mesh.edge_node_list().into_iter().collect();
+    let mut inner_rim_hits = 0usize;
+    let mut outer_rim_hits = 0usize;
+    for ([u, v], node) in &edge_map {
+        let pu = g.mesh.point(*u as usize);
+        let pv = g.mesh.point(*v as usize);
+        if (pu[2] - 0.5).abs() < 1e-12 && (pv[2] - 0.5).abs() < 1e-12 {
+            let ru = pu[0].hypot(pu[1]);
+            let rv = pv[0].hypot(pv[1]);
+            if (ru - 0.4).abs() < 1e-5 && (rv - 0.4).abs() < 1e-5 {
+                let rn = node[0].hypot(node[1]);
+                assert!((rn - 0.4).abs() < 1e-5, "interior z=0.5 crease node radius {rn} vs 0.4");
+                inner_rim_hits += 1;
+            }
+        }
+        if (pu[2] - 1.0).abs() < 1e-12 && (pv[2] - 1.0).abs() < 1e-12 {
+            let ru = pu[0].hypot(pu[1]);
+            let rv = pv[0].hypot(pv[1]);
+            if (ru - 0.8).abs() < 1e-5 && (rv - 0.8).abs() < 1e-5 {
+                let rn = node[0].hypot(node[1]);
+                assert!((rn - 0.8).abs() < 1e-5, "outer z=1.0 crease node radius {rn} vs 0.8");
+                outer_rim_hits += 1;
+            }
+        }
+    }
+    assert!(inner_rim_hits > 0 || outer_rim_hits > 0, "expected curved mid-edge nodes along cylinder-cap creases");
+    // Ensure BOTH cylindrical walls (`r = 0.4` interior and `r = 0.8` outer) carry curved nodes
+    let has_r04 = edge_map.iter().any(|(_, n)| (n[0].hypot(n[1]) - 0.4).abs() < 1e-5 && n[2] >= -1e-6 && n[2] <= 0.5 + 1e-6);
+    let has_r08 = edge_map.iter().any(|(_, n)| (n[0].hypot(n[1]) - 0.8).abs() < 1e-5 && n[2] >= -1e-6 && n[2] <= 1.0 + 1e-6);
+    assert!(has_r04 && has_r08, "expected curved wall nodes on both inner (r=0.4) and outer (r=0.8) cylinders");
+    for c in 0..g.mesh.n_cells() {
+        if g.mesh.cell_is_curved(c) {
+            let sj = femcore::meshing::curve3::scaled_jacobian_min(&g.mesh, c);
+            assert!(sj > 0.1, "cell {c} Bernstein scaled_jacobian_min = {sj}");
+        }
+    }
+}

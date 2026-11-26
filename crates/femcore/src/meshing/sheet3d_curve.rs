@@ -73,6 +73,35 @@ pub fn project_sheet3d_curved_edges(
     transitions: &[Sheet3dTransitionRef<'_>],
     mesh: &mut SimplexMesh,
 ) -> CurveReport {
+    project_sheet3d_curved_edges_periodic(
+        cx,
+        m2,
+        bnd_edges2,
+        z_planes,
+        used_v,
+        slab_layer,
+        level_of_zp,
+        transitions,
+        &[],
+        mesh,
+    )
+}
+
+/// Like [`project_sheet3d_curved_edges`], synchronizing curved mid-edge nodes and relaxation levels
+/// across all periodic boundary pairs `(src_labels, dst_labels, shift)` (R33).
+#[allow(clippy::too_many_arguments)]
+pub fn project_sheet3d_curved_edges_periodic(
+    cx: &Complex,
+    m2: &SimplexMesh,
+    bnd_edges2: &[(u32, u32, u32)],
+    z_planes: &[f64],
+    used_v: &[u32],
+    slab_layer: &[Option<usize>],
+    level_of_zp: &[usize],
+    transitions: &[Sheet3dTransitionRef<'_>],
+    periodic: &[(Vec<i32>, Vec<i32>, [f64; 3])],
+    mesh: &mut SimplexMesh,
+) -> CurveReport {
     if mesh.dim != 3 || z_planes.len() < 2 || bnd_edges2.is_empty() {
         return CurveReport::default();
     }
@@ -163,7 +192,15 @@ pub fn project_sheet3d_curved_edges(
             }
 
             let diag_spec = if ls == lt {
-                Some((a.min(b), a.max(b), s, s + 1))
+                let (va_s, vb_s) = (vid(a, s), vid(b, s));
+                let (va_t, vb_t) = (vid(a, s + 1), vid(b, s + 1));
+                if mesh_edges.contains_key(&pair(va_s, vb_t)) {
+                    Some((a, b, s, s + 1))
+                } else if mesh_edges.contains_key(&pair(vb_s, va_t)) {
+                    Some((b, a, s, s + 1))
+                } else {
+                    Some((a.min(b), a.max(b), s, s + 1))
+                }
             } else {
                 let (m, fp, cp) = if ls < lt { (ls, s, s + 1) } else { (lt, s + 1, s) };
                 transitions.get(m).and_then(|tr| {
@@ -218,7 +255,39 @@ pub fn project_sheet3d_curved_edges(
         }
     }
 
-    let cand: EdgeNodes = cand_map.into_iter().collect();
+    let mut cand: EdgeNodes = cand_map.into_iter().collect();
+    let periodic_edge_parent = if !periodic.is_empty() && !cand.is_empty() {
+        let mut periodic_target: Vec<[u32; 2]> = cand.iter().map(|&(e, _)| e).collect();
+        let all_dst: std::collections::HashSet<i32> =
+            periodic.iter().flat_map(|(_, dst, _)| dst.iter().copied()).collect();
+        let mut dst_v: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for f in 0..mesh.n_facets() {
+            if all_dst.contains(&mesh.facet_labels[f]) {
+                dst_v.extend(mesh.facet(f));
+            }
+        }
+        for &e in mesh_edges.keys() {
+            if dst_v.contains(&e[0]) && dst_v.contains(&e[1]) {
+                periodic_target.push(e);
+            }
+        }
+        periodic_target.sort_unstable();
+        periodic_target.dedup();
+        let (_, pmap) = crate::meshing::curve3::periodic_edge_parent_map(mesh, &periodic_target, periodic);
+        // Ensure child periodic edges always start from exact parent `q + shift` even at tolerance cusps
+        let mut cmap: BTreeMap<[u32; 2], [f64; 3]> = cand.into_iter().collect();
+        for (&ce, &(pe, shift)) in &pmap {
+            if let Some(&pq) = cmap.get(&pe) {
+                cmap.insert(ce, [pq[0] + shift[0], pq[1] + shift[1], pq[2] + shift[2]]);
+            } else if let Some(&cq) = cmap.get(&ce) {
+                cmap.insert(pe, [cq[0] - shift[0], cq[1] - shift[1], cq[2] - shift[2]]);
+            }
+        }
+        cand = cmap.into_iter().collect();
+        pmap
+    } else {
+        HashMap::new()
+    };
     if cand.is_empty() {
         return CurveReport::default();
     }
@@ -228,8 +297,18 @@ pub fn project_sheet3d_curved_edges(
         let i = 3 * v as usize;
         [pts[i], pts[i + 1], pts[i + 2]]
     };
-    let (nodes, report) = relax_edge_nodes(&pos, &cells, cand);
-    mesh.set_edge_nodes(&nodes);
+    let qp_edges = mesh.qp_edge_list();
+    let report = crate::meshing::curve3::relax_edge_nodes_periodic_with_qp(
+        &pos,
+        &cells,
+        &mut cand,
+        &periodic_edge_parent,
+        &qp_edges,
+    );
+    mesh.set_edge_nodes(&cand);
+    if !qp_edges.is_empty() {
+        mesh.set_qp_edges(&qp_edges);
+    }
     report
 }
 
@@ -454,9 +533,10 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
         })
         .collect();
 
+    let periodic_twins = crate::meshing::curve3::periodic_pairs_from_eval(&g.eval, &g.labels);
     if !has_pml_cells {
         let qp_backup = g.mesh.qp_edge_list();
-        let rep = project_sheet3d_curved_edges(
+        let rep = project_sheet3d_curved_edges_periodic(
             cx,
             &m2,
             &bnd_edges2,
@@ -465,6 +545,7 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
             &slab_layer,
             &level_of_zp,
             &[],
+            &periodic_twins,
             &mut g.mesh,
         );
         if !qp_backup.is_empty() {
@@ -484,8 +565,25 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
             phys_labels.push(g.mesh.cell_labels[c]);
         }
     }
-    let mut tmp_phys = SimplexMesh::new(3, g.mesh.points.clone(), phys_cells_flat, phys_labels, Vec::new(), Vec::new());
-    let rep = project_sheet3d_curved_edges(
+    let mut phys_facets_flat = Vec::new();
+    let mut phys_facet_labels = Vec::new();
+    for f in 0..g.mesh.n_facets() {
+        let fv = g.mesh.facet(f);
+        if fv.iter().all(|&v| phys_vert[v as usize]) {
+            phys_facets_flat.extend_from_slice(fv);
+            phys_facet_labels.push(g.mesh.facet_labels[f]);
+        }
+    }
+    let mut tmp_phys = SimplexMesh::new(3, g.mesh.points.clone(), phys_cells_flat, phys_labels, phys_facets_flat, phys_facet_labels);
+    if !existing_qp.is_empty() {
+        let kept_qp: Vec<[u32; 2]> = existing_qp
+            .iter()
+            .copied()
+            .filter(|&[a, b]| !pml_edges.contains(&pair(a, b)))
+            .collect();
+        tmp_phys.set_qp_edges(&kept_qp);
+    }
+    let rep = project_sheet3d_curved_edges_periodic(
         cx,
         &m2,
         &bnd_edges2,
@@ -494,6 +592,7 @@ pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport {
         &slab_layer,
         &level_of_zp,
         &[],
+        &periodic_twins,
         &mut tmp_phys,
     );
     let mut merged: BTreeMap<[u32; 2], [f64; 3]> = tmp_phys.edge_node_list().into_iter().collect();

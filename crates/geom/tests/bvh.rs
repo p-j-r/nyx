@@ -130,3 +130,90 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn aabb_bvh2_empty_and_singleton() {
+    let empty = AabbBvh2::build(vec![]);
+    assert!(empty.is_empty());
+    assert_bvh_matches_brute_force(&[], &empty, [0.0, 0.0], &Bbox2::new([-1.0, -1.0], [1.0, 1.0]), 0.1);
+
+    let all_empty = vec![Bbox2::EMPTY; 4];
+    let bvh_empty = AabbBvh2::build(all_empty.clone());
+    assert!(bvh_empty.is_empty());
+    assert_bvh_matches_brute_force(&all_empty, &bvh_empty, [0.0, 0.0], &Bbox2::new([-1.0, -1.0], [1.0, 1.0]), 0.1);
+
+    let single = vec![Bbox2::new([1.0, 2.0], [3.0, 4.0])];
+    let bvh_single = AabbBvh2::build(single.clone());
+    assert!(!bvh_single.is_empty());
+    for pt in [[2.0, 3.0], [0.95, 2.0], [5.0, 5.0]] {
+        assert_bvh_matches_brute_force(&single, &bvh_single, pt, &Bbox2::new([0.5, 1.5], [2.5, 3.5]), 0.1);
+    }
+}
+
+#[test]
+fn aabb_bvh2_coincident_boxes_match_brute_force() {
+    let boxes = vec![Bbox2::new([-0.5, -0.5], [0.5, 0.5]); 200];
+    let bvh = AabbBvh2::build(boxes.clone());
+    assert!(!bvh.is_empty());
+    for pt in [[0.0, 0.0], [0.5, 0.5], [-1.0, 0.0], [1.0, 0.0]] {
+        assert_bvh_matches_brute_force(&boxes, &bvh, pt, &Bbox2::new([-0.25, -0.25], [0.25, 0.25]), 1e-6);
+    }
+}
+
+#[test]
+fn aabb_bvh2_deep_skewed_over_64_spills_stack_safely() {
+    use geom::bvh::BvhNode2;
+    let depth = 80usize;
+    let item_boxes: Vec<Bbox2> = (0..=depth).map(|i| Bbox2::new([-(i as f64) - 1.0, -1.0], [1.0, 1.0])).collect();
+    let items: Vec<u32> = (0..=depth as u32).collect();
+    // Build a deep skewed internal chain (depth = 80 > inline stack capacity 64) where every internal
+    // node's bounding box contains the origin [0.0, 0.0] so all queries must descend the full stack.
+    let mut nodes: Vec<BvhNode2> = Vec::with_capacity(2 * depth + 1);
+    for i in 0..depth {
+        nodes.push(BvhNode2 {
+            bbox: Bbox2::new([-(depth as f64) - 1.0, -1.0], [1.0, 1.0]),
+            left_or_start: (i + 1) as u32,
+            right: (depth + 1 + i) as u32,
+            count: 0,
+        });
+    }
+    // Deepest left leaf at index `depth`
+    nodes.push(BvhNode2 { bbox: item_boxes[0], left_or_start: 0, right: 0, count: 1 });
+    // Right leaf siblings at indices `depth + 1 ..= 2 * depth`
+    for i in 0..depth {
+        nodes.push(BvhNode2 { bbox: item_boxes[i + 1], left_or_start: (i + 1) as u32, right: 0, count: 1 });
+    }
+    let bvh = AabbBvh2 { nodes, items, item_boxes: item_boxes.clone() };
+    for pt in [[0.0, 0.0], [-40.0, 0.0], [-90.0, 0.0], [0.0, 5.0]] {
+        assert_bvh_matches_brute_force(&item_boxes, &bvh, pt, &Bbox2::new([-50.0, -0.5], [0.5, 0.5]), 1e-6);
+    }
+}
+
+#[test]
+fn aabb_bvh2_10k_primitives_brute_force_parity() {
+    let mut seed = 0x5EED_BEEF_CAFE_u64;
+    let mut next_f = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 11) as f64) / ((1u64 << 53) as f64)
+    };
+    let mut boxes = Vec::with_capacity(10_000);
+    for i in 0..10_000 {
+        if i % 97 == 0 {
+            boxes.push(Bbox2::EMPTY);
+            continue;
+        }
+        let x0 = next_f() * 200.0 - 100.0;
+        let y0 = next_f() * 200.0 - 100.0;
+        let w = next_f() * 8.0;
+        let h = next_f() * 8.0;
+        boxes.push(Bbox2::new([x0, y0], [x0 + w, y0 + h]));
+    }
+    let bvh = AabbBvh2::build(boxes.clone());
+    for _ in 0..32 {
+        let px = next_f() * 220.0 - 110.0;
+        let py = next_f() * 220.0 - 110.0;
+        let pad = if next_f() < 0.25 { 0.0 } else { 0.25 };
+        let rect = Bbox2::new([px - 4.0, py - 3.0], [px + 4.0, py + 3.0]);
+        assert_bvh_matches_brute_force(&boxes, &bvh, [px, py], &rect, pad);
+    }
+}

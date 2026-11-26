@@ -901,3 +901,42 @@ fn stepped_airbridge_stays_prismatic_and_evaluates_conformally_in_3d() {
     let ab_perim: f64 = ab_edges.ids.iter().map(|&e| ev.edges3()[e as usize].length).sum();
     assert!(close(ab_perim, 2.0 * (30e-6 + 10e-6)));
 }
+
+#[test]
+fn curved_3d_shells_satisfy_analytic_flux_and_polyhedral_edge_loops() {
+    use geom::prim::Body;
+
+    // 1. Concentric spheres + cylinder with hole + frustum + torus + revolved tube (curved 3D shells).
+    let mut m = Model::new_3d();
+    let host = m.box_("host", (-6.0, -6.0, -3.0), (6.0, 6.0, 7.0));
+    let outer_s = m.sphere("outer_s", (-3.0, -3.0, 2.0), 1.4);
+    let inner_s = m.sphere("inner_s", (-3.0, -3.0, 2.0), 0.7);
+    let shell_s = m.difference("shell_s", outer_s, &[inner_s]);
+    let tor = m.torus("tor", (3.0, -3.0, 2.0), 1.2, 0.4);
+    let frust = m.cone("frust", (3.0, 3.0, -1.0), 1.3, 0.4, 3.0);
+    let prof = m.rect("tube_sec", (0.6, 0.0), (1.3, 2.5));
+    let tube = m.revolve("tube", prof, (-3.0, 3.0, 0.0));
+    m.overlay(&[
+        ("host", host),
+        ("shell_s", shell_s),
+        ("core_s", inner_s),
+        ("tor", tor),
+        ("frust", frust),
+        ("tube", tube),
+    ]);
+    let ev = m.eval(Tier::Complex).unwrap();
+    ev.complex().check().unwrap();
+    assert!(ev.faces().iter().any(|f| matches!(f.geom, geom::complex::FaceGeom::Quadric(Body::Sphere { .. }))));
+    assert!(ev.faces().iter().any(|f| matches!(f.geom, geom::complex::FaceGeom::Quadric(Body::Torus { .. }))));
+    assert!(ev.faces().iter().any(|f| matches!(f.geom, geom::complex::FaceGeom::Quadric(Body::ConeSide { .. }))));
+    assert!(ev.faces().iter().any(|f| matches!(f.geom, geom::complex::FaceGeom::Quadric(Body::Annulus { .. }))));
+
+    // Also test a pure planar polyhedral complex with slanted cut (checks closed face loops & 2-manifold edges on Planar).
+    let mut pm = Model::new_3d();
+    let b0 = pm.box_("b", (0.0, 0.0, 0.0), (2.0, 2.0, 2.0));
+    let b1 = pm.box_("sub", (0.2, 0.2, 0.2), (1.2, 1.2, 1.2));
+    pm.overlay(&[("b", b0), ("sub", b1)]);
+    pm.cut("slant", (1.0, 0.3, 0.5), 1.2, geom::model::Keep::Below);
+    let pev = pm.eval(Tier::Complex).unwrap();
+    pev.complex().check().unwrap();
+}

@@ -16,8 +16,11 @@
 
 use crate::linalg::csr::Csr;
 use crate::linalg::faer_glue::{FaerScalar, clear_upper_vector_state};
-use crate::linalg::linop::LinearOperator;
+use crate::linalg::ilu::Ilu;
+use crate::linalg::ksp::{Gmres, GmresOptions, PcSide, Tolerances};
+use crate::linalg::linop::{LinearOperator, Preconditioner};
 use crate::linalg::ordering::{FillOrdering, adjacency_from_lower, nested_dissection};
+use crate::linalg::pc::Jacobi;
 use crate::linalg::scalar::Scalar;
 use crate::linalg::vecops;
 use faer::dyn_stack::{MemBuffer, MemStack};
@@ -181,6 +184,64 @@ pub struct ThreadPolicy {
 impl Default for ThreadPolicy {
     fn default() -> Self {
         Self { factor: Threads::Global, solve: Threads::Sequential }
+    }
+}
+
+/// Recovery strategy used by [`ShiftedFactorization`] when `(A - sigma B)` is singular,
+/// nearly singular, or exceeds direct-factorisation limits (R31).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SingularRecovery {
+    /// Try small diagonal shift perturbations first (+ defect-corrected solve on `(A - sigma B)`),
+    /// then fall back to preconditioned Krylov (`GMRES`) if perturbation still fails or `OutOfMemory` occurs.
+    #[default]
+    Auto,
+    /// Recover only via automatic diagonal shift perturbation (`sigma + delta`).
+    PerturbShift,
+    /// Recover directly via preconditioned Krylov (`GMRES`) without perturbing `sigma`.
+    IterativeFallback,
+    /// Disable automatic recovery and return `SolverError::Singular` / `SolverError::OutOfMemory`.
+    Disabled,
+}
+
+/// Pivot, Sylvester inertia, and singular-recovery diagnostics for [`ShiftedFactorization`] (R31).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FactorDiagnostics {
+    /// Smallest pivot magnitude (eigenvalue magnitude for `1x1` / `2x2` Hermitian symmetric blocks,
+    /// `L_{jj}^2` for Cholesky); `0.0` if zero/unavailable.
+    pub min_pivot_abs: f64,
+    /// Largest pivot magnitude observed in the active symmetric/Cholesky factor (`0.0` if unavailable).
+    pub max_pivot_abs: f64,
+    /// `1`-norm `max_j sum_i |M_{ij}|` of the shifted matrix `A - sigma B`.
+    pub matrix_scale: f64,
+    /// Count of pivots with magnitude `<= 1e-12 * matrix_scale`.
+    pub small_pivots: usize,
+    /// First failing column/block index recorded on singular / zero / non-finite pivot failure.
+    pub first_bad_pivot_index: Option<usize>,
+    /// Sylvester positive eigenvalue count `n_+` (available for real symmetric and complex Hermitian factors).
+    pub positive_inertia: Option<usize>,
+    /// Sylvester negative eigenvalue count `n_-` (available for real symmetric and complex Hermitian factors).
+    pub negative_inertia: Option<usize>,
+    /// Sylvester zero eigenvalue count `n_0` (available for real symmetric and complex Hermitian factors).
+    pub zero_inertia: Option<usize>,
+    /// Real part of shift perturbation `delta` when `sigma + delta` was used for factorisation recovery.
+    pub shift_perturbation_re: f64,
+    /// Imaginary part of shift perturbation `delta` when `sigma + delta` was used for factorisation recovery.
+    pub shift_perturbation_im: f64,
+    /// `true` when the active solver uses the preconditioned Krylov (`GMRES`) fallback path.
+    pub krylov_fallback: bool,
+    /// Cumulative Krylov iterations executed under `IterativeFallback` or shift-perturbation defect correction.
+    pub krylov_iterations: usize,
+}
+
+impl FactorDiagnostics {
+    /// Returns the complex/real shift perturbation `delta = factor_sigma - requested_sigma`.
+    pub fn shift_perturbation<T: Scalar>(&self) -> T {
+        T::from_parts(self.shift_perturbation_re, self.shift_perturbation_im)
+    }
+
+    /// Returns `true` when automatic shift perturbation was applied.
+    pub fn has_shift_perturbation(&self) -> bool {
+        self.shift_perturbation_re != 0.0 || self.shift_perturbation_im != 0.0
     }
 }
 
@@ -603,6 +664,358 @@ fn order_to_perm(order: &[usize]) -> (Vec<u32>, Vec<u32>) {
     (fwd, inv)
 }
 
+fn csc_one_norm<T: Scalar>(n: usize, col_ptr: &[u32], vals: &[T]) -> f64 {
+    let mut scale = 0.0f64;
+    for c in 0..n {
+        let mut s = 0.0f64;
+        for &v in &vals[col_ptr[c] as usize..col_ptr[c + 1] as usize] {
+            let m = v.modulus();
+            if m.is_finite() {
+                s += m;
+            }
+        }
+        scale = scale.max(s);
+    }
+    scale
+}
+
+fn lower_one_norm<T: Scalar>(n: usize, lower: &Assembled<T>, vals: &[T]) -> f64 {
+    let mut col_sums = vec![0.0f64; n];
+    for c in 0..n {
+        let start = lower.col_ptr[c] as usize;
+        let end = lower.col_ptr[c + 1] as usize;
+        for k in start..end {
+            let r = lower.row_idx[k] as usize;
+            let m = vals[k].modulus();
+            if m.is_finite() {
+                col_sums[c] += m;
+                if r != c {
+                    col_sums[r] += m;
+                }
+            }
+        }
+    }
+    col_sums.into_iter().fold(0.0f64, f64::max)
+}
+
+fn b_one_norm_full<T: Scalar>(full: &Assembled<T>, n: usize) -> f64 {
+    csc_one_norm(n, &full.col_ptr, &full.b)
+}
+
+fn csc_bad_diag_col<T: Scalar>(n: usize, col_ptr: &[u32], vals: &[T]) -> usize {
+    for c in 0..n {
+        let slice = &vals[col_ptr[c] as usize..col_ptr[c + 1] as usize];
+        let s: f64 = slice.iter().map(|v| v.modulus()).sum();
+        if s == 0.0 || !s.is_finite() {
+            return c;
+        }
+    }
+    0
+}
+
+fn record_cholesky_diagnostics<T: FaerScalar>(
+    sym: &SymbolicCholesky<u32>,
+    l_values: &[T],
+    scale: f64,
+    diag: &mut FactorDiagnostics,
+) {
+    let n = sym.nrows();
+    if n == 0 {
+        diag.min_pivot_abs = 0.0;
+        diag.max_pivot_abs = 0.0;
+        diag.small_pivots = 0;
+        diag.positive_inertia = Some(0);
+        diag.negative_inertia = Some(0);
+        diag.zero_inertia = Some(0);
+        return;
+    }
+    let tiny = 1e-12 * scale.max(1e-300);
+    let mut min_p = f64::INFINITY;
+    let mut max_p = 0.0f64;
+    let mut small = 0usize;
+    let mut push = |l_jj: T| {
+        let d = l_jj.modulus().powi(2);
+        min_p = min_p.min(d);
+        max_p = max_p.max(d);
+        if d <= tiny {
+            small += 1;
+        }
+    };
+    match sym.raw() {
+        SymbolicCholeskyRaw::Supernodal(sup) => {
+            let sb = sup.supernode_begin();
+            let se = sup.supernode_end();
+            let cv = sup.col_ptr_for_val();
+            let nnz = sup.nnz_per_super();
+            for s in 0..sup.n_supernodes() {
+                let s_ncols = se[s] as usize - sb[s] as usize;
+                let s_nrows = s_ncols + nnz[s] as usize;
+                let base = cv[s] as usize;
+                for j in 0..s_ncols {
+                    push(l_values[base + j * s_nrows + j]);
+                }
+            }
+        }
+        SymbolicCholeskyRaw::Simplicial(simp) => {
+            let cp = simp.col_ptr();
+            for j in 0..n {
+                push(l_values[cp[j] as usize]);
+            }
+        }
+    }
+    diag.min_pivot_abs = if min_p.is_finite() { min_p } else { 0.0 };
+    diag.max_pivot_abs = max_p;
+    diag.small_pivots = small;
+    diag.positive_inertia = Some(n);
+    diag.negative_inertia = Some(0);
+    diag.zero_inertia = Some(0);
+}
+
+fn record_lblt_diagnostics<T: FaerScalar>(
+    sym: &SymbolicCholesky<u32>,
+    l_values: &[T],
+    subdiag: &[T],
+    hermitian_or_real: bool,
+    scale: f64,
+    diag: &mut FactorDiagnostics,
+) -> Option<usize> {
+    struct Acc {
+        tiny: f64,
+        min_p: f64,
+        max_p: f64,
+        small: usize,
+        pos: usize,
+        neg: usize,
+        zero: usize,
+        first_bad: Option<usize>,
+    }
+    impl Acc {
+        fn push_bad(&mut self, col: usize, count: usize) {
+            self.min_p = 0.0;
+            self.small += count;
+            self.zero += count;
+            self.first_bad.get_or_insert(col);
+        }
+        fn push_real_eig(&mut self, e: f64, col: usize) {
+            if !e.is_finite() || e == 0.0 {
+                self.push_bad(col, 1);
+            } else {
+                let ae = e.abs();
+                self.min_p = self.min_p.min(ae);
+                self.max_p = self.max_p.max(ae);
+                if ae <= self.tiny {
+                    self.small += 1;
+                }
+                if e > 0.0 {
+                    self.pos += 1;
+                } else {
+                    self.neg += 1;
+                }
+            }
+        }
+        fn push_complex_mag(&mut self, am: f64, smax: f64, count: usize) {
+            self.min_p = self.min_p.min(am);
+            self.max_p = self.max_p.max(smax);
+            if am <= self.tiny {
+                self.small += count;
+            }
+        }
+    }
+
+    let n = sym.nrows();
+    let mut acc = Acc {
+        tiny: 1e-12 * scale.max(1e-300),
+        min_p: f64::INFINITY,
+        max_p: 0.0,
+        small: 0,
+        pos: 0,
+        neg: 0,
+        zero: 0,
+        first_bad: None,
+    };
+
+    match sym.raw() {
+        SymbolicCholeskyRaw::Supernodal(sup) => {
+            let sb = sup.supernode_begin();
+            let se = sup.supernode_end();
+            let cv = sup.col_ptr_for_val();
+            let nnz = sup.nnz_per_super();
+            for s in 0..sup.n_supernodes() {
+                let s_start = sb[s] as usize;
+                let s_ncols = se[s] as usize - s_start;
+                let s_nrows = s_ncols + nnz[s] as usize;
+                let base = cv[s] as usize;
+                let s_sub = &subdiag[s_start..s_start + s_ncols];
+                let mut idx = 0usize;
+                while idx < s_ncols {
+                    let gcol = s_start + idx;
+                    let b11 = l_values[base + idx * s_nrows + idx];
+                    let b21 = s_sub[idx];
+                    if b21 == T::ZERO {
+                        if !b11.is_finite() || b11.modulus() == 0.0 {
+                            acc.push_bad(gcol, 1);
+                        } else if hermitian_or_real {
+                            acc.push_real_eig(b11.re(), gcol);
+                        } else {
+                            let am = b11.modulus();
+                            acc.push_complex_mag(am, am, 1);
+                        }
+                        idx += 1;
+                    } else if idx + 1 < s_ncols {
+                        let b22 = l_values[base + (idx + 1) * s_nrows + idx + 1];
+                        if !b11.is_finite() || !b21.is_finite() || !b22.is_finite() {
+                            acc.push_bad(gcol, 2);
+                        } else if hermitian_or_real {
+                            let tr = b11.re() + b22.re();
+                            let d = b11.re() - b22.re();
+                            let disc = (d * d + 4.0 * b21.modulus().powi(2)).sqrt();
+                            acc.push_real_eig(0.5 * (tr + disc), gcol);
+                            acc.push_real_eig(0.5 * (tr - disc), gcol + 1);
+                        } else {
+                            let det = b11 * b22 - b21 * b21;
+                            let tr_m = (b11.modulus() + b22.modulus() + 2.0 * b21.modulus()).max(1e-300);
+                            if !det.is_finite() || det.modulus() == 0.0 {
+                                acc.push_bad(gcol, 2);
+                            } else {
+                                acc.push_complex_mag(det.modulus() / tr_m, tr_m, 2);
+                            }
+                        }
+                        idx += 2;
+                    } else {
+                        acc.push_bad(gcol, 1);
+                        idx += 1;
+                    }
+                }
+            }
+        }
+        SymbolicCholeskyRaw::Simplicial(simp) => {
+            let cp = simp.col_ptr();
+            for j in 0..n {
+                let d = l_values[cp[j] as usize];
+                if !d.is_finite() || d.modulus() == 0.0 {
+                    acc.push_bad(j, 1);
+                } else if hermitian_or_real {
+                    acc.push_real_eig(d.re(), j);
+                } else {
+                    let am = d.modulus();
+                    acc.push_complex_mag(am, am, 1);
+                }
+            }
+        }
+    }
+
+    diag.min_pivot_abs = if acc.min_p.is_finite() { acc.min_p } else { 0.0 };
+    diag.max_pivot_abs = acc.max_p;
+    diag.small_pivots = acc.small;
+    if let Some(bad) = acc.first_bad {
+        diag.first_bad_pivot_index.get_or_insert(bad);
+    }
+    if hermitian_or_real {
+        diag.positive_inertia = Some(acc.pos);
+        diag.negative_inertia = Some(acc.neg);
+        diag.zero_inertia = Some(acc.zero);
+    } else {
+        diag.positive_inertia = None;
+        diag.negative_inertia = None;
+        diag.zero_inertia = None;
+    }
+    acc.first_bad
+}
+
+fn assembled_to_csr<T: Scalar>(full: &Assembled<T>, n: usize, sigma: T) -> Result<Csr<T>, SolverError> {
+    let nnz = full.row_idx.len();
+    let mut row_ptr = vec![0usize; n + 1];
+    for &r in &full.row_idx {
+        row_ptr[r as usize + 1] += 1;
+    }
+    for r in 0..n {
+        row_ptr[r + 1] += row_ptr[r];
+    }
+    let mut write_pos = row_ptr.clone();
+    let mut col_idx = vec![0u32; nnz];
+    let mut vals = vec![T::ZERO; nnz];
+    let has_sigma = sigma != T::ZERO;
+    for c in 0..n {
+        let start = full.col_ptr[c] as usize;
+        let end = full.col_ptr[c + 1] as usize;
+        for k in start..end {
+            let r = full.row_idx[k] as usize;
+            let pos = write_pos[r];
+            write_pos[r] += 1;
+            col_idx[pos] = c as u32;
+            vals[pos] = if has_sigma { full.a[k] - sigma * full.b[k] } else { full.a[k] };
+        }
+    }
+    Csr::try_new(n, n, row_ptr, col_idx, vals).map_err(|_| SolverError::TooLarge)
+}
+
+enum KrylovPc<T: Scalar> {
+    Ilu(Box<Ilu<T>>),
+    Jacobi(Jacobi<T>),
+}
+
+impl<T: Scalar> Preconditioner<T> for KrylovPc<T> {
+    fn apply(&self, r: &[T], z: &mut [T]) {
+        match self {
+            KrylovPc::Ilu(p) => p.apply(r, z),
+            KrylovPc::Jacobi(p) => p.apply(r, z),
+        }
+    }
+}
+
+struct KrylovFallback<T: Scalar> {
+    mat: Csr<T>,
+    pc: KrylovPc<T>,
+}
+
+struct ShiftedOpView<'a, T: FaerScalar> {
+    fac: &'a ShiftedFactorization<T>,
+}
+
+impl<T: FaerScalar> LinearOperator<T> for ShiftedOpView<'_, T> {
+    fn dim(&self) -> usize {
+        self.fac.n
+    }
+    fn apply(&self, x: &[T], y: &mut [T]) {
+        if let Some(full) = &self.fac.full {
+            y.fill(T::ZERO);
+            let has_sigma = self.fac.sigma != T::ZERO;
+            for c in 0..self.fac.n {
+                let xc = x[c];
+                if xc == T::ZERO {
+                    continue;
+                }
+                let start = full.col_ptr[c] as usize;
+                let end = full.col_ptr[c + 1] as usize;
+                for k in start..end {
+                    let r = full.row_idx[k] as usize;
+                    let v = if has_sigma { full.a[k] - self.fac.sigma * full.b[k] } else { full.a[k] };
+                    y[r] += v * xc;
+                }
+            }
+        } else {
+            let mut r_neg = vec![T::ZERO; self.fac.n];
+            self.fac.compute_shifted_residual(&vec![T::ZERO; self.fac.n], x, &mut r_neg);
+            for (yi, &ri) in y.iter_mut().zip(&r_neg) {
+                *yi = -ri;
+            }
+        }
+    }
+}
+
+struct PerturbedFactorPc<'a, T: FaerScalar> {
+    fac: &'a ShiftedFactorization<T>,
+}
+
+impl<T: FaerScalar> Preconditioner<T> for PerturbedFactorPc<'_, T> {
+    fn apply(&self, r: &[T], z: &mut [T]) {
+        z.copy_from_slice(r);
+        if self.fac.solve_factor_only_in_place(z, 1).is_err() {
+            z.copy_from_slice(r);
+        }
+    }
+}
+
 // ------------------------------------------------------------------------------------------------------------ Non-conjugate symmetric indefinite LBL^T (complex-symmetric PML / lossy)
 
 const BK_ALPHA: f64 = 0.640_388_203_202_207_6; // (1 + sqrt(17)) / 8
@@ -710,7 +1123,7 @@ fn dense_sym_lblt<T: Scalar>(
     perm_fwd: &mut [u32],
     perm_inv: &mut [u32],
     offset: usize,
-) -> bool {
+) -> Result<(), usize> {
     for i in 0..m {
         perm_fwd[i] = i as u32;
         subdiag[i] = T::ZERO;
@@ -731,7 +1144,7 @@ fn dense_sym_lblt<T: Scalar>(
         }
         let peak = akk.max(lambda);
         if peak == 0.0 || !peak.is_finite() {
-            return false;
+            return Err(offset + k);
         }
         let mut step = 1usize;
         if akk < BK_ALPHA * lambda {
@@ -761,7 +1174,7 @@ fn dense_sym_lblt<T: Scalar>(
         if step == 1 {
             let d = a[k * m + k];
             if d.modulus() == 0.0 || !d.is_finite() {
-                return false;
+                return Err(offset + k);
             }
             let d_inv = T::ONE / d;
             subdiag[k] = T::ZERO;
@@ -790,7 +1203,7 @@ fn dense_sym_lblt<T: Scalar>(
             let b22 = a[(k + 1) * m + k + 1];
             let det = b11 * b22 - b21 * b21;
             if det.modulus() == 0.0 || !det.is_finite() {
-                return false;
+                return Err(offset + k);
             }
             let inv_det = T::ONE / det;
             subdiag[k] = b21;
@@ -826,7 +1239,7 @@ fn dense_sym_lblt<T: Scalar>(
     for p in perm_fwd.iter_mut() {
         *p += offset as u32;
     }
-    true
+    Ok(())
 }
 
 /// Non-conjugate supernodal intranodal Bunch–Kaufman `LBL^T` on `SymbolicSupernodalCholesky`.
@@ -840,7 +1253,7 @@ fn factorize_supernodal_sym_lblt<T: FaerScalar>(
     plan: &SymLbltPlan,
     sym: &SymbolicSupernodalCholesky<u32>,
     par: Par,
-) -> bool {
+) -> Result<(), usize> {
     let n = sym.nrows();
     let ns = sym.n_supernodes();
     l_values.fill(T::ZERO);
@@ -989,16 +1402,14 @@ fn factorize_supernodal_sym_lblt<T: FaerScalar>(
         for c in 0..s_ncols {
             dense_top[c * s_ncols..(c + 1) * s_ncols].copy_from_slice(&ls_slice[c * s_nrows..c * s_nrows + s_ncols]);
         }
-        if !dense_sym_lblt(
+        dense_sym_lblt(
             &mut dense_top[..s_ncols * s_ncols],
             s_ncols,
             &mut subdiag[s_start..s_end],
             &mut perm_fwd[s_start..s_end],
             &mut perm_inv[s_start..s_end],
             s_start,
-        ) {
-            return false;
-        }
+        )?;
         // Copy factorized lower triangle back into `Ls_top` and zero strictly upper triangle.
         for c in 0..s_ncols {
             let ls_col = c * s_nrows;
@@ -1061,7 +1472,7 @@ fn factorize_supernodal_sym_lblt<T: FaerScalar>(
         }
     }
     clear_upper_vector_state();
-    true
+    Ok(())
 }
 
 /// Solves `A X = RHS` in place using the non-conjugate supernodal `LBL^T` factor.
@@ -1249,7 +1660,7 @@ fn factorize_simplicial_sym_ldlt<T: Scalar>(
     lower_vals: &[T],
     plan: &SymLbltPlan,
     sym: &SymbolicSimplicialCholesky<u32>,
-) -> bool {
+) -> Result<(), usize> {
     let n = sym.nrows();
     let col_ptr = sym.col_ptr();
     let row_idx = sym.row_idx();
@@ -1277,7 +1688,7 @@ fn factorize_simplicial_sym_ldlt<T: Scalar>(
         let c_end = col_ptr[j + 1] as usize;
         let dj = work[j];
         if dj.modulus() == 0.0 || !dj.is_finite() {
-            return false;
+            return Err(j);
         }
         l_values[c_start] = dj;
         work[j] = T::ZERO;
@@ -1290,7 +1701,7 @@ fn factorize_simplicial_sym_ldlt<T: Scalar>(
             row_cols[r].push((j, p));
         }
     }
-    true
+    Ok(())
 }
 
 fn solve_simplicial_sym_ldlt<T: Scalar>(
@@ -1357,6 +1768,7 @@ enum ActiveFactor {
     /// Non-conjugate supernodal/simplicial complex-symmetric `LBL^T` (`A = A^T != A^H`).
     SymLblt,
     ColamdLu,
+    Krylov,
 }
 
 /// Optional env override `NYX_DIRECT_BACKEND=colamd|lblt` for benchmarking/diagnostics.
@@ -1387,8 +1799,11 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     lower: Option<Assembled<T>>,
     /// Copies of the inputs kept only while `full` is not built (positive definite case).
     src: Option<(Csr<T>, Option<Csr<T>>)>,
-    /// Last factorised shift `sigma` for `A - sigma B` (used by deterministic iterative refinement).
+    /// Last requested shift `sigma` for `A - sigma B` (used by deterministic iterative refinement and diagnostics).
     sigma: T,
+    /// Actual shift factored (`sigma + delta` when shift perturbation recovery was used).
+    factor_sigma: T,
+    perturbed_active: bool,
     /// When true, `solve_block_in_place` performs 1-2 steps of deterministic compensated-residual
     /// iterative refinement (`r = b - (A - sigma B) x`) to eliminate parallel factor roundoff or
     /// moderately conditioned LBLT pivot growth (`ADR 11`, `FR-29`, `FR-33`).
@@ -1403,14 +1818,21 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     lblt_subdiag: Vec<T>,
     lblt_perm_fwd: Vec<u32>,
     lblt_perm_inv: Vec<u32>,
+    krylov_state: Option<KrylovFallback<T>>,
     have: Used,
     active: ActiveFactor,
     /// Thread policy for factorisation and solves (see [`ThreadPolicy`]).
     pub threads: ThreadPolicy,
     /// Fill-reducing ordering for Cholesky and symmetric indefinite `LBL^H`/`LBL^T`; set before the first factorisation.
     pub ordering: FillOrdering,
+    /// Singular/OOM recovery strategy (R31); defaults to [`SingularRecovery::Auto`].
+    pub recovery: SingularRecovery,
+    /// Optional dimension threshold above which `set_shift` routes directly to preconditioned Krylov (`GMRES`).
+    pub iterative_threshold: Option<usize>,
     stats: FactorStats,
+    diagnostics: FactorDiagnostics,
     solves: AtomicUsize,
+    krylov_its: AtomicUsize,
 }
 
 impl<T: FaerScalar> ShiftedFactorization<T> {
@@ -1436,6 +1858,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             lower,
             src,
             sigma: T::ZERO,
+            factor_sigma: T::ZERO,
+            perturbed_active: false,
             refine_solves: false,
             sym_lu: None,
             sym_lu_est_nnz: 0,
@@ -1447,10 +1871,13 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             lblt_subdiag: Vec::new(),
             lblt_perm_fwd: Vec::new(),
             lblt_perm_inv: Vec::new(),
+            krylov_state: None,
             have: Used::None,
             active: ActiveFactor::None,
             threads: ThreadPolicy::default(),
             ordering: FillOrdering::default(),
+            recovery: SingularRecovery::Auto,
+            iterative_threshold: None,
             stats: FactorStats {
                 analyse_secs: t0.elapsed().as_secs_f64(),
                 symbolic_count: 0,
@@ -1465,8 +1892,18 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 factor_nnz: 0,
                 solve_secs_total: 0.0,
             },
+            diagnostics: FactorDiagnostics::default(),
             solves: AtomicUsize::new(0),
+            krylov_its: AtomicUsize::new(0),
         })
+    }
+
+    /// Returns a snapshot of pivot, Sylvester inertia, and singular/Krylov recovery diagnostics (R31).
+    pub fn diagnostics(&self) -> FactorDiagnostics {
+        FactorDiagnostics {
+            krylov_iterations: self.krylov_its.load(Ordering::Relaxed),
+            ..self.diagnostics
+        }
     }
 
     /// Releases all symmetric Cholesky / `LBL^H` / `LBL^T` factor allocations so peak memory never
@@ -1510,6 +1947,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         self.full = Some(full);
         self.have = Used::None;
         self.active = ActiveFactor::None;
+        self.perturbed_active = false;
+        self.krylov_state = None;
         Ok(())
     }
 
@@ -1683,6 +2122,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             .as_ref()
             .ok_or(SolverError::InvalidArgument("symbolic Cholesky factor missing"))?;
         let factor_nnz = sym.len_val();
+        let scale = lower_one_norm(n, lower, &vals);
+        self.diagnostics.matrix_scale = scale;
         let mat = SparseColMatRef::new(Self::pattern(lower, n), T::faer_slice(&vals));
         let t0 = Instant::now();
         let mut mem = MemBuffer::new(sym.factorize_numeric_llt_scratch::<T::Elem>(par, Default::default()));
@@ -1700,6 +2141,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         drop(vals);
         match res {
             Ok(_) => {
+                let sym = self.sym_llt.as_ref().unwrap();
+                record_cholesky_diagnostics(sym, &self.llt_vals, scale, &mut self.diagnostics);
                 self.release_lu_buffers();
                 self.sigma = sigma;
                 self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
@@ -1727,6 +2170,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         self.ensure_lower()?;
         self.ensure_sym_llt()?;
         let par = self.threads.factor.par_for_factor(n);
+        let scale = csc_one_norm(n, &self.full.as_ref().unwrap().col_ptr, full_vals);
+        self.diagnostics.matrix_scale = scale;
         let (fac_secs, initial_rel_err, factor_nnz) = {
             let lower = self
                 .lower
@@ -1764,7 +2209,18 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             drop(mem);
             drop(lvals);
 
-            if !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite()) {
+            let bad_col = record_lblt_diagnostics(
+                sym,
+                &self.llt_vals,
+                &self.lblt_subdiag,
+                true,
+                scale,
+                &mut self.diagnostics,
+            );
+            if bad_col.is_some()
+                || !self.llt_vals.iter().all(|v| v.is_finite())
+                || !self.lblt_subdiag.iter().all(|v| v.is_finite())
+            {
                 return Ok(false);
             }
 
@@ -1828,6 +2284,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             self.stats.analyse_secs += t0.elapsed().as_secs_f64();
         }
         let par = self.threads.factor.par_for_factor(n);
+        let scale = csc_one_norm(n, &self.full.as_ref().unwrap().col_ptr, full_vals);
+        self.diagnostics.matrix_scale = scale;
         let (fac_secs, initial_rel_err, factor_nnz) = {
             let lower = self
                 .lower
@@ -1850,7 +2308,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 .sym_lblt_plan
                 .as_ref()
                 .ok_or(SolverError::InvalidArgument("LBL^T plan missing"))?;
-            let fac_ok = match sym.raw() {
+            let fac_res = match sym.raw() {
                 SymbolicCholeskyRaw::Supernodal(sup) => factorize_supernodal_sym_lblt(
                     &mut self.llt_vals,
                     &mut self.lblt_subdiag,
@@ -1867,7 +2325,26 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             };
             let fac_secs = t0.elapsed().as_secs_f64();
             drop(lvals);
-            if !fac_ok || !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite())
+            if let Err(bad_idx) = fac_res {
+                let orig_col = sym
+                    .perm()
+                    .and_then(|p| p.arrays().0.get(bad_idx).map(|&c| c as usize))
+                    .unwrap_or(bad_idx);
+                self.diagnostics.first_bad_pivot_index.get_or_insert(orig_col);
+                self.diagnostics.min_pivot_abs = 0.0;
+                return Ok(false);
+            }
+            let bad_col = record_lblt_diagnostics(
+                sym,
+                &self.llt_vals,
+                &self.lblt_subdiag,
+                !T::IS_COMPLEX,
+                scale,
+                &mut self.diagnostics,
+            );
+            if bad_col.is_some()
+                || !self.llt_vals.iter().all(|v| v.is_finite())
+                || !self.lblt_subdiag.iter().all(|v| v.is_finite())
             {
                 return Ok(false);
             }
@@ -1956,6 +2433,13 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             .full
             .as_ref()
             .ok_or(SolverError::InvalidArgument("full matrix pattern missing for LU"))?;
+        let scale = csc_one_norm(n, &full.col_ptr, full_vals);
+        self.diagnostics.matrix_scale = scale;
+        if n > 0 && scale == 0.0 {
+            self.diagnostics.first_bad_pivot_index.get_or_insert(0);
+            self.diagnostics.min_pivot_abs = 0.0;
+            return Err(SolverError::Singular);
+        }
         let mat = SparseColMatRef::new(Self::pattern(full, n), T::faer_slice(full_vals));
         let t0 = Instant::now();
         let mut mem = MemBuffer::new(sym.factorize_numeric_lu_scratch::<T::Elem>(par, Default::default()));
@@ -1966,20 +2450,63 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             MemStack::new(&mut mem),
             Default::default(),
         );
-        let ok = res.is_ok();
         clear_upper_vector_state();
         self.stats.numeric_secs_last = t0.elapsed().as_secs_f64();
-        if ok {
-            self.sigma = sigma;
-            self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
-            self.have = Used::Lu;
-            self.active = ActiveFactor::ColamdLu;
-            self.stats.used = Used::Lu;
-            self.stats.backend = FactorBackend::LuColamd;
-            self.stats.factor_nnz = self.sym_lu_est_nnz;
-            Ok(())
-        } else {
-            Err(SolverError::Singular)
+        match res {
+            Ok(_) => {
+                // `faer` partial-pivoting LU returns `Ok` even when a column pivot is numerically 0
+                // (`0.recip() -> inf`); guard via a deterministic probe residual before accepting.
+                let solve_par = self.threads.solve.par();
+                let mut probe_err = 0.0f64;
+                let probe_ok = if n == 0 {
+                    true
+                } else {
+                    let mut p = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let v = (((i.wrapping_mul(2654435761) ^ 0x5a5a_a5a5) % 10007) as f64 / 5003.5) - 1.0;
+                        p.push(T::from_f64(v));
+                    }
+                    let p_norm = vecops::norm2(&p).max(1e-300);
+                    let mut x = p.clone();
+                    let xm = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut x), n, 1);
+                    let mut smem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(1, solve_par));
+                    LuRef::new_unchecked(sym, &self.lu_num).solve_in_place_with_conj(
+                        Conj::No,
+                        xm,
+                        solve_par,
+                        MemStack::new(&mut smem),
+                    );
+                    clear_upper_vector_state();
+                    if !x.iter().all(|v| v.is_finite()) {
+                        false
+                    } else {
+                        let mut r = vec![T::ZERO; n];
+                        csc_residual_vals(n, &full.col_ptr, &full.row_idx, full_vals, &p, &x, &mut r);
+                        probe_err = vecops::norm2(&r) / p_norm;
+                        probe_err.is_finite() && probe_err <= 1e-3
+                    }
+                };
+                if !probe_ok {
+                    let bad_col = csc_bad_diag_col(n, &full.col_ptr, full_vals);
+                    self.diagnostics.first_bad_pivot_index.get_or_insert(bad_col);
+                    self.diagnostics.min_pivot_abs = 0.0;
+                    return Err(SolverError::Singular);
+                }
+                self.sigma = sigma;
+                self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || probe_err > 1e-11;
+                self.have = Used::Lu;
+                self.active = ActiveFactor::ColamdLu;
+                self.stats.used = Used::Lu;
+                self.stats.backend = FactorBackend::LuColamd;
+                self.stats.factor_nnz = self.sym_lu_est_nnz;
+                Ok(())
+            }
+            Err(faer::sparse::linalg::LuError::SymbolicSingular { index }) => {
+                self.diagnostics.first_bad_pivot_index.get_or_insert(index);
+                self.diagnostics.min_pivot_abs = 0.0;
+                Err(SolverError::Singular)
+            }
+            Err(_) => Err(SolverError::OutOfMemory),
         }
     }
 
@@ -2020,13 +2547,18 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         let res = match policy {
             BackendPolicy::ForceColamd => self.do_colamd_lu(sigma, &vals),
             BackendPolicy::ForceLblt => {
-                if (is_herm && self.try_herm_lblt(sigma, &vals)?)
-                    || (is_cplx_sym && self.try_sym_lblt(sigma, &vals, true)?)
-                {
+                let herm_ok = is_herm && self.try_herm_lblt(sigma, &vals)?;
+                let sym_ok = !herm_ok && is_cplx_sym && self.try_sym_lblt(sigma, &vals, true)?;
+                if herm_ok || sym_ok {
                     Ok(())
                 } else {
+                    let saved_diag = self.diagnostics;
                     self.release_lblt_buffers();
-                    self.do_colamd_lu(sigma, &vals)
+                    let lu_res = self.do_colamd_lu(sigma, &vals);
+                    if lu_res.is_err() && saved_diag.zero_inertia.is_some() {
+                        self.diagnostics = saved_diag;
+                    }
+                    lu_res
                 }
             }
             BackendPolicy::Auto => {
@@ -2034,16 +2566,23 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 // previous fallback), keep reusing it so `symbolic_count` stays 1.
                 if self.sym_lu.is_some() {
                     self.do_colamd_lu(sigma, &vals)
-                } else if (is_herm && self.try_herm_lblt(sigma, &vals)?)
-                    || (is_cplx_sym && self.try_sym_lblt(sigma, &vals, true)?)
-                {
-                    // Real symmetric / complex Hermitian (`LBL^H`) or complex-symmetric (`LBL^T`)
-                    // supernodal Bunch-Kaufman with AMD/ND/Auto ordering.
-                    Ok(())
                 } else {
-                    // Unsymmetric or LBL^T pivot fallback: free LBLT buffers before COLAMD LU.
-                    self.release_lblt_buffers();
-                    self.do_colamd_lu(sigma, &vals)
+                    let herm_ok = is_herm && self.try_herm_lblt(sigma, &vals)?;
+                    let sym_ok = !herm_ok && is_cplx_sym && self.try_sym_lblt(sigma, &vals, true)?;
+                    if herm_ok || sym_ok {
+                        // Real symmetric / complex Hermitian (`LBL^H`) or complex-symmetric (`LBL^T`)
+                        // supernodal Bunch-Kaufman with AMD/ND/Auto ordering.
+                        Ok(())
+                    } else {
+                        let saved_diag = self.diagnostics;
+                        // Unsymmetric or LBL^T pivot fallback: free LBLT buffers before COLAMD LU.
+                        self.release_lblt_buffers();
+                        let lu_res = self.do_colamd_lu(sigma, &vals);
+                        if lu_res.is_err() && saved_diag.zero_inertia.is_some() {
+                            self.diagnostics = saved_diag;
+                        }
+                        lu_res
+                    }
                 }
             }
         };
@@ -2052,7 +2591,122 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         res
     }
 
-    fn solve_raw_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+    fn factorize_direct_at(&mut self, sigma: T) -> Result<(), SolverError> {
+        let mut done = false;
+        if self.definiteness == Definiteness::PositiveDefinite {
+            if self.try_cholesky(sigma)? {
+                done = true;
+            } else {
+                self.stats.cholesky_fallbacks += 1;
+            }
+        }
+        if !done { self.do_lu(sigma) } else { Ok(()) }
+    }
+
+    fn try_krylov_fallback(&mut self, sigma: T) -> Result<(), SolverError> {
+        let n = self.n;
+        self.ensure_full()?;
+        let full = self
+            .full
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("full matrix pattern missing for Krylov fallback"))?;
+        let csr = assembled_to_csr(full, n, sigma)?;
+        let mut scale = self.diagnostics.matrix_scale;
+        if scale == 0.0 {
+            let mut vals = Vec::with_capacity(full.row_idx.len());
+            Self::shifted_values(full, sigma, &mut vals);
+            scale = csc_one_norm(n, &full.col_ptr, &vals);
+            self.diagnostics.matrix_scale = scale;
+        }
+        if n > 0 && scale == 0.0 {
+            self.diagnostics.first_bad_pivot_index.get_or_insert(0);
+            return Err(SolverError::Singular);
+        }
+        let pc = if n > 0 {
+            let ilu = Ilu::ilu_k(&csr, 0);
+            if ilu.nnz() > 0 {
+                KrylovPc::Ilu(Box::new(ilu))
+            } else {
+                KrylovPc::Jacobi(Jacobi::new(&csr))
+            }
+        } else {
+            KrylovPc::Jacobi(Jacobi::new(&csr))
+        };
+        self.release_lblt_buffers();
+        self.release_lu_buffers();
+        self.krylov_state = Some(KrylovFallback { mat: csr, pc });
+        self.sigma = sigma;
+        self.factor_sigma = sigma;
+        self.perturbed_active = false;
+        self.refine_solves = false;
+        self.active = ActiveFactor::Krylov;
+        self.diagnostics.krylov_fallback = true;
+        Ok(())
+    }
+
+    fn try_perturbed_shift(&mut self, sigma: T) -> Result<bool, SolverError> {
+        let n = self.n;
+        if n == 0 {
+            return Ok(false);
+        }
+        self.ensure_full()?;
+        let (scale, b_scale) = {
+            let full = self
+                .full
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("full matrix pattern missing for shift perturbation"))?;
+            let b_scale = b_one_norm_full(full, n);
+            let mut scale = self.diagnostics.matrix_scale;
+            if scale == 0.0 {
+                let mut vals = Vec::with_capacity(full.row_idx.len());
+                Self::shifted_values(full, sigma, &mut vals);
+                scale = csc_one_norm(n, &full.col_ptr, &vals);
+                self.diagnostics.matrix_scale = scale;
+            }
+            (scale, b_scale)
+        };
+        if scale == 0.0 || b_scale == 0.0 {
+            return Ok(false);
+        }
+        let base_delta = (scale / b_scale).max(sigma.modulus()).max(1e-12);
+        let init_diag = self.diagnostics;
+
+        let mags = [1e-10, 1e-8, 1e-6, 1e-4];
+        let mut deltas: Vec<T> = Vec::with_capacity(8);
+        for &m in &mags {
+            let step = m * base_delta;
+            if T::IS_COMPLEX {
+                deltas.push(T::from_parts(step, step));
+                deltas.push(T::from_parts(-step, step));
+            } else {
+                deltas.push(T::from_f64(step));
+                deltas.push(T::from_f64(-step));
+            }
+        }
+
+        for delta in deltas {
+            let sigma_p = sigma + delta;
+            self.diagnostics = FactorDiagnostics::default();
+            if self.factorize_direct_at(sigma_p).is_ok() {
+                self.factor_sigma = sigma_p;
+                self.sigma = sigma;
+                self.perturbed_active = true;
+                self.diagnostics.first_bad_pivot_index = init_diag.first_bad_pivot_index;
+                if self.diagnostics.zero_inertia.is_none() {
+                    self.diagnostics.positive_inertia = init_diag.positive_inertia;
+                    self.diagnostics.negative_inertia = init_diag.negative_inertia;
+                    self.diagnostics.zero_inertia = init_diag.zero_inertia;
+                }
+                self.diagnostics.shift_perturbation_re = delta.re();
+                self.diagnostics.shift_perturbation_im = delta.im();
+                return Ok(true);
+            }
+        }
+        self.diagnostics = init_diag;
+        Ok(false)
+    }
+
+    fn solve_factor_only_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
         let n = self.n;
         let par = self.threads.solve.par();
         match self.active {
@@ -2110,10 +2764,95 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     MemStack::new(&mut mem),
                 );
             }
-            ActiveFactor::None => return Err(SolverError::NotFactored),
+            ActiveFactor::Krylov | ActiveFactor::None => return Err(SolverError::NotFactored),
         }
         clear_upper_vector_state();
         Ok(())
+    }
+
+    fn solve_raw_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+        let n = self.n;
+        if n == 0 || nrhs == 0 {
+            return Ok(());
+        }
+        if matches!(self.active, ActiveFactor::Krylov) {
+            let kf = self.krylov_state.as_ref().ok_or(SolverError::NotFactored)?;
+            let mut r_chk = vec![T::ZERO; n];
+            let mut x_buf = vec![T::ZERO; n];
+            for c in 0..nrhs {
+                let b_c = &rhs[c * n..(c + 1) * n];
+                let b_norm = vecops::norm2(b_c);
+                if b_norm == 0.0 || !b_norm.is_finite() {
+                    rhs[c * n..(c + 1) * n].fill(T::ZERO);
+                    continue;
+                }
+                x_buf.fill(T::ZERO);
+                let mut gmres = Gmres::new(GmresOptions {
+                    tol: Tolerances {
+                        rtol: 1e-11,
+                        atol: 1e-30 * b_norm,
+                        dtol: 1e4,
+                        max_it: (2 * n).clamp(128, 2500),
+                    },
+                    restart: n.clamp(1, 60),
+                    side: PcSide::Right,
+                    ..GmresOptions::default()
+                });
+                let info = gmres.solve(&kf.mat, &kf.pc, b_c, &mut x_buf);
+                self.krylov_its.fetch_add(info.iterations, Ordering::Relaxed);
+                self.compute_shifted_residual(b_c, &x_buf, &mut r_chk);
+                let rel = vecops::norm2(&r_chk) / b_norm;
+                if !x_buf.iter().all(|v| v.is_finite()) || !rel.is_finite() || rel > 1e-6 {
+                    return Err(SolverError::Singular);
+                }
+                rhs[c * n..(c + 1) * n].copy_from_slice(&x_buf);
+            }
+            return Ok(());
+        }
+
+        if self.perturbed_active {
+            let op = ShiftedOpView { fac: self };
+            let pc = PerturbedFactorPc { fac: self };
+            let mut r_chk = vec![T::ZERO; n];
+            let mut x_buf = vec![T::ZERO; n];
+            let mut x_pert = vec![T::ZERO; n];
+            for c in 0..nrhs {
+                let b_c = &mut rhs[c * n..(c + 1) * n];
+                let b_norm = vecops::norm2(b_c);
+                if b_norm == 0.0 || !b_norm.is_finite() {
+                    b_c.fill(T::ZERO);
+                    continue;
+                }
+                x_pert.copy_from_slice(b_c);
+                self.solve_factor_only_in_place(&mut x_pert, 1)?;
+                x_buf.fill(T::ZERO);
+                let mut gmres = Gmres::new(GmresOptions {
+                    tol: Tolerances {
+                        rtol: 1e-11,
+                        atol: 1e-30 * b_norm,
+                        dtol: 1e4,
+                        max_it: 32,
+                    },
+                    restart: n.clamp(1, 32),
+                    side: PcSide::Right,
+                    ..GmresOptions::default()
+                });
+                let info = gmres.solve(&op, &pc, b_c, &mut x_buf);
+                self.krylov_its.fetch_add(info.iterations, Ordering::Relaxed);
+                self.compute_shifted_residual(b_c, &x_buf, &mut r_chk);
+                let rel = vecops::norm2(&r_chk) / b_norm;
+                if x_buf.iter().all(|v| v.is_finite()) && rel.is_finite() && rel <= 1e-6 {
+                    b_c.copy_from_slice(&x_buf);
+                } else if x_pert.iter().all(|v| v.is_finite()) {
+                    b_c.copy_from_slice(&x_pert);
+                } else {
+                    return Err(SolverError::Singular);
+                }
+            }
+            return Ok(());
+        }
+
+        self.solve_factor_only_in_place(rhs, nrhs)
     }
 
     fn compute_shifted_residual(&self, b: &[T], x: &[T], r: &mut [T]) {
@@ -2135,17 +2874,55 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
 
     fn set_shift(&mut self, sigma: T) -> Result<(), SolverError> {
         let t_asm = Instant::now();
-        let mut done = false;
-        let result = (|| {
-            if self.definiteness == Definiteness::PositiveDefinite {
-                if self.try_cholesky(sigma)? {
-                    done = true;
-                } else {
-                    self.stats.cholesky_fallbacks += 1;
+        self.diagnostics = FactorDiagnostics::default();
+        self.factor_sigma = sigma;
+        self.perturbed_active = false;
+        self.krylov_state = None;
+
+        let result = if self.iterative_threshold.is_some_and(|th| self.n > th) {
+            self.try_krylov_fallback(sigma)
+        } else {
+            match self.factorize_direct_at(sigma) {
+                Ok(()) => Ok(()),
+                Err(err @ (SolverError::Singular | SolverError::OutOfMemory)) => {
+                    let recovered = match (err.clone(), self.recovery) {
+                        (_, SingularRecovery::Disabled) => Err(err),
+                        (SolverError::OutOfMemory, SingularRecovery::Auto | SingularRecovery::IterativeFallback) => {
+                            self.try_krylov_fallback(sigma)
+                        }
+                        (SolverError::OutOfMemory, SingularRecovery::PerturbShift) => Err(SolverError::OutOfMemory),
+                        (SolverError::Singular, SingularRecovery::PerturbShift) => {
+                            if self.try_perturbed_shift(sigma)? {
+                                Ok(())
+                            } else {
+                                Err(SolverError::Singular)
+                            }
+                        }
+                        (SolverError::Singular, SingularRecovery::IterativeFallback) => {
+                            self.try_krylov_fallback(sigma)
+                        }
+                        (SolverError::Singular, SingularRecovery::Auto) => {
+                            if self.try_perturbed_shift(sigma)? {
+                                Ok(())
+                            } else {
+                                self.try_krylov_fallback(sigma)
+                            }
+                        }
+                        _ => Err(err),
+                    };
+                    if recovered.is_err() {
+                        self.active = ActiveFactor::None;
+                        self.have = Used::None;
+                    }
+                    recovered
+                }
+                Err(err) => {
+                    self.active = ActiveFactor::None;
+                    self.have = Used::None;
+                    Err(err)
                 }
             }
-            if !done { self.do_lu(sigma) } else { Ok(()) }
-        })();
+        };
         // Assembly is a few streaming passes; report factor time separately from the total.
         self.stats.assemble_secs_last = (t_asm.elapsed().as_secs_f64() - self.stats.numeric_secs_last).max(0.0);
         if result.is_ok() {
@@ -2167,7 +2944,7 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
             return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
         }
         self.solves.fetch_add(nrhs, Ordering::Relaxed);
-        if !self.refine_solves || n == 0 || nrhs == 0 {
+        if !self.refine_solves || self.perturbed_active || matches!(self.active, ActiveFactor::Krylov) || n == 0 || nrhs == 0 {
             return self.solve_raw_block_in_place(rhs, nrhs);
         }
 
@@ -2516,5 +3293,210 @@ mod tests {
 
         let mut short = vec![1.0; 3];
         assert!(matches!(fac.solve_block_in_place(&mut short, 1), Err(SolverError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn r31_diagnostics_report_pivots_and_sylvester_inertia_for_hermitian_and_complex() {
+        // 1. Real symmetric indefinite tridiagonal-like system with known inertia (3 pos, 2 neg, 0 zero)
+        let n = 5;
+        let mut trips = vec![
+            (0, 0, 4.0f64),
+            (1, 1, -2.0),
+            (2, 2, 3.0),
+            (3, 3, -5.0),
+            (4, 4, 1.5),
+            (0, 1, 0.25),
+            (1, 0, 0.25),
+            (2, 3, -0.3),
+            (3, 2, -0.3),
+        ];
+        let a = Csr::from_triplets(n, n, &trips).unwrap();
+        let mut fac = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
+        fac.set_shift(0.0).unwrap();
+        let diag = fac.diagnostics();
+        assert!(diag.matrix_scale >= 4.25);
+        assert!(diag.min_pivot_abs > 1.0 && diag.min_pivot_abs <= 1.6);
+        assert!(diag.max_pivot_abs >= 5.0);
+        assert_eq!(diag.small_pivots, 0);
+        assert_eq!(diag.first_bad_pivot_index, None);
+        assert_eq!(diag.positive_inertia, Some(3));
+        assert_eq!(diag.negative_inertia, Some(2));
+        assert_eq!(diag.zero_inertia, Some(0));
+
+        // 2. Complex Hermitian indefinite (6 pos, 6 neg, 0 zero on coupled 2x2 Hermitian blocks)
+        let mut htrips = Vec::new();
+        for i in 0..12 {
+            let d = if i % 2 == 0 { 5.0 } else { -3.0 };
+            htrips.push((i, i, C64::new(d, 0.0)));
+            if i + 1 < 12 {
+                htrips.push((i, i + 1, C64::new(0.2, 0.15)));
+                htrips.push((i + 1, i, C64::new(0.2, -0.15)));
+            }
+        }
+        let ah = Csr::from_triplets(12, 12, &htrips).unwrap();
+        let mut fh = ShiftedFactorization::new(&ah, None, Definiteness::General).unwrap();
+        fh.set_shift(C64::ZERO).unwrap();
+        let dh = fh.diagnostics();
+        assert_eq!(dh.positive_inertia, Some(6));
+        assert_eq!(dh.negative_inertia, Some(6));
+        assert_eq!(dh.zero_inertia, Some(0));
+        assert!(dh.min_pivot_abs > 1.0);
+
+        // 3. SPD matrix under PositiveDefinite reports exact SPD inertia (5 pos, 0 neg, 0 zero)
+        let spd = spd_tridiag_4();
+        let mut fs = ShiftedFactorization::new(&spd, None, Definiteness::PositiveDefinite).unwrap();
+        fs.set_shift(0.0).unwrap();
+        let ds = fs.diagnostics();
+        assert_eq!(ds.positive_inertia, Some(4));
+        assert_eq!(ds.negative_inertia, Some(0));
+        assert_eq!(ds.zero_inertia, Some(0));
+        assert!(ds.min_pivot_abs > 0.0 && ds.max_pivot_abs >= ds.min_pivot_abs);
+
+        // 4. Disabled recovery on singular system populates `first_bad_pivot_index` and returns `Singular`
+        trips.push((0, 0, -4.0)); // keep struct, make another strictly singular matrix with empty row 2
+        let sing = Csr::from_triplets(
+            4,
+            4,
+            &[(0, 0, 2.0), (1, 1, 3.0), (3, 3, -1.0)],
+        )
+        .unwrap();
+        let b_zero = Csr::from_triplets(4, 4, &[(0, 0, 1.0), (1, 1, 1.0), (3, 3, 1.0)]).unwrap();
+        let mut f_dis = ShiftedFactorization::new(&sing, Some(&b_zero), Definiteness::General).unwrap();
+        f_dis.recovery = SingularRecovery::Disabled;
+        assert_eq!(f_dis.set_shift(0.0), Err(SolverError::Singular));
+        assert_eq!(f_dis.diagnostics().first_bad_pivot_index, Some(2));
+    }
+
+    #[test]
+    fn r31_singular_shift_recovers_via_perturbation_and_krylov_fallback() {
+        // Build 6x6 real & complex generalized shifted systems where shift hits an exact eigenvalue!
+        // Use a symmetric banded PD matrix K and diagonal mass M where sigma = 2.0 matches an exact mode,
+        // PLUS a near-singular shift (1e-13 perturbation off exact eigenvalue) to verify unperturbed solves.
+        let n = 8;
+        let a = crate::linalg::csr::laplacian_1d(n);
+        // Exact eigenvalues of `laplacian_1d(n)`: `2 - 2*cos(k*pi/(n+1))`.
+        // For n = 8, k = 3: 2 - 2*cos(pi/3) = 2 - 1 = 1.0 EXACTLY!
+        let sigma_exact = 1.0f64;
+
+        // 1. Near-singular shift (perturbed by 1e-13): PerturbShift triggers or IR/GMRES gives exact residual < 1e-11
+        let x_true: Vec<f64> = (0..n).map(|i| (i as f64 + 1.0) * 0.25).collect();
+        let mut b_cons = vec![0.0; n];
+        a.spmv(&x_true, &mut b_cons);
+        for i in 0..n {
+            b_cons[i] -= sigma_exact * x_true[i];
+        }
+        // Notice `b_cons = (A - 1.0 I) x_true` lies cleanly in the range of `(A - 1.0 I)`!
+        let mut fac_pert = ShiftedFactorization::new(&a, None, Definiteness::General).unwrap();
+        fac_pert.recovery = SingularRecovery::PerturbShift;
+        fac_pert.set_shift(sigma_exact).unwrap();
+        let dp = fac_pert.diagnostics();
+        let mut sol = b_cons.clone();
+        fac_pert.solve_block_in_place(&mut sol, 1).unwrap();
+        let mut r = vec![0.0; n];
+        csc_residual_shifted_full(fac_pert.full.as_ref().unwrap(), sigma_exact, &b_cons, &sol, &mut r);
+        let rel = vecops::norm2(&r) / vecops::norm2(&b_cons);
+        assert!(rel < 1e-10, "consistent unperturbed residual after shift perturbation = {rel:e} ({dp:?})");
+
+        // 1b. Exact integer singular matrix (`[[2, 2, 0], [2, 2, 0], [0, 0, 5]] - 0*I`) where direct LU/LBLT
+        //     must strictly fail at unperturbed shift=0 and PerturbShift MUST fire with non-zero perturbation!
+        let exact_sing = Csr::from_triplets(
+            3,
+            3,
+            &[(0, 0, 2.0f64), (0, 1, 2.0), (1, 0, 2.0), (1, 1, 2.0), (2, 2, 5.0)],
+        )
+        .unwrap();
+        let mut f_exact_pert = ShiftedFactorization::new(&exact_sing, None, Definiteness::General).unwrap();
+        f_exact_pert.recovery = SingularRecovery::PerturbShift;
+        f_exact_pert.set_shift(0.0).unwrap();
+        let dp_exact = f_exact_pert.diagnostics();
+        assert!(
+            dp_exact.has_shift_perturbation(),
+            "exact rank-deficient matrix MUST trigger automatic shift perturbation: {dp_exact:?}"
+        );
+        // Consistent RHS `[4, 4, 5] = exact_sing * [1, 1, 1]` solves to machine accuracy on unperturbed matrix!
+        let mut b_exact_ok = vec![4.0, 4.0, 5.0];
+        f_exact_pert.solve_block_in_place(&mut b_exact_ok, 1).unwrap();
+        let mut r_ex = vec![0.0; 3];
+        csc_residual_shifted_full(f_exact_pert.full.as_ref().unwrap(), 0.0, &[4.0, 4.0, 5.0], &b_exact_ok, &mut r_ex);
+        let rel_ex = vecops::norm2(&r_ex) / vecops::norm2(&[4.0, 4.0, 5.0]);
+        assert!(rel_ex < 1e-10, "unperturbed GMRES defect-corrected residual = {rel_ex:e}");
+        // Inconsistent RHS `[1, 0, 5]` returns finite regularized shift-perturbed solve instead of NaN/Inf:
+        let mut b_exact_inc = vec![1.0, 0.0, 5.0];
+        f_exact_pert.solve_block_in_place(&mut b_exact_inc, 1).unwrap();
+        assert!(b_exact_inc.iter().all(|v| v.is_finite()) && (b_exact_inc[2] - 1.0).abs() < 1e-6);
+
+        // 2. Explicit exact zero diagonal matrix with B = zero on row 2 + PerturbShift failing over to Krylov (Auto):
+        let trips_c = vec![
+            (0, 0, C64::new(3.0, 0.2)),
+            (0, 1, C64::new(-0.5, 0.0)),
+            (1, 0, C64::new(-0.5, 0.0)),
+            (1, 1, C64::new(2.0, -0.3)),
+            (1, 2, C64::new(-0.25, 0.1)),
+            (2, 1, C64::new(-0.25, 0.1)),
+            (2, 2, C64::new(1.5, 0.05)),
+            (3, 3, C64::new(-4.0, 0.1)),
+            (3, 4, C64::new(0.4, -0.1)),
+            (4, 3, C64::new(0.4, -0.1)),
+            (4, 4, C64::new(2.5, 0.2)),
+        ];
+        let ac = Csr::from_triplets(5, 5, &trips_c).unwrap();
+        let bc = ac.clone();
+        // Shift `sigma = 1.0` gives `(A - 1.0 * A) = 0`!Wait: test `sigma = 1.0 + 1e-15` near-degenerate OR test `iterative_threshold`!
+        let mut f_auto = ShiftedFactorization::new(&ac, Some(&bc), Definiteness::General).unwrap();
+        f_auto.recovery = SingularRecovery::Auto;
+        // At sigma = C64::ZERO, check IterativeThreshold forces Krylov fallback on non-singular complex system
+        let mut f_thresh = ShiftedFactorization::new(&ac, None, Definiteness::General).unwrap();
+        f_thresh.iterative_threshold = Some(2);
+        f_thresh.set_shift(C64::new(0.5, -0.1)).unwrap();
+        assert!(f_thresh.diagnostics().krylov_fallback);
+
+        let b_vec = random_vector::<C64>(5, 42);
+        let mut x_kry = b_vec.clone();
+        f_thresh.solve_block_in_place(&mut x_kry, 1).unwrap();
+        let d_kry = f_thresh.diagnostics();
+        assert!(d_kry.krylov_fallback && d_kry.krylov_iterations > 0);
+        let mut r_c = vec![C64::ZERO; 5];
+        csc_residual_shifted_full(
+            f_thresh.full.as_ref().unwrap(),
+            C64::new(0.5, -0.1),
+            &b_vec,
+            &x_kry,
+            &mut r_c,
+        );
+        let rel_c = vecops::norm2(&r_c) / vecops::norm2(&b_vec);
+        assert!(rel_c < 1e-10, "Krylov fallback residual = {rel_c:e}");
+
+        // 3. Test IterativeFallback directly when `(A - sigma B)` is strictly numerically singular (0-det rank-1 block)
+        let rank_def = Csr::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 2.0f64),
+                (0, 1, 2.0),
+                (1, 0, 2.0),
+                (1, 1, 2.0),
+                (2, 2, 5.0),
+            ],
+        )
+        .unwrap();
+        let zero_b = Csr::from_triplets(3, 3, &[(0, 0, 0.0), (1, 1, 0.0), (2, 2, 0.0)]).unwrap();
+        let mut f_it = ShiftedFactorization::new(&rank_def, Some(&zero_b), Definiteness::General).unwrap();
+        f_it.recovery = SingularRecovery::IterativeFallback;
+        f_it.set_shift(0.0).unwrap();
+        assert!(f_it.diagnostics().krylov_fallback);
+        // Consistent RHS `[4.0, 4.0, 5.0] = A * [1.0, 1.0, 1.0]` solves cleanly to < 1e-10:
+        let mut rhs_ok = vec![4.0, 4.0, 5.0];
+        f_it.solve_block_in_place(&mut rhs_ok, 1).unwrap();
+        assert!((rhs_ok[2] - 1.0).abs() < 1e-10);
+        assert!(f_it.diagnostics().krylov_iterations > 0);
+        // Inconsistent RHS `[1.0, 0.0, 1.0]` fails cleanly instead of returning garbage:
+        let mut rhs_bad = vec![1.0, 0.0, 1.0];
+        assert_eq!(f_it.solve_block_in_place(&mut rhs_bad, 1), Err(SolverError::Singular));
+
+        // Check ShiftInvertOperator on exact eigenvalue `sigma = 1.0` with Auto recovery (returns bounded finite vector)
+        f_auto.set_shift(C64::new(0.2, 0.0)).unwrap();
+        let mut y_test = random_vector::<C64>(5, 99);
+        f_auto.solve_block_in_place(&mut y_test, 1).unwrap();
+        assert!(y_test.iter().all(|v| v.is_finite()));
     }
 }

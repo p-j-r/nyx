@@ -162,13 +162,10 @@ fn classify_agrees_with_the_boundary_loops() {
             (s >> 11) as f64 / (1u64 << 53) as f64
         };
         let p = [r() * 7.0 - 3.5, 0.0, r() * 7.0 - 3.5];
-        if ev.sdf_bound(p, 1.0) < 1e-3 {
-            continue;
-        }
         n += 1;
         assert_eq!(ev.classify(p), cx.locate([p[0], p[2]]), "at {p:?}");
     }
-    assert!(n > 3000);
+    assert!(n == 4000);
 }
 
 #[test]
@@ -336,4 +333,57 @@ fn route_meander_6000_segments_arranges_and_locates_under_350ms_deterministicall
     let bits_4 = run_child("4");
     assert!(!bits_1.is_empty());
     assert_eq!(bits_1, bits_4, "arrangement outputs differed between NYX_THREADS/RAYON_NUM_THREADS=1 and 4");
+}
+
+#[test]
+fn vertex_clustering_order_independent_and_edge_params_consistent() {
+    let build = |reverse: bool| {
+        let mut m = Model::new_2d();
+        let a = m.rect("a", (0.0, 0.0), (2.0, 1.0));
+        // Right square's bottom-left corner differs by 0.4 * tol (well within union-find merge radius <= tol ~ 3.6e-9).
+        let b = m.rect("b", (2.0 + 1e-9, 0.0), (3.5, 1.0));
+        let c = m.circle("c", (1.2, 0.6), 0.7);
+        let d = m.ellipse("d", (2.2, 0.5), (0.8, 0.35), 25.0);
+        let a_cut = m.difference("a_cut", a, &[c, d]);
+        let b_cut = m.difference("b_cut", b, &[c, d]);
+        let c_cut = m.difference("c_cut", c, &[d]);
+        if reverse {
+            m.overlay(&[("d", d), ("c", c_cut), ("b", b_cut), ("a", a_cut)]);
+        } else {
+            m.overlay(&[("a", a_cut), ("b", b_cut), ("c", c_cut), ("d", d)]);
+        }
+        m.eval(Tier::Complex).unwrap()
+    };
+    let ev0 = build(false);
+    let ev1 = build(true);
+    let (cx0, cx1) = (ev0.complex(), ev1.complex());
+    cx0.check().unwrap();
+    cx1.check().unwrap();
+
+    // Exact curve endpoint consistency against canonical vertex centroids on all edges.
+    for cx in [cx0, cx1] {
+        for (ei, ed) in cx.edges.iter().enumerate() {
+            let c = &cx.curves[ed.curve as usize];
+            let p0 = cx.iv(cx.vertices[ed.v0 as usize].p);
+            let p1 = cx.iv(cx.vertices[ed.v1 as usize].p);
+            let q0 = c.eval(ed.t0);
+            let q1 = c.eval(ed.t1);
+            assert!(
+                (q0[0] - p0[0]).hypot(q0[1] - p0[1]) <= 2.0 * cx.tol,
+                "edge {ei} ({}) t0 disagrees with snapped v0",
+                ed.name
+            );
+            assert!(
+                (q1[0] - p1[0]).hypot(q1[1] - p1[1]) <= 2.0 * cx.tol,
+                "edge {ei} ({}) t1 disagrees with snapped v1",
+                ed.name
+            );
+        }
+    }
+
+    assert_eq!(cx0.vertices.len(), cx1.vertices.len());
+    assert_eq!(cx0.edges.len(), cx1.edges.len());
+    let total0: f64 = cx0.regions.iter().map(|r| r.measure).sum();
+    let total1: f64 = cx1.regions.iter().map(|r| r.measure).sum();
+    assert!((total0 - total1).abs() <= 1e-13);
 }

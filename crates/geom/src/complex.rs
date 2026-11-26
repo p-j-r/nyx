@@ -655,43 +655,68 @@ impl Complex {
         best.map_or(p, |b| self.plane_lift(plane, b.1))
     }
 
-    /// 3D self-checks: every face separates two different sides, volumes are positive, and every region is closed
-    /// (the sum of its outward area vectors vanishes: the lateral faces and the caps balance in x, y and z).
+    /// 3D self-checks: every face separates two different sides, volumes are positive and match the divergence theorem,
+    /// and every region is closed (the sum of its outward area vectors vanishes: planar, lateral, cap and quadric surfaces
+    /// balance in x, y and z).
     fn check3(&self) -> Result<(), String> {
         let ov = self.stack.as_ref().map(|s| &s.overlay);
         let scale = self.regions.iter().map(|r| r.bbox.diagonal()).fold(0.0, f64::max).max(1e-300);
+        let p0 = self.regions.first().map(|r| self.iv(r.bbox.center())).unwrap_or([0.0; 3]);
         let mut flux = vec![[0.0f64; 3]; self.regions.len()];
+        let mut vol_flux = vec![0.0f64; self.regions.len()];
         for f in &self.faces {
             if f.first == f.second && !f.is_sheet() {
                 return Err(format!("face '{}' has the same region on both sides", f.name));
             }
-            let v = match f.geom {
-                FaceGeom::Planar { plane, .. } => mul3(self.planar[plane as usize].n, f.area),
+            let (v, dv) = match f.geom {
+                FaceGeom::Planar { plane, .. } => {
+                    let pd = &self.planar[plane as usize];
+                    (mul3(pd.n, f.area), (pd.d - dot3(pd.n, p0)) * f.area / 3.0)
+                }
                 FaceGeom::Lateral { edge, z0, z1 } => {
                     let ov = ov.expect("a layer stack");
                     let e = &ov.edges[edge as usize];
                     let c = &ov.curves[e.curve as usize];
                     let (a, b) = (c.eval(e.t0), c.eval(e.t1));
-                    [(z1 - z0) * (b[1] - a[1]), -(z1 - z0) * (b[0] - a[0]), 0.0]
+                    let v = [(z1 - z0) * (b[1] - a[1]), -(z1 - z0) * (b[0] - a[0]), 0.0];
+                    let dv = (z1 - z0) * c.green(e.t0, e.t1, [p0[0], p0[1]]) / 3.0;
+                    (v, dv)
                 }
-                FaceGeom::Cap { .. } => [0.0, 0.0, f.area],
-                FaceGeom::Quadric(_) => [0.0; 3],
+                FaceGeom::Cap { z, .. } => ([0.0, 0.0, f.area], (z - p0[2]) * f.area / 3.0),
+                FaceGeom::Quadric(b) => {
+                    let ba = b.area();
+                    if (f.area - ba).abs() > 64.0 * self.tol * scale + 1e-10 * scale * scale {
+                        return Err(format!("quadric face '{}' has area {} but its body has {ba}", f.name, f.area));
+                    }
+                    (b.area_vector(), b.volume_flux(p0))
+                }
             };
             for (r, s) in [(f.first, 1.0), (f.second, -1.0)] {
                 if let Some(r) = r {
                     for k in 0..3 {
                         flux[r as usize][k] += s * v[k];
                     }
+                    vol_flux[r as usize] += s * dv;
                 }
             }
         }
-        for (r, fl) in self.regions.iter().zip(&flux) {
+        for (i, (r, fl)) in self.regions.iter().zip(&flux).enumerate() {
+            if r.measure < 0.0 {
+                return Err(format!("region '{}' has negative volume {}", r.name, r.measure));
+            }
             if r.measure <= 0.0 {
                 continue;
             }
             // vertices are snapped within `tol`, so closure holds to a few tolerances times the model size
             if fl.iter().any(|x| x.abs() > 64.0 * self.tol * scale + 1e-12 * scale * scale) {
                 return Err(format!("region '{}' is not closed: its outward area vectors sum to {fl:?}", r.name));
+            }
+            let dv_err = (vol_flux[i] - r.measure).abs();
+            if dv_err > 128.0 * self.tol * scale * scale + 1e-10 * r.measure.abs() {
+                return Err(format!(
+                    "region '{}' volume {} disagrees with its boundary flux integral {}",
+                    r.name, r.measure, vol_flux[i]
+                ));
             }
         }
         self.check_topology3()

@@ -599,3 +599,80 @@ fn fill_grid_1000_to_1_ratio_via_geom_completes_under_250ms_and_matches_across_t
     assert_eq!(g1.mesh.cells, g8.mesh.cells);
     assert_eq!(g1.mesh.facets, g8.mesh.facets);
 }
+
+#[test]
+fn rhombic_periodic_cell_matches_slanted_and_horizontal_walls() {
+    use femcore::periodic::{match_vertices, nodal_relations};
+    use femcore::props::Periodic;
+    use geom::select::Selector;
+
+    let a = 0.50e-6_f64;
+    let hx = 0.5 * a;
+    let hz = 0.5 * 3.0_f64.sqrt() * a;
+    let check_model = |tag: &str, m: &Model| {
+        for (name, plan) in [
+            ("simple", MeshPlan::simple(0.06 * a)),
+            ("adaptive", MeshPlan::adaptive(0.06 * a, 0.35)),
+        ] {
+            let g = mesh_model(&m.list, &plan).unwrap_or_else(|e| panic!("{tag}/{name}: {e}"));
+            assert!(
+                g.warnings.is_empty(),
+                "{tag}/{name} unexpected warnings: {:?}",
+                g.warnings
+            );
+            let check_pair = |src_sel: &str, dst_sel: &str| {
+                let src = g.select(src_sel).unwrap();
+                let dst = g.select(dst_sel).unwrap();
+                let per = Periodic { source: src, dest: dst, phase: 0.37 };
+                let matched = match_vertices(&g.mesh, &per)
+                    .unwrap_or_else(|e| panic!("{tag}/{name} ({src_sel} -> {dst_sel}): {e}"));
+                let rels = nodal_relations(&g.mesh, 2, 1, &matched, 0.37)
+                    .unwrap_or_else(|e| panic!("{tag}/{name} nodal_relations: {e}"));
+                assert!(!rels.is_empty());
+            };
+            check_pair(
+                "outer & normal([-0.8660254037844386, 0, 0.5], 5)",
+                "outer & normal([0.8660254037844386, 0, -0.5], 5)",
+            );
+            check_pair("outer & plane(z = 0)", &format!("outer & plane(z = {hz:e})"));
+        }
+    };
+
+    // 1. Empty 60-degree rhombic primitive cell (isolates slanted Polygon constraint splitting)
+    let mut m_empty = Model::new_2d();
+    let cell0 = m_empty.polygon("cell", &[(0.0, 0.0), (a, 0.0), (a + hx, hz), (hx, hz)]);
+    m_empty.overlay(&[("cell", cell0)]);
+    m_empty.periodic(
+        "px",
+        Selector::parse("outer & normal([-0.8660254037844386, 0, 0.5], 5)").unwrap(),
+        Selector::parse("outer & normal([0.8660254037844386, 0, -0.5], 5)").unwrap(),
+        (a, 0.0, 0.0),
+    );
+    m_empty.periodic(
+        "pz",
+        Selector::parse("outer & plane(z = 0)").unwrap(),
+        Selector::parse(&format!("outer & plane(z = {hz:e})")).unwrap(),
+        (hx, 0.0, hz),
+    );
+    check_model("empty_rhombus", &m_empty);
+
+    // 2. 60-degree rhombic primitive cell with off-center circular scatterer & fine region sizing
+    let mut m_hole = Model::new_2d();
+    let cell1 = m_hole.polygon("cell", &[(0.0, 0.0), (a, 0.0), (a + hx, hz), (hx, hz)]);
+    let hole = m_hole.circle("hole", (0.58 * a, 0.42 * hz), 0.18 * a);
+    m_hole.overlay(&[("cell", cell1), ("hole", hole)]);
+    m_hole.size("hole_fine", Selector::Region("hole".into()), Some(geom::expr::Expr::Num(0.025 * a)), None, None);
+    m_hole.periodic(
+        "px",
+        Selector::parse("outer & normal([-0.8660254037844386, 0, 0.5], 5)").unwrap(),
+        Selector::parse("outer & normal([0.8660254037844386, 0, -0.5], 5)").unwrap(),
+        (a, 0.0, 0.0),
+    );
+    m_hole.periodic(
+        "pz",
+        Selector::parse("outer & plane(z = 0)").unwrap(),
+        Selector::parse(&format!("outer & plane(z = {hz:e})")).unwrap(),
+        (hx, 0.0, hz),
+    );
+    check_model("scatterer_rhombus", &m_hole);
+}

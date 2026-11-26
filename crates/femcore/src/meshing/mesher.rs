@@ -469,6 +469,43 @@ pub(crate) fn mesh_chains_with_seeds(
             }
         }
     }
+    // Protect slanted/polygonal boundary chains from convex-hull micro-sliver cascades in Ruppert refinement:
+    // on a subdivided slanted straight edge, IEEE-754 rounding (~0.5 ULP) places some interior vertices
+    // slightly inward from neighboring chords, leaving unconstrained convex-hull edges bridging those ~1e-16
+    // exterior pockets (`keep_constraint_edges` does not lock convex-hull edges). Locking flat exterior
+    // hull bridges (`area2 < 1e-6 * longest2` outside all domains) prevents sub-nanometre sliver cascades.
+    for _hull_pass in 0..4 {
+        let mut hull_locks = Vec::new();
+        for e in cdt.undirected_edges() {
+            if !e.is_part_of_convex_hull() || e.is_constraint_edge() {
+                continue;
+            }
+            let [va, vb] = e.vertices();
+            let de = e.as_directed();
+            let adj_face = de.face().as_inner().or_else(|| de.rev().face().as_inner());
+            let Some(f) = adj_face else { continue };
+            let [fa, fb, fc] = f.vertices();
+            let (pa, pb, pc) = (fa.position(), fb.position(), fc.position());
+            let area2 = ((pb.x - pa.x) * (pc.y - pa.y) - (pc.x - pa.x) * (pb.y - pa.y)).abs();
+            let l2 = [
+                (pa.x - pb.x).powi(2) + (pa.y - pb.y).powi(2),
+                (pb.x - pc.x).powi(2) + (pb.y - pc.y).powi(2),
+                (pc.x - pa.x).powi(2) + (pc.y - pa.y).powi(2),
+            ];
+            let longest2 = l2[0].max(l2[1]).max(l2[2]);
+            if area2 < 1e-8 * longest2 {
+                hull_locks.push((va.fix(), vb.fix()));
+            }
+        }
+        if hull_locks.is_empty() {
+            break;
+        }
+        for (a, b) in hull_locks {
+            if cdt.can_add_constraint(a, b) {
+                cdt.add_constraint(a, b);
+            }
+        }
+    }
     let n_init = cdt.num_vertices();
     let max_add = match mp.max_steiner_multiplier {
         Some(mult) => n_init.saturating_mul(mult),

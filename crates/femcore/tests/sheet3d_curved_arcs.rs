@@ -265,3 +265,77 @@ fn z_coarsen_guards_unused_vertices_and_curved_tets_recover_exact_cylinder_volum
     let k_mat = assemble_laplace(&g.mesh, 2, &eps);
     assert!(k_mat.values().iter().all(|v| v.is_finite()));
 }
+
+#[test]
+fn r33_periodic_sheet3d_curved_edges_stay_congruent_between_twins() {
+    use femcore::periodic::match_vertices;
+    use femcore::props::Periodic;
+    use std::collections::{BTreeSet, HashMap};
+
+    let period_z = 200e-6;
+    let mut m = Model::new_3d();
+    let box_bot = m.box_("bot_box", (-120e-6, -120e-6, -0.5 * period_z), (120e-6, 120e-6, 0.0));
+    let box_top = m.box_("top_box", (-120e-6, -120e-6, 0.0), (120e-6, 120e-6, 0.5 * period_z));
+    let cyl_hole = discretized_circle(55e-6, 64, true);
+    let core_disk = discretized_circle(35e-6, 48, true);
+    let pad_box = vec![[-120e-6, -120e-6], [120e-6, -120e-6], [120e-6, 120e-6], [-120e-6, 120e-6]];
+    let p_sheet = m.polygons_with_arcs(
+        "p_sheet",
+        vec![to_expr_ring(&pad_box)],
+        vec![to_expr_ring(&cyl_hole)],
+        500e-9,
+        0.0,
+        50e-9,
+    );
+    let p_core = m.polygons_with_arcs(
+        "p_core",
+        vec![to_expr_ring(&core_disk)],
+        vec![],
+        500e-9,
+        0.0,
+        50e-9,
+    );
+    m.sheet("gnd", p_sheet, 0.0);
+    m.sheet("core", p_core, 0.0);
+    // Extrude a dielectric core cylinder across BOTH Z-layers so `z = -period_z/2` and `z = +period_z/2`
+    // caps both contain curved circular edges that must match identically under periodic translation.
+    let cyl_c = m.circle("cyl_c", (0.0, 0.0), 75e-6);
+    let pillar = m.extrude_along("pillar", geom::model::Axis::Z, cyl_c, -0.5 * period_z, 0.5 * period_z);
+    m.overlay(&[("Bot", box_bot), ("Top", box_top), ("Pillar", pillar)]);
+    let pz_src = Selector::parse(&format!("outer & plane(z = {:e})", -0.5 * period_z)).unwrap();
+    let pz_dst = Selector::parse(&format!("outer & plane(z = {:e})", 0.5 * period_z)).unwrap();
+    m.periodic("pz", pz_src, pz_dst, (0.0, 0.0, period_z));
+
+    let ev = evaluate(&m.list).unwrap();
+    let mut plan = MeshPlan::simple(38e-6);
+    plan.opts.curved = true;
+    let (mut g, _) = mesh_sheet_stack_3d(ev, &plan, None).unwrap();
+    let rep = apply_sheet3d_curved_edges(&mut g);
+    assert!(rep.curved_edges > 0);
+    assert!(rep.min_scaled_jacobian > MIN_SCALED_JACOBIAN);
+
+    let src = g.select(&format!("outer & plane(z = {:e})", -0.5 * period_z)).unwrap();
+    let dst = g.select(&format!("outer & plane(z = {:e})", 0.5 * period_z)).unwrap();
+    let matched = match_vertices(&g.mesh, &Periodic { source: src, dest: dst, phase: 0.0 }).unwrap();
+    let edge_map: HashMap<[u32; 2], [f64; 3]> = g.mesh.edge_node_list().into_iter().collect();
+    let mut src_verts: BTreeSet<u32> = BTreeSet::new();
+    for &f in &matched.src_facets {
+        src_verts.extend(g.mesh.facet(f));
+    }
+    let mut synced_periodic_curved = 0usize;
+    for ([a, b], q_src) in &edge_map {
+        if src_verts.contains(a) && src_verts.contains(b) {
+            let ta = matched.map[a];
+            let tb = matched.map[b];
+            let key_dst = [ta.min(tb), ta.max(tb)];
+            let q_dst = edge_map
+                .get(&key_dst)
+                .unwrap_or_else(|| panic!("periodic dst edge {key_dst:?} missing curved EdgeNode for src ({a}, {b})"));
+            assert!((q_dst[0] - q_src[0]).abs() < 1e-13);
+            assert!((q_dst[1] - q_src[1]).abs() < 1e-13);
+            assert!((q_dst[2] - (q_src[2] + period_z)).abs() < 1e-13);
+            synced_periodic_curved += 1;
+        }
+    }
+    assert!(synced_periodic_curved > 0, "expected curved edges on periodic twin faces z = +/- period_z/2");
+}

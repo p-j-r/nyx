@@ -202,6 +202,39 @@ impl Body {
             _ => 0.0,
         }
     }
+    /// Analytic integral of the outward unit normal over the surface (`\iint_S n dA`) in the internal frame.
+    pub fn area_vector(&self) -> V3 {
+        let pi = std::f64::consts::PI;
+        match *self {
+            Body::Sphere { .. } | Body::Torus { .. } | Body::CylSide { .. } | Body::Cone { .. } => [0.0; 3],
+            Body::Disk { r, up, .. } => [0.0, 0.0, if up { pi * r * r } else { -pi * r * r }],
+            Body::Annulus { r_in, r_out, up, .. } => {
+                let a = pi * (r_out * r_out - r_in * r_in);
+                [0.0, 0.0, if up { a } else { -a }]
+            }
+            Body::ConeSide { r0, r1, flip, .. } => {
+                let az = pi * (r0 * r0 - r1 * r1);
+                [0.0, 0.0, if flip { -az } else { az }]
+            }
+        }
+    }
+    /// Analytic divergence-theorem volume integral `\frac{1}{3} \iint_S (p - p0) \cdot n \, dA` in the internal frame.
+    pub fn volume_flux(&self, p0: V3) -> f64 {
+        let pi = std::f64::consts::PI;
+        let shift = |c: V3| dot3(sub3(c, p0), self.area_vector()) / 3.0;
+        match *self {
+            Body::Sphere { .. } | Body::Torus { .. } | Body::Cone { .. } => self.volume(),
+            Body::CylSide { c, r, h, inward } => {
+                let s = if inward { -1.0 } else { 1.0 };
+                s * (2.0 / 3.0) * pi * r * r * h + shift(c)
+            }
+            Body::Disk { c, .. } | Body::Annulus { c, .. } => shift(c),
+            Body::ConeSide { c, r0, r1, h, flip } => {
+                let s = if flip { -1.0 } else { 1.0 };
+                s * (pi / 3.0) * h * r0 * (r0 + r1) + shift(c)
+            }
+        }
+    }
     pub fn bbox(&self) -> Aabb {
         match self {
             Body::Sphere { c, r } => Aabb::new(sub3(*c, [*r; 3]), add3(*c, [*r; 3])),

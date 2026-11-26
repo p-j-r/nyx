@@ -532,6 +532,7 @@ fn coarsen_2d_once(
     cur: &Level2D,
     pts2: &[V2],
     frozen_v: &[bool],
+    dompierre_rank: &[usize],
     h_target: f64,
     h_max_edge: f64,
     dz_slab: f64,
@@ -595,7 +596,7 @@ fn coarsen_2d_once(
     let rank_of = |w: u32, cp: &[Option<(usize, u8)>]| -> (u8, usize, u8) {
         match cp[w as usize] {
             Some((cid, sub)) => (0, cid, sub),
-            None => (1, w as usize, 0),
+            None => (1, dompierre_rank[w as usize], 0),
         }
     };
 
@@ -1794,7 +1795,14 @@ fn apply_quarter_point_on_meshed_geom(
         .opts
         .quarter_point_xi
         .unwrap_or(crate::meshing::singularity::DEFAULT_QUARTER_POINT_XI);
-    crate::meshing::singularity::apply_quarter_point_nodes(&mut g.mesh, &rim_verts, xi, &curved_rim_edges);
+    let periodic_twins = crate::meshing::curve3::periodic_pairs_from_eval(&g.eval, &g.labels);
+    crate::meshing::singularity::apply_quarter_point_nodes_periodic(
+        &mut g.mesh,
+        &rim_verts,
+        xi,
+        &curved_rim_edges,
+        &periodic_twins,
+    );
     if let Some(crate::mesh::Mesh::D3(ref mut cm)) = g.cells {
         if cm.n_points() == g.mesh.n_points() && cm.types.iter().all(|&t| t == crate::mesh::cells::CellType::Tet) {
             cm.set_edge_nodes(g.mesh.edge_node_list());
@@ -2222,6 +2230,118 @@ fn extrude_overlay_2d_inner(
         })
         .collect();
 
+    // Canonical Dompierre vertex ordering synchronized across 2D horizontal periodic boundary twins
+    // so vertical side-wall quad diagonals agree vertex-for-vertex on paired source/dest boundaries.
+    let dompierre_rank: Vec<usize> = {
+        let mut rank: Vec<usize> = (0..n2).collect();
+        let pairs = ev.periodic_pairs();
+        if !pairs.is_empty() && n2 > 0 {
+            let mut face_to_oes: HashMap<u32, Vec<u32>> = HashMap::new();
+            for (&(oe, _), &fi) in &lat_at {
+                face_to_oes.entry(fi as u32).or_default().push(oe);
+            }
+            let mut oe_verts: HashMap<u32, Vec<u32>> = HashMap::new();
+            for &(a, b, oe) in &bnd_edges2 {
+                oe_verts.entry(oe).or_default().extend([a, b]);
+            }
+            let (mut blo, mut bhi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+            for v in 0..n2 as u32 {
+                let p = pt2(v);
+                blo[0] = blo[0].min(p[0]);
+                blo[1] = blo[1].min(p[1]);
+                bhi[0] = bhi[0].max(p[0]);
+                bhi[1] = bhi[1].max(p[1]);
+            }
+            let xy_ext = (bhi[0] - blo[0]).max(bhi[1] - blo[1]).max(1e-300);
+            let tol2 = 1e-6 * xy_ext;
+            let cell2 = (4.0 * tol2).max(1e-12);
+            let gkey = |p: V2| -> (i64, i64) { ((p[0] / cell2).floor() as i64, (p[1] / cell2).floor() as i64) };
+            let mut direct_parent: Vec<Option<u32>> = vec![None; n2];
+            for pp in pairs {
+                if pp.a.kind != geom::select::EntityKind::Faces
+                    || pp.b.kind != geom::select::EntityKind::Faces
+                    || (pp.translation[0].abs() <= tol2 && pp.translation[1].abs() <= tol2)
+                {
+                    continue;
+                }
+                let mut src_v = std::collections::BTreeSet::new();
+                for &fi in &pp.a.ids {
+                    if let Some(oes) = face_to_oes.get(&fi) {
+                        for oe in oes {
+                            if let Some(vs) = oe_verts.get(oe) {
+                                src_v.extend(vs.iter().copied());
+                            }
+                        }
+                    }
+                }
+                let mut dst_v = std::collections::BTreeSet::new();
+                for &fi in &pp.b.ids {
+                    if let Some(oes) = face_to_oes.get(&fi) {
+                        for oe in oes {
+                            if let Some(vs) = oe_verts.get(oe) {
+                                dst_v.extend(vs.iter().copied());
+                            }
+                        }
+                    }
+                }
+                if src_v.is_empty() || dst_v.is_empty() {
+                    continue;
+                }
+                let mut grid: HashMap<(i64, i64), Vec<u32>> = HashMap::new();
+                for &sv in &src_v {
+                    grid.entry(gkey(pt2(sv))).or_default().push(sv);
+                }
+                let sh = [pp.translation[0], pp.translation[1]];
+                for &dv in &dst_v {
+                    let pd = pt2(dv);
+                    let target = [pd[0] - sh[0], pd[1] - sh[1]];
+                    let kt = gkey(target);
+                    let mut best: Option<(f64, u32)> = None;
+                    for dx in -1..=1 {
+                        for dy in -1..=1 {
+                            if let Some(bucket) = grid.get(&(kt.0 + dx, kt.1 + dy)) {
+                                for &sv in bucket {
+                                    let ps = pt2(sv);
+                                    if (ps[0] - target[0]).abs() <= tol2 && (ps[1] - target[1]).abs() <= tol2 {
+                                        let d = dist2(ps, target);
+                                        if best.is_none_or(|(bd, _)| d < bd) {
+                                            best = Some((d, sv));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let Some((_, sv)) = best {
+                        direct_parent[dv as usize].get_or_insert(sv);
+                    }
+                }
+            }
+            let max_hops = pairs.len().min(6);
+            let mut order: Vec<(u32, u32)> = (0..n2 as u32)
+                .map(|v| {
+                    let mut cur = v;
+                    for _ in 0..max_hops {
+                        if let Some(pv) = direct_parent[cur as usize] {
+                            if pv == cur {
+                                break;
+                            }
+                            cur = pv;
+                        } else {
+                            break;
+                        }
+                    }
+                    (cur, v)
+                })
+                .collect();
+            order.sort_unstable();
+            for (r, &(_, v)) in order.iter().enumerate() {
+                rank[v as usize] = r;
+            }
+        }
+        rank
+    };
+
     if !plan.opts.z_coarsen {
         if let Some(max_cells) = eff_max_cells {
             let mut projected_tets = 0usize;
@@ -2286,7 +2406,7 @@ fn extrude_overlay_2d_inner(
                 }
                 let dom_id = labels.domains[r as usize].id;
                 let mut v = [m2.cell(ti)[0], m2.cell(ti)[1], m2.cell(ti)[2]];
-                v.sort_unstable();
+                v.sort_by_key(|&w| dompierre_rank[w as usize]);
                 let (b0, b1, b2) = (vid(v[0], s), vid(v[1], s), vid(v[2], s));
                 let (t0, t1, t2) = (vid(v[0], s + 1), vid(v[1], s + 1), vid(v[2], s + 1));
                 for mut tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
@@ -2325,7 +2445,7 @@ fn extrude_overlay_2d_inner(
         }
 
         for &(a, b, oe) in &bnd_edges2 {
-            let (a, b) = (a.min(b), a.max(b));
+            let (a, b) = if dompierre_rank[a as usize] <= dompierre_rank[b as usize] { (a, b) } else { (b, a) };
             for (s, &layer_opt) in slab_layer.iter().enumerate().take(nslab) {
                 let Some(k) = layer_opt else { continue };
                 if let Some(&fi) = lat_at.get(&(oe, k)) {
@@ -2374,7 +2494,8 @@ fn extrude_overlay_2d_inner(
         // then extrude structured PML layers in lockstep so PML `edge_nodes` are never overwritten!
         if plan.opts.curved {
             let level_zero = vec![0usize; nz];
-            crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
+            let periodic_twins = crate::meshing::curve3::periodic_pairs_from_eval(&g.eval, &g.labels);
+            crate::meshing::sheet3d_curve::project_sheet3d_curved_edges_periodic(
                 g.eval.complex(),
                 m2,
                 &bnd_edges2,
@@ -2383,6 +2504,7 @@ fn extrude_overlay_2d_inner(
                 &slab_layer,
                 &level_zero,
                 &[],
+                &periodic_twins,
                 &mut g.mesh,
             );
         }
@@ -2602,6 +2724,7 @@ fn extrude_overlay_2d_inner(
             &levels_2d[m],
             &pts2,
             &frozen_v,
+            &dompierre_rank,
             h_target,
             h_layer_max,
             dz_slab,
@@ -2816,7 +2939,7 @@ fn extrude_overlay_2d_inner(
                     continue;
                 }
                 let dom_id = labels.domains[r as usize].id;
-                v.sort_unstable();
+                v.sort_by_key(|&w| dompierre_rank[w as usize]);
                 let (b0, b1, b2) = (vid(v[0], s), vid(v[1], s), vid(v[2], s));
                 let (t0, t1, t2) = (vid(v[0], s + 1), vid(v[1], s + 1), vid(v[2], s + 1));
                 for tet in [[b0, b1, b2, t2], [b0, b1, t1, t2], [b0, t0, t1, t2]] {
@@ -2887,7 +3010,9 @@ fn extrude_overlay_2d_inner(
             if let Some(&fi) = lat_at.get(&(oe, k)) {
                 let (ls, lt) = (level_of_zp[s], level_of_zp[s + 1]);
                 let (p, q, f_plane, c_plane) = if ls == lt {
-                    (a.min(b), a.max(b), s, s + 1)
+                    let (p0, p1) =
+                        if dompierre_rank[a as usize] <= dompierre_rank[b as usize] { (a, b) } else { (b, a) };
+                    (p0, p1, s, s + 1)
                 } else {
                     let (m, fp, cp) = if ls < lt { (ls, s, s + 1) } else { (lt, s + 1, s) };
                     let tr = &transitions[m];
@@ -2944,7 +3069,8 @@ fn extrude_overlay_2d_inner(
                 rank: &tr.rank,
             })
             .collect();
-        crate::meshing::sheet3d_curve::project_sheet3d_curved_edges(
+        let periodic_twins = crate::meshing::curve3::periodic_pairs_from_eval(&g.eval, &g.labels);
+        crate::meshing::sheet3d_curve::project_sheet3d_curved_edges_periodic(
             g.eval.complex(),
             m2,
             &bnd_edges2,
@@ -2953,6 +3079,7 @@ fn extrude_overlay_2d_inner(
             &slab_layer,
             &level_of_zp,
             &transition_refs,
+            &periodic_twins,
             &mut g.mesh,
         );
     }

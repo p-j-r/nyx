@@ -413,3 +413,84 @@ fn morrison_lewis_corner_exponents_and_babuska_grading_floor() {
     let (_, report) = mesh_request(&m.list, &req).unwrap();
     assert_eq!(report.dim, 3);
 }
+
+#[test]
+fn xi_qp_clamping_periodic_qp_twin_sync_and_bernstein_exclusion() {
+    use femcore::meshing::curve3::certify_curved_tet_bernstein;
+    use femcore::meshing::singularity::apply_quarter_point_nodes_periodic;
+    use femcore::periodic::match_vertices;
+    use femcore::props::Periodic;
+    use geom::select::Selector;
+
+    let m = build_sheet_pad_model();
+
+    // 1. Clamping: xi_qp < 0.25 clamps upward to 0.25; xi_qp >= 0.50 clamps to 0.50 (no shift)
+    let mut g_low = mesh_model(&m.list, &MeshPlan::simple(40e-6)).unwrap();
+    let mut slabs = g_low.boundary("pad");
+    slabs.extend(g_low.boundary("gnd"));
+    let rim_low = sheet_rim_vertices(&g_low.mesh, &slabs);
+    let rep_low = apply_quarter_point_nodes(&mut g_low.mesh, &rim_low, 0.10, &BTreeSet::new());
+    assert!(rep_low.shifted_edges > 0);
+    // Exact xi_eff = 0.25 makes Bernstein fail at rim (`det J = 0`) yet Q8 succeeds
+    let first_qp_cell = (0..g_low.mesh.n_cells()).find(|&c| g_low.mesh.cell_is_qp(c)).unwrap();
+    let ct_qp = CurvedTet::new(g_low.mesh.cell_geometry_nodes(first_qp_cell));
+    assert!(!certify_curved_tet_bernstein(&ct_qp, 0.0).0, "QP cell must fail Bernstein at rim");
+    assert!(scaled_jacobian_min_interior_q8(&g_low.mesh, first_qp_cell) > 0.0);
+    let summary_low = CurvedSummary::from_mesh(&g_low.mesh).unwrap();
+    assert!(summary_low.min_scaled_jacobian > 0.0);
+
+    let mut g_high = mesh_model(&m.list, &MeshPlan::simple(40e-6)).unwrap();
+    let rep_high = apply_quarter_point_nodes(&mut g_high.mesh, &rim_low, 0.75, &BTreeSet::new());
+    assert_eq!(rep_high.shifted_edges, 0, "xi_qp >= 0.50 clamps to 0.50 and leaves edges straight");
+    assert!(!g_high.mesh.has_qp());
+
+    // 2. R33 Periodic twin QP synchronization across y = -period/2 <-> y = +period/2
+    let py = 120e-6;
+    let mut pm = Model::new_3d();
+    let si = pm.box_("si", (-100e-6, -0.5 * py, -60e-6), (100e-6, 0.5 * py, 0.0));
+    let vac = pm.box_("vac", (-100e-6, -0.5 * py, 0.0), (100e-6, 0.5 * py, 60e-6));
+    let strip_poly = pm.polygons(
+        "strip_poly",
+        vec![vec![pt2(-25e-6, -0.5 * py), pt2(25e-6, -0.5 * py), pt2(25e-6, 0.5 * py), pt2(-25e-6, 0.5 * py)]],
+        vec![],
+    );
+    pm.sheet("strip", strip_poly, 0.0);
+    pm.overlay(&[("Si", si), ("Vac", vac)]);
+    let s_src = Selector::parse(&format!("outer & plane(y = {:e})", -0.5 * py)).unwrap();
+    let s_dst = Selector::parse(&format!("outer & plane(y = {:e})", 0.5 * py)).unwrap();
+    pm.periodic("py", s_src, s_dst, (0.0, py, 0.0));
+
+    let mut gp = mesh_model(&pm.list, &MeshPlan::simple(35e-6)).unwrap();
+    let plabs = gp.boundary("strip");
+    let prim = sheet_rim_vertices(&gp.mesh, &plabs);
+    let lsrc = gp.select(&format!("outer & plane(y = {:e})", -0.5 * py)).unwrap();
+    let ldst = gp.select(&format!("outer & plane(y = {:e})", 0.5 * py)).unwrap();
+    let matched = match_vertices(&gp.mesh, &Periodic { source: lsrc.clone(), dest: ldst.clone(), phase: 0.0 }).unwrap();
+    let qrep = apply_quarter_point_nodes_periodic(
+        &mut gp.mesh,
+        &prim,
+        0.25,
+        &BTreeSet::new(),
+        &[(lsrc, ldst, [0.0, py, 0.0])],
+    );
+    assert!(qrep.shifted_edges > 0);
+    let qp_set: BTreeSet<[u32; 2]> = gp.mesh.qp_edge_list().into_iter().collect();
+    let en_map: std::collections::BTreeMap<[u32; 2], [f64; 3]> = gp.mesh.edge_node_list().into_iter().collect();
+    let src_v: BTreeSet<u32> = matched.src_facets.iter().flat_map(|&f| gp.mesh.facet(f).iter().copied()).collect();
+    let mut synced = 0usize;
+    for &[a, b] in &qp_set {
+        if src_v.contains(&a) && src_v.contains(&b) {
+            let ta = matched.map[&a];
+            let tb = matched.map[&b];
+            let dst_e = [ta.min(tb), ta.max(tb)];
+            assert!(qp_set.contains(&dst_e), "periodic dst edge {dst_e:?} missing QP flag");
+            let qs = en_map[&[a, b]];
+            let qd = en_map[&dst_e];
+            assert!((qd[0] - qs[0]).abs() < 1e-13);
+            assert!((qd[1] - (qs[1] + py)).abs() < 1e-13);
+            assert!((qd[2] - qs[2]).abs() < 1e-13);
+            synced += 1;
+        }
+    }
+    assert!(synced > 0, "expected periodic twin QP edges on strip walls");
+}

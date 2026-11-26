@@ -331,9 +331,11 @@ pub fn mesh_geom_2d_with_skip(
         .collect();
     let has_skip = skip.iter().any(|&s| s);
 
-    // chains: one per active edge, with the end points of the vertices so that neighbours share them exactly
+    // chains: one per active edge, with the end points of the vertices so that neighbours share them exactly;
+    // periodic twin edges share the finer target size and exact translated sample points so both walls match
+    // vertex for vertex even on slanted boundaries or reversed edge parameterisations.
     let w2 = |p: [f64; 3]| [p[0], p[2]];
-    let mut chains = Vec::with_capacity(ev.edges().len());
+    let mut edge_h: Vec<Option<f64>> = vec![None; ev.edges().len()];
     for (i, ed) in ev.edges().iter().enumerate() {
         if has_skip
             && ![ed.left, ed.right]
@@ -352,11 +354,82 @@ pub fn mesh_geom_2d_with_skip(
         if let Some(x) = edge_rule[i] {
             h = h.min(x);
         }
+        edge_h[i] = Some(h);
+    }
+    let mut periodic_copy: Vec<Option<(usize, [f64; 2])>> = vec![None; ev.edges().len()];
+    for pp in ev.periodic_pairs() {
+        if pp.a.kind != EntityKind::Edges || pp.b.kind != EntityKind::Edges {
+            continue;
+        }
+        let t2 = [pp.translation[0], pp.translation[2]];
+        let mid2 = |ei: u32| -> [f64; 2] {
+            let ed = &ev.edges()[ei as usize];
+            w2(ev.complex().edge_point(ei, 0.5 * (ed.t0 + ed.t1)))
+        };
+        for &eb in &pp.b.ids {
+            let eb_u = eb as usize;
+            if edge_h[eb_u].is_none() || periodic_copy[eb_u].is_some() {
+                continue;
+            }
+            let mb = mid2(eb);
+            let mut best: Option<(f64, usize)> = None;
+            for &ea in &pp.a.ids {
+                let ea_u = ea as usize;
+                if edge_h[ea_u].is_none() {
+                    continue;
+                }
+                let ma = mid2(ea);
+                let d = (mb[0] - (ma[0] + t2[0])).hypot(mb[1] - (ma[1] + t2[1]));
+                if best.is_none_or(|(bd, _)| d < bd) {
+                    best = Some((d, ea_u));
+                }
+            }
+            if let Some((_, ea_u)) = best {
+                if let (Some(ha), Some(hb)) = (edge_h[ea_u], edge_h[eb_u]) {
+                    let h_sync = ha.min(hb);
+                    edge_h[ea_u] = Some(h_sync);
+                    edge_h[eb_u] = Some(h_sync);
+                }
+                periodic_copy[eb_u] = Some((ea_u, t2));
+            }
+        }
+    }
+    let mut chain_pts_by_edge: Vec<Option<Vec<[f64; 2]>>> = vec![None; ev.edges().len()];
+    for (i, _) in ev.edges().iter().enumerate() {
+        if periodic_copy[i].is_some() {
+            continue;
+        }
+        let Some(h) = edge_h[i] else { continue };
+        let ed = &ev.edges()[i];
         let mut pts: Vec<[f64; 2]> =
             ev.discretize_edge(i as u32, DiscretizeOpts { max_dev, max_len: h }).into_iter().map(|(_, p)| w2(p)).collect();
         let last = pts.len() - 1;
         pts[0] = w2(ev.vertices()[ed.v0 as usize].p);
         pts[last] = w2(ev.vertices()[ed.v1 as usize].p);
+        chain_pts_by_edge[i] = Some(pts);
+    }
+    for (i, ed) in ev.edges().iter().enumerate() {
+        let Some((src_e, t2)) = periodic_copy[i] else { continue };
+        let Some(src_pts) = chain_pts_by_edge[src_e].as_ref() else { continue };
+        let p0 = w2(ev.vertices()[ed.v0 as usize].p);
+        let p1 = w2(ev.vertices()[ed.v1 as usize].p);
+        let s0 = [src_pts[0][0] + t2[0], src_pts[0][1] + t2[1]];
+        let s1 = [src_pts[src_pts.len() - 1][0] + t2[0], src_pts[src_pts.len() - 1][1] + t2[1]];
+        let rev = (p0[0] - s1[0]).hypot(p0[1] - s1[1]) + (p1[0] - s0[0]).hypot(p1[1] - s0[1])
+            < (p0[0] - s0[0]).hypot(p0[1] - s0[1]) + (p1[0] - s1[0]).hypot(p1[1] - s1[1]);
+        let mut pts: Vec<[f64; 2]> = if rev {
+            src_pts.iter().rev().map(|p| [p[0] + t2[0], p[1] + t2[1]]).collect()
+        } else {
+            src_pts.iter().map(|p| [p[0] + t2[0], p[1] + t2[1]]).collect()
+        };
+        let last = pts.len() - 1;
+        pts[0] = p0;
+        pts[last] = p1;
+        chain_pts_by_edge[i] = Some(pts);
+    }
+    let mut chains = Vec::with_capacity(ev.edges().len());
+    for (i, ed) in ev.edges().iter().enumerate() {
+        let Some(pts) = chain_pts_by_edge[i].take() else { continue };
         let label = labels.label_of_edge(i as u32).ok_or_else(|| format!("edge '{}' has no boundary label", ed.name))?;
         chains.push(Chain { pts, label, part: i });
     }

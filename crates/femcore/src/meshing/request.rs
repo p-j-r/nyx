@@ -490,7 +490,7 @@ pub(crate) fn summarise_native_mesh(
                                 mixed_cell_scaled_jacobian_min(cm, &md, c)
                             }
                         } else if cm.types[c] == CellType::Tet {
-                            // Exact parity with `curve3::scaled_jacobian_min` (`det J / det_straight` on 10 nodes + q6)
+                            // Exact parity with `curve3::scaled_jacobian_min_tet` (Bernstein certificate)
                             let vs = cm.cell(c);
                             let v = [
                                 cm.points[vs[0] as usize],
@@ -507,28 +507,7 @@ pub(crate) fn summarise_native_mesh(
                                 }
                             }
                             let ct = crate::fem::CurvedTet::new(x);
-                            let det_s = crate::fem::CurvedTet::straight(v).jacobian(&[0.25; 4]).1;
-                            if det_s == 0.0 || !det_s.is_finite() {
-                                1.0
-                            } else {
-                                let rule = crate::fem::quad_rule_collapsed(6);
-                                let mut m_min = f64::INFINITY;
-                                for l in &rule.lam {
-                                    m_min = m_min.min(ct.jacobian(&[l[0], l[1], l[2], l[3]]).1 / det_s);
-                                }
-                                for (i, j) in TET_E {
-                                    let mut l = [0.0; 4];
-                                    l[i] = 0.5;
-                                    l[j] = 0.5;
-                                    m_min = m_min.min(ct.jacobian(&l).1 / det_s);
-                                }
-                                for i in 0..4 {
-                                    let mut l = [0.0; 4];
-                                    l[i] = 1.0;
-                                    m_min = m_min.min(ct.jacobian(&l).1 / det_s);
-                                }
-                                m_min
-                            }
+                            crate::meshing::curve3::scaled_jacobian_min_tet(&ct)
                         } else {
                             mixed_cell_scaled_jacobian_min(cm, &md, c)
                         }

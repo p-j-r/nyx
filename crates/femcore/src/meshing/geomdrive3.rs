@@ -16,6 +16,8 @@ use crate::mesh::SimplexMesh;
 use crate::meshing::curve3::curve_boundary_edges;
 use crate::meshing::geomdrive::{GeomMeshOpts, MeshedGeom};
 use crate::meshing::mesher3d::{mesh_3d, Domain3, PeriodicAxis3, Report3d, Spec3d};
+use geom::complex::{EdgeGeom, FaceGeom};
+use geom::curve::Curve;
 use geom::eval::Evaluated;
 use geom::labels::LabelMap;
 use geom::model::RegionKind;
@@ -215,6 +217,96 @@ impl<'a> GeomDomain3<'a> {
         let q = self.ev.complex().facet_project(i as u32, p);
         ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + (q[2] - p[2]).powi(2)).sqrt()
     }
+
+    fn dist3(a: [f64; 3], b: [f64; 3]) -> f64 {
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    }
+
+    /// Projects an edge lying along a curved B-Rep crease (circular/elliptic `Edge3` or smooth curved
+    /// face-intersection curve `S_i ∩ S_j`, including curved-face/cap rims and curved/periodic seams).
+    /// Returns `None` for non-crease edges, straight creases, and unprojectable sharp corners.
+    fn curved_crease_projection(&self, mid: [f64; 3], pa: [f64; 3], pb: [f64; 3]) -> Option<[f64; 3]> {
+        let len = Self::dist3(pa, pb);
+        if len <= 0.0 {
+            return None;
+        }
+        let tol = 1e-6 * len;
+        let cx = self.ev.complex();
+
+        // 1. Exact curved 3D crease edges in `cx.edges3` (`Circle`, or `Horizontal` sweeping `Circle`/`Ellipse`)
+        for (ei, e) in cx.edges3.iter().enumerate() {
+            let is_curved_edge3 = match e.geom {
+                EdgeGeom::Circle { .. } => true,
+                EdgeGeom::Horizontal { edge, .. } => cx.stack.as_ref().is_some_and(|st| {
+                    matches!(
+                        st.overlay.curves[st.overlay.edges[edge as usize].curve as usize],
+                        Curve::Circle { .. } | Curve::Ellipse { .. }
+                    )
+                }),
+                EdgeGeom::Vertical { .. } | EdgeGeom::Segment { .. } => false,
+            };
+            let bb = e.bbox.pad(tol);
+            let in_box = |p: [f64; 3]| {
+                p[0] >= bb.lo[0]
+                    && p[0] <= bb.hi[0]
+                    && p[1] >= bb.lo[1]
+                    && p[1] <= bb.hi[1]
+                    && p[2] >= bb.lo[2]
+                    && p[2] <= bb.hi[2]
+            };
+            if !(in_box(pa) && in_box(pb)) {
+                continue;
+            }
+            let qa = cx.edge3_closest(ei as u32, pa).0;
+            let qb = cx.edge3_closest(ei as u32, pb).0;
+            if Self::dist3(qa, pa) <= tol && Self::dist3(qb, pb) <= tol {
+                if is_curved_edge3 {
+                    let qm = cx.edge3_closest(ei as u32, mid).0;
+                    if qm.iter().all(|x| x.is_finite()) && Self::dist3(qm, mid) < 0.25 * len {
+                        return Some(qm);
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+
+        // 2. Smooth multi-face curved crease fallback (e.g. curved Quadric/Lateral intersecting another curved or planar face)
+        let mut incident: Vec<usize> = Vec::new();
+        for i in 0..self.sides.len() {
+            if self.face_distance(i, pa, tol) <= tol && self.face_distance(i, pb, tol) <= tol {
+                incident.push(i);
+            }
+        }
+        if incident.len() < 2 {
+            return None;
+        }
+        let has_curved = incident.iter().any(|&fi| {
+            matches!(cx.faces[fi].geom, FaceGeom::Quadric(_) | FaceGeom::Lateral { .. })
+                && cx.facet_kind(fi as u32) != "plane"
+        });
+        if !has_curved {
+            return None;
+        }
+        let mut q = mid;
+        for _ in 0..24 {
+            let prev = q;
+            for &fi in &incident {
+                q = cx.facet_project(fi as u32, q);
+            }
+            if Self::dist3(q, prev) <= 1e-12 * len {
+                break;
+            }
+        }
+        if q.iter().all(|x| x.is_finite())
+            && Self::dist3(q, mid) < 0.25 * len
+            && incident.iter().all(|&fi| self.face_distance(fi, q, tol) <= tol)
+        {
+            Some(q)
+        } else {
+            None
+        }
+    }
 }
 
 impl Domain3 for GeomDomain3<'_> {
@@ -258,7 +350,10 @@ impl Domain3 for GeomDomain3<'_> {
         best.1.map_or(1, |i| self.face_label[i])
     }
     fn project_edge(&self, mid: [f64; 3], pa: [f64; 3], pb: [f64; 3]) -> Option<[f64; 3]> {
-        let len = ((pb[0] - pa[0]).powi(2) + (pb[1] - pa[1]).powi(2) + (pb[2] - pa[2]).powi(2)).sqrt();
+        if let Some(q) = self.curved_crease_projection(mid, pa, pb) {
+            return Some(q);
+        }
+        let len = Self::dist3(pa, pb);
         let tol = 1e-6 * len;
         let cx = self.ev.complex();
         for i in 0..self.sides.len() {
@@ -290,11 +385,14 @@ impl Domain3 for GeomDomain3<'_> {
         best
     }
     fn edge_on_crease(&self, pa: [f64; 3], pb: [f64; 3]) -> bool {
-        let len = ((pb[0] - pa[0]).powi(2) + (pb[1] - pa[1]).powi(2) + (pb[2] - pa[2]).powi(2)).sqrt();
+        let len = Self::dist3(pa, pb);
         let tol = 1e-6 * len;
         let cx = self.ev.complex();
         let mid = [(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0, (pa[2] + pb[2]) / 2.0];
-        // the faces that both ends lie on; they are a crease when they put the midpoint in different places
+        if self.curved_crease_projection(mid, pa, pb).is_some() {
+            return false;
+        }
+        // Only treat straight/unprojectable surface seams as non-curved creases when incident faces disagree
         let mut first: Option<[f64; 3]> = None;
         for i in 0..self.sides.len() {
             if self.face_distance(i, pa, tol) <= tol && self.face_distance(i, pb, tol) <= tol {
@@ -302,7 +400,7 @@ impl Domain3 for GeomDomain3<'_> {
                 match first {
                     None => first = Some(q),
                     Some(f) => {
-                        if ((q[0] - f[0]).powi(2) + (q[1] - f[1]).powi(2) + (q[2] - f[2]).powi(2)).sqrt() > tol {
+                        if Self::dist3(q, f) > tol {
                             return true;
                         }
                     }

@@ -20,9 +20,9 @@
 //!    Jacobian positivity (`det(J) * det_straight > 0`) at all 216 Gauss points of `quad_rule_collapsed(8)`.
 
 use crate::mesh::SimplexMesh;
-use crate::meshing::curve3::scaled_jacobian_min_interior_q8;
+use crate::meshing::curve3::{periodic_edge_parent_map, scaled_jacobian_min_interior_q8};
 use geom::complex::{Complex, FaceGeom};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::f64::consts::{PI, TAU};
 
 /// Default Barsoum quarter-point parameter (`0.25` from the singular rim vertex).
@@ -473,13 +473,26 @@ pub fn apply_quarter_point_nodes(
     xi_qp: f64,
     curved_rim_edges: &BTreeSet<[u32; 2]>,
 ) -> QuarterPointReport {
+    apply_quarter_point_nodes_periodic(mesh, rim_verts, xi_qp, curved_rim_edges, &[])
+}
+
+/// Periodic-aware [`apply_quarter_point_nodes`], synchronizing quarter-point parameter clamping,
+/// mid-edge positions (`q_child = q_parent + shift`), and Q8 validation unshifts across all 3D periodic
+/// boundary pairs `(src_labels, dst_labels, shift)` (R33).
+pub fn apply_quarter_point_nodes_periodic(
+    mesh: &mut SimplexMesh,
+    rim_verts: &[bool],
+    xi_qp: f64,
+    curved_rim_edges: &BTreeSet<[u32; 2]>,
+    periodic: &[(Vec<i32>, Vec<i32>, [f64; 3])],
+) -> QuarterPointReport {
     let mut report = QuarterPointReport::default();
     if mesh.dim != 3 || rim_verts.len() != mesh.n_points() {
         return report;
     }
-    let xi_base = if xi_qp.is_finite() { xi_qp.clamp(0.25, 0.5) } else { DEFAULT_QUARTER_POINT_XI };
+    let xi_base = if xi_qp.is_finite() { xi_qp.clamp(0.25, 0.50) } else { DEFAULT_QUARTER_POINT_XI };
     report.rim_vertices = rim_verts.iter().filter(|&&r| r).count();
-    if report.rim_vertices == 0 || (xi_base - 0.5).abs() <= 1e-12 {
+    if report.rim_vertices == 0 || (xi_base - 0.50).abs() <= 1e-12 {
         mesh.set_qp_edges(&[]);
         return report;
     }
@@ -530,13 +543,49 @@ pub fn apply_quarter_point_nodes(
     // For each rim vertex touching a curved rim, also find the shortest transverse edge / altitude `h_y_min`
     // in cells sharing that curved rim so the sagitta guard `4 * xi - 1 > 2 * delta / h_y + 0.05` holds for the cell
     let mut min_transverse_h = vec![f64::INFINITY; nv];
+    let mut candidate_qp_keys: Vec<[u32; 2]> = Vec::new();
     for &(a, b) in mesh.edges() {
         let (ua, ub) = (a as usize, b as usize);
         if rim_verts[ua] ^ rim_verts[ub] {
+            let key = [a.min(b), a.max(b)];
+            candidate_qp_keys.push(key);
             let v_rim = if rim_verts[ua] { ua } else { ub };
             let len = dist3(pt(ua), pt(ub));
             if len > 1e-30 {
                 min_transverse_h[v_rim] = min_transverse_h[v_rim].min(len);
+            }
+        }
+    }
+
+    type TwinChildrenMap = HashMap<[u32; 2], Vec<([u32; 2], [f64; 3])>>;
+    // Build periodic twin correspondence across vertices & candidate QP edges
+    let (v_parent, periodic_edge_parent) = periodic_edge_parent_map(mesh, &candidate_qp_keys, periodic);
+    let mut twin_children: TwinChildrenMap = HashMap::new();
+    for (&ce, &(pe, shift)) in &periodic_edge_parent {
+        twin_children.entry(pe).or_default().push((ce, shift));
+    }
+    if !periodic.is_empty() {
+        for v in 0..nv {
+            if let Some((pv, _)) = v_parent[v] {
+                let pvi = pv as usize;
+                let any_curv = touches_curved_rim[v] || touches_curved_rim[pvi];
+                touches_curved_rim[v] = any_curv;
+                touches_curved_rim[pvi] = any_curv;
+                let sag = max_rim_sagitta[v].max(max_rim_sagitta[pvi]);
+                max_rim_sagitta[v] = sag;
+                max_rim_sagitta[pvi] = sag;
+                let mh = min_transverse_h[v].min(min_transverse_h[pvi]);
+                min_transverse_h[v] = mh;
+                min_transverse_h[pvi] = mh;
+            }
+        }
+        // Re-propagate canonical parent values back to all children in each equivalence class
+        for v in 0..nv {
+            if let Some((pv, _)) = v_parent[v] {
+                let pvi = pv as usize;
+                touches_curved_rim[v] = touches_curved_rim[pvi];
+                max_rim_sagitta[v] = max_rim_sagitta[pvi];
+                min_transverse_h[v] = min_transverse_h[pvi];
             }
         }
     }
@@ -566,10 +615,11 @@ pub fn apply_quarter_point_nodes(
                 continue;
             }
             if xi_eff < xi_min {
-                xi_eff = xi_min;
+                xi_eff = xi_min.clamp(0.25, 0.50);
                 clamped_set.insert(key);
             }
         }
+        let xi_eff = xi_eff.clamp(0.25, 0.50);
         let qpt = [
             (1.0 - xi_eff) * p_rim[0] + xi_eff * p_other[0],
             (1.0 - xi_eff) * p_rim[1] + xi_eff * p_other[1],
@@ -577,6 +627,28 @@ pub fn apply_quarter_point_nodes(
         ];
         edge_map.insert(key, qpt);
         qp_edges.insert(key);
+    }
+
+    // Keep periodic QP twins congruent: child shifted if parent is, with `q_child = q_parent + shift`
+    if !periodic_edge_parent.is_empty() {
+        for (&ce, &(pe, shift)) in &periodic_edge_parent {
+            if let Some(&pq) = edge_map.get(&pe).filter(|_| qp_edges.contains(&pe)) {
+                if qp_edges.contains(&ce) {
+                    edge_map.insert(ce, [pq[0] + shift[0], pq[1] + shift[1], pq[2] + shift[2]]);
+                    if clamped_set.contains(&pe) {
+                        clamped_set.insert(ce);
+                    }
+                } else {
+                    // Only shift symmetrically when both twins agree
+                    edge_map.remove(&pe);
+                    qp_edges.remove(&pe);
+                    clamped_set.remove(&pe);
+                }
+            } else if qp_edges.remove(&ce) {
+                edge_map.remove(&ce);
+                clamped_set.remove(&ce);
+            }
+        }
     }
 
     if qp_edges.is_empty() {
@@ -592,11 +664,11 @@ pub fn apply_quarter_point_nodes(
     };
     sync_mesh(mesh, &edge_map, &qp_edges);
 
-    // Validate strict interior positivity `det(J) * det_straight > 0.0` at all 216 Gauss points of `quad_rule_collapsed(8)`
+    // Exclude QP cells from Bernstein positivity (`det J = 0` at singular rim); validate strictly via interior Q8
     for _pass in 0..4 {
         let mut bad_edges: BTreeSet<[u32; 2]> = BTreeSet::new();
         for c in 0..mesh.n_cells() {
-            if !mesh.cell_is_curved(c) {
+            if !mesh.cell_is_qp(c) {
                 continue;
             }
             let min_q8 = scaled_jacobian_min_interior_q8(mesh, c);
@@ -615,11 +687,22 @@ pub fn apply_quarter_point_nodes(
         if bad_edges.is_empty() {
             break;
         }
+        let seeds: Vec<[u32; 2]> = bad_edges.iter().copied().collect();
+        for k in seeds {
+            let root = periodic_edge_parent.get(&k).map_or(k, |&(pe, _)| pe);
+            bad_edges.insert(root);
+            if let Some(children) = twin_children.get(&root) {
+                for &(ce, _) in children {
+                    bad_edges.insert(ce);
+                }
+            }
+        }
         for k in &bad_edges {
-            edge_map.remove(k);
-            qp_edges.remove(k);
-            clamped_set.remove(k);
-            report.unshifted_edges += 1;
+            if qp_edges.remove(k) {
+                edge_map.remove(k);
+                clamped_set.remove(k);
+                report.unshifted_edges += 1;
+            }
         }
         sync_mesh(mesh, &edge_map, &qp_edges);
         if qp_edges.is_empty() {

@@ -166,94 +166,71 @@ impl AabbBvh2 {
         self.nodes.is_empty()
     }
 
-    /// Visits all item indices whose 2D AABB (padded by `pad`) contains `p`.
     #[inline]
-    pub fn query_point(&self, p: V2, pad: f64, mut visit: impl FnMut(u32)) {
+    fn traverse(&self, mut matches: impl FnMut(&Bbox2) -> bool, mut visit: impl FnMut(u32)) {
         if self.nodes.is_empty() {
             return;
         }
-        let mut stack = [0u32; 64];
+        let mut inline_stack = [0u32; 64];
         let mut sp = 1usize;
-        while sp > 0 {
-            sp -= 1;
-            let node = &self.nodes[stack[sp] as usize];
-            if !node.bbox.contains_point(p, pad) {
+        let mut spill: Vec<u32> = Vec::new();
+        let mut spilled = false;
+        loop {
+            let idx = if spilled {
+                let Some(v) = spill.pop() else { break };
+                v
+            } else {
+                if sp == 0 {
+                    break;
+                }
+                sp -= 1;
+                inline_stack[sp]
+            };
+            let node = &self.nodes[idx as usize];
+            if !matches(&node.bbox) {
                 continue;
             }
             if node.count > 0 {
                 let start = node.left_or_start as usize;
                 let end = start + node.count as usize;
                 for &id in &self.items[start..end] {
-                    if self.item_boxes[id as usize].contains_point(p, pad) {
+                    if matches(&self.item_boxes[id as usize]) {
                         visit(id);
                     }
                 }
-            } else {
-                stack[sp] = node.right;
-                stack[sp + 1] = node.left_or_start;
+            } else if spilled {
+                spill.push(node.right);
+                spill.push(node.left_or_start);
+            } else if sp + 2 <= inline_stack.len() {
+                inline_stack[sp] = node.right;
+                inline_stack[sp + 1] = node.left_or_start;
                 sp += 2;
+            } else {
+                spill.reserve(sp + 32);
+                spill.extend_from_slice(&inline_stack[..sp]);
+                spill.push(node.right);
+                spill.push(node.left_or_start);
+                spilled = true;
             }
         }
+    }
+
+    /// Visits all item indices whose 2D AABB (padded by `pad`) contains `p`.
+    #[inline]
+    pub fn query_point(&self, p: V2, pad: f64, visit: impl FnMut(u32)) {
+        self.traverse(|bb| bb.contains_point(p, pad), visit);
     }
 
     /// Visits all item indices whose 2D AABB overlaps `target` within `pad`.
     #[inline]
-    pub fn query_box(&self, target: &Bbox2, pad: f64, mut visit: impl FnMut(u32)) {
-        if self.nodes.is_empty() {
-            return;
-        }
-        let mut stack = [0u32; 64];
-        let mut sp = 1usize;
-        while sp > 0 {
-            sp -= 1;
-            let node = &self.nodes[stack[sp] as usize];
-            if !node.bbox.overlaps(target, pad) {
-                continue;
-            }
-            if node.count > 0 {
-                let start = node.left_or_start as usize;
-                let end = start + node.count as usize;
-                for &id in &self.items[start..end] {
-                    if self.item_boxes[id as usize].overlaps(target, pad) {
-                        visit(id);
-                    }
-                }
-            } else {
-                stack[sp] = node.right;
-                stack[sp + 1] = node.left_or_start;
-                sp += 2;
-            }
-        }
+    pub fn query_box(&self, target: &Bbox2, pad: f64, visit: impl FnMut(u32)) {
+        self.traverse(|bb| bb.overlaps(target, pad), visit);
     }
 
     /// Visits all item indices whose 2D AABB overlaps the horizontal ray `[p[0], +inf) x {p[1]}` within `pad`.
     #[inline]
-    pub fn query_ray_x(&self, p: V2, pad: f64, mut visit: impl FnMut(u32)) {
-        if self.nodes.is_empty() {
-            return;
-        }
-        let mut stack = [0u32; 64];
-        let mut sp = 1usize;
-        while sp > 0 {
-            sp -= 1;
-            let node = &self.nodes[stack[sp] as usize];
-            if !node.bbox.overlaps_ray_x(p, pad) {
-                continue;
-            }
-            if node.count > 0 {
-                let start = node.left_or_start as usize;
-                let end = start + node.count as usize;
-                for &id in &self.items[start..end] {
-                    if self.item_boxes[id as usize].overlaps_ray_x(p, pad) {
-                        visit(id);
-                    }
-                }
-            } else {
-                stack[sp] = node.right;
-                stack[sp + 1] = node.left_or_start;
-                sp += 2;
-            }
-        }
+    pub fn query_ray_x(&self, p: V2, pad: f64, visit: impl FnMut(u32)) {
+        self.traverse(|bb| bb.overlaps_ray_x(p, pad), visit);
     }
 }
 

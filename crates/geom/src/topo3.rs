@@ -220,70 +220,411 @@ impl Complex {
         }
     }
 
-    /// Topology checks of a 3D complex: every edge is shared by at least two distinct faces, and the edges around every face add up to
-    /// its boundary (lateral: top and bottom plus the two verticals; cap: its cell's loops).
+    /// Topology checks of a 3D complex: every edge is shared by at least two distinct faces (except free rims of open sheets),
+    /// the edges around every face form closed directed boundary loops matching its exact perimeter, and every non-sheet
+    /// shell around an edge pairs half-edges in opposite directions (2-manifold per shell).
     pub(crate) fn check_topology3(&self) -> Result<(), String> {
         let scale = self.regions.iter().map(|r| r.bbox.diagonal()).fold(0.0, f64::max).max(1e-300);
-        if self.stack.is_none() {
-            let mut sum = vec![0.0f64; self.faces.len()];
-            for e in &self.edges3 {
+        let tol_s = 32.0 * self.tol + 1e-10 * scale;
+        // Map (face_idx) -> list of directed half-edges (edge3_idx, fwd_on_face)
+        let mut face_half_edges: Vec<Vec<(u32, bool)>> = vec![vec![]; self.faces.len()];
+        let mut sum = vec![0.0f64; self.faces.len()];
+        // Map (edge3_idx, face_idx) -> orientation on that face
+        let mut edge_face_dir: Vec<Vec<(u32, i8)>> = vec![vec![]; self.edges3.len()];
+
+        for (ei, e) in self.edges3.iter().enumerate() {
+            if e.length.is_nan() || e.length <= 0.0 {
+                return Err(format!("edge '{}' has invalid length {}", e.name, e.length));
+            }
+            if (e.v0 as usize) >= self.vertices.len() || (e.v1 as usize) >= self.vertices.len() {
+                return Err(format!("edge '{}' references out-of-range vertex ({}, {})", e.name, e.v0, e.v1));
+            }
+            if norm3(sub3(self.vertices[e.v0 as usize].p, self.edge3_point(ei as u32, 0.0))) > tol_s
+                || norm3(sub3(self.vertices[e.v1 as usize].p, self.edge3_point(ei as u32, 1.0))) > tol_s
+            {
+                return Err(format!("edge '{}' endpoints disagree with its vertex coordinates", e.name));
+            }
+            if matches!(e.geom, EdgeGeom::Circle { .. }) && e.v0 != e.v1 {
+                return Err(format!("circle edge '{}' must start and end at its seam vertex", e.name));
+            }
+            if e.faces.windows(2).any(|w| w[0] == w[1]) || {
+                let mut sorted = e.faces.clone();
+                sorted.sort_unstable();
+                sorted.windows(2).any(|w| w[0] == w[1])
+            } {
+                return Err(format!("edge '{}' lists a face more than once", e.name));
+            }
+            if self.stack.is_none() {
                 if e.faces.len() < 2 {
                     return Err(format!("edge '{}' is used by a single face", e.name));
                 }
-                e.faces.iter().for_each(|&f| sum[f as usize] += e.length);
-            }
-            for (i, f) in self.faces.iter().enumerate() {
-                let FaceGeom::Planar { plane, cell } = f.geom else { continue };
-                let cx = &self.planar[plane as usize].cx;
-                let want: f64 = cx.regions[cell as usize]
-                    .loops
-                    .iter()
-                    .flat_map(|&l| cx.loops[l as usize].edges.iter())
-                    .map(|&(e, _)| cx.edges[e as usize].length)
-                    .sum();
-                if (sum[i] - want).abs() > 32.0 * self.tol + 1e-10 * scale {
-                    return Err(format!(
-                        "the edges around face '{}' have length {} but its boundary has {want}",
-                        f.name, sum[i]
-                    ));
-                }
-            }
-            return Ok(());
-        }
-        let st = self.stack.as_ref().ok_or("no layer stack")?;
-        let ov = &st.overlay;
-        let scale = self.regions.iter().map(|r| r.bbox.diagonal()).fold(0.0, f64::max).max(1e-300);
-        let mut sum = vec![0.0f64; self.faces.len()];
-        for e in &self.edges3 {
-            if e.faces.len() < 2 && !(e.faces.len() == 1 && self.faces[e.faces[0] as usize].is_sheet()) {
+            } else if e.faces.len() < 2 && !(e.faces.len() == 1 && self.faces[e.faces[0] as usize].is_sheet()) {
                 return Err(format!("edge '{}' is used by a single face", e.name));
             }
             for &f in &e.faces {
                 sum[f as usize] += e.length;
             }
         }
+
+        if self.stack.is_none() {
+            let mut planar_segs: Vec<Vec<(V3, V3, V3, f64)>> = vec![vec![]; self.faces.len()];
+            for (fi, f) in self.faces.iter().enumerate() {
+                let FaceGeom::Planar { plane, cell } = f.geom else {
+                    return Err(format!("face '{}' is non-planar without a layer stack", f.name));
+                };
+                let pd = &self.planar[plane as usize];
+                let lift = |q: V2| add3(pd.o, add3(mul3(pd.u, q[0]), mul3(pd.v, q[1])));
+                for &li in &pd.cx.regions[cell as usize].loops {
+                    for &(e2, fwd2) in &pd.cx.loops[li as usize].edges {
+                        let ed = &pd.cx.edges[e2 as usize];
+                        let c = &pd.cx.curves[ed.curve as usize];
+                        let (q0, q1) =
+                            if fwd2 { (c.eval(ed.t0), c.eval(ed.t1)) } else { (c.eval(ed.t1), c.eval(ed.t0)) };
+                        let (p0, p1) = (lift(q0), lift(q1));
+                        let d = sub3(p1, p0);
+                        let len = norm3(d);
+                        if len > 0.0 {
+                            planar_segs[fi].push((p0, mul3(d, 1.0 / len), p1, len));
+                        }
+                    }
+                }
+            }
+            for (ei, e) in self.edges3.iter().enumerate() {
+                let EdgeGeom::Segment { a, b } = e.geom else {
+                    return Err(format!("edge '{}' is not a segment in a polyhedral complex", e.name));
+                };
+                let de = unit3(sub3(b, a));
+                let mid = mul3(add3(a, b), 0.5);
+                for &fi in &e.faces {
+                    let mut matched: Option<bool> = None;
+                    for &(p0, dir2, _, len2) in &planar_segs[fi as usize] {
+                        let rel = sub3(mid, p0);
+                        let t = dot3(rel, dir2);
+                        if t < -tol_s || t > len2 + tol_s {
+                            continue;
+                        }
+                        let perp = norm3(sub3(rel, mul3(dir2, t)));
+                        let par = dot3(de, dir2);
+                        if perp <= tol_s && par.abs() > 1.0 - 1e-5 {
+                            if matched.is_some() {
+                                return Err(format!(
+                                    "edge '{}' matches multiple boundary edges on face '{}'",
+                                    e.name, self.faces[fi as usize].name
+                                ));
+                            }
+                            matched = Some(par > 0.0);
+                        }
+                    }
+                    let Some(fwd) = matched else {
+                        return Err(format!(
+                            "edge '{}' does not lie on a boundary edge of face '{}'",
+                            e.name, self.faces[fi as usize].name
+                        ));
+                    };
+                    face_half_edges[fi as usize].push((ei as u32, fwd));
+                    edge_face_dir[ei].push((fi, if fwd { 1 } else { -1 }));
+                }
+            }
+        } else {
+            let st = self.stack.as_ref().ok_or("no layer stack")?;
+            let ov = &st.overlay;
+            let mut cap_dir: Vec<BTreeMap<u32, bool>> = vec![BTreeMap::new(); self.faces.len()];
+            for (fi, f) in self.faces.iter().enumerate() {
+                if let FaceGeom::Cap { cell, .. } = f.geom {
+                    for &li in &ov.regions[cell as usize].loops {
+                        for &(e2, fwd2) in &ov.loops[li as usize].edges {
+                            cap_dir[fi].insert(e2, fwd2);
+                        }
+                    }
+                }
+            }
+            for (ei, e) in self.edges3.iter().enumerate() {
+                for &fi in &e.faces {
+                    let f = &self.faces[fi as usize];
+                    let fwd = match (&f.geom, &e.geom) {
+                        (FaceGeom::Lateral { edge: fe, z0, z1 }, EdgeGeom::Horizontal { edge: ee, z })
+                            if *ee == *fe =>
+                        {
+                            if (*z - *z0).abs() <= tol_s {
+                                true
+                            } else if (*z - *z1).abs() <= tol_s {
+                                false
+                            } else {
+                                return Err(format!(
+                                    "horizontal edge '{}' does not lie on z0/z1 of lateral face '{}'",
+                                    e.name, f.name
+                                ));
+                            }
+                        }
+                        (FaceGeom::Lateral { edge: fe, z0, z1 }, EdgeGeom::Vertical { vertex, z0: vz0, z1: vz1 }) => {
+                            let ov_e = &ov.edges[*fe as usize];
+                            if ov_e.v0 == ov_e.v1 || *vz0 < *z0 - tol_s || *vz1 > *z1 + tol_s {
+                                return Err(format!(
+                                    "vertical edge '{}' is out of bounds for lateral face '{}'",
+                                    e.name, f.name
+                                ));
+                            }
+                            if *vertex == ov_e.v1 {
+                                true
+                            } else if *vertex == ov_e.v0 {
+                                false
+                            } else {
+                                return Err(format!(
+                                    "vertical edge '{}' vertex does not bound lateral face '{}'",
+                                    e.name, f.name
+                                ));
+                            }
+                        }
+                        (FaceGeom::Cap { z, .. }, EdgeGeom::Horizontal { edge: ee, z: ez })
+                            if (*ez - *z).abs() <= tol_s =>
+                        {
+                            let Some(&fwd2) = cap_dir[fi as usize].get(ee) else {
+                                return Err(format!(
+                                    "horizontal edge '{}' is not part of cap face '{}'",
+                                    e.name, f.name
+                                ));
+                            };
+                            fwd2
+                        }
+                        (FaceGeom::Quadric(b), EdgeGeom::Circle { c: ec, r: er }) => match *b {
+                            crate::prim::Body::Disk { c, r, up } => {
+                                if norm3(sub3(*ec, c)) > tol_s || (*er - r).abs() > tol_s {
+                                    return Err(format!(
+                                        "circle edge '{}' does not match disk face '{}'",
+                                        e.name, f.name
+                                    ));
+                                }
+                                up
+                            }
+                            crate::prim::Body::Annulus { c, r_in, r_out, up } => {
+                                if norm3(sub3(*ec, c)) > tol_s {
+                                    return Err(format!(
+                                        "circle edge '{}' center does not match annulus face '{}'",
+                                        e.name, f.name
+                                    ));
+                                }
+                                if (*er - r_out).abs() <= tol_s {
+                                    up
+                                } else if (*er - r_in).abs() <= tol_s {
+                                    !up
+                                } else {
+                                    return Err(format!(
+                                        "circle edge '{}' radius {er} does not match annulus face '{}'",
+                                        e.name, f.name
+                                    ));
+                                }
+                            }
+                            crate::prim::Body::CylSide { c, r, h, inward } => {
+                                if (ec[0] - c[0]).abs() > tol_s
+                                    || (ec[1] - c[1]).abs() > tol_s
+                                    || (*er - r).abs() > tol_s
+                                {
+                                    return Err(format!(
+                                        "circle edge '{}' does not match cylinder side '{}'",
+                                        e.name, f.name
+                                    ));
+                                }
+                                if (ec[2] - c[2]).abs() <= tol_s {
+                                    !inward
+                                } else if (ec[2] - (c[2] + h)).abs() <= tol_s {
+                                    inward
+                                } else {
+                                    return Err(format!(
+                                        "circle edge '{}' z = {} is not on cylinder side '{}'",
+                                        e.name, ec[2], f.name
+                                    ));
+                                }
+                            }
+                            crate::prim::Body::ConeSide { c, r0, r1, h, flip } => {
+                                if (ec[0] - c[0]).abs() > tol_s || (ec[1] - c[1]).abs() > tol_s {
+                                    return Err(format!(
+                                        "circle edge '{}' axis does not match cone side '{}'",
+                                        e.name, f.name
+                                    ));
+                                }
+                                if (ec[2] - c[2]).abs() <= tol_s && (*er - r0).abs() <= tol_s {
+                                    !flip
+                                } else if (ec[2] - (c[2] + h)).abs() <= tol_s && (*er - r1).abs() <= tol_s {
+                                    flip
+                                } else {
+                                    return Err(format!(
+                                        "circle edge '{}' does not match cone side '{}'",
+                                        e.name, f.name
+                                    ));
+                                }
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "quadric face '{}' cannot be bounded by edge '{}'",
+                                    f.name, e.name
+                                ));
+                            }
+                        },
+                        _ => {
+                            return Err(format!("edge '{}' has incompatible geometry for face '{}'", e.name, f.name));
+                        }
+                    };
+                    face_half_edges[fi as usize].push((ei as u32, fwd));
+                    edge_face_dir[ei].push((fi, if fwd { 1 } else { -1 }));
+                }
+            }
+        }
+
+        // Verify exact face perimeter length and closed directed boundary loops per face.
         for (i, f) in self.faces.iter().enumerate() {
             let want = match f.geom {
+                FaceGeom::Planar { plane, cell } => {
+                    let cx = &self.planar[plane as usize].cx;
+                    cx.regions[cell as usize]
+                        .loops
+                        .iter()
+                        .flat_map(|&l| cx.loops[l as usize].edges.iter())
+                        .map(|&(e, _)| cx.edges[e as usize].length)
+                        .sum()
+                }
                 FaceGeom::Lateral { edge, z0, z1 } => {
+                    let ov = &self.stack.as_ref().unwrap().overlay;
                     let e = &ov.edges[edge as usize];
                     2.0 * e.length + if e.v0 == e.v1 { 0.0 } else { 2.0 * (z1 - z0) }
                 }
                 FaceGeom::Quadric(b) => b.perimeter(),
-                FaceGeom::Planar { .. } => 0.0,
-                FaceGeom::Cap { cell, .. } => ov.regions[cell as usize]
-                    .loops
-                    .iter()
-                    .flat_map(|&l| ov.loops[l as usize].edges.iter())
-                    .map(|&(e, _)| ov.edges[e as usize].length)
-                    .sum(),
+                FaceGeom::Cap { cell, .. } => {
+                    let ov = &self.stack.as_ref().unwrap().overlay;
+                    ov.regions[cell as usize]
+                        .loops
+                        .iter()
+                        .flat_map(|&l| ov.loops[l as usize].edges.iter())
+                        .map(|&(e, _)| ov.edges[e as usize].length)
+                        .sum()
+                }
             };
-            if (sum[i] - want).abs() > 32.0 * self.tol + 1e-10 * scale {
+            if (sum[i] - want).abs() > tol_s {
                 return Err(format!(
                     "the edges around face '{}' have length {} but its boundary has {want}",
                     f.name, sum[i]
                 ));
             }
+            let mut deg: BTreeMap<u32, i32> = BTreeMap::new();
+            for &(ei, fwd) in &face_half_edges[i] {
+                let e = &self.edges3[ei as usize];
+                let (vs, ve) = if fwd { (e.v0, e.v1) } else { (e.v1, e.v0) };
+                *deg.entry(vs).or_insert(0) += 1;
+                *deg.entry(ve).or_insert(0) -= 1;
+            }
+            if let Some((&v, &bal)) = deg.iter().find(|&(_, &b)| b != 0) {
+                return Err(format!(
+                    "face '{}' boundary edge loop is not closed at vertex '{}' (net degree {bal})",
+                    f.name, self.vertices[v as usize].name
+                ));
+            }
+        }
+
+        // Verify 2-manifold shell edge pairing: per shell (Option<u32>), every undirected edge is shared by
+        // exactly two half-edges of opposite orientation (+1 and -1). Zero-thickness interior sheets with
+        // `first == second` are two-sided internal baffles embedded inside one region and do not bound a 3D shell.
+        for (ei, dirs) in edge_face_dir.iter().enumerate() {
+            let mut per_shell: BTreeMap<Option<u32>, Vec<i8>> = BTreeMap::new();
+            for &(fi, dir_on_face) in dirs {
+                let f = &self.faces[fi as usize];
+                if f.first == f.second {
+                    continue;
+                }
+                per_shell.entry(f.first).or_default().push(dir_on_face);
+                per_shell.entry(f.second).or_default().push(-dir_on_face);
+            }
+            for (shell, hs) in per_shell {
+                if hs.len() != 2 || hs[0] + hs[1] != 0 {
+                    let sname = shell.map_or_else(|| "void".to_string(), |r| self.regions[r as usize].name.clone());
+                    return Err(format!(
+                        "edge '{}' is non-manifold or misoriented on shell '{sname}': half-edge orientations {hs:?}",
+                        self.edges3[ei].name
+                    ));
+                }
+            }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::eval::Tier;
+    use crate::model::{Axis, Model};
+    use crate::prim::Body;
+
+    #[test]
+    fn analytic_quadric_area_vector_and_topology3_accept_valid_and_reject_corrupt_shells() {
+        let mut m = Model::new_3d();
+        let air = m.box_("air", (-5.0, -5.0, -2.0), (5.0, 5.0, 6.0));
+        let frustum = m.cone("frustum", (0.0, 0.0, 0.0), 1.5, 0.5, 2.0);
+        let prof = m.rect("tube_prof", (2.0, 3.0), (3.0, 5.0));
+        let tube = m.revolve("tube", prof, (0.0, 0.0, 0.0));
+        let cone_z = m.cone("horn", (-3.0, 3.0, 0.0), 0.6, 0.2, 1.5);
+        let ball = m.sphere("ball", (-3.0, -3.0, 2.0), 0.7);
+        m.overlay(&[("air", air), ("frustum", frustum), ("tube", tube), ("horn", cone_z), ("ball", ball)]);
+        let ev = m.eval(Tier::Complex).unwrap();
+        let cx = ev.complex().clone();
+        cx.check().unwrap();
+
+        let mut mx = Model::new_3d();
+        let host_x = mx.box_("host_x", (-4.0, -4.0, -4.0), (4.0, 4.0, 4.0));
+        let horn_x = mx.cone_along("horn_x", Axis::X, (-2.0, 0.0, 0.0), 0.8, 0.2, 3.0);
+        mx.overlay(&[("host_x", host_x), ("horn_x", horn_x)]);
+        mx.eval(Tier::Complex).unwrap().complex().check().unwrap();
+
+        // 1. Corrupting Disk `up` flag breaks analytic quadric flux closure.
+        let mut flipped_disk = cx.clone();
+        for f in &mut flipped_disk.faces {
+            if let crate::complex::FaceGeom::Quadric(Body::Disk { up, .. }) = &mut f.geom {
+                *up = !*up;
+                break;
+            }
+        }
+        assert!(flipped_disk.check().is_err(), "flipped quadric disk normal must fail check3");
+
+        // 2. Corrupting ConeSide `flip` flag breaks analytic quadric flux closure AND shell edge orientation.
+        let mut flipped_cone = cx.clone();
+        for f in &mut flipped_cone.faces {
+            if let crate::complex::FaceGeom::Quadric(Body::ConeSide { flip, .. }) = &mut f.geom {
+                *flip = !*flip;
+                break;
+            }
+        }
+        assert!(flipped_cone.check().is_err(), "flipped cone side must fail check3");
+
+        // 3. Swapping `first` / `second` on Sphere keeps area_vector == 0 but flips divergence volume flux.
+        let mut inside_out_sphere = cx.clone();
+        for f in &mut inside_out_sphere.faces {
+            if matches!(f.geom, crate::complex::FaceGeom::Quadric(Body::Sphere { .. })) {
+                std::mem::swap(&mut f.first, &mut f.second);
+                break;
+            }
+        }
+        assert!(inside_out_sphere.check().is_err(), "inside-out sphere must fail volume flux check3");
+
+        // 4. Corrupting Edge3 endpoint (`v0`/`v1` mismatch) breaks closed directed face edge loop check.
+        let mut broken_loop = cx.clone();
+        let ei = broken_loop
+            .edges3
+            .iter()
+            .position(|e| matches!(e.geom, crate::complex::EdgeGeom::Vertical { .. }))
+            .unwrap();
+        let other_v = broken_loop
+            .edges3
+            .iter()
+            .find_map(|e| (e.v0 != broken_loop.edges3[ei].v0 && e.v0 != broken_loop.edges3[ei].v1).then_some(e.v0))
+            .unwrap();
+        broken_loop.edges3[ei].v1 = other_v;
+        assert!(broken_loop.check().is_err(), "open/broken edge endpoint must fail check_topology3");
+
+        // 5. Dropping a face reference from an Edge3 breaks 2-manifold shell pairing.
+        let mut non_manifold = cx;
+        let ei_h = non_manifold
+            .edges3
+            .iter()
+            .position(|e| matches!(e.geom, crate::complex::EdgeGeom::Horizontal { .. }) && e.faces.len() >= 2)
+            .unwrap();
+        non_manifold.edges3[ei_h].faces.pop();
+        assert!(non_manifold.check().is_err(), "edge missing half-edge partner must fail check_topology3");
     }
 }
