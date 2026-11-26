@@ -61,6 +61,8 @@ pub struct BbqMode {
     pub kappa_hz: f64,
     pub q_m: f64,
     pub t1_purcell_s: f64,
+    pub foster_zero_residual_s: f64,
+    pub foster_zero_rel_residual: f64,
 }
 
 impl BbqMode {
@@ -73,6 +75,8 @@ impl BbqMode {
             "kappa_Hz": self.kappa_hz,
             "q_m": self.q_m,
             "t1_purcell_s": self.t1_purcell_s,
+            "foster_zero_residual_S": self.foster_zero_residual_s,
+            "foster_zero_rel_residual": self.foster_zero_rel_residual,
         })
     }
 }
@@ -90,11 +94,17 @@ pub struct S21CircleFit {
     pub phi_0_rad: f64,
     pub circle_center: [f64; 2],
     pub circle_radius: f64,
+    pub circle_fit_rmse: f64,
+    pub phase_fit_rmse_rad: f64,
+    pub f_r_sigma_hz: Option<f64>,
+    pub q_l_sigma: Option<f64>,
+    pub q_c_sigma: Option<f64>,
+    pub q_i_sigma: Option<f64>,
 }
 
 impl S21CircleFit {
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut obj = json!({
             "ports": self.ports,
             "resonator_branch": self.resonator_branch,
             "f_r_Hz": self.f_r_hz,
@@ -105,7 +115,22 @@ impl S21CircleFit {
             "phi_0_rad": self.phi_0_rad,
             "circle_center": self.circle_center,
             "circle_radius": self.circle_radius,
-        })
+            "circle_fit_rmse": self.circle_fit_rmse,
+            "phase_fit_rmse_rad": self.phase_fit_rmse_rad,
+        });
+        if let Some(s) = self.f_r_sigma_hz {
+            obj["f_r_sigma_Hz"] = json!(s);
+        }
+        if let Some(s) = self.q_l_sigma {
+            obj["q_l_sigma"] = json!(s);
+        }
+        if let Some(s) = self.q_c_sigma {
+            obj["q_c_sigma"] = json!(s);
+        }
+        if let Some(s) = self.q_i_sigma {
+            obj["q_i_sigma"] = json!(s);
+        }
+        obj
     }
 }
 
@@ -120,6 +145,7 @@ pub struct NetworkReport {
     pub y_matrix: Vec<Vec<Vec<[f64; 2]>>>,
     pub qep_modes: Vec<QepMode>,
     pub bbq_modes: Vec<BbqMode>,
+    pub max_foster_zero_residual_s: Option<f64>,
     pub s21_fit: Option<S21CircleFit>,
     pub touchstone_snp: Option<String>,
     pub elapsed_s: f64,
@@ -138,6 +164,9 @@ impl NetworkReport {
             "bbq_modes": self.bbq_modes.iter().map(BbqMode::to_json).collect::<Vec<_>>(),
             "elapsed_s": self.elapsed_s,
         });
+        if let Some(res) = self.max_foster_zero_residual_s {
+            obj["max_foster_zero_residual_S"] = json!(res);
+        }
         if let Some(ref fit) = self.s21_fit {
             obj["s21_fit"] = fit.to_json();
         }
@@ -768,23 +797,33 @@ fn extract_bbq_modes(
                               mut flo: f64,
                               mut fhi: f64|
      -> Option<BbqMode> {
+        let scale_ref = (flo.abs() + fhi.abs()).max(1e-30);
         let mut wm = lo - flo * (hi - lo) / (fhi - flo).max(1e-300);
-        for _ in 0..20 {
+        let mut last_side: i8 = 0;
+        for iter in 0..48 {
             wm = wm.clamp(lo, hi);
             let ym_mat = eval_fn(wm)?;
             let fm = ym_mat[(a_slot, a_slot)].im;
-            if fm.abs() <= 1.0e-15 * (flo.abs() + fhi.abs()).max(1e-30) || (hi - lo) <= 1.0e-13 * wm {
+            if fm.abs() <= 1.0e-15 * scale_ref || (hi - lo) <= 1.0e-14 * wm {
                 break;
             }
             if fm > 0.0 {
                 hi = wm;
                 fhi = fm;
+                if last_side == 1 {
+                    flo *= 0.5;
+                }
+                last_side = 1;
             } else {
                 lo = wm;
                 flo = fm;
+                if last_side == -1 {
+                    fhi *= 0.5;
+                }
+                last_side = -1;
             }
-            let sec = lo - flo * (hi - lo) / (fhi - flo);
-            wm = if sec > lo && sec < hi { sec } else { 0.5 * (lo + hi) };
+            let sec = lo - flo * (hi - lo) / (fhi - flo).max(1e-300);
+            wm = if iter % 6 == 5 || !(sec > lo && sec < hi) { 0.5 * (lo + hi) } else { sec };
         }
         let dw = (1.0e-7 * wm).max(1.0);
         let (ym, yp, yn) = (eval_fn(wm)?, eval_fn(wm + dw)?, eval_fn(wm - dw)?);
@@ -801,7 +840,19 @@ fn extract_bbq_modes(
         let kappa_hz = kappa_rad_s / (2.0 * PI);
         let q_m = if kappa_hz > 1.0e-15 * f_m_hz { f_m_hz / kappa_hz } else { f64::INFINITY };
         let t1_purcell_s = if kappa_rad_s > 1.0e-30 { 1.0 / kappa_rad_s } else { f64::INFINITY };
-        Some(BbqMode { port: port_name.to_string(), f_m_hz, c_sigma_f, l_eff_h, kappa_hz, q_m, t1_purcell_s })
+        let foster_zero_residual_s = y_center.im.abs();
+        let foster_zero_rel_residual = foster_zero_residual_s / (wm * d_im_dw).max(1.0e-300);
+        Some(BbqMode {
+            port: port_name.to_string(),
+            f_m_hz,
+            c_sigma_f,
+            l_eff_h,
+            kappa_hz,
+            q_m,
+            t1_purcell_s,
+            foster_zero_residual_s,
+            foster_zero_rel_residual,
+        })
     };
 
     let mut modes: Vec<BbqMode> = Vec::new();
@@ -835,7 +886,7 @@ fn extract_bbq_modes(
             } else {
                 // Discrete DrivenPortData interpolation (4-point cubic when n_pts >= 4, linear otherwise)
                 let mut wm = w0 - y0.im * (w1 - w0) / (y1.im - y0.im).max(1e-300);
-                let (re_y, d_im_dw) = if n_pts >= 4 {
+                let (re_y, d_im_dw, foster_im) = if n_pts >= 4 {
                     let i0 = k.saturating_sub(1).min(n_pts - 4);
                     let ws = [
                         2.0 * PI * freqs_hz[i0],
@@ -870,16 +921,18 @@ fn extract_bbq_modes(
                             }
                             wm = next;
                         }
-                        let (_, slope_m) = eval_lagrange4_and_deriv(ws, ims, wm);
+                        let (im_m, slope_m) = eval_lagrange4_and_deriv(ws, ims, wm);
                         let (re_m, _) = eval_lagrange4_and_deriv(ws, res, wm);
-                        (re_m, slope_m)
+                        (re_m, slope_m, im_m)
                     } else {
                         let t = (wm - w0) / (w1 - w0);
-                        (y0.re + t * (y1.re - y0.re), lin_slope)
+                        let im_lin = y0.im + t * (y1.im - y0.im);
+                        (y0.re + t * (y1.re - y0.re), lin_slope, im_lin)
                     }
                 } else {
                     let t = (wm - w0) / (w1 - w0);
-                    (y0.re + t * (y1.re - y0.re), (y1.im - y0.im) / (w1 - w0))
+                    let im_lin = y0.im + t * (y1.im - y0.im);
+                    (y0.re + t * (y1.re - y0.re), (y1.im - y0.im) / (w1 - w0), im_lin)
                 };
 
                 if d_im_dw > 0.0 {
@@ -891,9 +944,21 @@ fn extract_bbq_modes(
                     let kappa_hz = kappa_rad_s / (2.0 * PI);
                     let q_m = if kappa_hz > 1.0e-15 * f_m_hz { f_m_hz / kappa_hz } else { f64::INFINITY };
                     let t1_purcell_s = if kappa_rad_s > 1.0e-30 { 1.0 / kappa_rad_s } else { f64::INFINITY };
+                    let foster_zero_residual_s = foster_im.abs();
+                    let foster_zero_rel_residual = foster_zero_residual_s / (wm * d_im_dw).max(1.0e-300);
                     push_dedup(
                         &mut modes,
-                        BbqMode { port: port_name.clone(), f_m_hz, c_sigma_f, l_eff_h, kappa_hz, q_m, t1_purcell_s },
+                        BbqMode {
+                            port: port_name.clone(),
+                            f_m_hz,
+                            c_sigma_f,
+                            l_eff_h,
+                            kappa_hz,
+                            q_m,
+                            t1_purcell_s,
+                            foster_zero_residual_s,
+                            foster_zero_rel_residual,
+                        },
                     );
                 }
             }
@@ -1056,6 +1121,144 @@ fn solve_3x3(mut a: [[f64; 3]; 3], mut b: [f64; 3]) -> Option<[f64; 3]> {
     Some(x)
 }
 
+/// Minimal forward-mode dual number `(v, d)` for exact analytic propagation of fit covariance into `(Q_c, Q_i)`.
+#[derive(Clone, Copy, Debug)]
+struct Dual {
+    v: f64,
+    d: f64,
+}
+
+impl Dual {
+    #[inline]
+    fn c(v: f64) -> Self {
+        Self { v, d: 0.0 }
+    }
+    #[inline]
+    fn cos(self) -> Self {
+        Self { v: self.v.cos(), d: -self.v.sin() * self.d }
+    }
+    #[inline]
+    fn sin(self) -> Self {
+        Self { v: self.v.sin(), d: self.v.cos() * self.d }
+    }
+    #[inline]
+    fn hypot(self, y: Self) -> Self {
+        let h = self.v.hypot(y.v);
+        let d = if h > 0.0 { (self.v * self.d + y.v * y.d) / h } else { 0.0 };
+        Self { v: h, d }
+    }
+    #[inline]
+    fn atan2(self, x: Self) -> Self {
+        let den = x.v * x.v + self.v * self.v;
+        let d = if den > 0.0 { (x.v * self.d - self.v * x.d) / den } else { 0.0 };
+        Self { v: self.v.atan2(x.v), d }
+    }
+}
+
+impl std::ops::Add for Dual {
+    type Output = Self;
+    #[inline]
+    fn add(self, r: Self) -> Self {
+        Self { v: self.v + r.v, d: self.d + r.d }
+    }
+}
+impl std::ops::Sub for Dual {
+    type Output = Self;
+    #[inline]
+    fn sub(self, r: Self) -> Self {
+        Self { v: self.v - r.v, d: self.d - r.d }
+    }
+}
+impl std::ops::Mul for Dual {
+    type Output = Self;
+    #[inline]
+    fn mul(self, r: Self) -> Self {
+        Self { v: self.v * r.v, d: self.d * r.v + self.v * r.d }
+    }
+}
+impl std::ops::Div for Dual {
+    type Output = Self;
+    #[inline]
+    fn div(self, r: Self) -> Self {
+        Self { v: self.v / r.v, d: (self.d * r.v - self.v * r.d) / (r.v * r.v) }
+    }
+}
+
+/// Evaluates `(Q_c, Option<Q_i>, phi_0)` in dual numbers with respect to `(xc, yc, radius, q_l, theta_0)`.
+fn eval_branch_qc_qi_dual(
+    branch: ResonatorBranch,
+    xc: Dual,
+    yc: Dual,
+    radius: Dual,
+    q_l: Dual,
+    theta_0: Dual,
+) -> (Dual, Option<Dual>, Dual) {
+    let e_re = theta_0.cos();
+    let e_im = theta_0.sin();
+    let z_res_re = xc + radius * e_re;
+    let z_res_im = yc + radius * e_im;
+    let z_off_re = xc - radius * e_re;
+    let z_off_im = yc - radius * e_im;
+
+    match branch {
+        ResonatorBranch::Hanger | ResonatorBranch::Reflection => {
+            let a_mag_raw = z_off_re.hypot(z_off_im);
+            let a_mag = if a_mag_raw.v >= 1.0e-15 { a_mag_raw } else { Dual::c(1.0e-15) };
+            let off_n2 = z_off_re * z_off_re + z_off_im * z_off_im;
+            let zc_norm_re = (xc * z_off_re + yc * z_off_im) / off_n2;
+            let zc_norm_im = (yc * z_off_re - xc * z_off_im) / off_n2;
+            let diff_re = Dual::c(1.0) - zc_norm_re;
+            let diff_im = Dual::c(0.0) - zc_norm_im;
+            let phi_0 = diff_im.atan2(diff_re);
+            let mult = if branch == ResonatorBranch::Hanger { 2.0 } else { 1.0 };
+            let denom_r = Dual::c(mult) * radius;
+            let denom_safe = if denom_r.v.abs() >= 1.0e-30 { denom_r } else { Dual::c(1.0e-30) };
+            let qc_abs = (q_l * a_mag) / denom_safe;
+            let cos_phi = phi_0.cos();
+            let qc_real = if cos_phi.v.abs() > 1.0e-6 { qc_abs / cos_phi } else { qc_abs };
+            let inv_qi = (Dual::c(1.0) / q_l) - (cos_phi / qc_abs);
+            let qi = if inv_qi.v > 1.0e-15 / q_l.v { Some(Dual::c(1.0) / inv_qi) } else { None };
+            (qc_real, qi, phi_0)
+        }
+        ResonatorBranch::Transmission => {
+            let phi_0 = z_res_im.atan2(z_res_re);
+            let s21_peak_raw = Dual::c(2.0) * radius;
+            let s21_peak = if s21_peak_raw.v >= 1.0e-30 { s21_peak_raw } else { Dual::c(1.0e-30) };
+            let qc = q_l / s21_peak;
+            let inv_qi = (Dual::c(1.0) / q_l) - (Dual::c(1.0) / qc);
+            let qi = if inv_qi.v > 1.0e-15 / q_l.v { Some(Dual::c(1.0) / inv_qi) } else { None };
+            (qc, qi, phi_0)
+        }
+    }
+}
+
+/// Inverts a symmetric `3 x 3` Gauss-Newton normal matrix `H = J^T J` safely via eigendecomposition,
+/// returning `None` if rank-deficient or non-finite.
+fn invert_3x3_cov(h: &[[f64; 3]; 3], sigma_sq: f64) -> Option<[[f64; 3]; 3]> {
+    if !sigma_sq.is_finite() || sigma_sq < 0.0 {
+        return None;
+    }
+    let flat = [h[0][0], h[0][1], h[0][2], h[0][1], h[1][1], h[1][2], h[0][2], h[1][2], h[2][2]];
+    let (eigs, vecs) = dense_eigh(&flat, 3).ok()?;
+    let max_eig = eigs.iter().copied().fold(0.0_f64, f64::max);
+    if !(max_eig > 0.0 && max_eig.is_finite()) {
+        return None;
+    }
+    if eigs.iter().any(|&e| !e.is_finite() || e <= 1.0e-12 * max_eig) {
+        return None;
+    }
+    let mut cov = [[0.0; 3]; 3];
+    for k in 0..3 {
+        let w = sigma_sq / eigs[k];
+        for i in 0..3 {
+            for j in 0..3 {
+                cov[i][j] += w * vecs[k][i] * vecs[k][j];
+            }
+        }
+    }
+    cov.iter().flatten().all(|x| x.is_finite()).then_some(cov)
+}
+
 /// Fits `S_{out,in}(f)` via Probst et al. (2015) Taubin circle fit + Gauss-Newton arctan phase fit.
 fn fit_s21_circle(
     ports: [String; 2],
@@ -1068,6 +1271,32 @@ fn fit_s21_circle(
     }
     let n = freqs_hz.len();
     let (xc, yc, radius) = taubin_circle_fit(trace)?;
+
+    // Circle-fit radial residual RMSE and linearized 3x3 Gauss-Newton Jacobian for (xc, yc, radius)
+    let mut circle_rss = 0.0_f64;
+    let mut jc_t_jc = [[0.0_f64; 3]; 3];
+    let mut circle_jac_ok = n > 3;
+    for p in trace {
+        let dx = p[0] - xc;
+        let dy = p[1] - yc;
+        let rho = dx.hypot(dy);
+        let d = rho - radius;
+        circle_rss += d * d;
+        if circle_jac_ok {
+            if rho > 1.0e-15 * radius.max(1.0) {
+                let g = [-dx / rho, -dy / rho, -1.0];
+                for ia in 0..3 {
+                    for ib in 0..3 {
+                        jc_t_jc[ia][ib] += g[ia] * g[ib];
+                    }
+                }
+            } else {
+                circle_jac_ok = false;
+            }
+        }
+    }
+    let circle_fit_rmse = (circle_rss / (n as f64)).sqrt();
+    let cov_circle = if circle_jac_ok { invert_3x3_cov(&jc_t_jc, circle_rss / ((n - 3) as f64)) } else { None };
 
     // Unwrap phase around circle center (xc, yc)
     let mut thetas = Vec::with_capacity(n);
@@ -1175,44 +1404,79 @@ fn fit_s21_circle(
         }
     }
 
-    let z_c = C64::new(xc, yc);
-    let e_th0 = C64::new(theta_0.cos(), theta_0.sin());
-    let z_res = z_c + e_th0.scale(radius);
-    let z_off = z_c - e_th0.scale(radius);
+    // Evaluate undamped phase-fit Jacobian J^T J at the converged solution for linearized 1-sigma covariance
+    let mut phase_rss = 0.0_f64;
+    let mut jtj_final = [[0.0_f64; 3]; 3];
+    for k in 0..n {
+        let fk = freqs_hz[k];
+        let u = 2.0 * q_l * (fk - f_r) / f_r;
+        let pred = theta_0 + 2.0 * s_dir * u.atan();
+        let res = wrap_angle(thetas[k] - pred);
+        phase_rss += res * res;
+        let inv_1_u2 = 1.0 / (1.0 + u * u);
+        let du_dfr_scaled = -2.0 * q_l * fk / (f_r * f_r) * f_scale;
+        let du_dlql = u;
+        let g = [2.0 * s_dir * inv_1_u2 * du_dfr_scaled, 2.0 * s_dir * inv_1_u2 * du_dlql, 1.0];
+        for ia in 0..3 {
+            for ib in 0..3 {
+                jtj_final[ia][ib] += g[ia] * g[ib];
+            }
+        }
+    }
+    let phase_fit_rmse_rad = (phase_rss / (n as f64)).sqrt();
+    let cov_phase = if n > 3 { invert_3x3_cov(&jtj_final, phase_rss / ((n - 3) as f64)) } else { None };
+    let f_r_sigma_hz = cov_phase.map(|c| f_scale * c[0][0].max(0.0).sqrt()).filter(|x| x.is_finite());
+    let q_l_sigma = cov_phase.map(|c| q_l * c[1][1].max(0.0).sqrt()).filter(|x| x.is_finite());
 
-    let (q_c, q_i, phi_0_rad) = match branch {
-        ResonatorBranch::Hanger => {
-            let a_mag = z_off.norm().max(1.0e-15);
-            let z_c_norm = z_c / z_off;
-            let diff = C64::ONE - z_c_norm; // (Q_l / (2 |Q_c|)) * exp(i phi_0)
-            let phi_0 = diff.im.atan2(diff.re);
-            let qc_abs = (q_l * a_mag) / (2.0 * radius).max(1.0e-30);
-            let cos_phi = phi_0.cos();
-            let qc_real = if cos_phi.abs() > 1.0e-6 { qc_abs / cos_phi } else { qc_abs };
-            let inv_qi = (1.0 / q_l) - (cos_phi / qc_abs);
-            let qi = if inv_qi > 1.0e-15 / q_l { 1.0 / inv_qi } else { f64::INFINITY };
-            (qc_real, qi, phi_0)
+    let (qc_d, qi_d_opt, phi0_d) =
+        eval_branch_qc_qi_dual(branch, Dual::c(xc), Dual::c(yc), Dual::c(radius), Dual::c(q_l), Dual::c(theta_0));
+    let q_c = qc_d.v;
+    let q_i = qi_d_opt.map_or(f64::INFINITY, |q| q.v);
+    let phi_0_rad = phi0_d.v;
+
+    // Linearized 1-sigma propagation for Q_c and Q_i across (xc, yc, radius, q_l, theta_0)
+    let (q_c_sigma, q_i_sigma) = if let (Some(cc), Some(cp)) = (cov_circle, cov_phase) {
+        let mut grad_qc = [0.0_f64; 5];
+        let mut grad_qi = [0.0_f64; 5];
+        let mut qi_finite = qi_d_opt.is_some();
+        for idx in 0..5 {
+            let seed = |k: usize| if k == idx { 1.0 } else { 0.0 };
+            let (qc_k, qi_k_opt, _) = eval_branch_qc_qi_dual(
+                branch,
+                Dual { v: xc, d: seed(0) },
+                Dual { v: yc, d: seed(1) },
+                Dual { v: radius, d: seed(2) },
+                Dual { v: q_l, d: seed(3) },
+                Dual { v: theta_0, d: seed(4) },
+            );
+            grad_qc[idx] = qc_k.d;
+            if let Some(qi_k) = qi_k_opt {
+                grad_qi[idx] = qi_k.d;
+            } else {
+                qi_finite = false;
+            }
         }
-        ResonatorBranch::Reflection => {
-            let a_mag = z_off.norm().max(1.0e-15);
-            let z_c_norm = z_c / z_off;
-            let diff = C64::ONE - z_c_norm; // (Q_l / |Q_c|) * exp(i phi_0)
-            let phi_0 = diff.im.atan2(diff.re);
-            let qc_abs = (q_l * a_mag) / radius.max(1.0e-30);
-            let cos_phi = phi_0.cos();
-            let qc_real = if cos_phi.abs() > 1.0e-6 { qc_abs / cos_phi } else { qc_abs };
-            let inv_qi = (1.0 / q_l) - (cos_phi / qc_abs);
-            let qi = if inv_qi > 1.0e-15 / q_l { 1.0 / inv_qi } else { f64::INFINITY };
-            (qc_real, qi, phi_0)
-        }
-        ResonatorBranch::Transmission => {
-            let phi_0 = z_res.im.atan2(z_res.re);
-            let s21_peak = (2.0 * radius).max(1.0e-30);
-            let qc = q_l / s21_peak;
-            let inv_qi = (1.0 / q_l) - (1.0 / qc);
-            let qi = if inv_qi > 1.0e-15 / q_l { 1.0 / inv_qi } else { f64::INFINITY };
-            (qc, qi, phi_0)
-        }
+        // Convert phase covariance of (ln Q_l, theta_0) to (Q_l, theta_0)
+        let cov_ql_th0 = [[q_l * q_l * cp[1][1], q_l * cp[1][2]], [q_l * cp[2][1], cp[2][2]]];
+        let prop_var = |grad: &[f64; 5]| -> Option<f64> {
+            let mut v = 0.0_f64;
+            for i in 0..3 {
+                for j in 0..3 {
+                    v += grad[i] * cc[i][j] * grad[j];
+                }
+            }
+            for i in 0..2 {
+                for j in 0..2 {
+                    v += grad[3 + i] * cov_ql_th0[i][j] * grad[3 + j];
+                }
+            }
+            (v >= 0.0 && v.is_finite()).then(|| v.sqrt())
+        };
+        let qc_s = prop_var(&grad_qc);
+        let qi_s = if qi_finite { prop_var(&grad_qi) } else { None };
+        (qc_s, qi_s)
+    } else {
+        (None, None)
     };
 
     let kappa_hz = f_r / q_l;
@@ -1227,6 +1491,12 @@ fn fit_s21_circle(
         phi_0_rad,
         circle_center: [xc, yc],
         circle_radius: radius,
+        circle_fit_rmse,
+        phase_fit_rmse_rad,
+        f_r_sigma_hz,
+        q_l_sigma,
+        q_c_sigma,
+        q_i_sigma,
     })
 }
 
@@ -1690,6 +1960,12 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
         None
     };
 
+    let max_foster_zero_residual_s = if bbq_modes.is_empty() {
+        None
+    } else {
+        Some(bbq_modes.iter().map(|m| m.foster_zero_residual_s).fold(0.0_f64, f64::max))
+    };
+
     let s_matrix = s_mats.iter().map(dense_to_pairs).collect();
     let z_matrix = z_mats.iter().map(dense_to_pairs).collect();
     let y_matrix = y_mats.iter().map(dense_to_pairs).collect();
@@ -1703,6 +1979,7 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
         y_matrix,
         qep_modes,
         bbq_modes,
+        max_foster_zero_residual_s,
         s21_fit,
         touchstone_snp,
         elapsed_s: t0.elapsed().as_secs_f64(),
@@ -1985,6 +2262,198 @@ mod tests {
         assert!((fit.q_l - q_l).abs() / q_l < 1.0e-8, "q_l got {} want {}", fit.q_l, q_l);
         assert!((fit.q_i - q_i).abs() / q_i < 1.0e-6, "q_i got {} want {}", fit.q_i, q_i);
         assert!((fit.phi_0_rad - phi_0).abs() < 1.0e-8, "phi_0 got {} want {}", fit.phi_0_rad, phi_0);
+        assert!(fit.circle_fit_rmse < 1.0e-12, "noiseless circle_fit_rmse = {:e}", fit.circle_fit_rmse);
+        assert!(fit.phase_fit_rmse_rad < 1.0e-10, "noiseless phase_fit_rmse_rad = {:e}", fit.phase_fit_rmse_rad);
+        assert!(fit.f_r_sigma_hz.unwrap() < 1.0e-2 * (f_r / q_l));
         assert!(rep.touchstone_snp.unwrap().contains("# Hz S RI R 50.000000"));
+    }
+
+    #[test]
+    fn taubin_fit_diagnostics_calibrate_1sigma_uncertainties_across_branches_and_bbq_foster_residuals() {
+        // 1. Monte Carlo calibration on noisy tilted hanger S21 trace (isotropic complex noise sigma_s = 2e-3)
+        let f_r = 6.5e9_f64;
+        let q_i = 120_000.0_f64;
+        let qc_abs = 20_000.0_f64;
+        let phi_0 = 0.18_f64;
+        let q_l = 1.0 / ((1.0 / q_i) + (phi_0.cos() / qc_abs));
+        let n_pts = 81usize;
+        let span = 6.0 * (f_r / q_l);
+        let freqs_hz: Vec<f64> =
+            (0..n_pts).map(|k| (f_r - 0.5 * span) + span * (k as f64) / ((n_pts - 1) as f64)).collect();
+        let sigma_s = 2.0e-3_f64;
+
+        // Deterministic SplitMix64 + Box-Muller normal generator
+        let mut seed = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next_u01 = || -> f64 {
+            seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = seed;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            ((z >> 11) as f64 + 0.5) * (1.0 / ((1u64 << 53) as f64))
+        };
+        let mut next_gauss = || -> [f64; 2] {
+            let u1 = next_u01().max(1.0e-15);
+            let u2 = next_u01();
+            let r = (-2.0 * u1.ln()).sqrt();
+            let th = 2.0 * PI * u2;
+            [sigma_s * r * th.cos(), sigma_s * r * th.sin()]
+        };
+
+        let exact_hanger: Vec<C64> = freqs_hz
+            .iter()
+            .map(|&f| {
+                let denom = C64::new(1.0, 2.0 * q_l * (f - f_r) / f_r);
+                let num = C64::new(phi_0.cos(), phi_0.sin()).scale(q_l / qc_abs);
+                C64::ONE - num / denom
+            })
+            .collect();
+
+        let n_trials = 64usize;
+        let mut fr_vals = Vec::with_capacity(n_trials);
+        let mut ql_vals = Vec::with_capacity(n_trials);
+        let mut qc_vals = Vec::with_capacity(n_trials);
+        let mut qi_vals = Vec::with_capacity(n_trials);
+        let mut rep_sig_fr = 0.0;
+        let mut rep_sig_ql = 0.0;
+        let mut rep_sig_qc = 0.0;
+        let mut rep_sig_qi = 0.0;
+
+        for t in 0..n_trials {
+            let noisy: Vec<[f64; 2]> = exact_hanger
+                .iter()
+                .map(|z| {
+                    let g = next_gauss();
+                    [z.re + g[0], z.im + g[1]]
+                })
+                .collect();
+            let fit = fit_s21_circle(["in".into(), "out".into()], ResonatorBranch::Hanger, &freqs_hz, &noisy).unwrap();
+            assert!(fit.circle_fit_rmse > 0.5 * sigma_s && fit.circle_fit_rmse < 2.0 * sigma_s);
+            assert!(fit.phase_fit_rmse_rad > 0.0 && fit.phase_fit_rmse_rad.is_finite());
+            fr_vals.push(fit.f_r_hz);
+            ql_vals.push(fit.q_l);
+            qc_vals.push(fit.q_c);
+            qi_vals.push(fit.q_i);
+            rep_sig_fr += fit.f_r_sigma_hz.unwrap();
+            rep_sig_ql += fit.q_l_sigma.unwrap();
+            rep_sig_qc += fit.q_c_sigma.unwrap();
+            rep_sig_qi += fit.q_i_sigma.unwrap();
+            if t == 0 {
+                let j = fit.to_json();
+                assert!(j["circle_fit_rmse"].as_f64().unwrap() > 0.0);
+                assert!(j["phase_fit_rmse_rad"].as_f64().unwrap() > 0.0);
+                assert!(j["f_r_sigma_Hz"].as_f64().unwrap() > 0.0);
+                assert!(j["q_l_sigma"].as_f64().unwrap() > 0.0);
+                assert!(j["q_c_sigma"].as_f64().unwrap() > 0.0);
+                assert!(j["q_i_sigma"].as_f64().unwrap() > 0.0);
+            }
+        }
+        let sample_std = |xs: &[f64]| -> f64 {
+            let m = xs.iter().sum::<f64>() / xs.len() as f64;
+            (xs.iter().map(|&x| (x - m) * (x - m)).sum::<f64>() / ((xs.len() - 1) as f64)).sqrt()
+        };
+        let nf = n_trials as f64;
+        for (name, emp, pred) in [
+            ("f_r", sample_std(&fr_vals), rep_sig_fr / nf),
+            ("q_l", sample_std(&ql_vals), rep_sig_ql / nf),
+            ("q_c", sample_std(&qc_vals), rep_sig_qc / nf),
+            ("q_i", sample_std(&qi_vals), rep_sig_qi / nf),
+        ] {
+            let ratio = pred / emp;
+            assert!(
+                ratio > 0.5 && ratio < 2.0,
+                "1-sigma calibration mismatch for {name}: predicted={pred:e}, empirical={emp:e}, ratio={ratio:.2}"
+            );
+        }
+
+        // 2. Reflection & transmission branches + lossless (Q_i = inf -> q_i_sigma = None)
+        let refl_lossless: Vec<[f64; 2]> = freqs_hz
+            .iter()
+            .map(|&f| {
+                let denom = C64::new(1.0, 2.0 * qc_abs * (f - f_r) / f_r);
+                let s11 = C64::ONE - C64::new(2.0, 0.0) / denom;
+                [s11.re, s11.im]
+            })
+            .collect();
+        let fit_refl =
+            fit_s21_circle(["p1".into(), "p1".into()], ResonatorBranch::Reflection, &freqs_hz, &refl_lossless).unwrap();
+        assert!(fit_refl.q_i.is_infinite());
+        assert!(fit_refl.q_i_sigma.is_none());
+        assert!(fit_refl.to_json().get("q_i_sigma").is_none());
+        assert!(fit_refl.q_c_sigma.unwrap() < 1.0e-4 * qc_abs);
+
+        let trans_trace: Vec<[f64; 2]> = freqs_hz
+            .iter()
+            .map(|&f| {
+                let denom = C64::new(1.0, 2.0 * q_l * (f - f_r) / f_r);
+                let s21 = C64::new(q_l / qc_abs, 0.0) / denom;
+                let g = next_gauss();
+                [s21.re + g[0], s21.im + g[1]]
+            })
+            .collect();
+        let fit_tr =
+            fit_s21_circle(["p1".into(), "p2".into()], ResonatorBranch::Transmission, &freqs_hz, &trans_trace).unwrap();
+        assert!(fit_tr.q_c_sigma.unwrap() > 0.0 && fit_tr.q_i_sigma.unwrap() > 0.0);
+
+        // 3. Foster-zero residuals in BBQ on a CircuitRom
+        let l_r = 1.0 / ((2.0 * PI * 6.5e9).powi(2) * 50.0e-15);
+        let mut rom = CircuitRom {
+            ports: vec![
+                RomPort {
+                    name: "jj".into(),
+                    kind: "lumped_jj".into(),
+                    l_j_h: Some(10.0e-9),
+                    e_j_hz: None,
+                    c_j_f: 0.0,
+                    e_l_hz: None,
+                    phi_ext_rad: 0.0,
+                    n_g: 0.0,
+                    squid_asymmetry: None,
+                    z0_ohm: None,
+                    direction: [1.0, 0.0, 0.0],
+                    formulation: "rank1".into(),
+                },
+                RomPort {
+                    name: "ro".into(),
+                    kind: "lumped_port".into(),
+                    l_j_h: None,
+                    e_j_hz: None,
+                    c_j_f: 0.0,
+                    e_l_hz: None,
+                    phi_ext_rad: 0.0,
+                    n_g: 0.0,
+                    squid_asymmetry: None,
+                    z0_ohm: Some(50.0),
+                    direction: [1.0, 0.0, 0.0],
+                    formulation: "rank1".into(),
+                },
+            ],
+            r_static: 0,
+            r_dyn: 2,
+            k_r: vec![vec![0.0, 0.0], vec![0.0, MU0 / l_r]],
+            c_r: vec![],
+            m_r: vec![vec![70.0e-15 / EPS0, -2.0e-15 / EPS0], vec![-2.0e-15 / EPS0, 52.0e-15 / EPS0]],
+            b_r: vec![vec![1.0, 0.0], vec![0.0, 0.02]],
+            c_port_f: vec![],
+            modes: vec![],
+        };
+        rom.modes = crate::epr::project_rom_modes(&rom, &rom.ports).unwrap();
+        let res_rom = SolveResult { scalars: vec![rom.scalar()], ..Default::default() };
+        let net_rom = network_with_params(&res_rom, &json!({ "active_ports": ["jj"] })).unwrap();
+        assert!(!net_rom.bbq_modes.is_empty());
+        assert!(
+            net_rom.max_foster_zero_residual_s.unwrap() < 1.0e-12,
+            "max_foster_zero_residual_s = {:e}, modes = {:?}",
+            net_rom.max_foster_zero_residual_s.unwrap(),
+            net_rom.bbq_modes
+        );
+        for bm in &net_rom.bbq_modes {
+            assert!(bm.foster_zero_residual_s < 1.0e-12, "Foster residual {:e}", bm.foster_zero_residual_s);
+            assert!(bm.foster_zero_rel_residual < 1.0e-12, "rel residual {:e}", bm.foster_zero_rel_residual);
+            let bj = bm.to_json();
+            assert!(bj.get("foster_zero_residual_S").is_some());
+            assert!(bj.get("foster_zero_rel_residual").is_some());
+        }
+        assert!(net_rom.to_json().get("max_foster_zero_residual_S").is_some());
     }
 }

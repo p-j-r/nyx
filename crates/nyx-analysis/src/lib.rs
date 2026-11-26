@@ -51,7 +51,7 @@ pub use piezo_resonator::{
 pub use samples::{polarization_input, PolarizationInput};
 pub use tls::{
     tls_participation, tls_participation_applies, tls_participation_quasi_electrostatic, tls_participation_with_params,
-    QuasiElectrostaticTlsMode, TlsParticipationAnalysis, TlsReport,
+    tls_r0_plateau_check, QuasiElectrostaticTlsMode, R0PlateauCheck, TlsParticipationAnalysis, TlsReport,
 };
 
 use nyx_physics::{Error, Mesh, SolveResult};
