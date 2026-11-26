@@ -2,16 +2,17 @@
 
 C4 level 4 (code) of the component **Materials** (`engine.materials`) in the container **nyx-engine** (crate `nyx_engine`). [Component view of the container](../../3-components/engine.md) · [All code pages](../README.md)
 
-> The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point.
+> The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point, with active-study T-range clamping/strict guards and Source uncertainty diagnostics.
 
-**Decisions:** [ADR 58](../../../adr/0058-the-engine-resolves-materials-from-the-library-and-the-project.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
-**Size:** 2 files, 1347 lines.
+**Decisions:** [ADR 58](../../../adr/0058-the-engine-resolves-materials-from-the-library-and-the-project.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 3 files, 1533 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/material_fetch.rs` | 726 |  |
+| `crates/nyx-engine/src/material_warnings.rs` | 186 |  |
 | `crates/nyx-engine/src/materials.rs` | 621 |  |
 
 ## What it uses
@@ -20,7 +21,7 @@ C4 level 4 (code) of the component **Materials** (`engine.materials`) in the con
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::bcs, material::coupled, material::import, material::spec | EV_TO_J, FilmModel, ImportFormat, ImportOptions, Library, M3, M6, MaterialSpec, PiezoForm, Piezoelectric +10 |
 | container `materialLibrary` (Material library) |  (declared: Loads) |  |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | desc, error, physics, spec | Error, ParamKind, Physics, ProblemSpec |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | decode, desc, error, physics, result, spec | Ctx, DiagnosticSeverity, DiagnosticWarning, Error, MaterialAudit, ParamKind, Physics, ProblemSpec, SolveResult, SolverDiagnostics +1 |
 | [Commands](./commands.md) | engine | Engine |
 | [Job runner and queue](./jobs.md) | shared_queue | default_workspace |
 
@@ -31,7 +32,8 @@ C4 level 4 (code) of the component **Materials** (`engine.materials`) in the con
 | [app: Scripts and batch](../app/headless.md) | material_fetch | default_materials_folder, default_name_from_target |
 | [app: Inspector tabs](../app/inspector.md) | material_fetch | convert_to_toml, default_materials_folder, fetch_url_text_with_api_key, remote_catalog, resolve_remote_url |
 | [Commands](./commands.md) | materials | default_dirs, load_library, study_wavelength |
-| [Job runner and queue](./jobs.md) | materials | study_frequency, study_wavelength |
+| [Job runner and queue](./jobs.md) | material_warnings, materials | finalize, preflight, study_frequency, study_wavelength |
+| [Meshing seam](./meshing.md) | material_warnings | finalize, preflight |
 
 ## Class diagram
 
@@ -81,6 +83,13 @@ classDiagram
         +default_name_from_target(target) String
     }
   }
+  namespace material_warnings_rs {
+    class fns_material_warnings_rs {
+        <<module material_warnings.rs>>
+        ~preflight(p, spec, ctx, strict_material_range) Result
+        ~finalize(result, p, spec, ctx, strict_material_range, pre) Result
+    }
+  }
   namespace materials_rs {
     class fns_materials_rs {
         <<module materials.rs>>
@@ -114,6 +123,8 @@ classDiagram
 | fn | `Engine::fetch_material` | `material_fetch.rs:394` | `pub fn fetch_material( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS, converts it into validated TOML, and adds/saves as requested. |
 | fn | `Engine::fetch_material_with_key` | `material_fetch.rs:410` | `pub fn fetch_material_with_key( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, api_key: Option<&str>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS (using `api_key` or `MP_API_KEY` via `curl --config -` stdin for Materials Project), |
 | fn | `Engine::search_remote_materials` | `material_fetch.rs:513` | `pub fn search_remote_materials( &self, query: &str, domain: Option<&str>, source: Option<&str>, live: bool, api_key: Option<&str>, ) -> Result<Value, Error>` —  Searches the curated `REMOTE_CATALOG` and (when `live` is true) live AFLOW and Materials Project HTTPS endpoints. |
+| fn | `preflight` | `material_warnings.rs:96` | `pub(crate) fn preflight( p: &dyn Physics, spec: &ProblemSpec, ctx: &Ctx, strict_material_range: bool, ) -> Result<MaterialAudit, Error>` —  Checks pre-solve active materials and temperatures, refusing immediately if `strict_material_range` is enabled and any curve clamps. |
+| fn | `finalize` | `material_warnings.rs:114` | `pub(crate) fn finalize( result: &mut SolveResult, p: &dyn Physics, spec: &ProblemSpec, ctx: &Ctx, strict_material_range: bool, pre: MaterialAudit, ) -> Result<(), Error>` —  Checks solved thermal fields (if any), enforces `strict_material_range`, and appends deduplicated material warnings into `result.diagnostics.warnings`. |
 | fn | `default_dirs` | `materials.rs:17` | `pub fn default_dirs() -> Vec<PathBuf>` —  The folders searched for bundled/configured material files, first valid match wins when loading the base library: |
 | fn | `user_materials_dir` | `materials.rs:77` | `pub fn user_materials_dir() -> Option<PathBuf>` —  The user's writable material overlay folder (`<workspace>/materials`, i.e. `$NYX_WORKSPACE/materials` or `Documents/nyx/materials`). |
 | fn | `load_library` | `materials.rs:106` | `pub fn load_library(dirs: &[PathBuf]) -> (Library, Vec<String>)` —  Loads the first folder that has material files as the base library, then overlays any user `*.toml` files |

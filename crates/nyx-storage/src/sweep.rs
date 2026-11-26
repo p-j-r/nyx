@@ -57,6 +57,15 @@ pub struct SweepPoint {
     pub eig_im: Vec<f64>,
 }
 
+/// Metadata for a parametric sweep sample skipped due to invalid geometry, meshing failure, or bad elements.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SkippedSweepPoint {
+    pub index: usize,
+    pub label: String,
+    pub params: Vec<f64>,
+    pub reason: String,
+}
+
 /// Incremental HDF5 parameter-sweep checkpoint store backed by unlimited rank-1 chunked datasets.
 #[derive(Clone, Debug)]
 pub struct SweepCheckpoint {
@@ -279,5 +288,100 @@ impl SweepCheckpoint {
             out.push(SweepPoint { params, eig_re, eig_im });
         }
         Ok(out)
+    }
+
+    /// Returns the committed number of solved points (`@n_points`).
+    pub fn n_points(&self) -> Result<u64> {
+        let file = File::open_streaming(&self.path)?;
+        let attrs = file.root().attrs()?;
+        Ok(attr_i64(&attrs, "n_points").unwrap_or(0).max(0) as u64)
+    }
+
+    /// Returns the committed number of skipped points (`@n_skipped`, or `0` on legacy files).
+    pub fn n_skipped(&self) -> Result<u64> {
+        let file = File::open_streaming(&self.path)?;
+        let attrs = file.root().attrs()?;
+        Ok(attr_i64(&attrs, "n_skipped").unwrap_or(0).max(0) as u64)
+    }
+
+    /// Appends one skipped sweep point (`skipped_invalid_geometry`) to root metadata cleanly in place.
+    pub fn record_skipped(&self, skipped: &SkippedSweepPoint) -> Result<()> {
+        self.record_skipped_batch(std::slice::from_ref(skipped))
+    }
+
+    /// Appends one or more skipped sweep points atomically via `File::open_rw` + `commit()`.
+    pub fn record_skipped_batch(&self, items: &[SkippedSweepPoint]) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        for (i, item) in items.iter().enumerate() {
+            if item.params.len() != self.param_names.len() {
+                bail!("skipped point {} has {} params, expected {}", i, item.params.len(), self.param_names.len());
+            }
+        }
+        let mut existing = self.read_skipped()?;
+        existing.extend(items.iter().cloned());
+        let encoded = serde_json::to_string(&existing)?;
+        let n_skipped = existing.len() as i64;
+
+        let session = File::open_rw(&self.path)?;
+        session.root().set_attr("n_skipped", AttrValue::I64(n_skipped))?;
+        session.root().set_attr("skipped_json", AttrValue::VarLenString(encoded))?;
+        session.commit()?;
+        drop(session);
+        Ok(())
+    }
+
+    /// Reads all recorded skipped sweep points (empty vector on checkpoints with no skipped entries).
+    pub fn read_skipped(&self) -> Result<Vec<SkippedSweepPoint>> {
+        let file = File::open_streaming(&self.path)?;
+        let attrs = file.root().attrs()?;
+        let Ok(raw) = attr_str(&attrs, "skipped_json") else {
+            return Ok(Vec::new());
+        };
+        let list: Vec<SkippedSweepPoint> = serde_json::from_str(&raw)?;
+        Ok(list)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sweep_checkpoint_streams_points_and_skipped_invalid_geometry_cleanly() {
+        let dir = std::env::temp_dir().join(format!("nyx-storage-sweep-uq-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("qmc_ckpt.h5");
+
+        let ckpt = SweepCheckpoint::create(&path, &["gap_um", "eps_r"], 0).unwrap();
+        assert_eq!(ckpt.n_points().unwrap(), 0);
+        assert_eq!(ckpt.n_skipped().unwrap(), 0);
+
+        ckpt.append_point(&SweepPoint { params: vec![5.0, 11.45], eig_re: vec![], eig_im: vec![] }).unwrap();
+        ckpt.record_skipped(&SkippedSweepPoint {
+            index: 1,
+            label: "qmc-0001".into(),
+            params: vec![0.0, 11.45],
+            reason: "gap_um <= 0 invalid geometry".into(),
+        })
+        .unwrap();
+        ckpt.append_point(&SweepPoint { params: vec![7.5, 11.70], eig_re: vec![], eig_im: vec![] }).unwrap();
+
+        let reopened = SweepCheckpoint::open(&path).unwrap();
+        assert_eq!(reopened.n_points().unwrap(), 2);
+        assert_eq!(reopened.n_skipped().unwrap(), 1);
+        let pts = reopened.read_points().unwrap();
+        assert_eq!(pts.len(), 2);
+        assert_eq!(pts[0].params, vec![5.0, 11.45]);
+        assert_eq!(pts[1].params, vec![7.5, 11.70]);
+        let skipped = reopened.read_skipped().unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].index, 1);
+        assert_eq!(skipped[0].label, "qmc-0001");
+        assert!(skipped[0].reason.contains("invalid geometry"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

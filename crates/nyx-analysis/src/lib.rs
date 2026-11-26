@@ -28,6 +28,7 @@ pub mod raster;
 pub mod samples;
 pub mod section;
 pub mod tls;
+pub mod uq;
 pub mod view3d;
 
 pub use capacitance::{
@@ -52,6 +53,10 @@ pub use samples::{polarization_input, PolarizationInput};
 pub use tls::{
     tls_participation, tls_participation_applies, tls_participation_quasi_electrostatic, tls_participation_with_params,
     tls_r0_plateau_check, QuasiElectrostaticTlsMode, R0PlateauCheck, TlsParticipationAnalysis, TlsReport,
+};
+pub use uq::{
+    uq_cqed, uq_cqed_applies, uq_cqed_with_companion_and_params, uq_cqed_with_mesh_and_params, uq_cqed_with_params,
+    AleatoricEstimate, EpistemicInterval, PBoxEnvelope, UqCqedAnalysis, UqCqedReport, UqParameterSpec, UqQuantity,
 };
 
 use nyx_physics::{Error, Mesh, SolveResult};

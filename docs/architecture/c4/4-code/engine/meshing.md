@@ -4,14 +4,14 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 
 > MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92).
 
-**Decisions:** [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 4 files, 2029 lines.
+**Decisions:** [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 4 files, 2031 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/amr.rs` | 748 |  |
+| `crates/nyx-engine/src/amr.rs` | 750 |  |
 | `crates/nyx-engine/src/meshing.rs` | 559 |  |
 | `crates/nyx-engine/src/pml.rs` | 533 |  |
 | `crates/nyx-engine/src/preview.rs` | 189 |  |
@@ -27,6 +27,7 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, error, physics, registry, result, spec, validate | AdaptPassRecord, BcSpec, CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, Error, LabelResolver, MaterialAssign, Mesh, ProblemSpec +7 |
 | [Commands](./commands.md) | engine | Engine |
 | [Job runner and queue](./jobs.md) | estimate, solve | Estimate, History, build_solve_ctx, chain_key, chain_key_for_project, name_domains, solve_one_single |
+| [Materials](./materials.md) | material_warnings | finalize, preflight |
 | [Project](./project.md) | crate root, project | MeshSettings, PmlModeRequest, Project, SweepLayer |
 | [Registry and facade](./registry.md) | crate root | physics_for |
 
@@ -140,8 +141,8 @@ classDiagram
 | fn | `solve_dfs_with_amr` | `amr.rs:164` | `pub(crate) fn solve_dfs_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs the multi-pass goal-oriented AMR loop for `dfs` `electrostatic` and returns `(final_model, final_result)`. |
 | fn | `solve_dfs_with_amr_opts` | `amr.rs:175` | `pub(crate) fn solve_dfs_with_amr_opts( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], retain_amr_data: bool, ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` |
 | fn | `solve_ems_cavity_with_amr` | `amr.rs:493` | `pub(crate) fn solve_ems_cavity_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs multi-pass goal-oriented Maxwell residual AMR (`femcore::adapt::maxwell`) on 3D `ems::cavity` studies. |
-| fn | `solve_ems_cavity_with_amr` | `amr.rs:632` | `pub(crate) fn solve_ems_cavity_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` |
-| fn | `solve_sms_with_amr` | `amr.rs:645` | `pub(crate) fn solve_sms_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs multi-pass recovered-Hessian AMR (`femcore::adapt::{estimate, estimate3}`) over `PlotFields` for `sms` studies. |
+| fn | `solve_ems_cavity_with_amr` | `amr.rs:634` | `pub(crate) fn solve_ems_cavity_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` |
+| fn | `solve_sms_with_amr` | `amr.rs:647` | `pub(crate) fn solve_sms_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs multi-pass recovered-Hessian AMR (`femcore::adapt::{estimate, estimate3}`) over `PlotFields` for `sms` studies. |
 | struct | `MeshedModel` | `meshing.rs:17` |  |
 | trait | `Mesher` | `meshing.rs:271` | methods: `mesh` —  Builds the mesh of a model. `sizing` is what the physics of the project want resolved (`MeshSettings::physics_sizing`); the engine |
 | struct | `FemcoreMesher` | `meshing.rs:291` |  The mesher of `femcore`, driven by a `MeshRequest` (ADR 54): 2D and 3D models, simple or adaptive, inline or structured absorbing |

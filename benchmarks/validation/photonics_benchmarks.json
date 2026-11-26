@@ -1,0 +1,109 @@
+{
+  "benchmark_suite": "photonics_benchmarks",
+  "version": "1.0.0",
+  "citations": [
+    "S. G. Johnson and J. D. Joannopoulos, Opt. Express 8, 173 (2001) — MIT Photonic-Bands (MPB)",
+    "A. F. Oskooi et al., Comput. Phys. Commun. 181, 687 (2010) — MEEP",
+    "L. Chrostowski and M. Hochberg, Silicon Photonics Design: From Devices to Systems (Cambridge Univ. Press, 2015)"
+  ],
+  "methodology": "Cross-code validation of 2D/3D photonic eigenmodes, group index n_g, Floquet-Bloch Bragg band edges, 3D SWG dispersion, and radiative leaky grating decay alpha against archived MPB/Lumerical/analytical targets under ASME V&V 20.",
+  "si_on_sapphire_450x230": {
+    "wavelength_m": 1.55e-6,
+    "w_si_m": 450.0e-9,
+    "h_si_m": 230.0e-9,
+    "n_si": 3.45,
+    "n_sapphire": 1.746,
+    "target": {
+      "id": "sos_450x230_te0_neff",
+      "description": "450x230 nm Si-on-sapphire TE0 effective index at 1550 nm (converged MODE/MPB reference)",
+      "quantity": "n_eff_TE0",
+      "unit": "1",
+      "reference_value": 2.3175,
+      "u_input": 8.0e-4,
+      "u_d": 5.0e-4,
+      "tol_rel": 0.001,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  },
+  "soi_wires_1550nm": {
+    "wavelength_m": 1.55e-6,
+    "n_si": 3.4757,
+    "n_sio2": 1.4440,
+    "strip_500x300": {
+      "width_m": 500.0e-9,
+      "height_m": 300.0e-9,
+      "targets": [
+        {
+          "id": "soi_500x300_te0_neff",
+          "description": "500x300 nm SOI strip TE0 effective index at 1550 nm (Lumerical/MPB cross-code)",
+          "quantity": "n_eff_TE0",
+          "unit": "1",
+          "reference_value": 2.67179,
+          "u_input": 1.0e-3,
+          "u_d": 8.0e-4,
+          "tol_rel": 0.001,
+          "tol_abs": 0.0,
+          "coverage_k": 2.0
+        },
+        {
+          "id": "soi_500x300_tm0_neff",
+          "description": "500x300 nm SOI strip TM0 effective index at 1550 nm (Lumerical/MPB cross-code)",
+          "quantity": "n_eff_TM0",
+          "unit": "1",
+          "reference_value": 2.33374,
+          "u_input": 1.0e-3,
+          "u_d": 8.0e-4,
+          "tol_rel": 0.001,
+          "tol_abs": 0.0,
+          "coverage_k": 2.0
+        }
+      ]
+    },
+    "strip_500x220_chrostowski": {
+      "width_m": 500.0e-9,
+      "height_m": 220.0e-9,
+      "n_si_chrostowski": 3.476,
+      "n_sio2_chrostowski": 1.444,
+      "targets": [
+        {
+          "id": "soi_500x220_te0_neff",
+          "description": "500x220 nm Chrostowski & Hochberg (2015) SOI TE0 n_eff at 1550 nm (fixed-n Lumerical MODE)",
+          "quantity": "n_eff_TE0",
+          "unit": "1",
+          "reference_value": 2.444,
+          "u_input": 1.5e-3,
+          "u_d": 1.5e-3,
+          "tol_rel": 0.002,
+          "tol_abs": 0.0,
+          "coverage_k": 2.0
+        },
+        {
+          "id": "soi_500x220_te0_ng",
+          "description": "500x220 nm Chrostowski & Hochberg (2015) SOI TE0 group index n_g (dispersionless n) cross-check",
+          "quantity": "n_g_TE0",
+          "unit": "1",
+          "reference_value": 4.19,
+          "u_input": 4.0e-3,
+          "u_d": 4.0e-3,
+          "tol_rel": 0.005,
+          "tol_abs": 0.0,
+          "coverage_k": 2.0
+        }
+      ]
+    }
+  },
+  "bragg_and_swg_bloch": {
+    "bragg_stack_n": [3.4641016151377544, 1.4142135623730951],
+    "bragg_stack_d_m": [0.0075, 0.0125],
+    "bragg_edge_tol_rel": 0.005,
+    "swg_3d": {
+      "wavelength_m": 1.55e-6,
+      "pitch_subwavelength_m": 0.24e-6,
+      "pitch_radiative_m": 0.62e-6,
+      "nb_tol_rel": 0.002,
+      "ng_tol_rel": 0.002,
+      "alpha_tol_rel": 0.08
+    }
+  }
+}

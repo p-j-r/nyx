@@ -139,25 +139,25 @@ impl QuasiElectrostaticTlsMode {
 
 /// Parameters for [`tls_participation_with_params`].
 #[derive(Clone, Debug)]
-struct TlsParams {
-    solution: usize,
-    t_ma: f64,
-    t_ms: f64,
-    t_sa: f64,
-    eps_ma: f64,
-    eps_ms: f64,
-    eps_sa: f64,
-    tan_delta_ma: f64,
-    tan_delta_ms: f64,
-    tan_delta_sa: f64,
-    d: Option<f64>,
-    edge_cutoff: Option<f64>,
-    trench_depth_m: Option<f64>,
-    check_r0_plateau: bool,
+pub(crate) struct TlsParams {
+    pub(crate) solution: usize,
+    pub(crate) t_ma: f64,
+    pub(crate) t_ms: f64,
+    pub(crate) t_sa: f64,
+    pub(crate) eps_ma: f64,
+    pub(crate) eps_ms: f64,
+    pub(crate) eps_sa: f64,
+    pub(crate) tan_delta_ma: f64,
+    pub(crate) tan_delta_ms: f64,
+    pub(crate) tan_delta_sa: f64,
+    pub(crate) d: Option<f64>,
+    pub(crate) edge_cutoff: Option<f64>,
+    pub(crate) trench_depth_m: Option<f64>,
+    pub(crate) check_r0_plateau: bool,
 }
 
 impl TlsParams {
-    fn from_json(params: &Value, meta: &TlsMeta) -> Result<Self, Error> {
+    pub(crate) fn from_json(params: &Value, meta: &TlsMeta) -> Result<Self, Error> {
         let ifaces = meta.interfaces.as_ref();
         let def_t_ma = ifaces.and_then(|i| i.ma.as_ref()).map_or(2.0e-9, |s| s.thickness_m);
         let def_eps_ma = ifaces.and_then(|i| i.ma.as_ref()).map_or(10.0, |s| s.eps_r);
@@ -339,13 +339,80 @@ fn norm_sq3(e: &[C64; 3]) -> f64 {
 
 // ------------------------------------------------------------------ 2D TLS participation
 
-fn run_tls_2d(
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedTls2d {
+    pub(crate) u_elec_j: f64,
+    pub(crate) c_e: f64,
+    pub(crate) ma_eps2_en2: f64,
+    pub(crate) ma_epar2: f64,
+    pub(crate) ms_eps2_en2: f64,
+    pub(crate) ms_epar2: f64,
+    pub(crate) sa_eps2_en2: f64,
+    pub(crate) sa_epar2: f64,
+    pub(crate) h_edge_mean_m: f64,
+    pub(crate) n_cells: usize,
+}
+
+impl PreparedTls2d {
+    pub(crate) fn eval(&self, p: &TlsParams) -> TlsReport {
+        let ce_eps0 = self.c_e * EPS0;
+        let u_ma = ce_eps0 * p.t_ma * (self.ma_eps2_en2 / p.eps_ma + p.eps_ma * self.ma_epar2);
+        let u_ms = ce_eps0 * p.t_ms * (self.ms_eps2_en2 / p.eps_ms + p.eps_ms * self.ms_epar2);
+        let u_sa = ce_eps0 * p.t_sa * (p.eps_sa * self.sa_epar2 + self.sa_eps2_en2 / p.eps_sa);
+
+        let p_ma = u_ma / self.u_elec_j;
+        let p_ms = u_ms / self.u_elec_j;
+        let p_sa = u_sa / self.u_elec_j;
+        let p_total = p_ma + p_ms + p_sa;
+        let loss_tan_total = p_ma * p.tan_delta_ma + p_ms * p.tan_delta_ms + p_sa * p.tan_delta_sa;
+        let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
+        let r0_plateau_check = p.check_r0_plateau.then(|| R0PlateauCheck {
+            applicable: false,
+            r0_values_m: vec![0.0],
+            p_total_values: vec![p_total],
+            q_tls_values: vec![q_tls],
+            max_rel_spread: 0.0,
+            is_plateau_stable: true,
+        });
+
+        TlsReport {
+            solution: p.solution,
+            u_elec_j: self.u_elec_j,
+            p_ma,
+            p_ms,
+            p_sa,
+            p_total,
+            loss_tan_total,
+            q_tls,
+            edge_cutoff_m: 0.0,
+            r0_m: 0.0,
+            h_edge_mean_m: self.h_edge_mean_m,
+            i_edge: 0.0,
+            p_ma_interior: p_ma,
+            p_ms_interior: p_ms,
+            p_sa_interior: p_sa,
+            p_ma_edge: 0.0,
+            p_ms_edge: 0.0,
+            p_sa_edge: 0.0,
+            convergence_check: json!({
+                "dim": 2,
+                "mode": "exact_boundary_2d",
+                "n_cells": self.n_cells,
+                "r0_m": 0.0,
+                "h_edge_mean_m": self.h_edge_mean_m,
+                "i_edge": 0.0,
+            }),
+            r0_plateau_check,
+        }
+    }
+}
+
+fn prepare_tls_2d(
     disc: &Discretisation,
     ef: &EFieldAccessor<'_>,
     meta: &TlsMeta,
-    p: &TlsParams,
     c_e: f64,
-) -> Result<TlsReport, Error> {
+) -> Result<PreparedTls2d, Error> {
     let geo = geometry(disc);
     let quad = quad_rule(2, 4);
     let shapes: Vec<Vec<f64>> = quad.lam.iter().map(|l| shape(l, ef.order).0).collect();
@@ -406,9 +473,9 @@ fn run_tls_2d(
     });
 
     let f_rule = facet_rule(1);
-    let mut u_ma = 0.0;
-    let mut u_ms = 0.0;
-    let mut u_sa = 0.0;
+    let (mut ma_eps2_en2, mut ma_epar2) = (0.0, 0.0);
+    let (mut ms_eps2_en2, mut ms_epar2) = (0.0, 0.0);
+    let (mut sa_eps2_en2, mut sa_epar2) = (0.0, 0.0);
     let mut iface_len_sum = 0.0;
     let mut iface_cnt = 0usize;
     let mut all_len_sum = 0.0;
@@ -455,9 +522,11 @@ fn run_tls_2d(
                     int_epar2 += wq * epar2;
                 }
                 if eps_c <= 1.5 {
-                    u_ma += c_e * EPS0 * p.t_ma * ((eps_c * eps_c / p.eps_ma) * int_en2 + p.eps_ma * int_epar2);
+                    ma_eps2_en2 += eps_c * eps_c * int_en2;
+                    ma_epar2 += int_epar2;
                 } else {
-                    u_ms += c_e * EPS0 * p.t_ms * ((eps_c * eps_c / p.eps_ms) * int_en2 + p.eps_ms * int_epar2);
+                    ms_eps2_en2 += eps_c * eps_c * int_en2;
+                    ms_epar2 += int_epar2;
                 }
             }
         } else if cells.len() == 2 {
@@ -490,17 +559,12 @@ fn run_tls_2d(
                     int_en2 += wq * en2;
                     int_epar2 += wq * epar2;
                 }
-                u_sa += c_e * EPS0 * p.t_sa * (p.eps_sa * int_epar2 + (eps_vac * eps_vac / p.eps_sa) * int_en2);
+                sa_eps2_en2 += eps_vac * eps_vac * int_en2;
+                sa_epar2 += int_epar2;
             }
         }
     }
 
-    let p_ma = u_ma / u_elec_j;
-    let p_ms = u_ms / u_elec_j;
-    let p_sa = u_sa / u_elec_j;
-    let p_total = p_ma + p_ms + p_sa;
-    let loss_tan_total = p_ma * p.tan_delta_ma + p_ms * p.tan_delta_ms + p_sa * p.tan_delta_sa;
-    let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
     let h_edge_mean_m = if iface_cnt > 0 {
         iface_len_sum / (iface_cnt as f64)
     } else if all_cnt > 0 {
@@ -508,44 +572,30 @@ fn run_tls_2d(
     } else {
         0.0
     };
-    let r0_plateau_check = p.check_r0_plateau.then(|| R0PlateauCheck {
-        applicable: false,
-        r0_values_m: vec![0.0],
-        p_total_values: vec![p_total],
-        q_tls_values: vec![q_tls],
-        max_rel_spread: 0.0,
-        is_plateau_stable: true,
-    });
 
-    Ok(TlsReport {
-        solution: p.solution,
+    Ok(PreparedTls2d {
         u_elec_j,
-        p_ma,
-        p_ms,
-        p_sa,
-        p_total,
-        loss_tan_total,
-        q_tls,
-        edge_cutoff_m: 0.0,
-        r0_m: 0.0,
+        c_e,
+        ma_eps2_en2,
+        ma_epar2,
+        ms_eps2_en2,
+        ms_epar2,
+        sa_eps2_en2,
+        sa_epar2,
         h_edge_mean_m,
-        i_edge: 0.0,
-        p_ma_interior: p_ma,
-        p_ms_interior: p_ms,
-        p_sa_interior: p_sa,
-        p_ma_edge: 0.0,
-        p_ms_edge: 0.0,
-        p_sa_edge: 0.0,
-        convergence_check: json!({
-            "dim": 2,
-            "mode": "exact_boundary_2d",
-            "n_cells": nc,
-            "r0_m": 0.0,
-            "h_edge_mean_m": h_edge_mean_m,
-            "i_edge": 0.0,
-        }),
-        r0_plateau_check,
+        n_cells: nc,
     })
+}
+
+fn run_tls_2d(
+    disc: &Discretisation,
+    ef: &EFieldAccessor<'_>,
+    meta: &TlsMeta,
+    p: &TlsParams,
+    c_e: f64,
+) -> Result<TlsReport, Error> {
+    let prep = prepare_tls_2d(disc, ef, meta, c_e)?;
+    Ok(prep.eval(p))
 }
 
 // ------------------------------------------------------------------ 3D Flat AABB BVH & Edge-Tube Helpers
@@ -1095,14 +1145,188 @@ fn result_is_order_1(ef: &EFieldAccessor<'_>, result: &SolveResult) -> bool {
     ef.order == 1 || result.order == 1 || result.log.iter().any(|l| l.starts_with("Nedelec order 1,"))
 }
 
-fn run_tls_3d(
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedTls3d {
+    pub(crate) solution: usize,
+    pub(crate) u_elec_j: f64,
+    pub(crate) c_e: f64,
+    pub(crate) eps_sub: f64,
+    pub(crate) d_film_default: f64,
+    pub(crate) r0: f64,
+    pub(crate) has_resolved_3d_step: bool,
+    pub(crate) has_perimeter: bool,
+    pub(crate) perimeter_segments: usize,
+    pub(crate) perimeter_len_m: f64,
+    pub(crate) h_edge_mean_m: f64,
+    pub(crate) is_p1_field: bool,
+    pub(crate) u_tube_j: f64,
+    pub(crate) i_edge: f64,
+    pub(crate) ma_ext_eps2_en2: f64,
+    pub(crate) ma_ext_epar2: f64,
+    pub(crate) ma_col_eps2_en2: f64,
+    pub(crate) ma_col_epar2: f64,
+    pub(crate) ms_ext_eps2_en2: f64,
+    pub(crate) ms_ext_epar2: f64,
+    pub(crate) ms_col_eps2_en2: f64,
+    pub(crate) ms_col_epar2: f64,
+    pub(crate) sa_ext_eps2_en2: f64,
+    pub(crate) sa_ext_epar2: f64,
+    pub(crate) sa_col_eps2_en2: f64,
+    pub(crate) sa_col_epar2: f64,
+}
+
+impl PreparedTls3d {
+    fn eval_core(&self, p: &TlsParams, d_film: f64) -> (f64, f64, f64, f64, f64, f64, f64) {
+        let ce_eps0 = self.c_e * EPS0;
+        let u_ma_ext = ce_eps0 * p.t_ma * (self.ma_ext_eps2_en2 / p.eps_ma + p.eps_ma * self.ma_ext_epar2);
+        let u_ma_col = ce_eps0 * p.t_ma * (self.ma_col_eps2_en2 / p.eps_ma + p.eps_ma * self.ma_col_epar2);
+        let u_ms_ext = ce_eps0 * p.t_ms * (self.ms_ext_eps2_en2 / p.eps_ms + p.eps_ms * self.ms_ext_epar2);
+        let u_ms_col = ce_eps0 * p.t_ms * (self.ms_col_eps2_en2 / p.eps_ms + p.eps_ms * self.ms_col_epar2);
+        let u_sa_ext = ce_eps0 * p.t_sa * (p.eps_sa * self.sa_ext_epar2 + self.sa_ext_eps2_en2 / p.eps_sa);
+        let u_sa_col = ce_eps0 * p.t_sa * (p.eps_sa * self.sa_col_epar2 + self.sa_col_eps2_en2 / p.eps_sa);
+
+        let (mut u_ma_edge, mut u_ms_edge, mut u_sa_edge) = (0.0, 0.0, 0.0);
+        let trench_m = p.trench_depth_m.unwrap_or(0.0);
+
+        if self.has_perimeter && self.r0 > 0.0 {
+            let kappa_ma = ce_eps0 * (p.t_ma / p.eps_ma);
+            let kappa_ms = ce_eps0 * (self.eps_sub * self.eps_sub * p.t_ms / p.eps_ms);
+            let kappa_sa = ce_eps0 * (p.eps_sa * p.t_sa);
+
+            let (c_ma_corner, c_ms_corner, c_sa_corner) = if trench_m > 0.0 {
+                let tau_ln = (1.0 + trench_m / d_film.max(1e-12)).ln();
+                (-0.674 + 0.18 * tau_ln, -0.921 - 0.55 * tau_ln, 1.145 - 0.65 * tau_ln)
+            } else {
+                (-0.674, -0.921, 1.145)
+            };
+
+            let ln_r0_d = (self.r0 / d_film.max(1e-12)).max(1.01).ln();
+            let ln_2 = 2.0_f64.ln();
+
+            let ln_inner = (ln_r0_d - ln_2).max(0.0);
+            let asymp_col_ma = kappa_ma * self.i_edge * ln_2;
+            let asymp_col_ms = kappa_ms * self.i_edge * ln_2;
+            let asymp_col_sa = kappa_sa * self.i_edge * ln_2;
+
+            let col_ma = if u_ma_col > 0.0 { 0.5 * (u_ma_col + asymp_col_ma) } else { asymp_col_ma };
+            let col_ms = if u_ms_col > 0.0 { 0.5 * (u_ms_col + asymp_col_ms) } else { asymp_col_ms };
+            let col_sa = if u_sa_col > 0.0 { 0.5 * (u_sa_col + asymp_col_sa) } else { asymp_col_sa };
+
+            u_ma_edge = (kappa_ma * self.i_edge * (ln_inner + c_ma_corner) + col_ma).max(0.0);
+            u_ms_edge = (kappa_ms * self.i_edge * (ln_inner + c_ms_corner) + col_ms).max(0.0);
+            u_sa_edge = (kappa_sa * self.i_edge * (ln_inner + c_sa_corner) + col_sa).max(0.0);
+        }
+
+        let p_ma_interior = u_ma_ext / self.u_elec_j;
+        let p_ms_interior = u_ms_ext / self.u_elec_j;
+        let p_sa_interior = u_sa_ext / self.u_elec_j;
+        let p_ma_edge = u_ma_edge / self.u_elec_j;
+        let p_ms_edge = u_ms_edge / self.u_elec_j;
+        let p_sa_edge = u_sa_edge / self.u_elec_j;
+        let loss_tan_total = (p_ma_interior + p_ma_edge) * p.tan_delta_ma
+            + (p_ms_interior + p_ms_edge) * p.tan_delta_ms
+            + (p_sa_interior + p_sa_edge) * p.tan_delta_sa;
+        (p_ma_interior, p_ms_interior, p_sa_interior, p_ma_edge, p_ms_edge, p_sa_edge, loss_tan_total)
+    }
+
+    pub(crate) fn eval(
+        &self,
+        p: &TlsParams,
+        d_override: Option<f64>,
+        r0_plateau_check: Option<R0PlateauCheck>,
+    ) -> TlsReport {
+        let d_film = d_override.or(p.d).unwrap_or(self.d_film_default);
+        let (p_ma_interior, p_ms_interior, p_sa_interior, p_ma_edge, p_ms_edge, p_sa_edge, loss_tan_total) =
+            self.eval_core(p, d_film);
+
+        let p_ma = p_ma_interior + p_ma_edge;
+        let p_ms = p_ms_interior + p_ms_edge;
+        let p_sa = p_sa_interior + p_sa_edge;
+        let p_total = p_ma + p_ms + p_sa;
+        let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
+
+        let edge_singularity_underresolved =
+            self.is_p1_field && !self.has_resolved_3d_step && self.has_perimeter && self.h_edge_mean_m > 5.0 * d_film;
+
+        let mut conv = json!({
+            "dim": 3,
+            "mode": "matched_asymptotic_edge_tube_3d",
+            "d_film_m": d_film,
+            "r0_m": self.r0,
+            "h_edge_mean_m": self.h_edge_mean_m,
+            "perimeter_segments": self.perimeter_segments,
+            "perimeter_len_m": self.perimeter_len_m,
+            "u_tube_J": self.u_tube_j,
+            "i_edge": self.i_edge,
+            "edge_singularity_underresolved": edge_singularity_underresolved,
+        });
+        if let Some(htr) = p.trench_depth_m {
+            conv["trench_depth_m"] = json!(htr);
+        }
+        if edge_singularity_underresolved {
+            conv["warning"] = json!(format!(
+                "P1 electric field on coarse sheet perimeter (h_edge_mean = {:.3e} m > 5 * d_film = {:.3e} m) under-resolves the r^(-1/2) edge singularity; use P2 quarter_point (AF-2) or tls_participation_quasi_electrostatic for calibrated absolute Q_TLS / T1_TLS",
+                self.h_edge_mean_m,
+                5.0 * d_film
+            ));
+        }
+
+        TlsReport {
+            solution: self.solution,
+            u_elec_j: self.u_elec_j,
+            p_ma,
+            p_ms,
+            p_sa,
+            p_total,
+            loss_tan_total,
+            q_tls,
+            edge_cutoff_m: self.r0,
+            r0_m: self.r0,
+            h_edge_mean_m: self.h_edge_mean_m,
+            i_edge: self.i_edge,
+            p_ma_interior,
+            p_ms_interior,
+            p_sa_interior,
+            p_ma_edge,
+            p_ms_edge,
+            p_sa_edge,
+            convergence_check: conv,
+            r0_plateau_check,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PreparedTls {
+    Dim2(PreparedTls2d),
+    Dim3(PreparedTls3d),
+}
+
+impl PreparedTls {
+    pub(crate) fn eval(&self, p: &TlsParams, d_override: Option<f64>) -> TlsReport {
+        match self {
+            PreparedTls::Dim2(d2) => d2.eval(p),
+            PreparedTls::Dim3(d3) => d3.eval(p, d_override, None),
+        }
+    }
+
+    pub(crate) fn default_d_film(&self) -> Option<f64> {
+        match self {
+            PreparedTls::Dim2(_) => None,
+            PreparedTls::Dim3(d3) => Some(d3.d_film_default),
+        }
+    }
+}
+
+fn integrate_tls_3d(
     disc: &Discretisation,
     ef: &EFieldAccessor<'_>,
     meta: &TlsMeta,
     p: &TlsParams,
     c_e: f64,
     is_p1_field: bool,
-) -> Result<TlsReport, Error> {
+    with_plateau_samples: bool,
+) -> Result<(PreparedTls3d, Option<(PreparedTls3d, PreparedTls3d)>), Error> {
     let geo = geometry(disc);
     let quad3 = quad_rule(3, 4);
     let shapes3: Vec<Vec<f64>> = quad3.lam.iter().map(|l| shape(l, ef.order).0).collect();
@@ -1148,7 +1372,7 @@ fn run_tls_3d(
     let sub_tet = if !perim.bvh.is_empty() && r0 > 0.0 { subdivided_tet_quad(4) } else { Vec::new() };
     let sub_tet_shapes: Vec<Vec<f64>> = sub_tet.iter().map(|(l, _)| shape(l, ef.order).0).collect();
 
-    let eval_at_r0 = |r0_val: f64| -> (f64, f64, f64, f64, f64, f64, f64, f64, f64) {
+    let integrate_at_r0 = |r0_val: f64| -> PreparedTls3d {
         let r0_sq = r0_val * r0_val;
         let half_r0_sq = (0.5 * r0_val) * (0.5 * r0_val);
 
@@ -1225,24 +1449,26 @@ fn run_tls_3d(
             (ext_en2, ext_epar2, col_en2, col_epar2)
         };
 
-        let mut u_ma_ext = 0.0;
-        let mut u_ms_ext = 0.0;
-        let mut u_sa_ext = 0.0;
-        let mut u_ma_col = 0.0;
-        let mut u_ms_col = 0.0;
-        let mut u_sa_col = 0.0;
+        let (mut ma_ext_eps2_en2, mut ma_ext_epar2, mut ma_col_eps2_en2, mut ma_col_epar2) = (0.0, 0.0, 0.0, 0.0);
+        let (mut ms_ext_eps2_en2, mut ms_ext_epar2, mut ms_col_eps2_en2, mut ms_col_epar2) = (0.0, 0.0, 0.0, 0.0);
+        let (mut sa_ext_eps2_en2, mut sa_ext_epar2, mut sa_col_eps2_en2, mut sa_col_epar2) = (0.0, 0.0, 0.0, 0.0);
 
         for &tri in perim.sheet_tris.keys() {
             let Some(cells) = perim.face_to_cells.get(&tri) else { continue };
             for &(ci, lf) in cells {
                 let eps_c = cell_eps[ci];
                 let (ext_en2, ext_epar2, col_en2, col_epar2) = integrate_surface_tri(tri, ci, lf);
+                let eps2 = eps_c * eps_c;
                 if eps_c <= 1.5 {
-                    u_ma_ext += c_e * EPS0 * p.t_ma * ((eps_c * eps_c / p.eps_ma) * ext_en2 + p.eps_ma * ext_epar2);
-                    u_ma_col += c_e * EPS0 * p.t_ma * ((eps_c * eps_c / p.eps_ma) * col_en2 + p.eps_ma * col_epar2);
+                    ma_ext_eps2_en2 += eps2 * ext_en2;
+                    ma_ext_epar2 += ext_epar2;
+                    ma_col_eps2_en2 += eps2 * col_en2;
+                    ma_col_epar2 += col_epar2;
                 } else {
-                    u_ms_ext += c_e * EPS0 * p.t_ms * ((eps_c * eps_c / p.eps_ms) * ext_en2 + p.eps_ms * ext_epar2);
-                    u_ms_col += c_e * EPS0 * p.t_ms * ((eps_c * eps_c / p.eps_ms) * col_en2 + p.eps_ms * col_epar2);
+                    ms_ext_eps2_en2 += eps2 * ext_en2;
+                    ms_ext_epar2 += ext_epar2;
+                    ms_col_eps2_en2 += eps2 * col_en2;
+                    ms_col_epar2 += col_epar2;
                 }
             }
         }
@@ -1252,16 +1478,16 @@ fn run_tls_3d(
             if let Some(&(c_vac, lf)) = cells.iter().find(|&&(ci, _)| cell_eps[ci] <= 1.5) {
                 let eps_c = cell_eps[c_vac];
                 let (ext_en2, ext_epar2, col_en2, col_epar2) = integrate_surface_tri(tri, c_vac, lf);
-                u_sa_ext += c_e * EPS0 * p.t_sa * (p.eps_sa * ext_epar2 + (eps_c * eps_c / p.eps_sa) * ext_en2);
-                u_sa_col += c_e * EPS0 * p.t_sa * (p.eps_sa * col_epar2 + (eps_c * eps_c / p.eps_sa) * col_en2);
+                let eps2 = eps_c * eps_c;
+                sa_ext_eps2_en2 += eps2 * ext_en2;
+                sa_ext_epar2 += ext_epar2;
+                sa_col_eps2_en2 += eps2 * col_en2;
+                sa_col_epar2 += col_epar2;
             }
         }
 
-        let (mut u_ma_edge, mut u_ms_edge, mut u_sa_edge) = (0.0, 0.0, 0.0);
         let mut i_edge_val = 0.0;
         let mut u_tube_val = 0.0;
-        let trench_m = p.trench_depth_m.unwrap_or(0.0);
-
         if !perim.bvh.is_empty() && r0_val > 0.0 {
             for ci in 0..nc {
                 let v = disc.cell(ci);
@@ -1294,92 +1520,86 @@ fn run_tls_3d(
                     }
                 }
             }
-
             i_edge_val = u_tube_val / (c_e * EPS0 * PI * (eps_sub + eps_vac) * r0_val).max(1e-300);
-
-            let kappa_ma = c_e * EPS0 * (p.t_ma / p.eps_ma);
-            let kappa_ms = c_e * EPS0 * (eps_sub * eps_sub * p.t_ms / p.eps_ms);
-            let kappa_sa = c_e * EPS0 * (p.eps_sa * p.t_sa);
-
-            let (c_ma_corner, c_ms_corner, c_sa_corner) = if trench_m > 0.0 {
-                let tau_ln = (1.0 + trench_m / d_film.max(1e-12)).ln();
-                (-0.674 + 0.18 * tau_ln, -0.921 - 0.55 * tau_ln, 1.145 - 0.65 * tau_ln)
-            } else {
-                (-0.674, -0.921, 1.145)
-            };
-
-            let ln_r0_d = (r0_val / d_film.max(1e-12)).max(1.01).ln();
-            let ln_2 = 2.0_f64.ln();
-
-            let ln_inner = (ln_r0_d - ln_2).max(0.0);
-            let asymp_col_ma = kappa_ma * i_edge_val * ln_2;
-            let asymp_col_ms = kappa_ms * i_edge_val * ln_2;
-            let asymp_col_sa = kappa_sa * i_edge_val * ln_2;
-
-            let col_ma = if u_ma_col > 0.0 { 0.5 * (u_ma_col + asymp_col_ma) } else { asymp_col_ma };
-            let col_ms = if u_ms_col > 0.0 { 0.5 * (u_ms_col + asymp_col_ms) } else { asymp_col_ms };
-            let col_sa = if u_sa_col > 0.0 { 0.5 * (u_sa_col + asymp_col_sa) } else { asymp_col_sa };
-
-            u_ma_edge = (kappa_ma * i_edge_val * (ln_inner + c_ma_corner) + col_ma).max(0.0);
-            u_ms_edge = (kappa_ms * i_edge_val * (ln_inner + c_ms_corner) + col_ms).max(0.0);
-            u_sa_edge = (kappa_sa * i_edge_val * (ln_inner + c_sa_corner) + col_sa).max(0.0);
         }
 
-        (
-            u_ma_ext / u_elec_j,
-            u_ms_ext / u_elec_j,
-            u_sa_ext / u_elec_j,
-            u_ma_edge / u_elec_j,
-            u_ms_edge / u_elec_j,
-            u_sa_edge / u_elec_j,
-            u_tube_val,
-            i_edge_val,
-            (u_ma_ext + u_ma_edge) / u_elec_j * p.tan_delta_ma
-                + (u_ms_ext + u_ms_edge) / u_elec_j * p.tan_delta_ms
-                + (u_sa_ext + u_sa_edge) / u_elec_j * p.tan_delta_sa,
-        )
+        PreparedTls3d {
+            solution: p.solution,
+            u_elec_j,
+            c_e,
+            eps_sub,
+            d_film_default: d_film,
+            r0: r0_val,
+            has_resolved_3d_step: perim.has_resolved_3d_step,
+            has_perimeter: !perim.bvh.is_empty(),
+            perimeter_segments: perim.bvh.len(),
+            perimeter_len_m: perim.total_perim_len,
+            h_edge_mean_m: perim.h_edge_mean,
+            is_p1_field,
+            u_tube_j: u_tube_val,
+            i_edge: i_edge_val,
+            ma_ext_eps2_en2,
+            ma_ext_epar2,
+            ma_col_eps2_en2,
+            ma_col_epar2,
+            ms_ext_eps2_en2,
+            ms_ext_epar2,
+            ms_col_eps2_en2,
+            ms_col_epar2,
+            sa_ext_eps2_en2,
+            sa_ext_epar2,
+            sa_col_eps2_en2,
+            sa_col_epar2,
+        }
     };
 
-    let (
-        p_ma_interior,
-        p_ms_interior,
-        p_sa_interior,
-        p_ma_edge,
-        p_ms_edge,
-        p_sa_edge,
-        u_tube_j,
-        i_edge,
-        loss_tan_total,
-    ) = eval_at_r0(r0);
+    let nominal = integrate_at_r0(r0);
+    let plateau_pair = if with_plateau_samples && r0 > 0.0 && !perim.bvh.is_empty() {
+        Some((integrate_at_r0(0.75 * r0), integrate_at_r0(1.25 * r0)))
+    } else {
+        None
+    };
+    Ok((nominal, plateau_pair))
+}
 
-    let p_ma = p_ma_interior + p_ma_edge;
-    let p_ms = p_ms_interior + p_ms_edge;
-    let p_sa = p_sa_interior + p_sa_edge;
-    let p_total = p_ma + p_ms + p_sa;
-    let q_tls = if loss_tan_total > 0.0 { 1.0 / loss_tan_total } else { f64::INFINITY };
+fn run_tls_3d(
+    disc: &Discretisation,
+    ef: &EFieldAccessor<'_>,
+    meta: &TlsMeta,
+    p: &TlsParams,
+    c_e: f64,
+    is_p1_field: bool,
+) -> Result<TlsReport, Error> {
+    let (nominal, plateau_pair) = integrate_tls_3d(disc, ef, meta, p, c_e, is_p1_field, p.check_r0_plateau)?;
+    let d_film = nominal.d_film_default;
+    let r0 = nominal.r0;
+    let (p_ma_int, p_ms_int, p_sa_int, p_ma_e, p_ms_e, p_sa_e, _) = nominal.eval_core(p, d_film);
+    let p_total = p_ma_int + p_ms_int + p_sa_int + p_ma_e + p_ms_e + p_sa_e;
 
     let r0_plateau_check = if p.check_r0_plateau {
-        if r0 > 0.0 && !perim.bvh.is_empty() {
-            let r_lo = 0.75 * r0;
-            let r_hi = 1.25 * r0;
-            let (ma_i_lo, ms_i_lo, sa_i_lo, ma_e_lo, ms_e_lo, sa_e_lo, _, _, lt_lo) = eval_at_r0(r_lo);
+        if let Some((prep_lo, prep_hi)) = plateau_pair {
+            let (ma_i_lo, ms_i_lo, sa_i_lo, ma_e_lo, ms_e_lo, sa_e_lo, lt_lo) = prep_lo.eval_core(p, d_film);
             let p_lo = ma_i_lo + ms_i_lo + sa_i_lo + ma_e_lo + ms_e_lo + sa_e_lo;
             let q_lo = if lt_lo > 0.0 { 1.0 / lt_lo } else { f64::INFINITY };
-            let (ma_i_hi, ms_i_hi, sa_i_hi, ma_e_hi, ms_e_hi, sa_e_hi, _, _, lt_hi) = eval_at_r0(r_hi);
+            let (ma_i_hi, ms_i_hi, sa_i_hi, ma_e_hi, ms_e_hi, sa_e_hi, lt_hi) = prep_hi.eval_core(p, d_film);
             let p_hi = ma_i_hi + ms_i_hi + sa_i_hi + ma_e_hi + ms_e_hi + sa_e_hi;
             let q_hi = if lt_hi > 0.0 { 1.0 / lt_hi } else { f64::INFINITY };
+            let (_, _, _, _, _, _, lt_nom) = nominal.eval_core(p, d_film);
+            let q_tls = if lt_nom > 0.0 { 1.0 / lt_nom } else { f64::INFINITY };
             let p_min = p_lo.min(p_total).min(p_hi);
             let p_max = p_lo.max(p_total).max(p_hi);
             let max_rel_spread = (p_max - p_min) / p_total.max(1e-30);
             Some(R0PlateauCheck {
                 applicable: true,
-                r0_values_m: vec![r_lo, r0, r_hi],
+                r0_values_m: vec![prep_lo.r0, r0, prep_hi.r0],
                 p_total_values: vec![p_lo, p_total, p_hi],
                 q_tls_values: vec![q_lo, q_tls, q_hi],
                 max_rel_spread,
                 is_plateau_stable: max_rel_spread <= 0.05,
             })
         } else {
+            let (_, _, _, _, _, _, lt_nom) = nominal.eval_core(p, d_film);
+            let q_tls = if lt_nom > 0.0 { 1.0 / lt_nom } else { f64::INFINITY };
             Some(R0PlateauCheck {
                 applicable: false,
                 r0_values_m: vec![r0],
@@ -1393,54 +1613,7 @@ fn run_tls_3d(
         None
     };
 
-    let edge_singularity_underresolved =
-        is_p1_field && !perim.has_resolved_3d_step && !perim.bvh.is_empty() && perim.h_edge_mean > 5.0 * d_film;
-
-    let mut conv = json!({
-        "dim": 3,
-        "mode": "matched_asymptotic_edge_tube_3d",
-        "d_film_m": d_film,
-        "r0_m": r0,
-        "h_edge_mean_m": perim.h_edge_mean,
-        "perimeter_segments": perim.bvh.len(),
-        "perimeter_len_m": perim.total_perim_len,
-        "u_tube_J": u_tube_j,
-        "i_edge": i_edge,
-        "edge_singularity_underresolved": edge_singularity_underresolved,
-    });
-    if let Some(htr) = p.trench_depth_m {
-        conv["trench_depth_m"] = json!(htr);
-    }
-    if edge_singularity_underresolved {
-        conv["warning"] = json!(format!(
-            "P1 electric field on coarse sheet perimeter (h_edge_mean = {:.3e} m > 5 * d_film = {:.3e} m) under-resolves the r^(-1/2) edge singularity; use P2 quarter_point (AF-2) or tls_participation_quasi_electrostatic for calibrated absolute Q_TLS / T1_TLS",
-            perim.h_edge_mean,
-            5.0 * d_film
-        ));
-    }
-
-    Ok(TlsReport {
-        solution: p.solution,
-        u_elec_j,
-        p_ma,
-        p_ms,
-        p_sa,
-        p_total,
-        loss_tan_total,
-        q_tls,
-        edge_cutoff_m: r0,
-        r0_m: r0,
-        h_edge_mean_m: perim.h_edge_mean,
-        i_edge,
-        p_ma_interior,
-        p_ms_interior,
-        p_sa_interior,
-        p_ma_edge,
-        p_ms_edge,
-        p_sa_edge,
-        convergence_check: conv,
-        r0_plateau_check,
-    })
+    Ok(nominal.eval(p, None, r0_plateau_check))
 }
 
 fn synthesize_linear_combination_solution(
@@ -1503,13 +1676,21 @@ fn synthesize_linear_combination_solution(
 /// Evaluates per-mode dielectric TLS participation (`p_MA`, `p_MS`, `p_SA`, `Q_TLS`) and TLS-limited relaxation
 /// lifetime (`T1_TLS_s = Q_TLS / (2 pi f_m)`) by forming unit-terminal linear field combinations
 /// `E_m(x) = \sum_i V_{m,i} E^(i)(x)` on a fine electrostatic mesh (`FR-32`).
-pub fn tls_participation_quasi_electrostatic(
+pub(crate) struct PreparedQuasiMode {
+    pub(crate) mode: usize,
+    pub(crate) freq_hz: f64,
+    pub(crate) terminal_voltages_v: Vec<f64>,
+    pub(crate) prepared: PreparedTls,
+    pub(crate) params: TlsParams,
+}
+
+pub(crate) fn prepare_quasi_electrostatic_tls(
     electro_mesh: &Mesh,
     electro_result: &SolveResult,
     modal_voltages: &[Vec<f64>],
     modal_freqs_hz: &[f64],
     params: &Value,
-) -> Result<Vec<QuasiElectrostaticTlsMode>, Error> {
+) -> Result<Vec<PreparedQuasiMode>, Error> {
     if modal_voltages.is_empty() {
         return Err(Error::invalid("modal_voltages must contain at least one mode voltage vector"));
     }
@@ -1546,27 +1727,95 @@ pub fn tls_participation_quasi_electrostatic(
         let mut p_mode = p.clone();
         p_mode.solution = m_idx;
         let is_p1_field = result_is_order_1(&ef, electro_result);
-        let mut rep = match disc.dim {
-            2 => run_tls_2d(&disc, &ef, &meta, &p_mode, 0.5)?,
-            3 => run_tls_3d(&disc, &ef, &meta, &p_mode, 0.5, is_p1_field)?,
+        let prepared = match disc.dim {
+            2 => PreparedTls::Dim2(prepare_tls_2d(&disc, &ef, &meta, 0.5)?),
+            3 => PreparedTls::Dim3(integrate_tls_3d(&disc, &ef, &meta, &p_mode, 0.5, is_p1_field, false)?.0),
             d => {
                 return Err(Error::invalid(format!(
                     "tls_participation_quasi_electrostatic supports 2D and 3D meshes, not {d}D"
                 )))
             }
         };
-        let t1_tls_s = if freq_hz > 0.0 && rep.loss_tan_total > 0.0 && rep.q_tls.is_finite() {
-            rep.q_tls / (2.0 * PI * freq_hz)
+        out.push(PreparedQuasiMode {
+            mode: m_idx,
+            freq_hz,
+            terminal_voltages_v: v_m.clone(),
+            prepared,
+            params: p_mode,
+        });
+    }
+    Ok(out)
+}
+
+pub(crate) fn prepare_tls(
+    mesh: &Mesh,
+    result: &SolveResult,
+    params: &Value,
+) -> Result<(PreparedTls, TlsParams), Error> {
+    let meta = TlsMeta::of(result).unwrap_or_default();
+    let p = TlsParams::from_json(params, &meta)?;
+    let disc = discretise(mesh)?;
+    if disc.dim != result.dim as usize {
+        return Err(Error::invalid(format!("the result is {}D but the mesh is {}D", result.dim, disc.dim)));
+    }
+    if p.solution >= result.solutions.len() {
+        return Err(Error::invalid(format!(
+            "solution index {} is out of bounds (result has {} solution(s))",
+            p.solution,
+            result.solutions.len()
+        )));
+    }
+    let sol = &result.solutions[p.solution];
+    let ef = EFieldAccessor::new(sol, disc.dim, disc.n_cells())?;
+    let c_e = if result.physics == "ems" { 0.25 } else { 0.5 };
+    let is_p1_field = result_is_order_1(&ef, result);
+    let prepared = match disc.dim {
+        2 => PreparedTls::Dim2(prepare_tls_2d(&disc, &ef, &meta, c_e)?),
+        3 => PreparedTls::Dim3(integrate_tls_3d(&disc, &ef, &meta, &p, c_e, is_p1_field, false)?.0),
+        d => return Err(Error::invalid(format!("tls_participation supports 2D and 3D meshes, not {d}D"))),
+    };
+    Ok((prepared, p))
+}
+
+pub fn tls_participation_quasi_electrostatic(
+    electro_mesh: &Mesh,
+    electro_result: &SolveResult,
+    modal_voltages: &[Vec<f64>],
+    modal_freqs_hz: &[f64],
+    params: &Value,
+) -> Result<Vec<QuasiElectrostaticTlsMode>, Error> {
+    let prepared =
+        prepare_quasi_electrostatic_tls(electro_mesh, electro_result, modal_voltages, modal_freqs_hz, params)?;
+    let mut out = Vec::with_capacity(prepared.len());
+    for item in prepared {
+        let mut rep = match &item.prepared {
+            PreparedTls::Dim2(d2) => d2.eval(&item.params),
+            PreparedTls::Dim3(_) => {
+                let disc = discretise(electro_mesh)?;
+                let synth_sol = synthesize_linear_combination_solution(
+                    &electro_result.solutions,
+                    &item.terminal_voltages_v,
+                    disc.dim,
+                    disc.n_cells(),
+                )?;
+                let ef = EFieldAccessor::new(&synth_sol, disc.dim, disc.n_cells())?;
+                let meta = TlsMeta::of(electro_result).unwrap_or_default();
+                let is_p1_field = result_is_order_1(&ef, electro_result);
+                run_tls_3d(&disc, &ef, &meta, &item.params, 0.5, is_p1_field)?
+            }
+        };
+        let t1_tls_s = if item.freq_hz > 0.0 && rep.loss_tan_total > 0.0 && rep.q_tls.is_finite() {
+            rep.q_tls / (2.0 * PI * item.freq_hz)
         } else {
             f64::INFINITY
         };
         rep.convergence_check["quasi_electrostatic"] = json!(true);
-        rep.convergence_check["freq_Hz"] = json!(freq_hz);
+        rep.convergence_check["freq_Hz"] = json!(item.freq_hz);
         rep.convergence_check["t1_tls_s"] = json!(t1_tls_s);
         out.push(QuasiElectrostaticTlsMode {
-            mode: m_idx,
-            freq_hz,
-            terminal_voltages_v: v_m.clone(),
+            mode: item.mode,
+            freq_hz: item.freq_hz,
+            terminal_voltages_v: item.terminal_voltages_v,
             report: rep,
             t1_tls_s,
         });

@@ -477,22 +477,38 @@ fn default_sc_thickness_coeffs(eps_vac: f64, eps_sub: f64) -> (f64, f64) {
     (c0, c1)
 }
 
-struct ThicknessCorrectionOut {
-    maxwell_f: Vec<Vec<f64>>,
-    mutual_f: Vec<Vec<f64>>,
-    ec_hz: Vec<Vec<f64>>,
-    info_json: Value,
+pub(crate) struct ThicknessCorrectionOut {
+    pub(crate) maxwell_f: Vec<Vec<f64>>,
+    pub(crate) mutual_f: Vec<Vec<f64>>,
+    pub(crate) ec_hz: Vec<Vec<f64>>,
+    pub(crate) info_json: Value,
 }
 
-/// Computes the 3D matched-asymptotic edge-tube Gram-matrix capacitance thickness correction (FR-11 Pt 1).
-fn compute_3d_thickness_correction(
+#[derive(Clone, Debug)]
+pub(crate) struct PreparedThicknessGram {
+    pub(crate) i_edge: Vec<Vec<f64>>,
+    pub(crate) s_eff: f64,
+    pub(crate) eps_vac: f64,
+    pub(crate) eps_sub: f64,
+    pub(crate) r0: f64,
+    pub(crate) def_c0: f64,
+    pub(crate) def_c1: f64,
+    pub(crate) c0_override: Option<f64>,
+    pub(crate) c1_override: Option<f64>,
+    pub(crate) perimeter_segments: usize,
+    pub(crate) perimeter_len_m: f64,
+}
+
+/// Integrates the geometry-only 3D matched-asymptotic edge-tube Gram matrix `\tilde{I}_{edge}` once so zero-solve
+/// UQ can vary `metal_thickness_m`, `c0`, and `c1` without re-integrating the 3D mesh.
+pub(crate) fn prepare_3d_thickness_gram(
     mesh: &Mesh,
     result: &SolveResult,
     cap: &CapacitanceMatrixData,
     params_map: &Map<String, Value>,
-    t_metal: f64,
-) -> Result<ThicknessCorrectionOut, Error> {
-    if !(t_metal.is_finite() && t_metal > 0.0) {
+    t_metal_nom: f64,
+) -> Result<PreparedThicknessGram, Error> {
+    if !(t_metal_nom.is_finite() && t_metal_nom > 0.0) {
         return Err(Error::invalid("parameter 'metal_thickness_m' must be a positive finite thickness in m"));
     }
     if result.dim != 3 {
@@ -588,7 +604,7 @@ fn compute_3d_thickness_correction(
         ));
     }
 
-    let r0 = edge_cutoff_opt.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * t_metal));
+    let r0 = edge_cutoff_opt.unwrap_or_else(|| (1.15 * perim.h_edge_mean).max(4.0 * t_metal_nom));
     let r0_sq = r0 * r0;
     let sub_tet = subdivided_tet_quad(4);
     let sub_tet_shapes: Vec<Vec<f64>> = sub_tet.iter().map(|(l, _)| shape(l, order).0).collect();
@@ -663,25 +679,59 @@ fn compute_3d_thickness_correction(
         return Err(Error::invalid("edge-tube Gram matrix trace is zero; cannot evaluate s_eff"));
     }
     let s_eff = tr_cm / tr_iedge;
-    if s_eff <= t_metal {
+    if s_eff <= t_metal_nom {
         return Err(Error::invalid(format!(
-            "metal_thickness_m ({t_metal:e} m) exceeds effective gap scale s_eff ({s_eff:e} m); asymptotic thin-film regime violated"
+            "metal_thickness_m ({t_metal_nom:e} m) exceeds effective gap scale s_eff ({s_eff:e} m); asymptotic thin-film regime violated"
         )));
     }
 
     let eps_vac = cell_eps.iter().copied().fold(f64::INFINITY, f64::min).max(1.0);
     let eps_sub = cell_eps.iter().copied().fold(eps_vac, f64::max);
     let (def_c0, def_c1) = default_sc_thickness_coeffs(eps_vac, eps_sub);
-    let c0 = c0_override.unwrap_or(def_c0);
-    let c1 = c1_override.unwrap_or(def_c1);
 
-    let factor = t_metal * (c0 + c1 * (s_eff / t_metal).ln());
+    Ok(PreparedThicknessGram {
+        i_edge,
+        s_eff,
+        eps_vac,
+        eps_sub,
+        r0,
+        def_c0,
+        def_c1,
+        c0_override,
+        c1_override,
+        perimeter_segments: perim.bvh.len(),
+        perimeter_len_m: perim.total_perim_len,
+    })
+}
+
+/// Evaluates the 3D thickness capacitance correction from a cached [`PreparedThicknessGram`].
+pub(crate) fn apply_3d_thickness_gram(
+    cap: &CapacitanceMatrixData,
+    gram: &PreparedThicknessGram,
+    t_metal: f64,
+    c0_override: Option<f64>,
+    c1_override: Option<f64>,
+) -> Result<ThicknessCorrectionOut, Error> {
+    if !(t_metal.is_finite() && t_metal > 0.0) {
+        return Err(Error::invalid("parameter 'metal_thickness_m' must be a positive finite thickness in m"));
+    }
+    if gram.s_eff <= t_metal {
+        return Err(Error::invalid(format!(
+            "metal_thickness_m ({t_metal:e} m) exceeds effective gap scale s_eff ({:e} m); asymptotic thin-film regime violated",
+            gram.s_eff
+        )));
+    }
+    let n_term = cap.terminals.len();
+    let c0 = c0_override.or(gram.c0_override).unwrap_or(gram.def_c0);
+    let c1 = c1_override.or(gram.c1_override).unwrap_or(gram.def_c1);
+
+    let factor = t_metal * (c0 + c1 * (gram.s_eff / t_metal).ln());
     let mut delta_c = vec![vec![0.0; n_term]; n_term];
     let mut maxwell_corr = vec![vec![0.0; n_term]; n_term];
     for ia in 0..n_term {
         for ib in ia..n_term {
             let base_sym = 0.5 * (cap.maxwell_matrix_f[ia][ib] + cap.maxwell_matrix_f[ib][ia]);
-            let d_ij = factor * i_edge[ia][ib];
+            let d_ij = factor * gram.i_edge[ia][ib];
             delta_c[ia][ib] = d_ij;
             delta_c[ib][ia] = d_ij;
             maxwell_corr[ia][ib] = base_sym + d_ij;
@@ -694,20 +744,32 @@ fn compute_3d_thickness_correction(
 
     let info_json = json!({
         "metal_thickness_m": t_metal,
-        "edge_cutoff_m": r0,
-        "s_eff_m": s_eff,
+        "edge_cutoff_m": gram.r0,
+        "s_eff_m": gram.s_eff,
         "c0": c0,
         "c1": c1,
-        "eps_vac": eps_vac,
-        "eps_sub": eps_sub,
-        "perimeter_segments": perim.bvh.len(),
-        "perimeter_len_m": perim.total_perim_len,
-        "i_edge_F_per_m": i_edge,
+        "eps_vac": gram.eps_vac,
+        "eps_sub": gram.eps_sub,
+        "perimeter_segments": gram.perimeter_segments,
+        "perimeter_len_m": gram.perimeter_len_m,
+        "i_edge_F_per_m": gram.i_edge,
         "delta_maxwell_F": delta_c,
         "maxwell_uncorrected_F": cap.maxwell_matrix_f,
     });
 
     Ok(ThicknessCorrectionOut { maxwell_f: maxwell_corr, mutual_f: mutual_corr, ec_hz: ec_corr, info_json })
+}
+
+/// Computes the 3D matched-asymptotic edge-tube Gram-matrix capacitance thickness correction (FR-11 Pt 1).
+fn compute_3d_thickness_correction(
+    mesh: &Mesh,
+    result: &SolveResult,
+    cap: &CapacitanceMatrixData,
+    params_map: &Map<String, Value>,
+    t_metal: f64,
+) -> Result<ThicknessCorrectionOut, Error> {
+    let gram = prepare_3d_thickness_gram(mesh, result, cap, params_map, t_metal)?;
+    apply_3d_thickness_gram(cap, &gram, t_metal, None, None)
 }
 
 fn parse_ground_names(params_map: &Map<String, Value>) -> Result<Vec<String>, Error> {
@@ -1245,10 +1307,21 @@ fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params
         }
     };
 
+    run_capacitance_matrix_from_thickness(&cap, thickness_corr, params_map)
+}
+
+/// Evaluates Schur/ground reduction, qubit extraction, and resonator couplings from `cap` and an optional
+/// precomputed 3D thickness correction (used directly by zero-solve UQ without re-integrating the 3D mesh).
+pub(crate) fn run_capacitance_matrix_from_thickness(
+    cap: &CapacitanceMatrixData,
+    thickness_corr: Option<ThicknessCorrectionOut>,
+    params_map: &Map<String, Value>,
+) -> Result<Value, Error> {
     let active_maxwell = thickness_corr.as_ref().map_or(&cap.maxwell_matrix_f, |tc| &tc.maxwell_f);
     let active_mutual = thickness_corr.as_ref().map_or(&cap.mutual_matrix_f, |tc| &tc.mutual_f);
     let active_ec = thickness_corr.as_ref().map_or(&cap.ec_matrix_hz, |tc| &tc.ec_hz);
 
+    let n = cap.terminals.len();
     let ground_raw = parse_ground_names(params_map)?;
     let eliminate = parse_eliminate_mode(params_map)?;
     let mut ground_idx_set = BTreeSet::new();
@@ -1309,7 +1382,7 @@ fn run_capacitance_matrix_impl(mesh: Option<&Mesh>, result: &SolveResult, params
     out.insert("mutual_matrix_F".into(), json!(active_mutual));
     out.insert("ec_matrix_Hz".into(), json!(active_ec));
     if thickness_corr.is_none() {
-        insert_optional_bound_matrices(&mut out, &cap);
+        insert_optional_bound_matrices(&mut out, cap);
     }
     out.insert("eliminate".into(), json!(eliminate.as_str()));
     out.insert("ground_terminals".into(), json!(ground_terminals));

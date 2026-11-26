@@ -417,16 +417,18 @@ impl Engine {
                 "sweep_run" => match e.sweep_prepare(&l.args) {
                     Err(err) => report.problems.push(problem(err.to_string())),
                     Ok(p) => {
-                        let mut built = 0;
-                        for pe in &p.engines {
-                            built += usize::from(cache.need(pe.mesh_key()));
-                        }
+                        let count = p.point_count();
+                        let built = if p.is_sampling() {
+                            count
+                        } else {
+                            p.mesh_keys.iter().filter(|k| cache.need((*k).clone())).count()
+                        };
                         report.meshes += built;
-                        report.solves += p.engines.len();
+                        report.solves += count;
                         solved.extend(p.targets.clone().unwrap_or_else(|| e.default_targets()));
                         report.steps.push(step(
                             "sweep",
-                            format!("{} point(s), {} mesh(es) to build, one recorded run each", p.engines.len(), built),
+                            format!("{count} point(s), {built} mesh(es) to build, one recorded run each"),
                         ));
                     }
                 },

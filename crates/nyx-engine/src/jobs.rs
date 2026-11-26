@@ -46,6 +46,8 @@ pub enum JobOutput {
     Opened(Box<Opened>),
     /// a results file written
     Exported(Value),
+    /// a streaming LHS/Sobol QMC parameter sweep finished with compact summary rows + skipped points
+    QmcSweep(Value),
 }
 
 /// What a worker process measured of its own solve: the most memory it used, in bytes (the in-process job cannot know: the process is shared).

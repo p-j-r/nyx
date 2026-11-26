@@ -59,6 +59,10 @@ pub(crate) enum Pending {
         index: usize,
         project: Box<Project>,
     },
+    /// a streaming LHS/Sobol QMC sweep running point-by-point inside one lane job
+    QmcSweep {
+        sweep: u64,
+    },
     /// the physics checked and the problem key it was checked for (a verdict belongs to a problem, not to a result, ADR 91)
     Convergence {
         physics: String,
@@ -1181,6 +1185,7 @@ impl Engine {
             (Pending::Point { sweep, index, project }, outcome) => {
                 self.apply_point(id, sweep, index, *project, outcome)
             }
+            (Pending::QmcSweep { sweep }, outcome) => self.apply_qmc_sweep(sweep, outcome),
             (Pending::Convergence { physics, key }, Ok(JobOutput::Convergence(v))) => {
                 let apply_ext = crate::convergence::should_apply_extrapolated(&v);
                 let ext_cap = if apply_ext { crate::convergence::extrapolated_capacitance(&v) } else { None };

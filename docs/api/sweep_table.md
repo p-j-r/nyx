@@ -2,7 +2,7 @@
 
 **The table of a sweep** · access `read`: reads the project or the results
 
-Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.
+Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `skipped_invalid_geometry`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as, plus `skipped_invalid_geometry` counts and optional HDF5 `checkpoint_path` when running QMC/checkpointed sweeps. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.
 
 ## Arguments
 

@@ -84,6 +84,7 @@
       "type": "object"
     },
     "model": {
+      "additionalProperties": false,
       "properties": {
         "A": {
           "description": "sellmeier: n^2 = A + sum B x^2/(x^2 - C), default 1",
@@ -383,6 +384,7 @@
       ]
     },
     "temp_curve": {
+      "additionalProperties": false,
       "properties": {
         "T": {
           "items": {
@@ -561,8 +563,7 @@
       "additionalProperties": false,
       "properties": {
         "eps_T": {
-          "description": "temperature-dependent relative permittivity. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }",
-          "oneOf": [
+          "anyOf": [
             {
               "description": "temperature-dependent relative permittivity. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
               "oneOf": [
@@ -671,7 +672,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "description": "temperature-dependent relative permittivity. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }"
         },
         "eps_clamped": {
           "description": "constant-strain microwave relative permittivity eps^S / eps_0. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
@@ -5536,8 +5538,7 @@
       "additionalProperties": false,
       "properties": {
         "conductivity": {
-          "description": "thermal conductivity, W/(m K). A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }",
-          "oneOf": [
+          "anyOf": [
             {
               "description": "thermal conductivity, W/(m K). One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
               "oneOf": [
@@ -5646,11 +5647,11 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "description": "thermal conductivity, W/(m K). A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }"
         },
         "conductivity_T": {
-          "description": "explicit k(T) curve, W/(m K). A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }",
-          "oneOf": [
+          "anyOf": [
             {
               "description": "explicit k(T) curve, W/(m K). One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
               "oneOf": [
@@ -5759,7 +5760,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "description": "explicit k(T) curve, W/(m K). A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }"
         },
         "conductivity_T_unit": {
           "type": "string"
@@ -5768,8 +5770,7 @@
           "type": "string"
         },
         "contraction": {
-          "description": "integrated thermal contraction (L(T) - L_ref)/L_ref. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }",
-          "oneOf": [
+          "anyOf": [
             {
               "description": "integrated thermal contraction (L(T) - L_ref)/L_ref. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
               "oneOf": [
@@ -5878,14 +5879,14 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "description": "integrated thermal contraction (L(T) - L_ref)/L_ref. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }"
         },
         "contraction_unit": {
           "type": "string"
         },
         "expansion": {
-          "description": "thermal expansion alpha, 1/K. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }",
-          "oneOf": [
+          "anyOf": [
             {
               "description": "thermal expansion alpha, 1/K. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
               "oneOf": [
@@ -5994,11 +5995,11 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "description": "thermal expansion alpha, 1/K. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }"
         },
         "expansion_T": {
-          "description": "explicit alpha(T) curve, 1/K. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }",
-          "oneOf": [
+          "anyOf": [
             {
               "description": "explicit alpha(T) curve, 1/K. One value (isotropic), 3 (x y z), 6 (xx yy zz yz xz xy), a symmetric 3x3 array, or { perp, par } (unique axis along crystal z)",
               "oneOf": [
@@ -6107,7 +6108,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "description": "explicit alpha(T) curve, 1/K. A constant tensor, a scalar temperature-curve table, or { perp = <temp_curve>, par = <temp_curve> }"
         },
         "expansion_T_unit": {
           "type": "string"

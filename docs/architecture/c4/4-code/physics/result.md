@@ -47,11 +47,12 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [engine: Analyses](../engine/analyse.md) | result | Scalar, SolveResult |
 | [engine: Commands](../engine/commands.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, Solution, SolveResult |
 | [engine: Job runner and queue](../engine/jobs.md) | result | DiagnosticSeverity, DiagnosticWarning, Scalar, SolveResult, SpatialErrorEstimate |
+| [engine: Materials](../engine/materials.md) | result | DiagnosticSeverity, DiagnosticWarning, SolveResult, SolverDiagnostics |
 | [engine: Meshing seam](../engine/meshing.md) | result | Scalar, SolveResult |
 | [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, NumericalErrorBudget, Scalar, Solution, SolveResult, SolverDiagnostics |
 | [engine: Store link](../engine/storeLink.md) | result | Scalar, SolveResult |
 | [cQED result payloads](./cqed.md) | result | Scalar, SolveResult |
-| [Problem envelope](./envelope.md) | result | Scalar, SolveResult |
+| [Problem envelope](./envelope.md) | result | DiagnosticSeverity, DiagnosticWarning, Scalar, SolveResult |
 | [Test support](./testsupport.md) | result | Scalar, SolveResult |
 | [Physics trait and registry](./trait.md) | frame, result | CellField, DiagnosticSeverity, DiagnosticWarning, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, NumericalErrorBudget +7 |
 | [sms: Physics adapter](../sms/adapter.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, SolverDiagnostics, SpatialErrorEstimate |

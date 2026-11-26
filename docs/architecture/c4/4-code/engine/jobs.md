@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in the container **nyx-engine** (crate `nyx_engine`). [Component view of the container](../../3-components/engine.md) · [All code pages](../README.md)
 
-> Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
+> Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), streaming QMC sweeps over HDF5 checkpoints, memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
-**Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 11 files, 6808 lines.
+**Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 12 files, 7922 lines.
 
 ## Files
 
@@ -14,26 +14,28 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 14 |  |
 | `crates/nyx-engine/src/convergence.rs` | 2286 |  |
 | `crates/nyx-engine/src/estimate.rs` | 476 |  |
-| `crates/nyx-engine/src/jobs.rs` | 601 |  |
+| `crates/nyx-engine/src/jobs.rs` | 603 |  |
 | `crates/nyx-engine/src/process.rs` | 318 |  |
-| `crates/nyx-engine/src/queue.rs` | 696 |  |
+| `crates/nyx-engine/src/qmc.rs` | 391 |  |
+| `crates/nyx-engine/src/queue.rs` | 707 |  |
 | `crates/nyx-engine/src/reuse.rs` | 204 |  |
 | `crates/nyx-engine/src/shared_queue.rs` | 970 |  |
-| `crates/nyx-engine/src/solve.rs` | 230 |  |
-| `crates/nyx-engine/src/sweep.rs` | 501 |  |
+| `crates/nyx-engine/src/solve.rs` | 244 |  |
+| `crates/nyx-engine/src/sweep.rs` | 1197 |  |
 | `crates/nyx-engine/src/worker.rs` | 512 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | linalg::driver, material::spec, mesh, progress, vvuq, warm | Call, Library, Progress, RoacheGciRegime, RoacheGciReport, SimplexMesh, Warm, dense_eigh, from_bytes, install +3 |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | linalg::driver, linalg::rng, material::spec, mesh, progress, vvuq, warm | Call, Library, Progress, RoacheGciRegime, RoacheGciReport, SimplexMesh, SplitMix64, Warm, dense_eigh, from_bytes +4 |
 | [container `geom` (geom)](../../3-components/geom.md) | expr, model | Expr, Op |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, error, physics, registry, result, spec, validate | CAPACITANCE_KEY, CapacitanceMatrixData, Ctx, DiagnosticSeverity, DiagnosticWarning, ElectroAmrData, Error, Physics, ProblemSpec, Registry +5 |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, error, physics, registry, result, spec, validate | CAPACITANCE_KEY, CapacitanceMatrixData, Ctx, DiagnosticSeverity, DiagnosticWarning, ElectroAmrData, Error, Physics, ProblemSpec, Registry +6 |
+| [container `storage` (nyx-storage)](../../3-components/storage.md) | sweep | SkippedSweepPoint, SweepCheckpoint, SweepPoint |
 | [container `store` (nyx-store)](../../3-components/store.md) | workspace | default_root |
 | [Analyses](./analyse.md) | analyse | analyses |
-| [Commands](./commands.md) | commands, engine, validated | Access, Check, Engine, Purpose |
-| [Materials](./materials.md) | materials | study_frequency, study_wavelength |
+| [Commands](./commands.md) | commands, engine, validated | Access, Check, Engine, Pending, Purpose, Stored |
+| [Materials](./materials.md) | material_warnings, materials | finalize, preflight, study_frequency, study_wavelength |
 | [Meshing seam](./meshing.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, project_uses_ems_cavity_amr, project_uses_sms_amr, solve_dfs_with_amr_opts, solve_ems_cavity_with_amr, solve_sms_with_amr |
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
@@ -46,7 +48,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 |---|---|---|
 | [app: Window](../app/window.md) | convergence, process, queue, shared_queue, worker | Limits, Matching, QueueOpts, cli, opt_out_of_power_throttling, serve |
 | [Command lists](./commandlist.md) | convergence | Limits, Matching |
-| [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits +35 |
+| [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits +36 |
 | [Materials](./materials.md) | shared_queue | default_workspace |
 | [Meshing seam](./meshing.md) | estimate, solve | Estimate, History, build_solve_ctx, chain_key, chain_key_for_project, name_domains, solve_one_single |
 | [Registry and facade](./registry.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane +3 |
@@ -54,7 +56,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 
 ## Class diagram
 
-Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 5 more types than the diagram shows.**
+Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 9 more types than the diagram shows.**
 
 ```mermaid
 classDiagram
@@ -133,7 +135,7 @@ classDiagram
         ~shared() Option~SharedQueue~
         ~shared_of_job(id) Option~String~
         ~submission(label, lane, opts, key) Submit
-        +more_12_methods()
+        +more_13_methods()
     }
     class fns_convergence_rs {
         <<module convergence.rs>>
@@ -199,6 +201,7 @@ classDiagram
         Convergence
         Opened
         Exported
+        QmcSweep
     }
     class WorkerRun {
         <<struct>>
@@ -278,6 +281,28 @@ classDiagram
         +spawn_detached(program, args) Result
     }
   }
+  namespace qmc_rs {
+    class QmcMethod {
+        <<enumeration>>
+        Lhs
+        Sobol
+        +as_str() str
+    }
+    class MarginDistribution {
+        <<enumeration>>
+        Uniform
+        Normal
+        +map_unit(u) f64
+    }
+    class fns_qmc_rs {
+        <<module qmc.rs>>
+        +generate_lhs_unit(n_samples, dim, seed) Result
+        +generate_sobol_unit(n_samples, dim, seed, scramble, offset) Result
+        +inv_normal_cdf(p) f64
+        +MAX_QMC_SAMPLES const
+        +MAX_SOBOL_DIM const
+    }
+  }
   namespace queue_rs {
     class QueueOpts {
         <<struct>>
@@ -289,7 +314,7 @@ classDiagram
         +shared Option~bool~
         +warm Option~WarmLink~
         +save_fields bool
-        +more_3_fields
+        +more_4_fields
     }
     class JobMeta {
         <<struct>>
@@ -319,6 +344,7 @@ classDiagram
         ~validate_post_analyses(entries) Result
         ~save_fields_of(args) Result
         ~retain_amr_data_of(args) Result
+        ~strict_material_range_of(args) Result
         ~post_analyses_of(args) Result
         ~memory_wait_timeout_of(args) Result
         ~solve_key(problem_key, targets) String
@@ -472,17 +498,6 @@ classDiagram
         +job JobId
         +row Option~Value~
     }
-    class Sweep {
-        <<struct>>
-        +name String
-        +targets Vec~String~
-        +points Vec~Point~
-    }
-    class Prepared {
-        <<struct>>
-        +targets Option
-        +engines Vec~Engine~
-    }
     class fns_sweep_rs {
         <<module sweep.rs>>
         +MAX_POINTS const
@@ -520,8 +535,6 @@ classDiagram
   Item --> Request
   Item --> State
   RunnerOptions --> History
-  Sweep --> Point
-  Prepared --> Engine
 ```
 
 ## Public items
@@ -579,71 +592,81 @@ classDiagram
 | fn | `History::add` | `estimate.rs:185` | `pub fn add(&self, row: Row)` |
 | fn | `History::estimate` | `estimate.rs:195` | `pub fn estimate(&self, chain: &str, dim: u8, cells: u64) -> Option<Estimate>` |
 | type | `JobId` | `jobs.rs:22` |  |
-| enum | `JobOutput` | `jobs.rs:25` | variants: `Mesh`, `Solved`, `Convergence`, `Opened`, `Exported` —  What a finished job hands back. The engine applies it to its state (`Engine::apply`). |
-| struct | `WorkerRun` | `jobs.rs:53` | fields: `peak_working_set`, `peak_commit`, `shared` —  What a worker process measured of its own solve: the most memory it used, in bytes (the in-process job cannot know: the process is shared). |
-| struct | `Opened` | `jobs.rs:62` | fields: `project`, `model`, `results`, `path`, `checks` —  What opening a results file gives the engine to apply. |
-| enum | `JobState` | `jobs.rs:74` | variants: `Queued`, `Running`, `Done`, `Cancelled`, `Failed` |
-| enum | `Lane` | `jobs.rs:93` | variants: `Heavy`, `Light`, `Shared` —  The resource class of a job. The heavy lane runs one job at a time; the light lane (I/O) runs beside it. |
-| struct | `Submit` | `jobs.rs:103` | fields: `label`, `lane`, `owner`, `priority`, `key`, `supersede`, `hold` —  How a job is submitted: its name, lane, owner and priority. |
-| struct | `JobInfo` | `jobs.rs:126` | fields: `id`, `label`, `state`, `lane`, `owner`, `priority`, `held`, `position`, `queued_seconds`, `stage`, `stage_seconds`, `fraction`, ... |
-| struct | `JobRunner` | `jobs.rs:195` |  |
-| fn | `JobState::is_open` | `jobs.rs:85` | `pub fn is_open(&self) -> bool` —  Queued or running: the job has not finished. |
-| fn | `Submit::new` | `jobs.rs:120` | `pub fn new(label: &str, lane: Lane) -> Submit` |
-| fn | `JobRunner::new` | `jobs.rs:306` | `pub fn new() -> JobRunner` |
-| fn | `JobRunner::start` | `jobs.rs:325` | `pub fn start<F>(&self, label: &str, work: F) -> JobId` —  Submits `work` to the heavy lane with the default owner and priority. |
-| fn | `JobRunner::submit` | `jobs.rs:334` | `pub fn submit<F>(&self, spec: Submit, work: F) -> JobId` —  Submits `work`. It starts at once when its lane is free, otherwise it waits in the queue. The closure gets the job's `Progress`; a panic in |
-| fn | `JobRunner::info` | `jobs.rs:381` | `pub fn info(&self, id: JobId) -> Option<JobInfo>` |
-| fn | `JobRunner::progress` | `jobs.rs:421` | `pub fn progress(&self, id: JobId) -> Option<Arc<Progress>>` —  The progress handle of a job: the stage it is in, the log so far, the cancel flag. A front-end that shows a bar reads it. |
-| fn | `JobRunner::list` | `jobs.rs:426` | `pub fn list(&self) -> Vec<JobInfo>` —  All jobs, oldest first. |
-| fn | `JobRunner::running` | `jobs.rs:432` | `pub fn running(&self) -> Vec<JobId>` —  The jobs that have not finished (queued or running). |
-| fn | `JobRunner::cancel` | `jobs.rs:454` | `pub fn cancel(&self, id: JobId) -> bool` —  Asks the job to stop. A queued job stops at once and never runs; a running one notices at its next check (a factorisation finishes first). |
-| fn | `JobRunner::hold` | `jobs.rs:467` | `pub fn hold(&self, id: JobId) -> bool` —  Keeps a queued job from starting until `release`. False when it is not queued. |
-| fn | `JobRunner::release` | `jobs.rs:482` | `pub fn release(&self, id: JobId) -> bool` |
-| fn | `JobRunner::set_priority` | `jobs.rs:499` | `pub fn set_priority(&self, id: JobId, priority: u8) -> bool` —  Changes the priority of a queued job. False when it is not queued. |
-| fn | `JobRunner::pause` | `jobs.rs:515` | `pub fn pause(&self)` —  Stops the queue from starting anything new; what runs finishes. |
-| fn | `JobRunner::resume` | `jobs.rs:519` | `pub fn resume(&self)` |
-| fn | `JobRunner::paused` | `jobs.rs:524` | `pub fn paused(&self) -> bool` |
-| fn | `JobRunner::set_limit` | `jobs.rs:529` | `pub fn set_limit(&self, lane: Lane, n: usize)` —  How many jobs a lane runs at once (heavy 1, light 2 by default). |
-| fn | `JobRunner::set_age` | `jobs.rs:542` | `pub fn set_age(&self, age: Duration)` —  After this long in the queue a job competes one priority level higher. |
-| fn | `JobRunner::log` | `jobs.rs:547` | `pub fn log(&self, id: JobId) -> Vec<String>` —  The stage log of the job so far. |
-| fn | `JobRunner::try_take` | `jobs.rs:552` | `pub fn try_take(&self, id: JobId) -> Option<Result<JobOutput, Error>>` —  The outcome if the job has finished and it has not been taken; `None` while queued or running, or after it was taken. |
-| fn | `JobRunner::blocked` | `jobs.rs:558` | `pub fn blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for: it is held, or the queue is paused. `None` for a job that is running or will |
-| fn | `JobRunner::wait` | `jobs.rs:574` | `pub fn wait(&self, id: JobId) -> Result<JobOutput, Error>` —  Blocks until the job has finished and takes its outcome. |
-| fn | `JobRunner::wait_timeout` | `jobs.rs:584` | `pub fn wait_timeout(&self, id: JobId, timeout: Duration) -> Option<Result<JobOutput, Error>>` —  Like `wait`, but gives up after `timeout`: `None` when the job is still queued or running then (it keeps going and can be waited for again). |
+| enum | `JobOutput` | `jobs.rs:25` | variants: `Mesh`, `Solved`, `Convergence`, `Opened`, `Exported`, `QmcSweep` —  What a finished job hands back. The engine applies it to its state (`Engine::apply`). |
+| struct | `WorkerRun` | `jobs.rs:55` | fields: `peak_working_set`, `peak_commit`, `shared` —  What a worker process measured of its own solve: the most memory it used, in bytes (the in-process job cannot know: the process is shared). |
+| struct | `Opened` | `jobs.rs:64` | fields: `project`, `model`, `results`, `path`, `checks` —  What opening a results file gives the engine to apply. |
+| enum | `JobState` | `jobs.rs:76` | variants: `Queued`, `Running`, `Done`, `Cancelled`, `Failed` |
+| enum | `Lane` | `jobs.rs:95` | variants: `Heavy`, `Light`, `Shared` —  The resource class of a job. The heavy lane runs one job at a time; the light lane (I/O) runs beside it. |
+| struct | `Submit` | `jobs.rs:105` | fields: `label`, `lane`, `owner`, `priority`, `key`, `supersede`, `hold` —  How a job is submitted: its name, lane, owner and priority. |
+| struct | `JobInfo` | `jobs.rs:128` | fields: `id`, `label`, `state`, `lane`, `owner`, `priority`, `held`, `position`, `queued_seconds`, `stage`, `stage_seconds`, `fraction`, ... |
+| struct | `JobRunner` | `jobs.rs:197` |  |
+| fn | `JobState::is_open` | `jobs.rs:87` | `pub fn is_open(&self) -> bool` —  Queued or running: the job has not finished. |
+| fn | `Submit::new` | `jobs.rs:122` | `pub fn new(label: &str, lane: Lane) -> Submit` |
+| fn | `JobRunner::new` | `jobs.rs:308` | `pub fn new() -> JobRunner` |
+| fn | `JobRunner::start` | `jobs.rs:327` | `pub fn start<F>(&self, label: &str, work: F) -> JobId` —  Submits `work` to the heavy lane with the default owner and priority. |
+| fn | `JobRunner::submit` | `jobs.rs:336` | `pub fn submit<F>(&self, spec: Submit, work: F) -> JobId` —  Submits `work`. It starts at once when its lane is free, otherwise it waits in the queue. The closure gets the job's `Progress`; a panic in |
+| fn | `JobRunner::info` | `jobs.rs:383` | `pub fn info(&self, id: JobId) -> Option<JobInfo>` |
+| fn | `JobRunner::progress` | `jobs.rs:423` | `pub fn progress(&self, id: JobId) -> Option<Arc<Progress>>` —  The progress handle of a job: the stage it is in, the log so far, the cancel flag. A front-end that shows a bar reads it. |
+| fn | `JobRunner::list` | `jobs.rs:428` | `pub fn list(&self) -> Vec<JobInfo>` —  All jobs, oldest first. |
+| fn | `JobRunner::running` | `jobs.rs:434` | `pub fn running(&self) -> Vec<JobId>` —  The jobs that have not finished (queued or running). |
+| fn | `JobRunner::cancel` | `jobs.rs:456` | `pub fn cancel(&self, id: JobId) -> bool` —  Asks the job to stop. A queued job stops at once and never runs; a running one notices at its next check (a factorisation finishes first). |
+| fn | `JobRunner::hold` | `jobs.rs:469` | `pub fn hold(&self, id: JobId) -> bool` —  Keeps a queued job from starting until `release`. False when it is not queued. |
+| fn | `JobRunner::release` | `jobs.rs:484` | `pub fn release(&self, id: JobId) -> bool` |
+| fn | `JobRunner::set_priority` | `jobs.rs:501` | `pub fn set_priority(&self, id: JobId, priority: u8) -> bool` —  Changes the priority of a queued job. False when it is not queued. |
+| fn | `JobRunner::pause` | `jobs.rs:517` | `pub fn pause(&self)` —  Stops the queue from starting anything new; what runs finishes. |
+| fn | `JobRunner::resume` | `jobs.rs:521` | `pub fn resume(&self)` |
+| fn | `JobRunner::paused` | `jobs.rs:526` | `pub fn paused(&self) -> bool` |
+| fn | `JobRunner::set_limit` | `jobs.rs:531` | `pub fn set_limit(&self, lane: Lane, n: usize)` —  How many jobs a lane runs at once (heavy 1, light 2 by default). |
+| fn | `JobRunner::set_age` | `jobs.rs:544` | `pub fn set_age(&self, age: Duration)` —  After this long in the queue a job competes one priority level higher. |
+| fn | `JobRunner::log` | `jobs.rs:549` | `pub fn log(&self, id: JobId) -> Vec<String>` —  The stage log of the job so far. |
+| fn | `JobRunner::try_take` | `jobs.rs:554` | `pub fn try_take(&self, id: JobId) -> Option<Result<JobOutput, Error>>` —  The outcome if the job has finished and it has not been taken; `None` while queued or running, or after it was taken. |
+| fn | `JobRunner::blocked` | `jobs.rs:560` | `pub fn blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for: it is held, or the queue is paused. `None` for a job that is running or will |
+| fn | `JobRunner::wait` | `jobs.rs:576` | `pub fn wait(&self, id: JobId) -> Result<JobOutput, Error>` —  Blocks until the job has finished and takes its outcome. |
+| fn | `JobRunner::wait_timeout` | `jobs.rs:586` | `pub fn wait_timeout(&self, id: JobId, timeout: Duration) -> Option<Result<JobOutput, Error>>` —  Like `wait`, but gives up after `timeout`: `None` when the job is still queued or running then (it keeps going and can be waited for again). |
 | fn | `opt_out_of_power_throttling` | `process.rs:14` | `pub fn opt_out_of_power_throttling() -> bool` —  Asks Windows not to throttle this process. True when the request was accepted; false when it was refused (an older Windows) or on another |
 | fn | `peak_memory` | `process.rs:56` | `pub fn peak_memory() -> Option<(u64, u64)>` —  The most memory this process has used so far, in bytes: `(peak working set, peak commit)`. The working set is what was in RAM, the commit what |
 | fn | `system_memory` | `process.rs:95` | `pub fn system_memory() -> Option<(u64, u64)>` —  The physical memory of the machine and what is available now without paging, in bytes: `(total, available)`. Admission (`estimate.rs`) |
 | fn | `spawn_detached` | `process.rs:144` | `pub fn spawn_detached(program: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()>` —  Starts `program args...` as a process that belongs to nobody: it outlives the program that started it, has no console and no standard |
-| struct | `QueueOpts` | `queue.rs:19` | fields: `priority`, `supersede`, `hold`, `isolate`, `force`, `shared`, `warm`, `save_fields`, `post_analyses`, `memory_wait_timeout_s`, `retain_amr_data` —  How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded and `save_fields: true`. |
-| const | `POST_ANALYSIS_CMDS` | `queue.rs:65` | `&[&str]` —  Read-only post-solve commands allowed inside `post_analyses`. |
-| fn | `validate_post_analyses` | `queue.rs:81` | `pub(crate) fn validate_post_analyses(entries: &[Value]) -> Result<(), Error>` —  Validates `post_analyses` entries upfront before any meshing or solving starts. |
-| fn | `save_fields_of` | `queue.rs:182` | `pub(crate) fn save_fields_of(args: &Value) -> Result<bool, Error>` |
-| fn | `retain_amr_data_of` | `queue.rs:189` | `pub(crate) fn retain_amr_data_of(args: &Value) -> Result<bool, Error>` |
-| fn | `post_analyses_of` | `queue.rs:196` | `pub(crate) fn post_analyses_of(args: &Value) -> Result<Vec<Value>, Error>` |
-| fn | `memory_wait_timeout_of` | `queue.rs:207` | `pub(crate) fn memory_wait_timeout_of(args: &Value) -> Result<Option<f64>, Error>` |
-| struct | `JobMeta` | `queue.rs:220` | fields: `kind`, `targets`, `stamp`, `estimate`, `shared_id` —  What the engine remembers of a job beyond the runner's own record. |
-| struct | `SolveSummary` | `queue.rs:233` | fields: `dofs`, `cells`, `numbers` —  What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's |
-| struct | `Stages` | `queue.rs:247` |  Recent stages, found by content. Small on purpose: a mesh of a large model is gigabytes. |
-| fn | `solve_key` | `queue.rs:291` | `pub(crate) fn solve_key(problem_key: &str, targets: &[String]) -> String` —  The cache key of a solve: the problem key of the physics and the chain it was solved in (the sorted targets of its job). |
-| fn | `SolveSummary::of` | `queue.rs:240` | `pub fn of(r: &SolveResult, cells: usize) -> SolveSummary` |
-| fn | `Stages::mesh` | `queue.rs:256` | `pub fn mesh(&self, key: &str) -> Option<Arc<MeshedModel>>` |
-| fn | `Stages::put_mesh` | `queue.rs:260` | `pub fn put_mesh(&self, key: &str, m: &Arc<MeshedModel>)` |
-| fn | `Stages::solve` | `queue.rs:270` | `pub fn solve(&self, key: &str) -> Option<Arc<SolveSummary>>` |
-| fn | `Stages::put_solve` | `queue.rs:274` | `pub fn put_solve(&self, key: &str, r: &Arc<SolveSummary>)` |
-| fn | `Stages::clear` | `queue.rs:284` | `pub fn clear(&self)` |
-| fn | `Engine::set_owner` | `queue.rs:314` | `pub fn set_owner(&mut self, owner: &str)` —  Names who this engine's requests are made for (`gui`, `ai`, `cli`): the queue serves owners in turn, and a person's requests run first. |
-| fn | `Engine::owner` | `queue.rs:318` | `pub fn owner(&self) -> &str` |
-| fn | `Engine::shared` | `queue.rs:323` | `pub(crate) fn shared(&self) -> Option<crate::shared_queue::SharedQueue>` —  The queue of the workspace, when the engine has a workspace. |
-| fn | `Engine::shared_of_job` | `queue.rs:328` | `pub(crate) fn shared_of_job(&self, id: JobId) -> Option<String>` —  The item id of a job of this engine that was handed to the workspace queue. |
-| fn | `Engine::submission` | `queue.rs:345` | `pub(crate) fn submission(&self, label: &str, lane: Lane, opts: &QueueOpts, key: &str) -> Submit` —  The submission of a job of this engine: owner, priority by owner unless given, and the key a newer request of the same kind replaces. |
-| fn | `Engine::queue_entry` | `queue.rs:356` | `pub fn queue_entry(&self, id: JobId) -> Option<Value>` —  A job as the queue commands show it: the runner's record plus what was asked and whether the project has changed since. |
-| fn | `Engine::queue_list` | `queue.rs:383` | `pub fn queue_list(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value>` —  The queue, oldest first, optionally of one owner or one state (`queued`, `running`, `done`, `cancelled`, `failed`). |
-| fn | `Engine::wait_timeout` | `queue.rs:424` | `pub fn wait_timeout(&mut self, id: JobId, timeout: Duration) -> Result<Value, Error>` —  Waits for a job up to `timeout` and applies its outcome; at the timeout the job's entry comes back with `waiting: true` and the job goes on. |
-| fn | `Engine::queue_command` | `queue.rs:441` | `pub(crate) fn queue_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` —  The `queue_*` commands (see the catalog). |
-| fn | `Engine::note_shared` | `queue.rs:591` | `pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>)` —  Remembers that the job `id` was handed to the workspace queue, and under which item. |
-| fn | `Engine::note_job` | `queue.rs:597` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
-| fn | `Engine::note_job_estimate` | `queue.rs:602` | `pub(crate) fn note_job_estimate( &mut self, id: JobId, kind: &'static str, targets: Vec<String>, estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>, )` —  `note_job` for a job that fills in its own estimate (a solve, once its mesh is known). |
-| fn | `Engine::run_post_analyses` | `queue.rs:639` | `pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error>` —  Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results). |
+| const | `MAX_QMC_SAMPLES` | `qmc.rs:12` | `usize` —  Maximum samples permitted in a single streaming QMC `sweep_run` request. |
+| enum | `QmcMethod` | `qmc.rs:16` | variants: `Lhs`, `Sobol` —  Sampling strategy for parametric design-of-experiments in `sweep_run`. |
+| enum | `MarginDistribution` | `qmc.rs:34` | variants: `Uniform`, `Normal` —  Marginal distribution mapping one unit-hypercube coordinate `u in (0, 1)` onto a scalar parameter value. |
+| fn | `generate_lhs_unit` | `qmc.rs:61` | `pub fn generate_lhs_unit(n_samples: usize, dim: usize, seed: u64) -> Result<Vec<Vec<f64>>, Error>` —  Generates `n_samples` unit-hypercube vectors in `(0, 1)^dim` via stratified Latin Hypercube Sampling (`SplitMix64`). |
+| const | `MAX_SOBOL_DIM` | `qmc.rs:91` | `usize` —  Maximum number of dimensions supported by the embedded primitive polynomial / direction-number table. |
+| fn | `generate_sobol_unit` | `qmc.rs:152` | `pub fn generate_sobol_unit( n_samples: usize, dim: usize, seed: u64, scramble: bool, offset: usize, ) -> Result<Vec<Vec<f64>>, Error>` —  Generates `n_samples` unit-hypercube vectors in `(0, 1)^dim` via a low-discrepancy base-2 Sobol sequence |
+| fn | `inv_normal_cdf` | `qmc.rs:217` | `pub fn inv_normal_cdf(p: f64) -> f64` —  Acklam minimax rational approximation to the inverse standard normal CDF `Phi^(-1)(p)` (`< 1.15e-9` max rel err). |
+| fn | `QmcMethod::as_str` | `qmc.rs:24` | `pub fn as_str(self) -> &'static str` |
+| fn | `MarginDistribution::map_unit` | `qmc.rs:41` | `pub fn map_unit(self, u: f64) -> f64` —  Maps a unit-hypercube coordinate `u in (0, 1)` deterministically to the physical parameter value. |
+| struct | `QueueOpts` | `queue.rs:19` | fields: `priority`, `supersede`, `hold`, `isolate`, `force`, `shared`, `warm`, `save_fields`, `post_analyses`, `memory_wait_timeout_s`, `retain_amr_data`, `strict_material_range` —  How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded and `save_fields: true`. |
+| const | `POST_ANALYSIS_CMDS` | `queue.rs:68` | `&[&str]` —  Read-only post-solve commands allowed inside `post_analyses`. |
+| fn | `validate_post_analyses` | `queue.rs:84` | `pub(crate) fn validate_post_analyses(entries: &[Value]) -> Result<(), Error>` —  Validates `post_analyses` entries upfront before any meshing or solving starts. |
+| fn | `save_fields_of` | `queue.rs:185` | `pub(crate) fn save_fields_of(args: &Value) -> Result<bool, Error>` |
+| fn | `retain_amr_data_of` | `queue.rs:192` | `pub(crate) fn retain_amr_data_of(args: &Value) -> Result<bool, Error>` |
+| fn | `strict_material_range_of` | `queue.rs:199` | `pub(crate) fn strict_material_range_of(args: &Value) -> Result<Option<bool>, Error>` |
+| fn | `post_analyses_of` | `queue.rs:206` | `pub(crate) fn post_analyses_of(args: &Value) -> Result<Vec<Value>, Error>` |
+| fn | `memory_wait_timeout_of` | `queue.rs:217` | `pub(crate) fn memory_wait_timeout_of(args: &Value) -> Result<Option<f64>, Error>` |
+| struct | `JobMeta` | `queue.rs:230` | fields: `kind`, `targets`, `stamp`, `estimate`, `shared_id` —  What the engine remembers of a job beyond the runner's own record. |
+| struct | `SolveSummary` | `queue.rs:243` | fields: `dofs`, `cells`, `numbers` —  What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's |
+| struct | `Stages` | `queue.rs:257` |  Recent stages, found by content. Small on purpose: a mesh of a large model is gigabytes. |
+| fn | `solve_key` | `queue.rs:301` | `pub(crate) fn solve_key(problem_key: &str, targets: &[String]) -> String` —  The cache key of a solve: the problem key of the physics and the chain it was solved in (the sorted targets of its job). |
+| fn | `SolveSummary::of` | `queue.rs:250` | `pub fn of(r: &SolveResult, cells: usize) -> SolveSummary` |
+| fn | `Stages::mesh` | `queue.rs:266` | `pub fn mesh(&self, key: &str) -> Option<Arc<MeshedModel>>` |
+| fn | `Stages::put_mesh` | `queue.rs:270` | `pub fn put_mesh(&self, key: &str, m: &Arc<MeshedModel>)` |
+| fn | `Stages::solve` | `queue.rs:280` | `pub fn solve(&self, key: &str) -> Option<Arc<SolveSummary>>` |
+| fn | `Stages::put_solve` | `queue.rs:284` | `pub fn put_solve(&self, key: &str, r: &Arc<SolveSummary>)` |
+| fn | `Stages::clear` | `queue.rs:294` | `pub fn clear(&self)` |
+| fn | `Engine::set_owner` | `queue.rs:324` | `pub fn set_owner(&mut self, owner: &str)` —  Names who this engine's requests are made for (`gui`, `ai`, `cli`): the queue serves owners in turn, and a person's requests run first. |
+| fn | `Engine::owner` | `queue.rs:328` | `pub fn owner(&self) -> &str` |
+| fn | `Engine::shared` | `queue.rs:333` | `pub(crate) fn shared(&self) -> Option<crate::shared_queue::SharedQueue>` —  The queue of the workspace, when the engine has a workspace. |
+| fn | `Engine::shared_of_job` | `queue.rs:338` | `pub(crate) fn shared_of_job(&self, id: JobId) -> Option<String>` —  The item id of a job of this engine that was handed to the workspace queue. |
+| fn | `Engine::submission` | `queue.rs:355` | `pub(crate) fn submission(&self, label: &str, lane: Lane, opts: &QueueOpts, key: &str) -> Submit` —  The submission of a job of this engine: owner, priority by owner unless given, and the key a newer request of the same kind replaces. |
+| fn | `Engine::queue_entry` | `queue.rs:366` | `pub fn queue_entry(&self, id: JobId) -> Option<Value>` —  A job as the queue commands show it: the runner's record plus what was asked and whether the project has changed since. |
+| fn | `Engine::queue_list` | `queue.rs:393` | `pub fn queue_list(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value>` —  The queue, oldest first, optionally of one owner or one state (`queued`, `running`, `done`, `cancelled`, `failed`). |
+| fn | `Engine::wait_timeout` | `queue.rs:434` | `pub fn wait_timeout(&mut self, id: JobId, timeout: Duration) -> Result<Value, Error>` —  Waits for a job up to `timeout` and applies its outcome; at the timeout the job's entry comes back with `waiting: true` and the job goes on. |
+| fn | `Engine::queue_command` | `queue.rs:451` | `pub(crate) fn queue_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` —  The `queue_*` commands (see the catalog). |
+| fn | `Engine::note_shared` | `queue.rs:602` | `pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>)` —  Remembers that the job `id` was handed to the workspace queue, and under which item. |
+| fn | `Engine::note_job` | `queue.rs:608` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
+| fn | `Engine::note_job_estimate` | `queue.rs:613` | `pub(crate) fn note_job_estimate( &mut self, id: JobId, kind: &'static str, targets: Vec<String>, estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>, )` —  `note_job` for a job that fills in its own estimate (a solve, once its mesh is known). |
+| fn | `Engine::run_post_analyses` | `queue.rs:650` | `pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error>` —  Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results). |
 | struct | `WarmDone` | `reuse.rs:25` | fields: `bytes`, `calls` —  What a finished point leaves for the next: the modes as bytes (none when it failed, or its eigensolves left none) and what its eigensolves did. |
 | struct | `WarmCell` | `reuse.rs:32` |  Where a point leaves its modes. Empty until the point's job has ended. |
 | enum | `WarmSource` | `reuse.rs:54` | variants: `Cold`, `Bytes`, `Cell` —  Where a point's start block comes from. |
@@ -701,15 +724,20 @@ classDiagram
 | fn | `run_chain_partial_amr` | `solve.rs:103` | `pub fn run_chain_partial_amr( registry: &Registry, project: &Project, model: Arc<MeshedModel>, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>)` —  Like [`run_chain_partial`], and runs multi-pass AMR (`dfs`, `ems::cavity`, or `sms`) when configured, |
 | fn | `run_chain_partial_amr_with` | `solve.rs:114` | `pub(crate) fn run_chain_partial_amr_with( registry: &Registry, project: &Project, mut model: Arc<MeshedModel>, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, retain_amr_data: bool, ) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>)` |
 | fn | `build_solve_ctx` | `solve.rs:171` | `pub(crate) fn build_solve_ctx<'a>( registry: &Registry, model: &'a MeshedModel, p: &dyn nyx_physics::Physics, spec: &nyx_physics::ProblemSpec, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Ctx<'a>` —  Builds a [`Ctx`] with imported fields from previously solved physics in `done`. |
-| fn | `solve_one_single` | `solve.rs:194` | `pub(crate) fn solve_one_single( registry: &Registry, project: &Project, model: &MeshedModel, id: &str, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<SolveResult, Error>` —  One physics of a chain, with the fields of the physics solved before it. |
-| const | `MAX_POINTS` | `sweep.rs:20` | `usize` —  The most points one request may make: a sweep is a queue of jobs, not a way to start ten thousand. |
-| struct | `Point` | `sweep.rs:22` | fields: `label`, `edits`, `job`, `row` |
-| struct | `Sweep` | `sweep.rs:30` | fields: `name`, `targets`, `points` |
-| struct | `Prepared` | `sweep.rs:37` | fields: `targets`, `engines` —  A checked sweep request: the points, the physics named (if any), the queue options and one engine per point. |
-| fn | `Engine::scratch` | `sweep.rs:110` | `pub(crate) fn scratch(&self) -> Engine` —  A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does |
-| fn | `Engine::sweep_command` | `sweep.rs:153` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
-| fn | `Engine::sweep_prepare` | `sweep.rs:169` | `pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error>` —  Reads and checks a sweep request without submitting anything: the points, what they solve, how they queue, and the engine of every point |
-| fn | `Engine::apply_point` | `sweep.rs:349` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
+| fn | `solve_one_single` | `solve.rs:206` | `pub(crate) fn solve_one_single( registry: &Registry, project: &Project, model: &MeshedModel, id: &str, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<SolveResult, Error>` —  One physics of a chain, with the fields of the physics solved before it. |
+| const | `MAX_POINTS` | `sweep.rs:26` | `usize` —  The most points one explicit `points` / `series` request may make: a sweep is a queue of jobs, not a way to start ten thousand. |
+| struct | `Point` | `sweep.rs:29` | fields: `label`, `edits`, `job`, `row` |
+| struct | `Sweep` | `sweep.rs:37` | fields: `name`, `targets`, `points`, `qmc_job`, `qmc_summary` |
+| struct | `QmcParamDim` | `sweep.rs:46` | fields: `col_name`, `cmd`, `base_args`, `field`, `distribution` |
+| struct | `QmcPlan` | `sweep.rs:55` | fields: `method`, `seed`, `scramble`, `offset`, `skip_invalid_geometry`, `dims`, `samples` |
+| struct | `Prepared` | `sweep.rs:66` | fields: `targets`, `mesh_keys`, `sampling` —  A checked sweep request: explicit points or streaming QMC plan, targets, queue options, and content mesh keys. |
+| fn | `Prepared::point_count` | `sweep.rs:79` | `pub fn point_count(&self) -> usize` |
+| fn | `Prepared::is_sampling` | `sweep.rs:86` | `pub fn is_sampling(&self) -> bool` |
+| fn | `Engine::scratch` | `sweep.rs:316` | `pub(crate) fn scratch(&self) -> Engine` —  A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does |
+| fn | `Engine::sweep_command` | `sweep.rs:359` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
+| fn | `Engine::sweep_prepare` | `sweep.rs:385` | `pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error>` —  Reads and checks a sweep request without cloning `Vec<Engine>`: |
+| fn | `Engine::apply_qmc_sweep` | `sweep.rs:637` | `pub(crate) fn apply_qmc_sweep(&mut self, sweep: u64, outcome: Result<JobOutput, Error>) -> Result<Value, Error>` |
+| fn | `Engine::apply_point` | `sweep.rs:744` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
 | const | `PREFIX` | `worker.rs:28` | `&str` —  Every line of the worker's standard output that is a message starts with this. |
 | struct | `RemoteSpec` | `worker.rs:32` | fields: `worker`, `project_json`, `materials`, `targets`, `warm`, `save_fields`, `post_analyses`, `retain_amr_data` —  What a worker is asked to solve. |
 | struct | `WarmIo` | `worker.rs:50` | fields: `input` —  The modes handed to a worker for a warm start (none for the first point, which only records). |

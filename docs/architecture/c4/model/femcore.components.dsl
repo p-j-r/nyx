@@ -155,7 +155,7 @@ material = component "Material specification" "TOML material files with explicit
     properties {
         "adr" "29, 30, 34, 35, 101, 104"
         "code" "crates/femcore/src: material/bcs.rs, material/coupled.rs, material/elastic.rs, material/import.rs, material/mod.rs, material/optics.rs, ... (13 files)"
-        "lines" "10179"
+        "lines" "10474"
         "codeDiagram" "4-code/femcore/material.md"
     }
 }

@@ -1128,7 +1128,7 @@
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
               "analysis": {
-                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator)",
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)",
                 "type": "string"
               },
               "args": {
@@ -1157,7 +1157,7 @@
           "type": "array"
         },
         "retain_amr_data": {
-          "description": "retain transient cellwise ElectroAmrData indicators on the stored result instead of stripping them after solve; default false",
+          "description": "retain transient cellwise ElectroAmrData indicators on SolveResult instead of stripping them after solve; default false",
           "type": "boolean"
         },
         "save_fields": {
@@ -1166,6 +1166,10 @@
         },
         "shared": {
           "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
+          "type": "boolean"
+        },
+        "strict_material_range": {
+          "description": "refuse out-of-range material temperature evaluations with an error instead of clamping and emitting a warning (default false; overrides project strict_material_range)",
           "type": "boolean"
         },
         "wait": {
@@ -1344,7 +1348,7 @@
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
               "analysis": {
-                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator)",
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)",
                 "type": "string"
               },
               "args": {
@@ -1395,6 +1399,10 @@
         },
         "shared": {
           "description": "hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process",
+          "type": "boolean"
+        },
+        "strict_material_range": {
+          "description": "solve only: refuse out-of-range material temperature evaluations with an error instead of clamping and emitting a warning (default false; overrides project strict_material_range)",
           "type": "boolean"
         },
         "supersede": {
@@ -1593,11 +1601,19 @@
   },
   {
     "access": "expensive",
-    "description": "Queues one solve per point and returns the sweep's number at once. A point is a list of edits (`{ \"cmd\": \"set_param\", \"args\": { \"name\": \"w\", \"value\": 4e-7 } }`: any command that changes the project except those that replace it or start work), applied to a copy of the project: what varies, a geometry parameter, the wavelength in the study, a material, a mesh setting, is the case's to decide. Give `points` (each `{ label, edits }`) or `series` (`{ cmd, args, field, values }`: the command repeated with `field` set to each value). `physics` is the code or list solved at every point (default: what a solve would solve). The points are queued at priority 3 (sweeps and batches) so a person's request and a single request of an agent go before them, and run on the same mesh and solve caches as any request. Every point's edits are applied and checked first: a bad point fails the request with its number and nothing runs. The project, the mesh and the results of the engine are not touched; each point is recorded in the run table when the project is bound to a workflow. Read the table with `sweep_table`.",
+    "description": "Queues one solve per explicit point (`points` or `series`) or streams a deterministic LHS / Sobol QMC ensemble (`sampling`, checking geometry and `SimplexMesh::check()` per sample and recording invalid samples as `skipped_invalid_geometry` without aborting the ensemble). An explicit point is a list of edits (`{ \"cmd\": \"set_param\", \"args\": { \"name\": \"w\", \"value\": 4e-7 } }`) applied to a copy of the project on demand without upfront `Vec<Engine>` cloning. `physics` is the code or list solved at every point (default: what a solve would solve). Points run at priority 3 on the engine's mesh/solve stage caches; optionally pass `checkpoint_path` (`.h5`) to stream points and skipped metadata incrementally to HDF5 `SweepCheckpoint`. Read the table with `sweep_table`.",
     "name": "sweep_run",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "checkpoint_lzf": {
+          "description": "compress checkpoint columns with Shuffle+LZF; default false",
+          "type": "boolean"
+        },
+        "checkpoint_path": {
+          "description": "optional .h5 file path for incremental HDF5 SweepCheckpoint streaming of solved points and skipped invalid geometries",
+          "type": "string"
+        },
         "force": {
           "description": "start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits",
           "type": "boolean"
@@ -1675,7 +1691,7 @@
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
               "analysis": {
-                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator)",
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)",
                 "type": "string"
               },
               "args": {
@@ -1714,6 +1730,110 @@
             "warm"
           ],
           "type": "string"
+        },
+        "sampling": {
+          "description": "deterministic LHS / Sobol QMC streaming design-of-experiments (alternative to `points` or `series`)",
+          "properties": {
+            "method": {
+              "description": "QMC generator (`lhs` SplitMix64 Latin Hypercube Sampling, default; or low-discrepancy `sobol`)",
+              "enum": [
+                "lhs",
+                "sobol"
+              ],
+              "type": "string"
+            },
+            "n_samples": {
+              "description": "number of QMC samples to stream (1..=4096)",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "offset": {
+              "description": "starting index in Sobol sequence (default 1 to avoid the origin corner)",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "parameters": {
+              "description": "sampled parameter dimensions",
+              "items": {
+                "description": "one parametric margin (uniform `[min, max]` or normal `{ mean, sigma | rel_tol }`)",
+                "properties": {
+                  "args": {
+                    "description": "base arguments kept constant (e.g. `{ \"name\": \"w\" }`)",
+                    "type": "object"
+                  },
+                  "bounds": {
+                    "description": "alternative `[min, max]` uniform range",
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "type": "array"
+                  },
+                  "cmd": {
+                    "description": "edit command (default `set_param`)",
+                    "type": "string"
+                  },
+                  "distribution": {
+                    "description": "marginal distribution (default `uniform`, or `normal` when mean/sigma given)",
+                    "enum": [
+                      "uniform",
+                      "normal"
+                    ],
+                    "type": "string"
+                  },
+                  "field": {
+                    "description": "argument key receiving each sampled value (default `value`)",
+                    "type": "string"
+                  },
+                  "max": {
+                    "description": "upper bound (uniform range max, or optional normal clamp max)",
+                    "type": "number"
+                  },
+                  "mean": {
+                    "description": "nominal mean for `normal` marginal",
+                    "type": "number"
+                  },
+                  "min": {
+                    "description": "lower bound (uniform range min, or optional normal clamp min)",
+                    "type": "number"
+                  },
+                  "name": {
+                    "description": "column label in checkpoint and table",
+                    "type": "string"
+                  },
+                  "rel_tol": {
+                    "description": "relative 1-sigma tolerance `|mean| * rel_tol` for `normal` marginal",
+                    "type": "number"
+                  },
+                  "sigma": {
+                    "description": "1-sigma standard deviation for `normal` marginal",
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "scramble": {
+              "description": "apply deterministic SplitMix64 XOR digital scramble to Sobol coordinates; default false",
+              "type": "boolean"
+            },
+            "seed": {
+              "description": "deterministic 64-bit SplitMix64 seed",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "skip_invalid_geometry": {
+              "description": "record geometry, meshing, or SimplexMesh::check failures as `skipped_invalid_geometry` without aborting the ensemble; default true",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "n_samples",
+            "parameters"
+          ],
+          "type": "object"
         },
         "save_fields": {
           "description": "when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results at every sweep point after running any post_analyses; default true",
@@ -1758,7 +1878,7 @@
   },
   {
     "access": "read",
-    "description": "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.",
+    "description": "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `skipped_invalid_geometry`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as, plus `skipped_invalid_geometry` counts and optional HDF5 `checkpoint_path` when running QMC/checkpointed sweeps. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.",
     "name": "sweep_table",
     "schema": {
       "additionalProperties": false,
@@ -3200,7 +3320,7 @@
   },
   {
     "access": "read",
-    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator), which solved physics each applies to and, per physics, whether its result is `stale`.",
+    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed), which solved physics each applies to and, per physics, whether its result is `stale`.",
     "name": "list_analyses",
     "schema": {
       "additionalProperties": false,
@@ -3212,7 +3332,7 @@
   },
   {
     "access": "read",
-    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, or piezo_resonator. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]`, `params` accept `trench_depth_m` (substrate over-etch depth in metres), and passing `electrostatic_physics` (e.g. `\"dfs\"`, with optional `port_terminals`, `modal_voltages`, `modal_freqs_hz`) evaluates hybrid quasi-electrostatic modal TLS participation and `T1_TLS_s` on the fine electrostatic mesh. For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. For `piezo_resonator`, extracts series/parallel resonance frequencies (`f_s_Hz`, `f_p_Hz`), IEEE coupling factors (`k_t2`, `k_eff2`), unwrapped phase-slope quality factors (`Q_s`, `Q_p`), and bounded 6-parameter mBVD equivalent circuit (`C_0`, `R_0`, `R_s`, `C_m`, `L_m`, `R_m`) from `DrivenPortData`. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
+    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, or uq_cqed. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]`, `params` accept `trench_depth_m` (substrate over-etch depth in metres), and passing `electrostatic_physics` (e.g. `\"dfs\"`, with optional `port_terminals`, `modal_voltages`, `modal_freqs_hz`) evaluates hybrid quasi-electrostatic modal TLS participation and `T1_TLS_s` on the fine electrostatic mesh. For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. For `piezo_resonator`, extracts series/parallel resonance frequencies (`f_s_Hz`, `f_p_Hz`), IEEE coupling factors (`k_t2`, `k_eff2`), unwrapped phase-slope quality factors (`Q_s`, `Q_p`), and bounded 6-parameter mBVD equivalent circuit (`C_0`, `R_0`, `R_s`, `C_m`, `L_m`, `R_m`) from `DrivenPortData`. For `uq_cqed`, propagates fabrication and constitutive 1-sigma `uncertainties` (plus `seed`, `n_samples`, `electrostatic_physics` companion bounds) through zero-solve EPR/Hamiltonian/Capacitance/TLS post-processing while keeping ASME V&V 20 epistemic brackets strictly separated from aleatoric variances. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
     "name": "analyse",
     "schema": {
       "additionalProperties": false,
@@ -3222,7 +3342,7 @@
           "type": "string"
         },
         "params": {
-          "description": "optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, electrostatic_physics, port_terminals, modal_voltages, modal_freqs_hz; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; piezo_resonator: port, terminations, f_window_hz, z_ref_ohm, fix_r_s_ohm; epr options)",
+          "description": "optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, electrostatic_physics, port_terminals, modal_voltages, modal_freqs_hz; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; piezo_resonator: port, terminations, f_window_hz, z_ref_ohm, fix_r_s_ohm; uq_cqed: seed, n_samples, basis, uncertainties, electrostatic_physics, qubits, resonators, metal_thickness_m; epr options)",
           "type": "object"
         },
         "physics": {

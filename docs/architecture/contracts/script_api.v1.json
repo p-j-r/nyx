@@ -69,7 +69,8 @@
     "arguments": [
       "path",
       "folder",
-      "workspace"
+      "workspace",
+      "checkpoint_path"
     ],
     "root": "the workspace given to the run, else the folder of the script; relative paths are taken from it"
   },

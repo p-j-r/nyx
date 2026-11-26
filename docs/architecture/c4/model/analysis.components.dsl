@@ -3,7 +3,7 @@ api = component "Analysis API" "The entry points an engine calls: an analysis is
     properties {
         "adr" "56, 103, 105"
         "code" "crates/nyx-analysis/src: lib.rs"
-        "lines" "133"
+        "lines" "138"
         "codeDiagram" "4-code/analysis/api.md"
     }
 }
@@ -11,15 +11,15 @@ capacitance = component "Capacitance and inductance matrices" "Maxwell/mutual ca
     properties {
         "adr" "103"
         "code" "crates/nyx-analysis/src: capacitance.rs"
-        "lines" "1584"
+        "lines" "1657"
         "codeDiagram" "4-code/analysis/capacitance.md"
     }
 }
-cqed = component "cQED quantization and TLS participation" "KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, `NetworkAnalysis`, and edge-regularized 3D TLS participation ratios." "Rust modules" {
+cqed = component "cQED quantization and TLS participation" "KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, `NetworkAnalysis`, edge-regularized 3D TLS participation ratios, and zero-solve `uq_cqed` interval/aleatoric UQ." "Rust modules" {
     properties {
-        "adr" "105, 118"
-        "code" "crates/nyx-analysis/src: epr.rs, hamiltonian.rs, network.rs, tls.rs"
-        "lines" "8316"
+        "adr" "105, 118, 133"
+        "code" "crates/nyx-analysis/src: epr.rs, hamiltonian.rs, network.rs, tls.rs, uq.rs"
+        "lines" "10641"
         "codeDiagram" "4-code/analysis/cqed.md"
     }
 }

@@ -5,23 +5,23 @@ C4 level 4 (code) of the component **Material specification** (`femcore.material
 > TOML material files with explicit units, tensors, dispersion models evaluated at the wavelength, Zimmermann BCS superconducting conductivity, provenance and the library loader.
 
 **Decisions:** [ADR 29](../../../adr/0029-material-files-are-toml-with-explicit-units.md), [ADR 30](../../../adr/0030-optical-dispersion-models-evaluated-at-the-study-wavelength.md), [ADR 34](../../../adr/0034-a-material-may-extend-another-and-replaces-whole-tables.md), [ADR 35](../../../adr/0035-material-provenance-oscillator-models-and-the-checked-library.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
-**Size:** 13 files, 10179 lines.
+**Size:** 13 files, 10474 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/material/bcs.rs` | 1027 |  |
-| `crates/femcore/src/material/coupled.rs` | 1800 |  |
+| `crates/femcore/src/material/coupled.rs` | 1814 |  |
 | `crates/femcore/src/material/elastic.rs` | 784 |  |
 | `crates/femcore/src/material/import.rs` | 1406 |  |
 | `crates/femcore/src/material/mod.rs` | 476 |  |
-| `crates/femcore/src/material/optics.rs` | 1264 |  |
+| `crates/femcore/src/material/optics.rs` | 1324 |  |
 | `crates/femcore/src/material/reader.rs` | 277 |  |
-| `crates/femcore/src/material/schema.rs` | 489 |  |
-| `crates/femcore/src/material/source.rs` | 136 |  |
-| `crates/femcore/src/material/spec.rs` | 1307 |  |
-| `crates/femcore/src/material/state_t.rs` | 747 |  |
+| `crates/femcore/src/material/schema.rs` | 490 |  |
+| `crates/femcore/src/material/source.rs` | 145 |  |
+| `crates/femcore/src/material/spec.rs` | 1359 |  |
+| `crates/femcore/src/material/state_t.rs` | 906 |  |
 | `crates/femcore/src/material/tensor.rs` | 171 |  |
 | `crates/femcore/src/material/units.rs` | 295 |  |
 
@@ -51,7 +51,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [Finite-element basics](./fem.md) | material | Anisotropy, M3, M6 |
 | [Meshing facade](./meshing.md) | material | M3, M6 |
 | [Frame and sections](./section.md) | material | M3, M6 |
-| [physics: Problem envelope](../physics/envelope.md) | material, material::coupled, material::elastic, material::spec, material::tensor | Class, InterfaceLayer, Library, M3, Requirement, Tensor, TensorProp, iso_tensor +1 |
+| [physics: Problem envelope](../physics/envelope.md) | material, material::coupled, material::elastic, material::optics, material::source, material::spec +2 | Axes, Class, InterfaceLayer, Library, M3, MaterialSpec, Requirement, Source +5 |
 | [physics: Physics trait and registry](../physics/trait.md) | material::spec | Library |
 | [sms: Physics adapter](../sms/adapter.md) | material, material::coupled, material::spec | EPSILON_0, Library, isotropic_stiffness, piezo_e_global, stiffness_global, tensor_global |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | material | M3, M6 |
@@ -64,7 +64,7 @@ Nothing outside the component (the standard library and external crates are not 
 
 ## Class diagram
 
-Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 8 more types than the diagram shows.**
+Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 10 more types than the diagram shows.**
 
 ```mermaid
 classDiagram
@@ -130,6 +130,7 @@ classDiagram
         +more_2_fields
         +read(s) Result
         +write(tbl)
+        +complex_permittivity_checked(freq_hz, temperature_k, e_field_v_per_m, prefer_free) Option
         +complex_permittivity(freq_hz, temperature_k, e_field_v_per_m, prefer_free) Option
     }
     class InterfaceLayer {
@@ -382,6 +383,8 @@ classDiagram
         +k_data Option
         +dn_dt_einstein_theta Option~f64~
         +dn_dt_range Option
+        +sources() slice
+        +eval_dn_dt_temperature_checked(temperature_k) CheckedTempEval~f64~
     }
     class Axes {
         <<enumeration>>
@@ -401,13 +404,13 @@ classDiagram
         +axes Axes
         +is_anisotropic() bool
         +range_m() Option
+        +nk_checked(axis, lambda_m, temp_k) Result
         +nk(axis, lambda_m, temp_k) Result
+        +index_checked(axis, lambda_m, temp_k) Result
         +index(axis, lambda_m, temp_k) Result
         +d_index_d_lambda(axis, lambda_m, temp_k) Result
         +group_index(axis, lambda_m, temp_k) Result
-        +permittivity_diag(lambda_m, temp_k) ResultComplex64
-        +permittivity_global(lambda_m, temp_k, euler_deg) ResultComplex64
-        +more_3_methods()
+        +more_7_methods()
     }
     class OpticsError {
         <<enumeration>>
@@ -471,6 +474,8 @@ classDiagram
         +verified Option~String~
         +text(cite) Source
         +is_verified() bool
+        +is_approximate() bool
+        +is_unverified() bool
         +flags_uncertainty() bool
     }
     class fns_material_source_rs {
@@ -518,7 +523,7 @@ classDiagram
         +permittivity_clamped() Option~M3~
         +permittivity_free() Option~M3~
         +stiffness_constant_e() Option~M6~
-        +more_9_methods()
+        +more_14_methods()
     }
     class Library {
         <<struct>>
@@ -542,7 +547,7 @@ classDiagram
         +dielectric slice
         +superconducting slice
         +piezoelectric slice
-        +more_7_fields
+        +more_8_fields
     }
     class fns_material_spec_rs {
         <<module material/spec.rs>>
@@ -559,6 +564,10 @@ classDiagram
     class fns_material_state_t_rs {
         <<module material/state_t.rs>>
         +einstein_thermal_coordinate(temperature_k, theta_e_k) f64
+        ~clamp_temp_range(temperature_k, lo, hi) tuple
+        +TEMP_CURVE_KEYS const
+        +ComponentClamp type
+        +AxisClamp type
     }
   }
   namespace material_units_rs {
@@ -625,51 +634,52 @@ classDiagram
 | fn | `tls_saturation_factor` | `material/coupled.rs:146` | `pub fn tls_saturation_factor( tan_delta_tls_0: f64, e_crit: Option<f64>, freq_hz: Option<f64>, temperature_k: Option<f64>, e_field_v_per_m: Option<f64>, ) -> f64` —  TLS loss tangent factor `tan_delta_tls_0 * tanh(h f / (2 k_B T)) / sqrt(1 + (E / E_c)^2)`. |
 | struct | `Dielectric` | `material/coupled.rs:169` | fields: `source`, `eps_r`, `eps_clamped`, `eps_free`, `eps_inf`, `eps_t`, `loss_tangent`, `loss_ref_freq`, `tls_tan_delta_0`, `tls_e_crit` —  Microwave/RF dielectric permittivity and bulk + TLS dielectric loss (`[dielectric]`). |
 | const | `DIELECTRIC_KEYS` | `material/coupled.rs:201` | `&[&str]` |
-| struct | `InterfaceLayer` | `material/coupled.rs:349` | fields: `source`, `oxide`, `thickness`, `eps_r`, `tan_delta_tls_0`, `e_crit` —  Native oxide or interface Two-Level System loss layer (`[interfaces.{ma,ms,sa}]`). |
-| const | `IFACE_KEYS` | `material/coupled.rs:365` | `&[&str]` |
-| struct | `Interfaces` | `material/coupled.rs:437` | fields: `ma`, `ms`, `sa` —  Superconducting / dielectric surface oxide interfaces (`[interfaces]`). |
-| const | `INTERFACES_KEYS` | `material/coupled.rs:470` | `&[&str]` |
-| const | `PIEZOELECTRIC_KEYS` | `material/coupled.rs:471` | `&[&str]` |
-| const | `PHOTOELASTIC_KEYS` | `material/coupled.rs:472` | `&[&str]` |
-| const | `ELECTRO_OPTIC_KEYS` | `material/coupled.rs:473` | `&[&str]` |
-| const | `VISCOELASTIC_KEYS` | `material/coupled.rs:474` | `&[&str]` |
-| enum | `PiezoForm` | `material/coupled.rs:478` | variants: `StressCharge`, `StrainCharge` |
-| struct | `Piezoelectric` | `material/coupled.rs:485` | fields: `source`, `form`, `matrix` —  Piezoelectric coupling tensor (`[piezoelectric]`), stored in textbook Voigt `(xx, yy, zz, yz, xz, xy)`. |
-| struct | `Photoelastic` | `material/coupled.rs:772` | fields: `source`, `wavelength`, `matrix` —  Photoelastic Pockels tensor `p_IJ` (`[photoelastic]`) in textbook Voigt `(xx, yy, zz, yz, xz, xy)`. |
-| struct | `ElectroOptic` | `material/coupled.rs:1016` | fields: `source`, `wavelength`, `clamped`, `free` —  Linear electro-optic (Pockels) tensor `r_Ij` (`[electro_optic]`) in m/V and textbook Voigt order. |
-| struct | `Viscoelastic` | `material/coupled.rs:1254` | fields: `source`, `matrix`, `cryo_qm_floor` —  Phononic / viscoelastic damping tensor `eta_IJ` (`[viscoelastic]`) in `Pa*s` and textbook Voigt order. |
-| fn | `resolve_piezo_legendre_duals` | `material/coupled.rs:1404` | `pub fn resolve_piezo_legendre_duals( ce_voigt: &M6, piezo: &Piezoelectric, eps_clamped_r: Option<&M3>, eps_free_r: Option<&M3>, ) -> Result<(M3, M3, M6, M6), String>` —  Exact piezoelectric Legendre duals in textbook Voigt order `(xx, yy, zz, yz, xz, xy)`. |
-| fn | `stiffness_to_textbook_voigt` | `material/coupled.rs:1479` | `pub fn stiffness_to_textbook_voigt(s: &Stiffness) -> M6` —  Rotates a stiffness `Stiffness` enum into textbook Voigt `(xx, yy, zz, yz, xz, xy)` without shear conversion. |
-| fn | `rotate_m3` | `material/coupled.rs:1547` | `pub fn rotate_m3(m: &M3, r: &M3) -> M3` —  Rotates a `3x3` permittivity/conductivity/loss tensor by `R`. |
-| fn | `rot_z_deg` | `material/coupled.rs:1552` | `pub fn rot_z_deg(angle_deg: f64) -> M3` —  Computes `R_z(angle_deg)` for crystallographic rotation checks. |
+| struct | `InterfaceLayer` | `material/coupled.rs:363` | fields: `source`, `oxide`, `thickness`, `eps_r`, `tan_delta_tls_0`, `e_crit` —  Native oxide or interface Two-Level System loss layer (`[interfaces.{ma,ms,sa}]`). |
+| const | `IFACE_KEYS` | `material/coupled.rs:379` | `&[&str]` |
+| struct | `Interfaces` | `material/coupled.rs:451` | fields: `ma`, `ms`, `sa` —  Superconducting / dielectric surface oxide interfaces (`[interfaces]`). |
+| const | `INTERFACES_KEYS` | `material/coupled.rs:484` | `&[&str]` |
+| const | `PIEZOELECTRIC_KEYS` | `material/coupled.rs:485` | `&[&str]` |
+| const | `PHOTOELASTIC_KEYS` | `material/coupled.rs:486` | `&[&str]` |
+| const | `ELECTRO_OPTIC_KEYS` | `material/coupled.rs:487` | `&[&str]` |
+| const | `VISCOELASTIC_KEYS` | `material/coupled.rs:488` | `&[&str]` |
+| enum | `PiezoForm` | `material/coupled.rs:492` | variants: `StressCharge`, `StrainCharge` |
+| struct | `Piezoelectric` | `material/coupled.rs:499` | fields: `source`, `form`, `matrix` —  Piezoelectric coupling tensor (`[piezoelectric]`), stored in textbook Voigt `(xx, yy, zz, yz, xz, xy)`. |
+| struct | `Photoelastic` | `material/coupled.rs:786` | fields: `source`, `wavelength`, `matrix` —  Photoelastic Pockels tensor `p_IJ` (`[photoelastic]`) in textbook Voigt `(xx, yy, zz, yz, xz, xy)`. |
+| struct | `ElectroOptic` | `material/coupled.rs:1030` | fields: `source`, `wavelength`, `clamped`, `free` —  Linear electro-optic (Pockels) tensor `r_Ij` (`[electro_optic]`) in m/V and textbook Voigt order. |
+| struct | `Viscoelastic` | `material/coupled.rs:1268` | fields: `source`, `matrix`, `cryo_qm_floor` —  Phononic / viscoelastic damping tensor `eta_IJ` (`[viscoelastic]`) in `Pa*s` and textbook Voigt order. |
+| fn | `resolve_piezo_legendre_duals` | `material/coupled.rs:1418` | `pub fn resolve_piezo_legendre_duals( ce_voigt: &M6, piezo: &Piezoelectric, eps_clamped_r: Option<&M3>, eps_free_r: Option<&M3>, ) -> Result<(M3, M3, M6, M6), String>` —  Exact piezoelectric Legendre duals in textbook Voigt order `(xx, yy, zz, yz, xz, xy)`. |
+| fn | `stiffness_to_textbook_voigt` | `material/coupled.rs:1493` | `pub fn stiffness_to_textbook_voigt(s: &Stiffness) -> M6` —  Rotates a stiffness `Stiffness` enum into textbook Voigt `(xx, yy, zz, yz, xz, xy)` without shear conversion. |
+| fn | `rotate_m3` | `material/coupled.rs:1561` | `pub fn rotate_m3(m: &M3, r: &M3) -> M3` —  Rotates a `3x3` permittivity/conductivity/loss tensor by `R`. |
+| fn | `rot_z_deg` | `material/coupled.rs:1566` | `pub fn rot_z_deg(angle_deg: f64) -> M3` —  Computes `R_z(angle_deg)` for crystallographic rotation checks. |
 | fn | `Dielectric::read` | `material/coupled.rs:217` | `pub fn read(s: &mut Section) -> Result<Self, MaterialError>` |
 | fn | `Dielectric::write` | `material/coupled.rs:282` | `pub fn write(&self, tbl: &mut toml::Table)` |
-| fn | `Dielectric::complex_permittivity` | `material/coupled.rs:317` | `pub fn complex_permittivity( &self, freq_hz: Option<f64>, temperature_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, ) -> Option<(M3, M3)>` —  Evaluates `(eps_re, eps_im_loss)` in the crystal frame where passive loss corresponds to |
-| fn | `InterfaceLayer::read` | `material/coupled.rs:377` | `pub fn read(s: &mut Section) -> Result<Self, MaterialError>` |
-| fn | `InterfaceLayer::write` | `material/coupled.rs:415` | `pub fn write(&self, tbl: &mut toml::Table)` |
-| fn | `InterfaceLayer::effective_tan_delta` | `material/coupled.rs:430` | `pub fn effective_tan_delta(&self, freq_hz: Option<f64>, temperature_k: Option<f64>, e_field_v_per_m: Option<f64>) -> f64` |
-| fn | `Interfaces::is_empty` | `material/coupled.rs:447` | `pub fn is_empty(&self) -> bool` |
-| fn | `Interfaces::read` | `material/coupled.rs:451` | `pub fn read(s: &mut Section) -> Result<Self, MaterialError>` |
-| fn | `Interfaces::write` | `material/coupled.rs:459` | `pub fn write(&self, tbl: &mut toml::Table)` |
-| fn | `Piezoelectric::to_rank3` | `material/coupled.rs:570` | `pub fn to_rank3(&self) -> [[[f64` —  Expands `[piezoelectric]` textbook Voigt `3x6` matrix to a full rank-3 tensor `t[i][j][k]`. |
-| fn | `Piezoelectric::from_rank3` | `material/coupled.rs:588` | `pub fn from_rank3(form: PiezoForm, t: &[[[f64; 3]; 3]; 3]) -> [[f64` —  Reconstructs a `3x6` textbook Voigt matrix from a rank-3 tensor `t[i][j][k]` (`t[i][j][k] == t[i][k][j]`). |
-| fn | `Piezoelectric::rotate` | `material/coupled.rs:604` | `pub fn rotate(&self, r: &M3) -> [[f64` —  Rotates the `3x6` piezoelectric coupling matrix from crystal frame into global frame via `R`. |
-| fn | `Piezoelectric::stress_charge` | `material/coupled.rs:626` | `pub fn stress_charge(&self, stiffness_voigt: Option<&M6>) -> Result<[[f64` —  Converts to stress-charge `e_iJ` (`C/m^2`) in textbook Voigt, multiplying `d * C^E` if stored as strain-charge. |
-| fn | `Piezoelectric::strain_charge` | `material/coupled.rs:649` | `pub fn strain_charge(&self, stiffness_voigt: Option<&M6>) -> Result<[[f64` —  Converts to strain-charge `d_iJ` (`C/N = m/V`) in textbook Voigt, multiplying `e * (C^E)^-1` if stored as stress-charge. |
-| fn | `Piezoelectric::read` | `material/coupled.rs:672` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
-| fn | `Piezoelectric::write` | `material/coupled.rs:750` | `pub fn write(&self, tbl: &mut toml::Table)` |
-| fn | `Photoelastic::to_rank4` | `material/coupled.rs:784` | `pub fn to_rank4(&self) -> [[[[f64` —  Expands textbook Voigt `6x6` matrix `p_IJ` directly into full rank-4 tensor `p_{abcd}` (`p_{abcd} = p_{IJ}` without factor 2). |
-| fn | `Photoelastic::rotate_voigt` | `material/coupled.rs:800` | `pub fn rotate_voigt(&self, r: &M3) -> M6` —  Rotates photoelastic tensor `p_{IJ}` into the global frame using `R`, returning textbook Voigt `6x6`. |
-| fn | `Photoelastic::rotate_solver` | `material/coupled.rs:832` | `pub fn rotate_solver(&self, r: &M3) -> M6` —  Rotates photoelastic tensor `p_{IJ}` into solver Voigt order `(xx, yy, zz, xy, yz, xz)`. |
-| fn | `Photoelastic::read` | `material/coupled.rs:836` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
-| fn | `Photoelastic::write` | `material/coupled.rs:884` | `pub fn write(&self, tbl: &mut toml::Table)` |
-| fn | `ElectroOptic::resolved_free` | `material/coupled.rs:1079` | `pub fn resolved_free(&self, pe: Option<&Photoelastic>, d_strain_charge: Option<&[[f64; 6]; 3]>) -> Option<[[f64` —  Derives free `r^T` from clamped `r^S` (`r^T = r^S + p * d^T`), or returns explicit `free`. |
-| fn | `ElectroOptic::resolved_clamped` | `material/coupled.rs:1101` | `pub fn resolved_clamped(&self, pe: Option<&Photoelastic>, d_strain_charge: Option<&[[f64; 6]; 3]>) -> Option<[[f64` —  Derives clamped `r^S` from free `r^T` (`r^S = r^T - p * d^T`), or returns explicit `clamped`. |
-| fn | `ElectroOptic::read` | `material/coupled.rs:1122` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
-| fn | `ElectroOptic::write` | `material/coupled.rs:1230` | `pub fn write(&self, tbl: &mut toml::Table)` |
-| fn | `Viscoelastic::to_solver_voigt` | `material/coupled.rs:1265` | `pub fn to_solver_voigt(&self) -> M6` |
-| fn | `Viscoelastic::read` | `material/coupled.rs:1269` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
-| fn | `Viscoelastic::write` | `material/coupled.rs:1332` | `pub fn write(&self, tbl: &mut toml::Table)` |
+| fn | `Dielectric::complex_permittivity_checked` | `material/coupled.rs:316` | `pub fn complex_permittivity_checked( &self, freq_hz: Option<f64>, temperature_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, ) -> Option<((M3, M3), Vec<ComponentClamp>)>` —  Evaluates `(eps_re, eps_im_loss)` together with any `eps_T` clamping events in the crystal frame. |
+| fn | `Dielectric::complex_permittivity` | `material/coupled.rs:350` | `pub fn complex_permittivity( &self, freq_hz: Option<f64>, temperature_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, ) -> Option<(M3, M3)>` —  Evaluates `(eps_re, eps_im_loss)` in the crystal frame where passive loss corresponds to |
+| fn | `InterfaceLayer::read` | `material/coupled.rs:391` | `pub fn read(s: &mut Section) -> Result<Self, MaterialError>` |
+| fn | `InterfaceLayer::write` | `material/coupled.rs:429` | `pub fn write(&self, tbl: &mut toml::Table)` |
+| fn | `InterfaceLayer::effective_tan_delta` | `material/coupled.rs:444` | `pub fn effective_tan_delta(&self, freq_hz: Option<f64>, temperature_k: Option<f64>, e_field_v_per_m: Option<f64>) -> f64` |
+| fn | `Interfaces::is_empty` | `material/coupled.rs:461` | `pub fn is_empty(&self) -> bool` |
+| fn | `Interfaces::read` | `material/coupled.rs:465` | `pub fn read(s: &mut Section) -> Result<Self, MaterialError>` |
+| fn | `Interfaces::write` | `material/coupled.rs:473` | `pub fn write(&self, tbl: &mut toml::Table)` |
+| fn | `Piezoelectric::to_rank3` | `material/coupled.rs:584` | `pub fn to_rank3(&self) -> [[[f64` —  Expands `[piezoelectric]` textbook Voigt `3x6` matrix to a full rank-3 tensor `t[i][j][k]`. |
+| fn | `Piezoelectric::from_rank3` | `material/coupled.rs:602` | `pub fn from_rank3(form: PiezoForm, t: &[[[f64; 3]; 3]; 3]) -> [[f64` —  Reconstructs a `3x6` textbook Voigt matrix from a rank-3 tensor `t[i][j][k]` (`t[i][j][k] == t[i][k][j]`). |
+| fn | `Piezoelectric::rotate` | `material/coupled.rs:618` | `pub fn rotate(&self, r: &M3) -> [[f64` —  Rotates the `3x6` piezoelectric coupling matrix from crystal frame into global frame via `R`. |
+| fn | `Piezoelectric::stress_charge` | `material/coupled.rs:640` | `pub fn stress_charge(&self, stiffness_voigt: Option<&M6>) -> Result<[[f64` —  Converts to stress-charge `e_iJ` (`C/m^2`) in textbook Voigt, multiplying `d * C^E` if stored as strain-charge. |
+| fn | `Piezoelectric::strain_charge` | `material/coupled.rs:663` | `pub fn strain_charge(&self, stiffness_voigt: Option<&M6>) -> Result<[[f64` —  Converts to strain-charge `d_iJ` (`C/N = m/V`) in textbook Voigt, multiplying `e * (C^E)^-1` if stored as stress-charge. |
+| fn | `Piezoelectric::read` | `material/coupled.rs:686` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
+| fn | `Piezoelectric::write` | `material/coupled.rs:764` | `pub fn write(&self, tbl: &mut toml::Table)` |
+| fn | `Photoelastic::to_rank4` | `material/coupled.rs:798` | `pub fn to_rank4(&self) -> [[[[f64` —  Expands textbook Voigt `6x6` matrix `p_IJ` directly into full rank-4 tensor `p_{abcd}` (`p_{abcd} = p_{IJ}` without factor 2). |
+| fn | `Photoelastic::rotate_voigt` | `material/coupled.rs:814` | `pub fn rotate_voigt(&self, r: &M3) -> M6` —  Rotates photoelastic tensor `p_{IJ}` into the global frame using `R`, returning textbook Voigt `6x6`. |
+| fn | `Photoelastic::rotate_solver` | `material/coupled.rs:846` | `pub fn rotate_solver(&self, r: &M3) -> M6` —  Rotates photoelastic tensor `p_{IJ}` into solver Voigt order `(xx, yy, zz, xy, yz, xz)`. |
+| fn | `Photoelastic::read` | `material/coupled.rs:850` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
+| fn | `Photoelastic::write` | `material/coupled.rs:898` | `pub fn write(&self, tbl: &mut toml::Table)` |
+| fn | `ElectroOptic::resolved_free` | `material/coupled.rs:1093` | `pub fn resolved_free(&self, pe: Option<&Photoelastic>, d_strain_charge: Option<&[[f64; 6]; 3]>) -> Option<[[f64` —  Derives free `r^T` from clamped `r^S` (`r^T = r^S + p * d^T`), or returns explicit `free`. |
+| fn | `ElectroOptic::resolved_clamped` | `material/coupled.rs:1115` | `pub fn resolved_clamped(&self, pe: Option<&Photoelastic>, d_strain_charge: Option<&[[f64; 6]; 3]>) -> Option<[[f64` —  Derives clamped `r^S` from free `r^T` (`r^S = r^T - p * d^T`), or returns explicit `clamped`. |
+| fn | `ElectroOptic::read` | `material/coupled.rs:1136` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
+| fn | `ElectroOptic::write` | `material/coupled.rs:1244` | `pub fn write(&self, tbl: &mut toml::Table)` |
+| fn | `Viscoelastic::to_solver_voigt` | `material/coupled.rs:1279` | `pub fn to_solver_voigt(&self) -> M6` |
+| fn | `Viscoelastic::read` | `material/coupled.rs:1283` | `pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError>` |
+| fn | `Viscoelastic::write` | `material/coupled.rs:1346` | `pub fn write(&self, tbl: &mut toml::Table)` |
 | enum | `Unique` | `material/elastic.rs:14` | variants: `Y`, `Z` |
 | enum | `Class` | `material/elastic.rs:21` | variants: `Isotropic`, `Cubic`, `Hexagonal`, `Trigonal`, `Tetragonal`, `Orthotropic`, `Monoclinic`, `Triclinic` —  Crystal class of the stiffness (the elastic symmetry group, not the full point group). |
 | const | `NAMES` | `material/elastic.rs:54` | `[[&str` |
@@ -723,29 +733,35 @@ classDiagram
 | fn | `Tensor::name` | `material/mod.rs:166` | `pub fn name(&self) -> &'static str` |
 | fn | `Tensor::matrix` | `material/mod.rs:173` | `pub fn matrix(&self) -> M3` |
 | fn | `Tensor::constants_mut` | `material/mod.rs:180` | `pub fn constants_mut(&mut self) -> Vec<(&'static str, &mut f64)>` |
-| enum | `Interp` | `material/optics.rs:17` | variants: `Pchip`, `Linear` |
-| enum | `Extrapolate` | `material/optics.rs:23` | variants: `Error`, `Linear` |
-| enum | `Dispersion` | `material/optics.rs:32` | variants: `Constant`, `Sellmeier`, `Cauchy`, `Tabulated`, `Schott`, `Herzberger`, `RiiFormula4`, `RiiFormula5`, `RiiFormula6`, `Oscillators` —  One dispersion model. Parameters are in the file's wavelength unit (`x` below is the wavelength in that unit). |
-| struct | `AxisModel` | `material/optics.rs:76` | fields: `dispersion`, `source`, `dn_dt`, `k_data`, `dn_dt_einstein_theta`, `dn_dt_range` |
-| enum | `Axes` | `material/optics.rs:96` | variants: `Isotropic`, `Uniaxial`, `Biaxial` |
-| struct | `Optical` | `material/optics.rs:104` | fields: `source`, `wavelength_unit`, `unit_m`, `range`, `reference_temperature`, `axes` |
-| enum | `OpticsError` | `material/optics.rs:120` | variants: `OutOfRange`, `NotFinite`, `BadWavelength` |
-| const | `MODEL_KEYS` | `material/optics.rs:722` | `&[&str]` |
-| const | `OPTICAL_KEYS` | `material/optics.rs:1118` | `&[&str]` —  Keys of the `[optical]` table itself (the model keys of an isotropic material live there too). |
-| fn | `Dispersion::name` | `material/optics.rs:55` | `pub fn name(&self) -> &'static str` |
-| fn | `Axes::model` | `material/optics.rs:401` | `pub fn model(&self, axis: usize) -> &AxisModel` |
-| fn | `Axes::models` | `material/optics.rs:414` | `pub fn models(&self) -> Vec<&AxisModel>` |
-| fn | `Optical::is_anisotropic` | `material/optics.rs:424` | `pub fn is_anisotropic(&self) -> bool` |
-| fn | `Optical::range_m` | `material/optics.rs:429` | `pub fn range_m(&self) -> Option<(f64, f64)>` —  The validity range in metres. |
-| fn | `Optical::nk` | `material/optics.rs:434` | `pub fn nk(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<(f64, f64, f64, f64), OpticsError>` —  `(n, k, dn/dlambda, dk/dlambda)` for crystal axis 0, 1 or 2 (derivatives per metre). |
-| fn | `Optical::index` | `material/optics.rs:485` | `pub fn index(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<Complex64, OpticsError>` —  Complex index `n - j k`. |
-| fn | `Optical::d_index_d_lambda` | `material/optics.rs:491` | `pub fn d_index_d_lambda(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<Complex64, OpticsError>` —  `d(n - j k)/d lambda` per metre. |
-| fn | `Optical::group_index` | `material/optics.rs:497` | `pub fn group_index(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<f64, OpticsError>` —  Group index `n - lambda dn/dlambda` (real part). |
-| fn | `Optical::permittivity_diag` | `material/optics.rs:503` | `pub fn permittivity_diag(&self, lambda_m: f64, temp_k: Option<f64>) -> Result<[Complex64` —  Relative permittivity along the three crystal axes, `(n - j k)^2`. |
-| fn | `Optical::permittivity_global` | `material/optics.rs:513` | `pub fn permittivity_global(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor in the global frame for a crystal rotated by the Bunge angles (degrees). |
-| fn | `Optical::read` | `material/optics.rs:529` | `pub fn read(s: &mut Section) -> Result<Optical, MaterialError>` |
-| fn | `Optical::validate` | `material/optics.rs:603` | `pub fn validate(&self) -> Result<(), (String, String)>` —  Checks that every model is usable over the declared range. |
-| fn | `Optical::write` | `material/optics.rs:676` | `pub fn write(&self) -> toml::Table` |
+| enum | `Interp` | `material/optics.rs:18` | variants: `Pchip`, `Linear` |
+| enum | `Extrapolate` | `material/optics.rs:24` | variants: `Error`, `Linear` |
+| enum | `Dispersion` | `material/optics.rs:33` | variants: `Constant`, `Sellmeier`, `Cauchy`, `Tabulated`, `Schott`, `Herzberger`, `RiiFormula4`, `RiiFormula5`, `RiiFormula6`, `Oscillators` —  One dispersion model. Parameters are in the file's wavelength unit (`x` below is the wavelength in that unit). |
+| struct | `AxisModel` | `material/optics.rs:77` | fields: `dispersion`, `source`, `dn_dt`, `k_data`, `dn_dt_einstein_theta`, `dn_dt_range` |
+| enum | `Axes` | `material/optics.rs:115` | variants: `Isotropic`, `Uniaxial`, `Biaxial` |
+| struct | `Optical` | `material/optics.rs:123` | fields: `source`, `wavelength_unit`, `unit_m`, `range`, `reference_temperature`, `axes` |
+| enum | `OpticsError` | `material/optics.rs:139` | variants: `OutOfRange`, `NotFinite`, `BadWavelength` |
+| const | `MODEL_KEYS` | `material/optics.rs:782` | `&[&str]` |
+| const | `OPTICAL_KEYS` | `material/optics.rs:1178` | `&[&str]` —  Keys of the `[optical]` table itself (the model keys of an isotropic material live there too). |
+| fn | `Dispersion::name` | `material/optics.rs:56` | `pub fn name(&self) -> &'static str` |
+| fn | `AxisModel::sources` | `material/optics.rs:97` | `pub fn sources(&self) -> &[Source]` —  Citations attached to this optical axis model. |
+| fn | `AxisModel::eval_dn_dt_temperature_checked` | `material/optics.rs:102` | `pub fn eval_dn_dt_temperature_checked(&self, temperature_k: f64) -> CheckedTempEval<f64>` —  Checks `temperature_k` against `dn_dt_range` (when present) and returns the effective temperature with clamping metadata. |
+| fn | `Axes::model` | `material/optics.rs:420` | `pub fn model(&self, axis: usize) -> &AxisModel` |
+| fn | `Axes::models` | `material/optics.rs:433` | `pub fn models(&self) -> Vec<&AxisModel>` |
+| fn | `Optical::is_anisotropic` | `material/optics.rs:443` | `pub fn is_anisotropic(&self) -> bool` |
+| fn | `Optical::range_m` | `material/optics.rs:448` | `pub fn range_m(&self) -> Option<(f64, f64)>` —  The validity range in metres. |
+| fn | `Optical::nk_checked` | `material/optics.rs:453` | `pub fn nk_checked( &self, axis: usize, lambda_m: f64, temp_k: Option<f64>, ) -> Result<CheckedTempEval<(f64, f64, f64, f64)>, OpticsError>` —  `(n, k, dn/dlambda, dk/dlambda)` for crystal axis 0, 1 or 2 (derivatives per metre), returning any `dn_dT_range` clamping metadata. |
+| fn | `Optical::nk` | `material/optics.rs:509` | `pub fn nk(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<(f64, f64, f64, f64), OpticsError>` —  `(n, k, dn/dlambda, dk/dlambda)` for crystal axis 0, 1 or 2 (derivatives per metre). |
+| fn | `Optical::index_checked` | `material/optics.rs:514` | `pub fn index_checked(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<CheckedTempEval<Complex64>, OpticsError>` —  Complex index `n - j k` together with any `dn_dT_range` clamping metadata. |
+| fn | `Optical::index` | `material/optics.rs:523` | `pub fn index(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<Complex64, OpticsError>` —  Complex index `n - j k`. |
+| fn | `Optical::d_index_d_lambda` | `material/optics.rs:528` | `pub fn d_index_d_lambda(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<Complex64, OpticsError>` —  `d(n - j k)/d lambda` per metre. |
+| fn | `Optical::group_index` | `material/optics.rs:534` | `pub fn group_index(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<f64, OpticsError>` —  Group index `n - lambda dn/dlambda` (real part). |
+| fn | `Optical::permittivity_diag_checked` | `material/optics.rs:540` | `pub fn permittivity_diag_checked( &self, lambda_m: f64, temp_k: Option<f64>, ) -> Result<([Complex64` —  Relative permittivity along the three crystal axes, `(n - j k)^2`, returning any per-axis clamping events. |
+| fn | `Optical::permittivity_diag` | `material/optics.rs:558` | `pub fn permittivity_diag(&self, lambda_m: f64, temp_k: Option<f64>) -> Result<[Complex64` —  Relative permittivity along the three crystal axes, `(n - j k)^2`. |
+| fn | `Optical::permittivity_global_checked` | `material/optics.rs:563` | `pub fn permittivity_global_checked( &self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3], ) -> Result<([[Complex64` —  Relative permittivity tensor in the global frame for a rotated crystal, returning any per-axis `dn_dT_range` clamping events. |
+| fn | `Optical::permittivity_global` | `material/optics.rs:583` | `pub fn permittivity_global(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor in the global frame for a crystal rotated by the Bunge angles (degrees). |
+| fn | `Optical::read` | `material/optics.rs:589` | `pub fn read(s: &mut Section) -> Result<Optical, MaterialError>` |
+| fn | `Optical::validate` | `material/optics.rs:663` | `pub fn validate(&self) -> Result<(), (String, String)>` —  Checks that every model is usable over the declared range. |
+| fn | `Optical::write` | `material/optics.rs:736` | `pub fn write(&self) -> toml::Table` |
 | struct | `MaterialError` | `material/reader.rs:12` | fields: `material`, `path`, `message` —  A problem found in a material file or description, in plain words. |
 | enum | `Tree` | `material/reader.rs:33` | variants: `Num`, `List`, `Uniaxial` —  A quantity tree after unit conversion: numbers in SI, lists, or the uniaxial pair. |
 | struct | `Section` | `material/reader.rs:39` | fields: `material`, `path` |
@@ -766,14 +782,16 @@ classDiagram
 | fn | `Section::finish` | `material/reader.rs:236` | `pub fn finish(&self, known: &[&str]) -> Result<(), MaterialError>` —  Reports the first key nobody read, with the closest known key as a suggestion. |
 | const | `SCHEMA_VERSION` | `material/schema.rs:10` | `&str` |
 | const | `SCHEMA_VERSION_V1` | `material/schema.rs:11` | `&str` |
-| fn | `material_schema_v1` | `material/schema.rs:153` | `pub fn material_schema_v1() -> Value` —  The JSON Schema (draft 2020-12) of legacy format 1 (retained verbatim for v1 contract tests). |
-| fn | `material_schema` | `material/schema.rs:329` | `pub fn material_schema() -> Value` —  The JSON Schema (draft 2020-12) of format 2 (`SCHEMA_VERSION = "2.0"`). |
+| fn | `material_schema_v1` | `material/schema.rs:154` | `pub fn material_schema_v1() -> Value` —  The JSON Schema (draft 2020-12) of legacy format 1 (retained verbatim for v1 contract tests). |
+| fn | `material_schema` | `material/schema.rs:330` | `pub fn material_schema() -> Value` —  The JSON Schema (draft 2020-12) of format 2 (`SCHEMA_VERSION = "2.0"`). |
 | struct | `Source` | `material/source.rs:11` | fields: `cite`, `url`, `doi`, `verified` |
-| fn | `read_sources` | `material/source.rs:93` | `pub fn read_sources(s: &mut Section, key: &str) -> Result<Vec<Source>, MaterialError>` —  Reads `key` of the section as a list of sources (empty if the key is absent). |
-| fn | `write_sources` | `material/source.rs:102` | `pub fn write_sources(v: &[Source]) -> Option<toml::Value>` —  The TOML value for a list of sources, or `None` if it is empty. |
+| fn | `read_sources` | `material/source.rs:102` | `pub fn read_sources(s: &mut Section, key: &str) -> Result<Vec<Source>, MaterialError>` —  Reads `key` of the section as a list of sources (empty if the key is absent). |
+| fn | `write_sources` | `material/source.rs:111` | `pub fn write_sources(v: &[Source]) -> Option<toml::Value>` —  The TOML value for a list of sources, or `None` if it is empty. |
 | fn | `Source::text` | `material/source.rs:20` | `pub fn text(cite: &str) -> Source` |
 | fn | `Source::is_verified` | `material/source.rs:25` | `pub fn is_verified(&self) -> bool` —  True if the entry has a verification date. |
-| fn | `Source::flags_uncertainty` | `material/source.rs:30` | `pub fn flags_uncertainty(&self) -> bool` —  True if the citation text itself flags the data as unchecked. |
+| fn | `Source::is_approximate` | `material/source.rs:30` | `pub fn is_approximate(&self) -> bool` —  True if the citation text marks the data as approximate or representative. |
+| fn | `Source::is_unverified` | `material/source.rs:35` | `pub fn is_unverified(&self) -> bool` —  True if the citation text marks the data as unverified against a primary source. |
+| fn | `Source::flags_uncertainty` | `material/source.rs:40` | `pub fn flags_uncertainty(&self) -> bool` —  True if the citation text itself flags the data as unchecked. |
 | const | `FORMAT` | `material/spec.rs:27` | `i64` —  Current primary version of the material file format (`format = 2`). |
 | const | `FORMAT_V1` | `material/spec.rs:29` | `i64` —  Legacy v1 file format version still supported read-only via dual reader. |
 | struct | `Thermal` | `material/spec.rs:36` | fields: `source`, `conductivity`, `specific_heat`, `expansion`, `conductivity_t`, `specific_heat_t`, `expansion_t`, `contraction` |
@@ -784,10 +802,10 @@ classDiagram
 | const | `ELASTIC_KEYS` | `material/spec.rs:188` | `&[&str]` |
 | const | `THERMAL_KEYS` | `material/spec.rs:189` | `&[&str]` |
 | const | `ELECTRICAL_KEYS` | `material/spec.rs:206` | `&[&str]` |
-| struct | `Library` | `material/spec.rs:914` |  A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case. |
-| fn | `merge_over` | `material/spec.rs:1194` | `pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table` —  `over` laid over `base`: |
-| struct | `Keys` | `material/spec.rs:1234` | fields: `top`, `top_v1`, `elastic`, `thermal`, `electrical`, `dielectric`, `superconducting`, `piezoelectric`, `photoelastic`, `electro_optic`, `viscoelastic`, `interfaces`, ... —  The keys each table of a material file accepts (the contract test compares them with the JSON Schema). |
-| fn | `keys` | `material/spec.rs:1252` | `pub fn keys() -> Keys` |
+| struct | `Library` | `material/spec.rs:964` |  A folder of material files, loaded at run time. Materials are found by file name (without `.toml`), ignoring case. |
+| fn | `merge_over` | `material/spec.rs:1244` | `pub fn merge_over(base: &toml::Table, over: &toml::Table) -> toml::Table` —  `over` laid over `base`: |
+| struct | `Keys` | `material/spec.rs:1284` | fields: `top`, `top_v1`, `elastic`, `thermal`, `electrical`, `dielectric`, `superconducting`, `piezoelectric`, `photoelastic`, `electro_optic`, `viscoelastic`, `interfaces`, ... —  The keys each table of a material file accepts (the contract test compares them with the JSON Schema). |
+| fn | `keys` | `material/spec.rs:1303` | `pub fn keys() -> Keys` |
 | fn | `MaterialSpec::from_toml_named` | `material/spec.rs:253` | `pub fn from_toml_named(text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from TOML text. `fallback_name` is used when the file has no `name`. |
 | fn | `MaterialSpec::from_table` | `material/spec.rs:264` | `pub fn from_table(table: &toml::Table, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads a material from a parsed table (already merged with its base if it had `extends`). |
 | fn | `MaterialSpec::from_toml` | `material/spec.rs:510` | `pub fn from_toml(text: &str) -> Result<MaterialSpec, MaterialError>` |
@@ -797,29 +815,40 @@ classDiagram
 | fn | `MaterialSpec::permittivity_free` | `material/spec.rs:661` | `pub fn permittivity_free(&self) -> Option<M3>` —  Free (constant-stress) static/microwave relative permittivity `eps^T` in the crystal frame. |
 | fn | `MaterialSpec::stiffness_constant_e` | `material/spec.rs:681` | `pub fn stiffness_constant_e(&self) -> Option<M6>` —  Short-circuit (constant-electric-field) stiffness `C^E` in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` (`Pa`). |
 | fn | `MaterialSpec::stiffness_constant_d` | `material/spec.rs:686` | `pub fn stiffness_constant_d(&self) -> Option<M6>` —  Open-circuit (constant-displacement) stiffness `C^D = C^E + e^T (eps^S)^-1 e` in textbook Voigt order `(xx, yy, zz, yz, xz, xy)` (`Pa`). |
-| fn | `MaterialSpec::complex_microwave_permittivity` | `material/spec.rs:705` | `pub fn complex_microwave_permittivity( &self, freq_hz: Option<f64>, temp_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, euler_deg: [f64; 3], ) -> Option<(M3, M3)>` —  Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where |
-| fn | `MaterialSpec::thermal_conductivity_at` | `material/spec.rs:750` | `pub fn thermal_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k`, defaulting to reference temperature. |
-| fn | `MaterialSpec::specific_heat_at` | `material/spec.rs:758` | `pub fn specific_heat_at(&self, temp_k: Option<f64>) -> Option<f64>` —  Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k`, defaulting to reference temperature. |
-| fn | `MaterialSpec::thermal_expansion_at` | `material/spec.rs:766` | `pub fn thermal_expansion_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k`, defaulting to reference temperature. |
-| fn | `MaterialSpec::surface_impedance_at` | `material/spec.rs:774` | `pub fn surface_impedance_at( &self, freq_hz: f64, temp_k: f64, thickness: Option<f64>, film_model: Option<FilmModel>, ) -> Result<BcsEval, MaterialError>` —  Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted. |
-| fn | `MaterialSpec::anisotropy` | `material/spec.rs:796` | `pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy` —  The material in the `Anisotropy` form placed with Bunge angles in degrees. |
-| fn | `MaterialSpec::legacy_scalars` | `material/spec.rs:845` | `pub fn legacy_scalars(&self) -> BTreeMap<String, f64>` —  Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic). |
-| fn | `MaterialSpec::optical_permittivity` | `material/spec.rs:892` | `pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles. |
-| fn | `Library::load_dir` | `material/spec.rs:932` | `pub fn load_dir(dir: &Path) -> Result<Library, Vec<MaterialError>>` —  Loads every `*.toml` file of the folder (not its subfolders). All files with problems are reported together. |
-| fn | `Library::read` | `material/spec.rs:988` | `pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder, |
-| fn | `Library::with_texts` | `material/spec.rs:994` | `pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>>` —  A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material |
-| fn | `Library::read_table` | `material/spec.rs:1015` | `pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError>` —  `read`, with the table after `extends` was resolved. |
-| fn | `Library::get` | `material/spec.rs:1034` | `pub fn get(&self, name: &str) -> Option<&MaterialSpec>` |
-| fn | `Library::require` | `material/spec.rs:1039` | `pub fn require(&self, name: &str) -> Result<&MaterialSpec, MaterialError>` —  Like `get`, with an error that lists the available names. |
-| fn | `Library::names` | `material/spec.rs:1047` | `pub fn names(&self) -> Vec<String>` |
-| fn | `Library::len` | `material/spec.rs:1051` | `pub fn len(&self) -> usize` |
-| fn | `Library::is_empty` | `material/spec.rs:1055` | `pub fn is_empty(&self) -> bool` |
+| fn | `MaterialSpec::complex_microwave_permittivity_checked` | `material/spec.rs:704` | `pub fn complex_microwave_permittivity_checked( &self, freq_hz: Option<f64>, temp_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, euler_deg: [f64; 3], ) -> Option<((M3, M3), Vec<super::state_t::ComponentClamp>)>` —  Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` together with any `eps_T` clamping events. |
+| fn | `MaterialSpec::complex_microwave_permittivity` | `material/spec.rs:752` | `pub fn complex_microwave_permittivity( &self, freq_hz: Option<f64>, temp_k: Option<f64>, e_field_v_per_m: Option<f64>, prefer_free: bool, euler_deg: [f64; 3], ) -> Option<(M3, M3)>` —  Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where |
+| fn | `MaterialSpec::thermal_conductivity_at_checked` | `material/spec.rs:765` | `pub fn thermal_conductivity_at_checked( &self, temp_k: Option<f64>, ) -> Option<(TensorProp, Vec<super::state_t::ComponentClamp>)>` —  Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k` with clamping metadata. |
+| fn | `MaterialSpec::thermal_conductivity_at` | `material/spec.rs:776` | `pub fn thermal_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k`, defaulting to reference temperature. |
+| fn | `MaterialSpec::specific_heat_at_checked` | `material/spec.rs:781` | `pub fn specific_heat_at_checked(&self, temp_k: Option<f64>) -> Option<(f64, Option<super::state_t::TempClampInfo>)>` —  Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k` with optional clamping metadata. |
+| fn | `MaterialSpec::specific_heat_at` | `material/spec.rs:792` | `pub fn specific_heat_at(&self, temp_k: Option<f64>) -> Option<f64>` —  Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k`, defaulting to reference temperature. |
+| fn | `MaterialSpec::thermal_expansion_at_checked` | `material/spec.rs:797` | `pub fn thermal_expansion_at_checked( &self, temp_k: Option<f64>, ) -> Option<(TensorProp, Vec<super::state_t::ComponentClamp>)>` —  Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k` with clamping metadata. |
+| fn | `MaterialSpec::thermal_expansion_at` | `material/spec.rs:808` | `pub fn thermal_expansion_at(&self, temp_k: Option<f64>) -> Option<TensorProp>` —  Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k`, defaulting to reference temperature. |
+| fn | `MaterialSpec::surface_impedance_at` | `material/spec.rs:813` | `pub fn surface_impedance_at( &self, freq_hz: f64, temp_k: f64, thickness: Option<f64>, film_model: Option<FilmModel>, ) -> Result<BcsEval, MaterialError>` —  Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted. |
+| fn | `MaterialSpec::anisotropy` | `material/spec.rs:835` | `pub fn anisotropy(&self, euler_deg: [f64; 3]) -> Anisotropy` —  The material in the `Anisotropy` form placed with Bunge angles in degrees. |
+| fn | `MaterialSpec::legacy_scalars` | `material/spec.rs:884` | `pub fn legacy_scalars(&self) -> BTreeMap<String, f64>` —  Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic). |
+| fn | `MaterialSpec::optical_permittivity_checked` | `material/spec.rs:931` | `pub fn optical_permittivity_checked( &self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3], ) -> Result<([[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a rotated crystal, returning any per-axis `dn_dT_range` clamping events. |
+| fn | `MaterialSpec::optical_permittivity` | `material/spec.rs:947` | `pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64` —  Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles. |
+| fn | `Library::load_dir` | `material/spec.rs:982` | `pub fn load_dir(dir: &Path) -> Result<Library, Vec<MaterialError>>` —  Loads every `*.toml` file of the folder (not its subfolders). All files with problems are reported together. |
+| fn | `Library::read` | `material/spec.rs:1038` | `pub fn read(&self, text: &str, fallback_name: &str) -> Result<MaterialSpec, MaterialError>` —  Reads material text that may use `extends`, looking the base up in this library (for a file outside the library folder, |
+| fn | `Library::with_texts` | `material/spec.rs:1044` | `pub fn with_texts(&self, texts: &BTreeMap<String, String>) -> Result<Library, Vec<MaterialError>>` —  A copy of the library with more materials given as TOML text by name (the materials a project carries). A text may extend a material |
+| fn | `Library::read_table` | `material/spec.rs:1065` | `pub fn read_table(&self, text: &str, fallback_name: &str) -> Result<(MaterialSpec, toml::Table), MaterialError>` —  `read`, with the table after `extends` was resolved. |
+| fn | `Library::get` | `material/spec.rs:1084` | `pub fn get(&self, name: &str) -> Option<&MaterialSpec>` |
+| fn | `Library::require` | `material/spec.rs:1089` | `pub fn require(&self, name: &str) -> Result<&MaterialSpec, MaterialError>` —  Like `get`, with an error that lists the available names. |
+| fn | `Library::names` | `material/spec.rs:1097` | `pub fn names(&self) -> Vec<String>` |
+| fn | `Library::len` | `material/spec.rs:1101` | `pub fn len(&self) -> usize` |
+| fn | `Library::is_empty` | `material/spec.rs:1105` | `pub fn is_empty(&self) -> bool` |
 | enum | `MaterialKind` | `material/state_t.rs:15` | variants: `Crystalline`, `Polycrystalline`, `Amorphous`, `Superconductor`, `Semiconductor`, `Dielectric`, `Metal`, `Polymer`, `Fluid` —  Macroscopic structural classification of a material. |
 | enum | `CrystalSetting` | `material/state_t.rs:60` | variants: `Ieee1987`, `Ire1949` —  Crystal axis frame convention for trigonal/orthorhombic/piezoelectric tensors. |
 | enum | `PointGroup` | `material/state_t.rs:87` | variants: `C1`, `Ci`, `C2`, `Cs`, `C2h`, `D2`, `C2v`, `D2h`, `C4`, `S4`, `C4h`, `D4`, ... —  All 32 Hermann–Mauguin crystallographic point groups plus isotropic and transverse-isotropic continuous groups. |
 | fn | `einstein_thermal_coordinate` | `material/state_t.rs:297` | `pub fn einstein_thermal_coordinate(temperature_k: f64, theta_e_k: f64) -> f64` —  Einstein oscillator thermal shift helper `g(T) = theta_e / (exp(theta_e / T) - 1)`, |
-| enum | `TempCurve` | `material/state_t.rs:315` | variants: `Constant`, `Tabulated`, `Log10Poly`, `EinsteinShift` —  A temperature-dependent scalar property curve in SI units. |
-| enum | `TempTensor` | `material/state_t.rs:638` | variants: `Scalar`, `Uniaxial` —  Temperature-dependent scalar or uniaxial (perp/par) property in SI units. |
+| const | `TEMP_CURVE_KEYS` | `material/state_t.rs:313` | `&[&str]` —  Allowed TOML keys inside a temperature-curve table (`$defs.temp_curve` in `material_schema`). |
+| struct | `TempClampInfo` | `material/state_t.rs:331` | fields: `requested_k`, `clamped_k`, `bounds_k` —  Metadata recorded when a temperature-dependent constitutive curve or axis model is clamped to its valid domain `[T_min, T_max]`. |
+| struct | `CheckedTempEval` | `material/state_t.rs:342` | fields: `value`, `clamp` —  Result of evaluating a temperature-dependent quantity together with optional out-of-range clamping metadata. |
+| type | `ComponentClamp` | `material/state_t.rs:348` |  Optional tensor-component label (`"perp"` / `"par"` or `None` for scalar) paired with clamping metadata. |
+| type | `AxisClamp` | `material/state_t.rs:351` |  Optical crystal axis index (`0`, `1`, `2`) paired with thermo-optic clamping metadata. |
+| fn | `clamp_temp_range` | `material/state_t.rs:354` | `pub(crate) fn clamp_temp_range(temperature_k: f64, lo: f64, hi: f64) -> (f64, Option<TempClampInfo>)` —  Clamps `temperature_k` to `[lo, hi]` with sub-ULP rounding slack on unit conversions, returning clamping metadata when outside bounds. |
+| enum | `TempCurve` | `material/state_t.rs:372` | variants: `Constant`, `Tabulated`, `Log10Poly`, `EinsteinShift` —  A temperature-dependent scalar property curve in SI units. |
+| enum | `TempTensor` | `material/state_t.rs:741` | variants: `Scalar`, `Uniaxial` —  Temperature-dependent scalar or uniaxial (perp/par) property in SI units. |
 | fn | `MaterialKind::parse` | `material/state_t.rs:28` | `pub fn parse(s: &str) -> Option<Self>` |
 | fn | `MaterialKind::as_str` | `material/state_t.rs:43` | `pub fn as_str(self) -> &'static str` |
 | fn | `CrystalSetting::parse` | `material/state_t.rs:69` | `pub fn parse(s: &str) -> Option<Self>` |
@@ -828,14 +857,22 @@ classDiagram
 | fn | `PointGroup::as_str` | `material/state_t.rs:212` | `pub fn as_str(self) -> &'static str` |
 | fn | `PointGroup::is_centrosymmetric` | `material/state_t.rs:252` | `pub fn is_centrosymmetric(self) -> bool` —  True for the 11 centrosymmetric Laue point groups and continuous isotropic/transverse-isotropic media. |
 | fn | `PointGroup::forbids_piezo_and_pockels` | `material/state_t.rs:273` | `pub fn forbids_piezo_and_pockels(self) -> bool` —  True if Neumann's principle forces all linear piezoelectric and Pockels (rank-3 polar) components to zero. |
-| fn | `TempCurve::eval` | `material/state_t.rs:351` | `pub fn eval(&self, temperature_k: f64) -> f64` —  Evaluate the scalar quantity (in SI units) at `temperature_k` [K]. |
-| fn | `TempCurve::at_ref` | `material/state_t.rs:403` | `pub fn at_ref(&self) -> f64` |
-| fn | `TempCurve::read` | `material/state_t.rs:412` | `pub fn read(s: &mut Section, key: &str, dim: Dim, default_unit: Option<&str>) -> Result<Option<Self>, MaterialError>` |
-| fn | `TempCurve::to_toml` | `material/state_t.rs:571` | `pub fn to_toml(&self, unit: Option<&str>) -> toml::Value` |
-| fn | `TempTensor::eval_tensor` | `material/state_t.rs:644` | `pub fn eval_tensor(&self, temperature_k: f64) -> TensorProp` |
-| fn | `TempTensor::eval_scalar` | `material/state_t.rs:654` | `pub fn eval_scalar(&self, temperature_k: f64) -> f64` |
-| fn | `TempTensor::read` | `material/state_t.rs:661` | `pub fn read(s: &mut Section, key: &str, dim: Dim, default_unit: Option<&str>) -> Result<Option<Self>, MaterialError>` |
-| fn | `TempTensor::to_toml` | `material/state_t.rs:681` | `pub fn to_toml(&self, unit: Option<&str>) -> toml::Value` |
+| fn | `TempCurve::t_range` | `material/state_t.rs:408` | `pub fn t_range(&self) -> Option<[f64` —  Valid temperature interval `[T_min, T_max]` in Kelvin when the curve is calibrated on a finite interval. |
+| fn | `TempCurve::sources` | `material/state_t.rs:421` | `pub fn sources(&self) -> &[Source]` —  Citations attached directly to this temperature curve. |
+| fn | `TempCurve::eval_checked` | `material/state_t.rs:431` | `pub fn eval_checked(&self, temperature_k: f64) -> CheckedTempEval<f64>` —  Evaluate the scalar quantity (in SI units) at `temperature_k` [K], returning clamping metadata when outside `T_range` / tabulated bounds. |
+| fn | `TempCurve::eval_strict` | `material/state_t.rs:493` | `pub fn eval_strict(&self, temperature_k: f64) -> Result<f64, TempClampInfo>` —  Evaluate the scalar quantity (in SI units) at `temperature_k` [K], refusing out-of-range clamping. |
+| fn | `TempCurve::eval` | `material/state_t.rs:502` | `pub fn eval(&self, temperature_k: f64) -> f64` —  Evaluate the scalar quantity (in SI units) at `temperature_k` [K]. |
+| fn | `TempCurve::at_ref` | `material/state_t.rs:506` | `pub fn at_ref(&self) -> f64` |
+| fn | `TempCurve::read` | `material/state_t.rs:515` | `pub fn read(s: &mut Section, key: &str, dim: Dim, default_unit: Option<&str>) -> Result<Option<Self>, MaterialError>` |
+| fn | `TempCurve::to_toml` | `material/state_t.rs:674` | `pub fn to_toml(&self, unit: Option<&str>) -> toml::Value` |
+| fn | `TempTensor::t_range` | `material/state_t.rs:748` | `pub fn t_range(&self) -> Option<[f64` —  Returns temperature bounds `[T_min, T_max]` when the underlying scalar curve defines a finite range. |
+| fn | `TempTensor::sources` | `material/state_t.rs:760` | `pub fn sources(&self) -> Vec<&Source>` —  All source entries attached to the underlying temperature curves. |
+| fn | `TempTensor::eval_tensor_checked` | `material/state_t.rs:768` | `pub fn eval_tensor_checked(&self, temperature_k: f64) -> (TensorProp, Vec<ComponentClamp>)` —  Evaluates the scalar/uniaxial tensor property at `temperature_k` [K], returning any clamping events with component label. |
+| fn | `TempTensor::eval_scalar_checked` | `material/state_t.rs:791` | `pub fn eval_scalar_checked(&self, temperature_k: f64) -> (f64, Vec<ComponentClamp>)` —  Evaluates the isotropic / orientation-averaged scalar property at `temperature_k` [K], returning any clamping events. |
+| fn | `TempTensor::eval_tensor` | `material/state_t.rs:812` | `pub fn eval_tensor(&self, temperature_k: f64) -> TensorProp` |
+| fn | `TempTensor::eval_scalar` | `material/state_t.rs:816` | `pub fn eval_scalar(&self, temperature_k: f64) -> f64` |
+| fn | `TempTensor::read` | `material/state_t.rs:820` | `pub fn read(s: &mut Section, key: &str, dim: Dim, default_unit: Option<&str>) -> Result<Option<Self>, MaterialError>` |
+| fn | `TempTensor::to_toml` | `material/state_t.rs:840` | `pub fn to_toml(&self, unit: Option<&str>) -> toml::Value` |
 | enum | `TensorProp` | `material/tensor.rs:15` | variants: `Scalar`, `Diagonal`, `Uniaxial`, `Symmetric` |
 | enum | `Requirement` | `material/tensor.rs:26` | variants: `PositiveDefinite`, `NonNegative`, `SymmetricOnly` —  What a physical tensor must satisfy. |
 | fn | `TensorProp::matrix` | `material/tensor.rs:36` | `pub fn matrix(&self) -> M3` |

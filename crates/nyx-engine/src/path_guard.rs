@@ -14,7 +14,7 @@ use std::path::{Component, Path, PathBuf};
 
 /// The names of the arguments that hold a file or a folder, in every command of the catalog. `tests/path_guard.rs` fails when a command takes
 /// a path-like argument that is not named here, so a new command cannot slip past the guard.
-pub const PATH_ARGS: &[&str] = &["path", "folder", "workspace"];
+pub const PATH_ARGS: &[&str] = &["path", "folder", "workspace", "checkpoint_path"];
 
 /// A root made absolute, as the guard keeps it.
 pub(crate) fn absolute_root(root: &Path) -> Result<PathBuf, String> {

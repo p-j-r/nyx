@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93, 94, 102"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs"
-        "lines" "7282"
+        "lines" "7318"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -11,7 +11,7 @@ project = component "Project" "The saved state: feature list, mesh settings, one
     properties {
         "adr" "63"
         "code" "crates/nyx-engine/src: project.rs"
-        "lines" "338"
+        "lines" "342"
         "codeDiagram" "4-code/engine/project.md"
     }
 }
@@ -23,11 +23,11 @@ geometry = component "Geometry operations" "Every edit of a geom feature list as
         "codeDiagram" "4-code/engine/geometry.md"
     }
 }
-jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96)." "Rust modules" {
+jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), streaming QMC sweeps over HDF5 checkpoints, memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96)." "Rust modules" {
     properties {
-        "adr" "61, 80, 85, 87, 86, 11, 95, 96"
-        "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "6808"
+        "adr" "61, 80, 85, 87, 86, 11, 95, 96, 133"
+        "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, qmc.rs, ... (12 files)"
+        "lines" "7922"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -35,7 +35,7 @@ commandlist = component "Command lists" "A JSON-lines list of engine commands is
     properties {
         "adr" "89"
         "code" "crates/nyx-engine/src: commandlist.rs"
-        "lines" "618"
+        "lines" "620"
         "codeDiagram" "4-code/engine/commandlist.md"
     }
 }
@@ -49,17 +49,17 @@ apiref = component "API reference" "One Markdown page per engine command and an 
 }
 meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92)." "Rust modules" {
     properties {
-        "adr" "54, 50, 92"
+        "adr" "54, 50, 92, 133"
         "code" "crates/nyx-engine/src: amr.rs, meshing.rs, pml.rs, preview.rs"
-        "lines" "2029"
+        "lines" "2031"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }
-materials = component "Materials" "The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point." "Rust modules" {
+materials = component "Materials" "The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point, with active-study T-range clamping/strict guards and Source uncertainty diagnostics." "Rust modules" {
     properties {
-        "adr" "58, 104"
-        "code" "crates/nyx-engine/src: material_fetch.rs, materials.rs"
-        "lines" "1347"
+        "adr" "58, 104, 133"
+        "code" "crates/nyx-engine/src: material_fetch.rs, material_warnings.rs, materials.rs"
+        "lines" "1533"
         "codeDiagram" "4-code/engine/materials.md"
     }
 }
@@ -67,7 +67,7 @@ analyse = component "Analyses" "Runs the analyses of nyx-analysis on the latest 
     properties {
         "adr" "56, 99, 103, 105"
         "code" "crates/nyx-engine/src: analyse.rs, figure.rs"
-        "lines" "911"
+        "lines" "942"
         "codeDiagram" "4-code/engine/analyse.md"
     }
 }
@@ -75,7 +75,7 @@ resultsIO = component "Results files" "HDF5 results via pure-Rust hdf5-pure and 
     properties {
         "adr" "62, 63, 99, 107, 132"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "1844"
+        "lines" "1860"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
@@ -91,7 +91,7 @@ registry = component "Registry and facade" "The physics compiled in (cargo featu
     properties {
         "adr" "25"
         "code" "crates/nyx-engine/src: lib.rs"
-        "lines" "107"
+        "lines" "109"
         "codeDiagram" "4-code/engine/registry.md"
     }
 }

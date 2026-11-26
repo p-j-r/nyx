@@ -43,7 +43,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 
 | Component | Modules | Items |
 |---|---|---|
-| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::dense, linalg::scalar | C64, Dense, Scalar, hermitian_eig, solve_small |
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | linalg::dense, linalg::rng, linalg::scalar | C64, Dense, Scalar, SplitMix64, hermitian_eig, solve_small |
 | [analysis: Mode figures](../analysis/figures.md) | linalg::csr::assembly | C |
 | [analysis: Piezo resonator analysis](../analysis/piezo.md) | linalg::dense, linalg::scalar | C64, Dense |
 | [dfs: Shared helpers](../dfs/common.md) | linalg::csr, linalg::csr::assembly | C, Coo, RCsr, c |
@@ -60,6 +60,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [ems: Optical mode sets](../ems/optical.md) | linalg::csr::assembly | c |
 | [ems: Typed problem](../ems/problem.md) | linalg::csr::assembly | c |
 | [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |
+| [engine: Job runner and queue](../engine/jobs.md) | linalg::rng | SplitMix64 |
 | [engine: Meshing seam](../engine/meshing.md) | linalg::csr::assembly | C |
 | [Error estimators](./estimators.md) | linalg::csr::assembly | C |
 | [Expressions](./expr.md) | linalg::csr::assembly | C |

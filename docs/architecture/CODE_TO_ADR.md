@@ -28,6 +28,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
 | `docs/ux/*` | 88, 123 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
 | `docs/vvuq/*` | 10, 19, 61, 91, 112, 120, 131 | ASME VVUQ & Rust formal verification plan and EGM-refined plan |
+| `benchmarks/validation/*` | 133 | ASME V&V 20 versioned validation datasets (Park 2026, Palace/Q3D/SQuADDS, `scqubits`/TLS, photonics, MEMS/piezo, NAFEMS T1–T4) |
 | `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
 | `docs/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
 | `docs/GEOMETRY_ARCHITECTURE.md` | 2, 3, 18 | historical |
@@ -128,7 +129,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/adapt/maxwell.rs` | 53, 133 | analytic P1/P2/CurvedTet residual error estimator for edge elements and the equidistributing metric |
 | `crates/femcore/src/adapt/{ops3,topo3,drive3}.rs` | 7, 51, 131 | 3D adaptation operators, working mesh, driver; overlap check, edge-removal and flip guards, compaction (ADR 51) |
 | `crates/femcore/src/adapt/*` | 7 | metric adaptation, timer, mod |
-| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 104, 108, 109 | spec, units, elastic, tensor, optics, schema, T-curves (`state_t.rs`), Zimmermann BCS (`bcs.rs`), coupled tensors (`coupled.rs`), database importers (`import.rs`) |
+| `crates/femcore/src/material/*` | 1, 29, 30, 34, 35, 101, 104, 108, 109, 133 | spec, units, elastic, tensor, optics, schema (`anyOf` / closed `temp_curve` & `model`), T-curves (`state_t.rs` `eval_checked` / `eval_strict`), `Source` uncertainty flags, Zimmermann BCS (`bcs.rs`), coupled tensors (`coupled.rs`), database importers (`import.rs`) |
 | `crates/femcore/tests/material_import.rs` | 108, 109 | pure-Rust importer & catalog regression tests |
 | `crates/femcore/tests/material_bcs.rs` | 104, 109 | Mattis–Bardeen BCS surface impedance and sub-gap mK loss floor tests |
 | `materials/*` | 29, 30, 34, 35, 101, 104, 108, 109 | the shipped multi-source material library (TOML, `format = 2`) |
@@ -188,12 +189,12 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
 | `crates/femcore/tests/pml_curvilinear.rs` | 128, 52, 82 | verification of all 7 canonical PML topologies, zero-pyramid conformity, lockstep curved shells, ray-invariance guards, and thread determinism |
 | `crates/femcore/tests/{portable_kernels,vvuq_props}.rs` | 131, 11, 33 | `portable-kernels` `< 1e-13` differential parity and `proptest` mesh/Csr/formula invariants |
-| `crates/femcore/tests/*` | 9, 12 | physics tests: solid, solid_pml, anisotropic, common |
+| `crates/femcore/tests/*` | 9, 12, 133 | physics tests: solid, solid_pml, anisotropic, common, `material_range_and_uncertainty` |
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |
 | `crates/femcore/examples/mesh_*.rs` | 7, 16 | mesher studies |
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
-| `crates/nyx-storage/*` | 107, 62, 99, 131 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer with `max_solutions` & byte budgets, XDMF, sweep checkpoint |
+| `crates/nyx-storage/*` | 107, 62, 99, 131, 133 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer with `max_solutions` & byte budgets, XDMF, sweep checkpoint (`SkippedSweepPoint`) |
 | `crates/nyx-store/*` | 14, 39, 130, 131 | JSON specs, settings (`scale_mode`, `zoom`), `.nys`/`.xdmf` archive rules, and the card function (39) |
 | `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124, 130, 133 | colour tokens as data, the looks built from them (`weak_text_color`), the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/src/console.rs` | 123, 122, 131 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles (`// SAFETY:` audited) |
@@ -210,7 +211,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `tools/vvuq_ci.*` | 131, 20 | local Linux/WSL and Windows PowerShell VVUQ 3-tier CI playbook runners |
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27, 107 | shared target directory (no `HDF5_DIR` C dependency) |
-| `crates/nyx-physics/src/decode.rs` | 41, 25, 109, 113 | typed parameters, inline tensor decoding (`PropValue`), and name resolution shared by every physics |
+| `crates/nyx-physics/src/decode.rs` | 41, 25, 109, 113, 133 | typed parameters, inline tensor decoding (`PropValue`), name resolution, and active-study `audit_active_materials` shared by every physics |
 | `crates/nyx-physics/src/testkit.rs` | 41, 10, 110 | the golden-file harness |
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/src/cqed.rs` | 103, 104, 105, 106, 118, 120, 121 | typed cQED payloads (`CapacitanceMatrixData` bounds/loss/AMR history, `InductanceMatrixData`, `TlsMeta`, `CircuitRom`, `DrivenPortData`, `ElectroAmrData`) |
@@ -262,7 +263,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
 | `crates/nyx-analysis/tests/squadds_smoke.rs` | 103, 105, 118, 120, 125 | PR CI smoke suite for TransmonCross Mode G2 + `far_field` + `I_edge` (`bug1`), DC-SQUID `Dissipator` sweep, and `MUNINN` 3D TLS |
 | `crates/nyx-analysis/src/piezo_resonator.rs` | 129, 118 | piezoelectric resonator mBVD 6-param fit, Schur-reduced multi-port admittance, phase-slope `Q_s`/`Q_p`, and IEEE `k_t^2`/`k_eff^2` |
-| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127, 129, 131, 133 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, piezo_resonator, 2D/3D mode figures, §5.5 diagnostics) |
+| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127, 129, 131, 133 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, piezo_resonator, zero-solve `uq_cqed` with ASME V&V 20 interval separation, 2D/3D mode figures, §5.5 diagnostics) |
 | `crates/nyx-engine/tests/layering.rs` | 26, 107 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
@@ -270,7 +271,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/api_docs.rs` | 89, 57 | the API reference: `docs/api/` is what the catalog generates, every command has a page and an index row, every example passes `nyx check`, every argument is described |
 | `docs/api/*` | 89, 57 | the API reference, one page per engine command, generated from `Engine::catalog()` (never edited by hand) |
 | `crates/app/tests/cli.rs` | 89 | `nyx check` and `nyx run`: the plan, exit codes, a bad list runs nothing |
-| `crates/nyx-engine/tests/sweep.rs` | 87 | sweeps: a point is an edit list, one recorded run per point, the numbers of a hand-made solve, the engine's own project and results untouched, a bad point stops the request |
+| `crates/nyx-engine/tests/sweep.rs` | 87, 133 | sweeps: a point is an edit list, one recorded run per point, the numbers of a hand-made solve, the engine's own project and results untouched, a bad point stops the request |
 | `crates/nyx-engine/tests/worker.rs` | 86 | a worker gives the numbers of the same solve in this process to the bit (five examples, a coupled chain), its stage log is the job log, a cancel kills it at once, what cannot be isolated says so, sweep points in workers |
 | `crates/nyx-engine/tests/admission.rs` | 86 | estimates from worker runs, no estimate without two sizes, a solve waits for memory and says why, refusal unless forced, a cancel ends the wait, the history survives in a file |
 | `crates/nyx-engine/tests/worker_crash.rs` | 86 | a worker that dies fails its job only and the next job runs |
@@ -283,7 +284,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/tests/expr_grammar.rs` | 65 | the two expression grammars (`geom::expr`, `femcore::expr`) accept and refuse the same corpus (R06) |
 | `crates/nyx-engine/tests/golden/*` | 10, 42 | `solid_static_thermal_from_heat`, moved unchanged from femcore |
 | `crates/nyx-engine/tests/swept_cell.rs` | 66 | a periodic swept cell with filled layers: closed form and refusal |
-| `crates/nyx-engine/examples/*` | 41, 9 | benchmarks and logs that drive every physics |
+| `crates/nyx-engine/examples/*` | 41, 9, 133 | quantitative benchmarks and logs that drive every physics (`examples.rs` checks closed forms, passivity, convergence) |
 | `crates/nyx-engine/src/validated.rs` | 91, 112, 133 | the validated state (`exploratory`, `checked`, `check_not_affordable`), `state` + `tier` (`MeshConverged` / `BoundCertified`), the checks kept by problem key and the verdict written into `/provenance/validated_json` and the run record |
 | `crates/nyx-engine/src/reduce.rs` | 90, 112, 133 | field handles and the reductions `integrate`, `extremum` (with P2 edge-midpoint bound), `probe`, `line_cut`, `overlap`, `confinement` (with quadrature warnings), including single-pass bit-exact batch evaluation |
 | `crates/nyx-engine/src/amr.rs` | 120, 61, 85, 133 | multi-pass goal-oriented electrostatic, `ems::cavity`, and `sms` AMR loops (`sheet_2d_z`, `full_3d`, and 2D), `retain_amr_data`, and `AdaptPassRecord` tracking |
@@ -303,7 +304,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 125, 126, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, `bug2`–`bug5`, and thread determinism |
 | `crates/nyx-engine/tests/fr25_33_e2e.rs` | 125, 126, 127 | end-to-end post-SQuADDS (`FR-25..FR-33`) integration tests through `Engine::call` (`ibc_mode: "perturbative"`, hybrid quasi-electrostatic TLS, and `ems::driven` `blr`/`ams_fgmres` + memory calibration) |
 | `crates/nyx-engine/tests/piezo_driven_network.rs` | 129, 106, 118 | Mason 1D BAW driven piezo FEM -> `NetworkAnalysis` and `piezo_resonator` mBVD round-trip tests |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130, 131, 132, 133 | `Project`, commands, jobs, store wiring (`card_of` swept 3D), pure-Rust HDF5 results (`h5io.rs` diagnostics/error_budget/validated provenance, `xdmf.rs` with R32 `CurvedEdgesIgnored`, `results_file.rs` v4), Phase 3 tests (`vvuq_phase3.rs`) and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130, 131, 132, 133 | `Project`, commands, jobs, `material_warnings.rs` & `strict_material_range`, `qmc.rs` streaming LHS/Sobol QMC `sweep_run`, store wiring (`card_of` swept 3D), pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs` with R32 `CurvedEdgesIgnored`, `results_file.rs` v4), Phase 3/4 tests (`vvuq_phase3.rs`, `vvuq_phase4_*.rs`, `validation_*.rs`, `common/mod.rs`) and geometry descriptors; the registry from cargo features |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
 | `crates/nyx-script/src/kernel.rs` | 94, 93, 113, 131 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, timeout/output clamping, network refusal, and worker recovery |

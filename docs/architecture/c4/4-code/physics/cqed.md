@@ -24,7 +24,7 @@ C4 level 4 (code) of the component **cQED result payloads** (`physics.cqed`) in 
 | Component | Modules | Items |
 |---|---|---|
 | [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | cqed | CapacitanceMatrixData, InductanceMatrixData, TlsMeta |
-| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | cqed | CircuitRom, DrivenPortData, ModeEnergyRow, RomPort, TlsMeta |
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | cqed | CapacitanceMatrixData, CircuitRom, DrivenPortData, ModeEnergyRow, RomPort, TlsMeta |
 | [analysis: Piezo resonator analysis](../analysis/piezo.md) | cqed | DrivenPortData |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | cqed | CapacitanceMatrixData, ElectroAmrData, TlsMeta |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | cqed | InductanceMatrixData |

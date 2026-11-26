@@ -3,7 +3,7 @@ types = component "Storage types and read budget" "FieldStorageLayout (L1 Deflat
     properties {
         "adr" "107, 62, 99"
         "code" "crates/nyx-storage/src: lib.rs"
-        "lines" "206"
+        "lines" "204"
         "codeDiagram" "4-code/storage/types.md"
     }
 }
@@ -35,7 +35,7 @@ sweep = component "Sweep checkpoint and atomic IO" "Incremental in-place paramet
     properties {
         "adr" "107, 87"
         "code" "crates/nyx-storage/src: sweep.rs"
-        "lines" "284"
+        "lines" "388"
         "codeDiagram" "4-code/storage/sweep.md"
     }
 }

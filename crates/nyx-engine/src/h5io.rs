@@ -1246,6 +1246,11 @@ mod tests {
             fb.set_attr("format", text_attr("nyx-results")?);
             fb.set_attr("version", AttrValue::I32(4));
             fill_u8(fb.create_dataset("project"), &vec![0u8; proj_json.len()], layout);
+            let empty_checks: BTreeMap<String, crate::validated::Check> = BTreeMap::new();
+            let validated_bytes = serde_json::to_vec(&empty_checks).map_err(|x| x.to_string())?;
+            let mut prov = fb.create_group("provenance");
+            fill_u8(prov.create_dataset("validated_json"), &vec![0u8; validated_bytes.len()], layout);
+            fb.add_group(prov.finish());
 
             let mut m = fb.create_group("mesh");
             fill_f64(m.create_dataset("points"), &vec![0.0; mesh.points.len()], d, layout);
@@ -1282,6 +1287,10 @@ mod tests {
                 fill_u8(g.create_dataset("scalars"), &vec![0u8; scalars_text.len()], layout);
                 let log_text = serde_json::to_string(&r.log).map_err(|x| x.to_string())?;
                 fill_u8(g.create_dataset("log"), &vec![0u8; log_text.len()], layout);
+                let diag_bytes = serde_json::to_vec(&r.diagnostics).map_err(|x| x.to_string())?;
+                fill_u8(g.create_dataset("diagnostics_json"), &vec![0u8; diag_bytes.len()], layout);
+                let budget_bytes = serde_json::to_vec(&r.error_budget).map_err(|x| x.to_string())?;
+                fill_u8(g.create_dataset("error_budget_json"), &vec![0u8; budget_bytes.len()], layout);
                 fill_f64(g.create_dataset("eigenvalues"), &vec![0.0; r.solutions.len() * 2], 2, layout);
 
                 if let Some((nloc_cf, ref meta)) = packable_cell_fields(r, n_cells) {
@@ -1340,6 +1349,9 @@ mod tests {
 
         let session = File::open_rw(path).map_err(e("open_rw"))?;
         write_slice_u8(&session, "project", proj_json.as_bytes(), part)?;
+        let empty_checks: BTreeMap<String, crate::validated::Check> = BTreeMap::new();
+        let validated_bytes = serde_json::to_vec(&empty_checks).map_err(|x| x.to_string())?;
+        write_slice_u8(&session, "provenance/validated_json", &validated_bytes, part)?;
         write_slice_f64(&session, "mesh/points", &mesh.points, d, part)?;
         write_slice_u32(&session, "mesh/cells", &mesh.cells, d + 1, part)?;
         write_slice_i32(&session, "mesh/cell_labels", mesh.cell_labels.as_slice(), part)?;
@@ -1370,6 +1382,10 @@ mod tests {
             write_slice_u8(&session, &format!("{base}/scalars"), scalars_text.as_bytes(), part)?;
             let log_text = serde_json::to_string(&r.log).map_err(|x| x.to_string())?;
             write_slice_u8(&session, &format!("{base}/log"), log_text.as_bytes(), part)?;
+            let diag_bytes = serde_json::to_vec(&r.diagnostics).map_err(|x| x.to_string())?;
+            write_slice_u8(&session, &format!("{base}/diagnostics_json"), &diag_bytes, part)?;
+            let budget_bytes = serde_json::to_vec(&r.error_budget).map_err(|x| x.to_string())?;
+            write_slice_u8(&session, &format!("{base}/error_budget_json"), &budget_bytes, part)?;
 
             let mut eig_flat = Vec::with_capacity(r.solutions.len() * 2);
             for s in &r.solutions {
