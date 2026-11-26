@@ -119,12 +119,12 @@ fn shifted_wrapper_agrees_with_the_faer_factorisation_on_a_pencil() {
     let mut reference = ShiftedFactorization::new(&a, Some(&m), Definiteness::General).unwrap();
     reference.set_shift(sigma).unwrap();
     let mut x_ref = b.clone();
-    reference.solve_block_in_place(&mut x_ref, 1);
+    reference.solve_block_in_place(&mut x_ref, 1).unwrap();
     for ordering in [LuOrdering::Amd, LuOrdering::NestedDissection { leaf: 8 }] {
         let mut ours = ShiftedSparseLu::new(&a, Some(&m), &LuOptions { ordering, pivot_tol: 0.1 }).unwrap();
         ours.set_shift(sigma).unwrap();
         let mut x = b.clone();
-        ours.solve_block_in_place(&mut x, 1);
+        ours.solve_block_in_place(&mut x, 1).unwrap();
         let err = x.iter().zip(&x_ref).map(|(p, q)| (p - q).powi(2)).sum::<f64>().sqrt() / norm(&x_ref);
         assert!(err < 1e-8, "{err}");
         // a second shift reuses the ordering

@@ -91,7 +91,7 @@ lacore = component "Matrices and vectors" "The one matrix type Csr over a generi
     properties {
         "adr" "33, 8, 11, 129"
         "code" "crates/femcore/src: linalg/basis.rs, linalg/bsr.rs, linalg/bundle.rs, linalg/csr.rs, linalg/csr/assembly.rs, linalg/dense/mod.rs, ... (18 files)"
-        "lines" "4862"
+        "lines" "5111"
         "codeDiagram" "4-code/femcore/lacore.md"
     }
 }
@@ -99,7 +99,7 @@ ladriver = component "Linear algebra driver" "The door the physics kernels use: 
     properties {
         "adr" "33"
         "code" "crates/femcore/src: linalg/driver.rs, linalg/pc.rs, linalg/problem.rs"
-        "lines" "1432"
+        "lines" "1454"
         "codeDiagram" "4-code/femcore/ladriver.md"
     }
 }
@@ -107,7 +107,7 @@ ladirect = component "Direct solvers" "Shifted sparse direct solves with symboli
     properties {
         "adr" "33, 8"
         "code" "crates/femcore/src: linalg/blr.rs, linalg/direct.rs, linalg/lowrank.rs, linalg/mixed.rs, linalg/ordering.rs, linalg/sparse_lu.rs"
-        "lines" "4966"
+        "lines" "5128"
         "codeDiagram" "4-code/femcore/ladirect.md"
     }
 }
@@ -123,7 +123,7 @@ laeigen = component "Eigensolvers" "Krylov-Schur, LOBPCG, Jacobi-Davidson, quadr
     properties {
         "adr" "33, 8, 11"
         "code" "crates/femcore/src: linalg/arnoldi_real.rs, linalg/chebfsi.rs, linalg/contour.rs, linalg/eps/krylov_schur.rs, linalg/eps/mod.rs, linalg/eps/orth.rs, ... (12 files)"
-        "lines" "4692"
+        "lines" "4694"
         "codeDiagram" "4-code/femcore/laeigen.md"
     }
 }
@@ -131,7 +131,7 @@ laprecond = component "Preconditioners" "Smoothed-aggregation multigrid (scalar 
     properties {
         "adr" "33, 8"
         "code" "crates/femcore/src: linalg/ads.rs, linalg/amg.rs, linalg/amg_elastic/mod.rs, linalg/amg_elastic/single.rs, linalg/ams.rs, linalg/fieldsplit.rs, linalg/ilu.rs, linalg/schwarz.rs"
-        "lines" "4019"
+        "lines" "4112"
         "codeDiagram" "4-code/femcore/laprecond.md"
     }
 }

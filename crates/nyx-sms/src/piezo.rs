@@ -59,10 +59,10 @@ pub struct SchurShiftInvertOp<'a, T: FaerScalar> {
 impl<T: FaerScalar> SchurShiftInvertOp<'_, T> {
     fn solve_full_rhs(&self, rhs: &mut [T], nrhs: usize) {
         if nrhs <= 1 || self.n_tot < 10_000 || femcore::par::threads() <= 1 {
-            self.fac.solve_block_in_place(rhs, nrhs);
+            self.fac.solve_block_in_place(rhs, nrhs).expect("SchurShiftInvertOp solver must be factored before apply");
         } else {
             rhs.par_chunks_mut(self.n_tot).for_each(|col| {
-                self.fac.solve_block_in_place(col, 1);
+                self.fac.solve_block_in_place(col, 1).expect("SchurShiftInvertOp solver must be factored before apply");
             });
         }
     }
@@ -149,10 +149,14 @@ impl LinearOperator<C64> for SchurQepShiftInvertOp<'_> {
             }
         }
         if nrhs <= 1 || self.n_tot < 10_000 || femcore::par::threads() <= 1 {
-            self.fac.solve_block_in_place(&mut rhs, nrhs);
+            self.fac
+                .solve_block_in_place(&mut rhs, nrhs)
+                .expect("SchurQepShiftInvertOp solver must be factored before apply");
         } else {
             rhs.par_chunks_mut(self.n_tot).for_each(|col| {
-                self.fac.solve_block_in_place(col, 1);
+                self.fac
+                    .solve_block_in_place(col, 1)
+                    .expect("SchurQepShiftInvertOp solver must be factored before apply");
             });
         }
         for c_idx in 0..nrhs {

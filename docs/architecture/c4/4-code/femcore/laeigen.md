@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 > Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 12 files, 4692 lines.
+**Size:** 12 files, 4694 lines.
 
 ## Files
 
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 | `crates/femcore/src/linalg/jd.rs` | 690 | Jacobi–Davidson interior eigensolver (port item E2; SLEPc's `EPSJD`/`EPSGD` are the nearest references): eigenpairs near a *target* without factorising `A − τB`. |
 | `crates/femcore/src/linalg/lobpcg.rs` | 379 | LOBPCG (Knyazev 2001) for the generalised Hermitian problem `A x = λ B x` (port item E4), real or complex, with the improvements the port list names: |
 | `crates/femcore/src/linalg/nep.rs` | 418 | Nonlinear eigenvalue problems `T(λ) x = 0` in the split form `T(λ) = Σ_j f_j(λ) A_j` (port item N2): dispersive materials (Drude/Lorentz permittivity), frequency-dependent PML stretching, delay and radiation boundary conditions, and ... |
-| `crates/femcore/src/linalg/nleigs.rs` | 505 | **NLEIGS** (Güttel, Van Beeumen, Meerbergen & Michiels 2014): a rational Krylov method for the nonlinear eigenproblem `T(λ) x = 0`, `T(λ) = Σ_t f_t(λ) A_t`, in a region `Σ` of the complex plane (port item N2, the robust method afte... |
+| `crates/femcore/src/linalg/nleigs.rs` | 507 | **NLEIGS** (Güttel, Van Beeumen, Meerbergen & Michiels 2014): a rational Krylov method for the nonlinear eigenproblem `T(λ) x = 0`, `T(λ) = Σ_t f_t(λ) A_t`, in a region `Σ` of the complex plane (port item N2, the robust method afte... |
 | `crates/femcore/src/linalg/sens.rs` | 262 | Eigenvalue sensitivities and mode tracking (port item N3; groundwork for the optimisation of item O1). |
 | `crates/femcore/src/linalg/toar.rs` | 462 | **TOAR** for the quadratic eigenproblem `(λ² M + λ C + K) x = 0` (port item N1): Arnoldi on the shift-and-invert operator of the linearisation, with the `2n`-dimensional Krylov basis stored in compressed form. |
 
@@ -514,7 +514,7 @@ classDiagram
 | struct | `RationalInterpolant` | `linalg/nleigs.rs:121` | fields: `center`, `sigma`, `inv_xi`, `beta`, `coef` —  The rational Newton interpolants of the scalar functions of a [`NonlinearEigenProblem`]. |
 | fn | `build_interpolant` | `linalg/nleigs.rs:233` | `pub fn build_interpolant( p: &NonlinearEigenProblem, region: &Ellipse, singularities: &[C64], tol: f64, max_degree: usize, boundary_samples: usize, ) -> Result<(RationalInterpolant, f64), NepError>` —  Builds the interpolant, raising the degree until the test error is below `tol`; returns it with that error. |
 | struct | `NleigsOperator` | `linalg/nleigs.rs:287` |  The operator `(𝐁 − s𝐀)⁻¹ 𝐀` of the NLEIGS linearisation, applied through one factorisation of `T̃(s)`. |
-| fn | `nleigs` | `linalg/nleigs.rs:435` | `pub fn nleigs(p: &NonlinearEigenProblem, opts: &NleigsOptions) -> Result<NleigsResult, NepError>` —  Eigenvalues of `p` inside `opts.region` (see the module documentation). |
+| fn | `nleigs` | `linalg/nleigs.rs:437` | `pub fn nleigs(p: &NonlinearEigenProblem, opts: &NleigsOptions) -> Result<NleigsResult, NepError>` —  Eigenvalues of `p` inside `opts.region` (see the module documentation). |
 | fn | `NleigsOptions::new` | `linalg/nleigs.rs:84` | `pub fn new(region: Ellipse, nev: usize) -> Self` |
 | fn | `RationalInterpolant::degree` | `linalg/nleigs.rs:136` | `pub fn degree(&self) -> usize` |
 | fn | `RationalInterpolant::basis` | `linalg/nleigs.rs:141` | `pub fn basis(&self, z: C64) -> Vec<C64>` —  `b_0(z), …, b_d(z)`. |

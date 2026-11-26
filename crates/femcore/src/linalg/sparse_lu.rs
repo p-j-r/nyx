@@ -461,10 +461,18 @@ impl<T: Scalar> ShiftedSolver<T> for ShiftedSparseLu<T> {
         Ok(())
     }
 
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
-        let lu = self.lu.as_ref().expect("set_shift must be called before solving");
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+        let lu = self.lu.as_ref().ok_or(SolverError::NotFactored)?;
+        let expected = self
+            .n
+            .checked_mul(nrhs)
+            .ok_or(SolverError::InvalidArgument("rhs block size overflows usize"))?;
+        if rhs.len() < expected {
+            return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
+        }
         lu.solve_block_in_place(rhs, nrhs);
         self.solves.set(self.solves.get() + nrhs);
+        Ok(())
     }
 
     fn stats(&self) -> FactorStats {

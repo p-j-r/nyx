@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of ems: descri
     properties {
         "adr" "45, 25, 104, 106"
         "code" "crates/nyx-ems/src: lib.rs"
-        "lines" "613"
+        "lines" "616"
         "codeDiagram" "4-code/ems/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed ems problem the kernels read, dec
     properties {
         "adr" "45, 104, 106"
         "code" "crates/nyx-ems/src: problem.rs"
-        "lines" "1156"
+        "lines" "1159"
         "codeDiagram" "4-code/ems/problem.md"
     }
 }
@@ -59,7 +59,7 @@ driven = component "Driven frequency-domain and PROM" "Driven 3D frequency-domai
     properties {
         "adr" "106"
         "code" "crates/nyx-ems/src: driven.rs, ports.rs"
-        "lines" "2963"
+        "lines" "2979"
         "codeDiagram" "4-code/ems/driven.md"
     }
 }

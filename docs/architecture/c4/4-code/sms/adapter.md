@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Physics adapter** (`sms.adapter`) in the co
 > The Physics implementation of sms with five studies (static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, driven frequency sweep): descriptors, validation, solve entry.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 68](../../../adr/0068-the-axisymmetric-solid-gets-a-study.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md), [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md)  
-**Size:** 1 file, 666 lines.
+**Size:** 1 file, 670 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/lib.rs` | 666 |  |
+| `crates/nyx-sms/src/lib.rs` | 670 |  |
 
 ## What it uses
 
@@ -50,6 +50,6 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | struct | `Sms` | `lib.rs:38` |  |
-| fn | `run` | `lib.rs:591` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, assembles natively on `MixedDiscretisation` whenever |
+| fn | `run` | `lib.rs:595` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, assembles natively on `MixedDiscretisation` whenever |
 
 Trait implementations in this component: `Sms: Physics`

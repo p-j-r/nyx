@@ -134,7 +134,9 @@ impl<T: FaerScalar> Amg<T> {
         let level = &self.levels[lvl];
         if level.p.is_none() {
             cur.x.copy_from_slice(&cur.rhs);
-            self.coarse.solve_block_in_place(&mut cur.x, 1);
+            self.coarse
+                .solve_block_in_place(&mut cur.x, 1)
+                .expect("AMG coarse solver is always factored in construction");
             return;
         }
         cur.x.fill(T::ZERO);

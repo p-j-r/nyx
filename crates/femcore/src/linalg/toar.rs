@@ -307,7 +307,7 @@ pub fn toar_shift_invert(p: &QuadraticProblem, opts: &ToarOptions) -> Result<Toa
             for (r, t) in rhs.iter_mut().zip(&tmp) {
                 *r = -(*r + *t);
             }
-            fac.solve_block_in_place(&mut rhs, 1);
+            fac.solve_block_in_place(&mut rhs, 1)?;
             applications += 1;
             let w2 = rhs.clone();
             let w1: Vec<C64> = x2.iter().zip(&w2).map(|(&a, &b)| a + sigma * b).collect();

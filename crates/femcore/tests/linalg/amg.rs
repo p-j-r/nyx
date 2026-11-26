@@ -165,7 +165,7 @@ struct ExactShifted(ShiftedFactorization<C64>);
 impl Preconditioner<C64> for ExactShifted {
     fn apply(&self, r: &[C64], z: &mut [C64]) {
         z.copy_from_slice(r);
-        self.0.solve_block_in_place(z, 1);
+        self.0.solve_block_in_place(z, 1).unwrap();
     }
 }
 

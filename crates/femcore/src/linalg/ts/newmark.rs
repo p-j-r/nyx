@@ -108,7 +108,7 @@ pub fn newmark_solve<T: FaerScalar>(
             a[i] -= tmp[i];
         }
     }
-    mfac.solve_block_in_place(&mut a, 1);
+    mfac.solve_block_in_place(&mut a, 1)?;
 
     let mut out =
         SecondOrderSolution { t: vec![t0], u: vec![u.clone()], v: vec![v.clone()], stats: TsStats::default() };
@@ -142,7 +142,7 @@ pub fn newmark_solve<T: FaerScalar>(
                 rhs[i] -= tmp[i];
             }
         }
-        sfac.solve_block_in_place(&mut rhs, 1);
+        sfac.solve_block_in_place(&mut rhs, 1)?;
         for i in 0..n {
             a[i] = rhs[i];
             u[i] = u_pred[i] + a[i].scale(beta * h * h);

@@ -271,7 +271,7 @@ impl FullSolver<'_> {
         };
         fac.set_shift(C64::ZERO)?;
         let mut x = b.to_vec();
-        fac.solve_block_in_place(&mut x, 1);
+        fac.solve_block_in_place(&mut x, 1)?;
         Ok(x)
     }
     fn counts(&self) -> (usize, usize) {

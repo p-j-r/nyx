@@ -53,7 +53,7 @@ pub fn theta_solve<T: FaerScalar>(
         for i in 0..n {
             rhs[i] += -tmp[i].scale((1.0 - theta) * h) + (f1[i].scale(theta) + f0[i].scale(1.0 - theta)).scale(h);
         }
-        fac.solve_block_in_place(&mut rhs, 1);
+        fac.solve_block_in_place(&mut rhs, 1)?;
         y.copy_from_slice(&rhs);
         std::mem::swap(&mut f0, &mut f1);
         stats.steps += 1;

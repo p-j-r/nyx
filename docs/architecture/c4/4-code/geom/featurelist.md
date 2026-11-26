@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Feature list** (`geom.featurelist`) in the 
 > The serialisable feature list (single source of truth for code and GUI), its operations and validation, parameter expressions, printing as Rust builder calls, and the error type.
 
 **Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 6 files, 4416 lines.
+**Size:** 6 files, 4492 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Feature list** (`geom.featurelist`) in the 
 |---|---:|---|
 | `crates/geom/src/error.rs` | 42 | The error type of the crate: plain-language messages that name the features involved. Converts into `String` because the femcore APIs use `Result<_, String>`. |
 | `crates/geom/src/expr.rs` | 337 | Parameter expressions: a number or a small safe formula over named parameters. The grammar mirrors nyx `femcore::expr` (numbers, `+ - * / ^ **`, parentheses, the functions `sin cos tan exp log ln log10 sqrt abs sinh cosh tanh atan min ma... |
-| `crates/geom/src/gds.rs` | 2649 |  |
+| `crates/geom/src/gds.rs` | 2725 |  |
 | `crates/geom/src/lib.rs` | 27 | `geom`: a lean CSG-over-B-rep geometry kernel for the nyx FEM stack. |
 | `crates/geom/src/model.rs` | 1182 | The serialisable feature list (the single source of truth for code and GUI), its operations, validation, and the `Model` builder that only pushes `Op`s and returns `FeatureId` handles. Nothing here evaluates geometry. |
 | `crates/geom/src/print.rs` | 179 | `FeatureList::to_rust`: prints the builder calls that recreate a list (the "Copy as Rust" of the GUI). One statement per feature, `let fN = m.method(...)` where `N` is the feature id; operations without a builder shorthand fall back to `... |

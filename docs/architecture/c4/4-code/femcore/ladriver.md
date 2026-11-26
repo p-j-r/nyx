@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Linear algebra driver** (`femcore.ladriver`
 > The door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md)  
-**Size:** 3 files, 1432 lines.
+**Size:** 3 files, 1454 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/linalg/driver.rs` | 1196 | The entry points the physics kernels call: a direct solve of `A x = b`, eigenpairs of `A x = lambda B x` near a shift, and small dense eigenproblems. Everything else of `solvers` (Krylov methods, preconditioners, factorisation variants) ... |
+| `crates/femcore/src/linalg/driver.rs` | 1218 | The entry points the physics kernels call: a direct solve of `A x = b`, eigenpairs of `A x = lambda B x` near a shift, and small dense eigenproblems. Everything else of `solvers` (Krylov methods, preconditioners, factorisation variants) ... |
 | `crates/femcore/src/linalg/pc.rs` | 35 | Preconditioners (PETSc `PC`). More (ILU/IC, Schwarz, AMG) follow in later items. |
 | `crates/femcore/src/linalg/problem.rs` | 201 | The solver interface used by models: "eigenpairs of `A x = λ B x` near a shift". |
 
@@ -209,37 +209,37 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | struct | `DirectSolver` | `linalg/driver.rs:34` |  A sparse matrix factorised once, then solved for any number of right-hand sides: Cholesky when the matrix is symmetric (Hermitian) |
-| struct | `EigenOptions` | `linalg/driver.rs:102` | fields: `tol`, `block`, `ncv`, `par_solve_min_n` —  Options of the shift-and-invert eigensolvers. `tol` is the relative residual of the transformed problem |
-| struct | `Pairs` | `linalg/driver.rs:123` | fields: `values`, `vectors`, `residuals`, `errors`, `converged`, `dim`, `restarts`, `matvecs` —  Eigenpairs of `A x = lambda B x` nearest the shift, nearest first. |
-| type | `Projector` | `linalg/driver.rs:139` | `<'a, T>` —  A projection applied to every operator result (removes a known null space of `A`). It must be a `B`-orthogonal projection. |
-| fn | `eigs_near` | `linalg/driver.rs:191` | `pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sym: Symmetry, definiteness: Definiteness, opts: &EigenOptions, project: Option<Projector<'_, T>>) -> Result<Pairs<T>, String>` —  The `nev` eigenpairs of `A x = lambda B x` nearest `sigma` (block Krylov-Schur on the shift-and-invert operator). `sym` says whether |
-| fn | `eigs_real_general_near` | `linalg/driver.rs:272` | `pub fn eigs_real_general_near(a: &Csr<f64>, b: &Csr<f64>, sigma: f64, nev: usize, opts: &EigenOptions) -> Result<Pairs<f64>, String>` —  Real eigenpairs of a pencil with real, non-symmetric matrices (the 2D waveguide modes): the real eigenvalues nearest the real |
-| fn | `dense_eigh` | `linalg/driver.rs:322` | `pub fn dense_eigh(a: &[f64], n: usize) -> Result<(Vec<f64>, Vec<Vec<f64>>), String>` —  Eigen decomposition of a symmetric dense matrix (row-major, only the lower triangle is read): ascending eigenvalues and the |
-| fn | `dense_gen_eigh` | `linalg/driver.rs:356` | `pub fn dense_gen_eigh(k: &[f64], m: &[f64], n: usize) -> Result<(Vec<f64>, Vec<Vec<f64>>), String>` —  Generalised symmetric-definite problem `K x = lambda M x` (dense, row-major, `M` positive definite) through the Cholesky factor |
-| fn | `thin_svd_c64` | `linalg/driver.rs:416` | `pub fn thin_svd_c64(cols: &[Vec<C64>]) -> Result<(Vec<f64>, Vec<Vec<C64>>), String>` —  Thin SVD of a complex matrix given by its columns (`cols[j]` has length `n`): |
-| fn | `cancel_point` | `linalg/driver.rs:476` | `pub fn cancel_point()` —  Call inside an operator or preconditioner application: leaves the library's loop with a cancel when the job was cancelled. |
-| fn | `catching_cancel` | `linalg/driver.rs:483` | `pub fn catching_cancel<R>(f: impl FnOnce() -> R) -> Result<R, String>` —  Runs a library solve, turning a cancel raised by [`cancel_point`] into `Err("cancelled")`. |
-| const | `STALLED` | `linalg/driver.rs:497` | `&str` —  Start of the error text returned when the LOBPCG stall guard gives up (the caller falls back to a factorisation). |
-| fn | `eigs_sym` | `linalg/driver.rs:529` | `pub fn eigs_sym(a: &RCsr, m: &RCsr, sigma: f64, nev: usize, opts: &EigOpts, project: Option<Projector<f64>>) -> Result<EigPairs, String>` —  Real symmetric pencil `A x = lambda M x` with `M` positive definite, eigenvalues nearest `sigma`; a shift at or below zero is taken to |
-| fn | `eigs_sym_indefinite` | `linalg/driver.rs:535` | `pub fn eigs_sym_indefinite(a: &RCsr, m: &RCsr, sigma: f64, nev: usize, opts: &EigOpts, project: Option<Projector<f64>>) -> Result<EigPairs, String>` —  Like [`eigs_sym`] for an indefinite `A - sigma M` (always LU). |
-| fn | `eigs_general` | `linalg/driver.rs:542` | `pub fn eigs_general(a: &RCsr, b: &RCsr, sigma: f64, nev: usize, opts: &EigOpts) -> Result<EigPairs, String>` —  Real eigenvalues and real vectors of a real non-symmetric pencil (2D waveguide modes), in real arithmetic |
-| struct | `CEigPairs` | `linalg/driver.rs:548` | fields: `values`, `vectors`, `residuals`, `dim`, `converged` —  Eigenpairs of a complex pencil. |
-| fn | `eigs_complex_projected` | `linalg/driver.rs:558` | `pub fn eigs_complex_projected(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, _max_dim: usize, project: Option<Projector<C64>>) -> Result<CEigPairs, String>` —  Complex pencil (PML, tilted crystals, Floquet phases), nearest the complex shift; `project` as in [`eigs_sym`]. |
-| fn | `eigs_complex` | `linalg/driver.rs:564` | `pub fn eigs_complex(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, max_dim: usize) -> Result<CEigPairs, String>` |
-| fn | `eigs_quadratic_complex` | `linalg/driver.rs:574` | `pub fn eigs_quadratic_complex(a0: &CCsr, a1: &CCsr, a2: &CCsr, sigma: C64, nev: usize, tol: f64) -> Result<CEigPairs, String>` —  Complex quadratic eigenproblem `(A0 + lambda A1 + lambda^2 A2) u = 0`, returning up to `nev` eigenpairs nearest `sigma`. |
-| fn | `lobpcg_guarded` | `linalg/driver.rs:677` | `pub fn lobpcg_guarded(k: &RCsr, m: &RCsr, nev: usize, extra: usize, precond: &dyn Fn(&[f64]) -> Vec<f64>, tol: f64, max_iter: usize, stall_guard: bool) -> Result<EigPairs, String>` —  The `nev` lowest eigenpairs of `K x = lambda M x` by LOBPCG with the given preconditioner. With `stall_guard` the run gives up (error |
-| struct | `IterativeCurlCurlOptions` | `linalg/driver.rs:809` | fields: `rtol`, `atol`, `max_it`, `restart`, `flexible`, `ams` —  Options for [`solve_curl_curl_p2_iterative`] (FGMRES/GMRES preconditioned by [`AmsP2`]). |
-| struct | `IterativeSolveReport` | `linalg/driver.rs:839` | fields: `x`, `iterations`, `relative_residual`, `converged`, `preconditioner_nnz` —  Output of [`solve_curl_curl_p2_iterative`]. |
-| fn | `solve_curl_curl_p2_iterative` | `linalg/driver.rs:866` | `pub fn solve_curl_curl_p2_iterative<T: FaerScalar>( a: &Csr<T>, pc_matrix: Option<&Csr<T>>, topo: &AmsP2Topology, rhs: &[T], opts: &IterativeCurlCurlOptions, ) -> Result<IterativeSolveReport<T>, String>` —  Solves a 3D $P_2$ Nédélec curl-curl linear system `A x = b` (driven frequency-domain or |
-| fn | `eigs_curl_curl_p2_jd` | `linalg/driver.rs:911` | `pub fn eigs_curl_curl_p2_jd( k: &Csr<C64>, m: &Csr<C64>, topo: &AmsP2Topology, target: C64, nev: usize, tol: f64, max_it: usize, ) -> Result<CEigPairs, String>` —  Finds `nev` interior eigenpairs of a 3D $P_2$ Nédélec curl-curl pencil `K x = λ M x` near |
-| struct | `IterativeShiftInvertP2` | `linalg/driver.rs:956` |  Matrix-free / low-memory [`ShiftedSolver`] for 3D $P_2$ Nédélec shifted curl-curl systems |
+| struct | `EigenOptions` | `linalg/driver.rs:104` | fields: `tol`, `block`, `ncv`, `par_solve_min_n` —  Options of the shift-and-invert eigensolvers. `tol` is the relative residual of the transformed problem |
+| struct | `Pairs` | `linalg/driver.rs:125` | fields: `values`, `vectors`, `residuals`, `errors`, `converged`, `dim`, `restarts`, `matvecs` —  Eigenpairs of `A x = lambda B x` nearest the shift, nearest first. |
+| type | `Projector` | `linalg/driver.rs:141` | `<'a, T>` —  A projection applied to every operator result (removes a known null space of `A`). It must be a `B`-orthogonal projection. |
+| fn | `eigs_near` | `linalg/driver.rs:193` | `pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sym: Symmetry, definiteness: Definiteness, opts: &EigenOptions, project: Option<Projector<'_, T>>) -> Result<Pairs<T>, String>` —  The `nev` eigenpairs of `A x = lambda B x` nearest `sigma` (block Krylov-Schur on the shift-and-invert operator). `sym` says whether |
+| fn | `eigs_real_general_near` | `linalg/driver.rs:274` | `pub fn eigs_real_general_near(a: &Csr<f64>, b: &Csr<f64>, sigma: f64, nev: usize, opts: &EigenOptions) -> Result<Pairs<f64>, String>` —  Real eigenpairs of a pencil with real, non-symmetric matrices (the 2D waveguide modes): the real eigenvalues nearest the real |
+| fn | `dense_eigh` | `linalg/driver.rs:324` | `pub fn dense_eigh(a: &[f64], n: usize) -> Result<(Vec<f64>, Vec<Vec<f64>>), String>` —  Eigen decomposition of a symmetric dense matrix (row-major, only the lower triangle is read): ascending eigenvalues and the |
+| fn | `dense_gen_eigh` | `linalg/driver.rs:358` | `pub fn dense_gen_eigh(k: &[f64], m: &[f64], n: usize) -> Result<(Vec<f64>, Vec<Vec<f64>>), String>` —  Generalised symmetric-definite problem `K x = lambda M x` (dense, row-major, `M` positive definite) through the Cholesky factor |
+| fn | `thin_svd_c64` | `linalg/driver.rs:418` | `pub fn thin_svd_c64(cols: &[Vec<C64>]) -> Result<(Vec<f64>, Vec<Vec<C64>>), String>` —  Thin SVD of a complex matrix given by its columns (`cols[j]` has length `n`): |
+| fn | `cancel_point` | `linalg/driver.rs:478` | `pub fn cancel_point()` —  Call inside an operator or preconditioner application: leaves the library's loop with a cancel when the job was cancelled. |
+| fn | `catching_cancel` | `linalg/driver.rs:485` | `pub fn catching_cancel<R>(f: impl FnOnce() -> R) -> Result<R, String>` —  Runs a library solve, turning a cancel raised by [`cancel_point`] into `Err("cancelled")`. |
+| const | `STALLED` | `linalg/driver.rs:499` | `&str` —  Start of the error text returned when the LOBPCG stall guard gives up (the caller falls back to a factorisation). |
+| fn | `eigs_sym` | `linalg/driver.rs:531` | `pub fn eigs_sym(a: &RCsr, m: &RCsr, sigma: f64, nev: usize, opts: &EigOpts, project: Option<Projector<f64>>) -> Result<EigPairs, String>` —  Real symmetric pencil `A x = lambda M x` with `M` positive definite, eigenvalues nearest `sigma`; a shift at or below zero is taken to |
+| fn | `eigs_sym_indefinite` | `linalg/driver.rs:537` | `pub fn eigs_sym_indefinite(a: &RCsr, m: &RCsr, sigma: f64, nev: usize, opts: &EigOpts, project: Option<Projector<f64>>) -> Result<EigPairs, String>` —  Like [`eigs_sym`] for an indefinite `A - sigma M` (always LU). |
+| fn | `eigs_general` | `linalg/driver.rs:544` | `pub fn eigs_general(a: &RCsr, b: &RCsr, sigma: f64, nev: usize, opts: &EigOpts) -> Result<EigPairs, String>` —  Real eigenvalues and real vectors of a real non-symmetric pencil (2D waveguide modes), in real arithmetic |
+| struct | `CEigPairs` | `linalg/driver.rs:550` | fields: `values`, `vectors`, `residuals`, `dim`, `converged` —  Eigenpairs of a complex pencil. |
+| fn | `eigs_complex_projected` | `linalg/driver.rs:560` | `pub fn eigs_complex_projected(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, _max_dim: usize, project: Option<Projector<C64>>) -> Result<CEigPairs, String>` —  Complex pencil (PML, tilted crystals, Floquet phases), nearest the complex shift; `project` as in [`eigs_sym`]. |
+| fn | `eigs_complex` | `linalg/driver.rs:566` | `pub fn eigs_complex(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, max_dim: usize) -> Result<CEigPairs, String>` |
+| fn | `eigs_quadratic_complex` | `linalg/driver.rs:576` | `pub fn eigs_quadratic_complex(a0: &CCsr, a1: &CCsr, a2: &CCsr, sigma: C64, nev: usize, tol: f64) -> Result<CEigPairs, String>` —  Complex quadratic eigenproblem `(A0 + lambda A1 + lambda^2 A2) u = 0`, returning up to `nev` eigenpairs nearest `sigma`. |
+| fn | `lobpcg_guarded` | `linalg/driver.rs:679` | `pub fn lobpcg_guarded(k: &RCsr, m: &RCsr, nev: usize, extra: usize, precond: &dyn Fn(&[f64]) -> Vec<f64>, tol: f64, max_iter: usize, stall_guard: bool) -> Result<EigPairs, String>` —  The `nev` lowest eigenpairs of `K x = lambda M x` by LOBPCG with the given preconditioner. With `stall_guard` the run gives up (error |
+| struct | `IterativeCurlCurlOptions` | `linalg/driver.rs:823` | fields: `rtol`, `atol`, `max_it`, `restart`, `flexible`, `ams` —  Options for [`solve_curl_curl_p2_iterative`] (FGMRES/GMRES preconditioned by [`AmsP2`]). |
+| struct | `IterativeSolveReport` | `linalg/driver.rs:853` | fields: `x`, `iterations`, `relative_residual`, `converged`, `preconditioner_nnz` —  Output of [`solve_curl_curl_p2_iterative`]. |
+| fn | `solve_curl_curl_p2_iterative` | `linalg/driver.rs:880` | `pub fn solve_curl_curl_p2_iterative<T: FaerScalar>( a: &Csr<T>, pc_matrix: Option<&Csr<T>>, topo: &AmsP2Topology, rhs: &[T], opts: &IterativeCurlCurlOptions, ) -> Result<IterativeSolveReport<T>, String>` —  Solves a 3D $P_2$ Nédélec curl-curl linear system `A x = b` (driven frequency-domain or |
+| fn | `eigs_curl_curl_p2_jd` | `linalg/driver.rs:925` | `pub fn eigs_curl_curl_p2_jd( k: &Csr<C64>, m: &Csr<C64>, topo: &AmsP2Topology, target: C64, nev: usize, tol: f64, max_it: usize, ) -> Result<CEigPairs, String>` —  Finds `nev` interior eigenpairs of a 3D $P_2$ Nédélec curl-curl pencil `K x = λ M x` near |
+| struct | `IterativeShiftInvertP2` | `linalg/driver.rs:970` |  Matrix-free / low-memory [`ShiftedSolver`] for 3D $P_2$ Nédélec shifted curl-curl systems |
 | fn | `DirectSolver::new` | `linalg/driver.rs:40` | `pub fn new(a: &Csr<T>, spd: bool) -> Result<Self, String>` |
 | fn | `DirectSolver::n` | `linalg/driver.rs:54` | `pub fn n(&self) -> usize` |
 | fn | `DirectSolver::update_matrix` | `linalg/driver.rs:60` | `pub fn update_matrix(&mut self, a: &Csr<T>) -> Result<(), String>` —  Replaces the numeric values of `a` while reusing the cached symbolic analysis |
 | fn | `DirectSolver::stats` | `linalg/driver.rs:74` | `pub fn stats(&self) -> FactorStats` —  Factorisation statistics (including `symbolic_count` and `numeric_count`). |
 | fn | `DirectSolver::solve` | `linalg/driver.rs:78` | `pub fn solve(&self, b: &[T]) -> Vec<T>` |
-| fn | `DirectSolver::solve_many` | `linalg/driver.rs:86` | `pub fn solve_many(&self, bs: &[Vec<T>]) -> Vec<Vec<T>>` —  Several right-hand sides; the independent triangular solves are spread over the threads of the shared pool. |
-| fn | `IterativeShiftInvertP2::new` | `linalg/driver.rs:968` | `pub fn new(k: &Csr<T>, m: &Csr<T>, topo: AmsP2Topology, opts: IterativeCurlCurlOptions) -> Self` |
+| fn | `DirectSolver::solve_many` | `linalg/driver.rs:88` | `pub fn solve_many(&self, bs: &[Vec<T>]) -> Vec<Vec<T>>` —  Several right-hand sides; the independent triangular solves are spread over the threads of the shared pool. |
+| fn | `IterativeShiftInvertP2::new` | `linalg/driver.rs:982` | `pub fn new(k: &Csr<T>, m: &Csr<T>, topo: AmsP2Topology, opts: IterativeCurlCurlOptions) -> Self` |
 | struct | `Jacobi` | `linalg/pc.rs:10` |  Point Jacobi: `M⁻¹ = diag(A)⁻¹` (PETSc `PCJACOBI`). A zero diagonal entry is replaced by 1 |
 | fn | `Jacobi::new` | `linalg/pc.rs:15` | `pub fn new(a: &Csr<T>) -> Self` |
 | fn | `Jacobi::from_diagonal` | `linalg/pc.rs:20` | `pub fn from_diagonal(diag: Vec<T>) -> Self` —  From the diagonal alone, for operators that are never assembled (see [`crate::linalg::matfree`]). |

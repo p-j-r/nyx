@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed dfs problem the kernels read, dec
     properties {
         "adr" "41, 103"
         "code" "crates/nyx-dfs/src: problem.rs"
-        "lines" "873"
+        "lines" "897"
         "codeDiagram" "4-code/dfs/problem.md"
     }
 }

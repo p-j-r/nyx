@@ -42,6 +42,8 @@ pub enum SolverError {
     Singular,
     /// A Cholesky factorisation was required but the matrix is not positive definite.
     NotPositiveDefinite,
+    /// [`ShiftedSolver::solve_block_in_place`] was called before a successful [`ShiftedSolver::set_shift`].
+    NotFactored,
     OutOfMemory,
     /// More non-zeros than the 32-bit indices used here can address.
     TooLarge,
@@ -53,6 +55,7 @@ impl std::fmt::Display for SolverError {
         match self {
             SolverError::Singular => write!(f, "matrix is singular at this shift"),
             SolverError::NotPositiveDefinite => write!(f, "matrix is not positive definite"),
+            SolverError::NotFactored => write!(f, "solver has not been factored (call set_shift first)"),
             SolverError::OutOfMemory => write!(f, "out of memory in the sparse factorisation"),
             SolverError::TooLarge => write!(f, "matrix exceeds 32-bit index range"),
             SolverError::InvalidArgument(m) => write!(f, "invalid argument: {m}"),
@@ -215,7 +218,7 @@ pub trait ShiftedSolver<T: Scalar> {
     /// Factorises `A − σB`. May reuse everything that depends only on the sparsity pattern.
     fn set_shift(&mut self, sigma: T) -> Result<(), SolverError>;
     /// Solves `(A − σB) X = RHS` in place for `nrhs` columns of length `dim()`.
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize);
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError>;
     fn stats(&self) -> FactorStats;
 }
 
@@ -274,9 +277,9 @@ pub(crate) fn assemble<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>, lower: bool) -
     let (mut av, mut bv): (Vec<T>, Vec<T>) = (Vec::with_capacity(tmp.len()), Vec::with_capacity(tmp.len()));
     let mut last: Option<(u32, u32)> = None;
     for &(c, r, x, y) in &tmp {
-        if last == Some((c, r)) {
-            *av.last_mut().unwrap() += x;
-            *bv.last_mut().unwrap() += y;
+        if let (true, Some(a_last), Some(b_last)) = (last == Some((c, r)), av.last_mut(), bv.last_mut()) {
+            *a_last += x;
+            *b_last += y;
         } else {
             row_idx.push(r);
             av.push(x);
@@ -1491,7 +1494,10 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError> {
         self.ensure_full()?;
         let full = assemble(a, b, false)?;
-        let old = self.full.as_ref().unwrap();
+        let old = self
+            .full
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("full pattern missing after ensure_full"))?;
         if full.col_ptr != old.col_ptr || full.row_idx != old.row_idx {
             return Err(SolverError::InvalidArgument("sparsity pattern differs from the one analysed"));
         }
@@ -1514,7 +1520,10 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 self.tmap = Some(build_transpose_map(full, self.n));
             }
         } else {
-            let (a, b) = self.src.as_ref().expect("source matrices kept while the full pattern is missing");
+            let (a, b) = self
+                .src
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("source matrices missing while full pattern is absent"))?;
             let f = assemble(a, b.as_ref(), false)?;
             self.tmap = Some(build_transpose_map(&f, self.n));
             self.full = Some(f);
@@ -1522,11 +1531,15 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         Ok(())
     }
 
-    fn ensure_lower(&mut self) {
+    fn ensure_lower(&mut self) -> Result<(), SolverError> {
         if self.lower.is_none() {
-            let full = self.full.as_ref().expect("full pattern must exist before extracting lower");
+            let full = self
+                .full
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("full pattern missing before extracting lower"))?;
             self.lower = Some(extract_lower(full, self.n));
         }
+        Ok(())
     }
 
     fn pattern(asm: &Assembled<T>, n: usize) -> SymbolicSparseColMatRef<'_, u32> {
@@ -1544,7 +1557,10 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             return Ok(());
         }
         let n = self.n;
-        let lower = self.lower.as_ref().expect("lower pattern must exist");
+        let lower = self
+            .lower
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("lower pattern missing for symbolic Cholesky"))?;
         let t0 = Instant::now();
         let pattern = Self::pattern(lower, n);
         let amd_sym = || factorize_symbolic_cholesky(pattern, Side::Lower, SymmetricOrdering::Amd, Default::default());
@@ -1612,7 +1628,9 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         if !x.iter().all(|v| v.is_finite()) {
             return ProbeCheck { ok: false, initial_rel_err: f64::INFINITY };
         }
-        let full = self.full.as_ref().unwrap();
+        let Some(full) = self.full.as_ref() else {
+            return ProbeCheck { ok: false, initial_rel_err: f64::INFINITY };
+        };
         let mut r = vec![T::ZERO; n];
         csc_residual_vals(n, &full.col_ptr, &full.row_idx, full_vals, &probe, &x, &mut r);
         let initial_rel_err = vecops::norm2(&r) / p_norm;
@@ -1654,10 +1672,17 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         let n = self.n;
         let par = self.threads.factor.par_for_factor(n);
         self.ensure_sym_llt()?;
-        let lower = self.lower.as_ref().expect("lower pattern exists for PositiveDefinite");
+        let lower = self
+            .lower
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("lower pattern missing for Cholesky"))?;
         let mut vals = Vec::with_capacity(lower.row_idx.len());
         Self::shifted_values(lower, sigma, &mut vals);
-        let sym = self.sym_llt.as_ref().unwrap();
+        let sym = self
+            .sym_llt
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("symbolic Cholesky factor missing"))?;
+        let factor_nnz = sym.len_val();
         let mat = SparseColMatRef::new(Self::pattern(lower, n), T::faer_slice(&vals));
         let t0 = Instant::now();
         let mut mem = MemBuffer::new(sym.factorize_numeric_llt_scratch::<T::Elem>(par, Default::default()));
@@ -1685,7 +1710,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     FillOrdering::NestedDissection => FactorBackend::CholeskyNd,
                     _ => FactorBackend::CholeskyAmd,
                 };
-                self.stats.factor_nnz = self.sym_llt.as_ref().unwrap().len_val();
+                self.stats.factor_nnz = factor_nnz;
                 Ok(true)
             }
             Err(_) => Ok(false),
@@ -1699,63 +1724,73 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         if n == 0 {
             return Ok(false);
         }
-        self.ensure_lower();
+        self.ensure_lower()?;
         self.ensure_sym_llt()?;
         let par = self.threads.factor.par_for_factor(n);
-        let lower = self.lower.as_ref().unwrap();
-        let mut lvals = Vec::with_capacity(lower.row_idx.len());
-        Self::shifted_values(lower, sigma, &mut lvals);
+        let (fac_secs, initial_rel_err, factor_nnz) = {
+            let lower = self
+                .lower
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("lower pattern missing for LBL^H"))?;
+            let mut lvals = Vec::with_capacity(lower.row_idx.len());
+            Self::shifted_values(lower, sigma, &mut lvals);
 
-        self.lblt_subdiag.resize(n, T::ZERO);
-        self.lblt_perm_fwd.resize(n, 0);
-        self.lblt_perm_inv.resize(n, 0);
+            self.lblt_subdiag.resize(n, T::ZERO);
+            self.lblt_perm_fwd.resize(n, 0);
+            self.lblt_perm_inv.resize(n, 0);
 
-        let sym = self.sym_llt.as_ref().unwrap();
-        let mat = SparseColMatRef::new(Self::pattern(lower, n), T::faer_slice(&lvals));
-        let t0 = Instant::now();
-        let mut mem = MemBuffer::new(sym.factorize_numeric_intranode_lblt_scratch::<T::Elem>(par, Default::default()));
-        let _lblt = sym.factorize_numeric_intranode_lblt::<T::Elem>(
-            T::faer_slice_mut(&mut self.llt_vals),
-            T::faer_slice_mut(&mut self.lblt_subdiag),
-            &mut self.lblt_perm_fwd,
-            &mut self.lblt_perm_inv,
-            mat,
-            Side::Lower,
-            par,
-            MemStack::new(&mut mem),
-            Default::default(),
-        );
-        clear_upper_vector_state();
-        let fac_secs = t0.elapsed().as_secs_f64();
-        drop(mem);
-        drop(lvals);
-
-        if !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite()) {
-            return Ok(false);
-        }
-
-        let solve_par = self.threads.solve.par();
-        let probe = self.verify_probe_residual(full_vals, false, |x| {
-            let sym = self.sym_llt.as_ref().unwrap();
-            let mut smem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(1, solve_par));
-            let perm = PermRef::new_checked(&self.lblt_perm_fwd, &self.lblt_perm_inv, n);
-            let lblt = IntranodeLbltRef::new(
-                sym,
-                T::faer_slice(&self.llt_vals),
-                T::faer_slice(&self.lblt_subdiag),
-                perm,
+            let sym = self
+                .sym_llt
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("symbolic Cholesky factor missing for LBL^H"))?;
+            let factor_nnz = sym.len_val();
+            let mat = SparseColMatRef::new(Self::pattern(lower, n), T::faer_slice(&lvals));
+            let t0 = Instant::now();
+            let mut mem =
+                MemBuffer::new(sym.factorize_numeric_intranode_lblt_scratch::<T::Elem>(par, Default::default()));
+            let _ = sym.factorize_numeric_intranode_lblt::<T::Elem>(
+                T::faer_slice_mut(&mut self.llt_vals),
+                T::faer_slice_mut(&mut self.lblt_subdiag),
+                &mut self.lblt_perm_fwd,
+                &mut self.lblt_perm_inv,
+                mat,
+                Side::Lower,
+                par,
+                MemStack::new(&mut mem),
+                Default::default(),
             );
-            let xm = MatMut::from_column_major_slice_mut(T::faer_slice_mut(x), n, 1);
-            lblt.solve_in_place_with_conj(Conj::No, xm, solve_par, MemStack::new(&mut smem));
             clear_upper_vector_state();
-        });
-        if !probe.ok {
-            return Ok(false);
-        }
+            let fac_secs = t0.elapsed().as_secs_f64();
+            drop(mem);
+            drop(lvals);
+
+            if !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite()) {
+                return Ok(false);
+            }
+
+            let solve_par = self.threads.solve.par();
+            let probe = self.verify_probe_residual(full_vals, false, |x| {
+                let mut smem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(1, solve_par));
+                let perm = PermRef::new_checked(&self.lblt_perm_fwd, &self.lblt_perm_inv, n);
+                let lblt = IntranodeLbltRef::new(
+                    sym,
+                    T::faer_slice(&self.llt_vals),
+                    T::faer_slice(&self.lblt_subdiag),
+                    perm,
+                );
+                let xm = MatMut::from_column_major_slice_mut(T::faer_slice_mut(x), n, 1);
+                lblt.solve_in_place_with_conj(Conj::No, xm, solve_par, MemStack::new(&mut smem));
+                clear_upper_vector_state();
+            });
+            if !probe.ok {
+                return Ok(false);
+            }
+            (fac_secs, probe.initial_rel_err, factor_nnz)
+        };
 
         self.release_lu_buffers();
         self.sigma = sigma;
-        self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || probe.initial_rel_err > 1e-13;
+        self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || initial_rel_err > 1e-13;
         self.stats.numeric_secs_last = fac_secs;
         self.have = Used::Lu;
         self.active = ActiveFactor::HermLblt;
@@ -1764,7 +1799,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             FillOrdering::NestedDissection => FactorBackend::LbltNd,
             _ => FactorBackend::LbltAmd,
         };
-        self.stats.factor_nnz = self.sym_llt.as_ref().unwrap().len_val();
+        self.stats.factor_nnz = factor_nnz;
         Ok(true)
     }
 
@@ -1776,28 +1811,46 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         if n == 0 {
             return Ok(false);
         }
-        self.ensure_lower();
+        self.ensure_lower()?;
         self.ensure_sym_llt()?;
         if self.sym_lblt_plan.is_none() {
             let t0 = Instant::now();
-            let plan = build_sym_lblt_plan(self.lower.as_ref().unwrap(), self.sym_llt.as_ref().unwrap(), n);
+            let lower = self
+                .lower
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("lower pattern missing for LBL^T plan"))?;
+            let sym = self
+                .sym_llt
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("symbolic Cholesky factor missing for LBL^T plan"))?;
+            let plan = build_sym_lblt_plan(lower, sym, n);
             self.sym_lblt_plan = Some(plan);
             self.stats.analyse_secs += t0.elapsed().as_secs_f64();
         }
         let par = self.threads.factor.par_for_factor(n);
-        let lower = self.lower.as_ref().unwrap();
-        let mut lvals = Vec::with_capacity(lower.row_idx.len());
-        Self::shifted_values(lower, sigma, &mut lvals);
+        let (fac_secs, initial_rel_err, factor_nnz) = {
+            let lower = self
+                .lower
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("lower pattern missing for LBL^T"))?;
+            let mut lvals = Vec::with_capacity(lower.row_idx.len());
+            Self::shifted_values(lower, sigma, &mut lvals);
 
-        self.lblt_subdiag.resize(n, T::ZERO);
-        self.lblt_perm_fwd.resize(n, 0);
-        self.lblt_perm_inv.resize(n, 0);
+            self.lblt_subdiag.resize(n, T::ZERO);
+            self.lblt_perm_fwd.resize(n, 0);
+            self.lblt_perm_inv.resize(n, 0);
 
-        let t0 = Instant::now();
-        let fac_ok = {
-            let sym = self.sym_llt.as_ref().unwrap();
-            let plan = self.sym_lblt_plan.as_ref().unwrap();
-            match sym.raw() {
+            let t0 = Instant::now();
+            let sym = self
+                .sym_llt
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("symbolic Cholesky factor missing for LBL^T"))?;
+            let factor_nnz = sym.len_val();
+            let plan = self
+                .sym_lblt_plan
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("LBL^T plan missing"))?;
+            let fac_ok = match sym.raw() {
                 SymbolicCholeskyRaw::Supernodal(sup) => factorize_supernodal_sym_lblt(
                     &mut self.llt_vals,
                     &mut self.lblt_subdiag,
@@ -1811,18 +1864,16 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 SymbolicCholeskyRaw::Simplicial(simp) => {
                     factorize_simplicial_sym_ldlt(&mut self.llt_vals, &lvals, plan, simp)
                 }
+            };
+            let fac_secs = t0.elapsed().as_secs_f64();
+            drop(lvals);
+            if !fac_ok || !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite())
+            {
+                return Ok(false);
             }
-        };
-        let fac_secs = t0.elapsed().as_secs_f64();
-        drop(lvals);
-        if !fac_ok || !self.llt_vals.iter().all(|v| v.is_finite()) || !self.lblt_subdiag.iter().all(|v| v.is_finite()) {
-            return Ok(false);
-        }
 
-        let solve_par = self.threads.solve.par();
-        let probe = self.verify_probe_residual(full_vals, allow_ir_rescue, |x| {
-            let sym = self.sym_llt.as_ref().unwrap();
-            match sym.raw() {
+            let solve_par = self.threads.solve.par();
+            let probe = self.verify_probe_residual(full_vals, allow_ir_rescue, |x| match sym.raw() {
                 SymbolicCholeskyRaw::Supernodal(sup) => solve_supernodal_sym_lblt(
                     sym,
                     sup,
@@ -1835,15 +1886,16 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     solve_par,
                 ),
                 SymbolicCholeskyRaw::Simplicial(simp) => solve_simplicial_sym_ldlt(sym, simp, &self.llt_vals, x, 1),
+            });
+            if !probe.ok {
+                return Ok(false);
             }
-        });
-        if !probe.ok {
-            return Ok(false);
-        }
+            (fac_secs, probe.initial_rel_err, factor_nnz)
+        };
 
         self.release_lu_buffers();
         self.sigma = sigma;
-        self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || probe.initial_rel_err > 1e-13;
+        self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || initial_rel_err > 1e-13;
         self.stats.numeric_secs_last = fac_secs;
         self.have = Used::Lu;
         self.active = ActiveFactor::SymLblt;
@@ -1852,7 +1904,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             FillOrdering::NestedDissection => FactorBackend::LbltNd,
             _ => FactorBackend::LbltAmd,
         };
-        self.stats.factor_nnz = self.sym_llt.as_ref().unwrap().len_val();
+        self.stats.factor_nnz = factor_nnz;
         Ok(true)
     }
 
@@ -1864,13 +1916,19 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         self.release_lblt_buffers();
         if self.sym_lu.is_none() {
             let t0 = Instant::now();
-            let full = self.full.as_ref().unwrap();
+            let full = self
+                .full
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("full matrix pattern missing for LU"))?;
             let sym = factorize_symbolic_lu(Self::pattern(full, n), Default::default())
                 .map_err(|_| SolverError::OutOfMemory)?;
             // Estimate COLAMD symmetric fill when structurally symmetric so factor_nnz is comparable.
             let est_nnz = if self.tmap.as_ref().is_some_and(|t| t.structurally_symmetric) {
-                self.ensure_lower();
-                let lower = self.lower.as_ref().unwrap();
+                self.ensure_lower()?;
+                let lower = self
+                    .lower
+                    .as_ref()
+                    .ok_or(SolverError::InvalidArgument("lower pattern missing for LU fill estimate"))?;
                 factorize_symbolic_cholesky(
                     Self::pattern(lower, n),
                     Side::Lower,
@@ -1890,8 +1948,15 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             self.stats.analyse_secs += t0.elapsed().as_secs_f64();
             self.stats.symbolic_count += 1;
         }
-        let sym = self.sym_lu.as_ref().unwrap();
-        let mat = SparseColMatRef::new(Self::pattern(self.full.as_ref().unwrap(), n), T::faer_slice(full_vals));
+        let sym = self
+            .sym_lu
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("symbolic LU factor missing"))?;
+        let full = self
+            .full
+            .as_ref()
+            .ok_or(SolverError::InvalidArgument("full matrix pattern missing for LU"))?;
+        let mat = SparseColMatRef::new(Self::pattern(full, n), T::faer_slice(full_vals));
         let t0 = Instant::now();
         let mut mem = MemBuffer::new(sym.factorize_numeric_lu_scratch::<T::Elem>(par, Default::default()));
         let res = sym.factorize_numeric_lu::<T::Elem>(
@@ -1920,27 +1985,37 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
 
     fn do_lu(&mut self, sigma: T) -> Result<(), SolverError> {
         self.ensure_full()?;
-        let mut vals = Vec::with_capacity(self.full.as_ref().unwrap().row_idx.len());
-        Self::shifted_values(self.full.as_ref().unwrap(), sigma, &mut vals);
+        let (vals, is_herm, is_cplx_sym) = {
+            let full = self
+                .full
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("full matrix pattern missing for LU"))?;
+            let mut vals = Vec::with_capacity(full.row_idx.len());
+            Self::shifted_values(full, sigma, &mut vals);
 
-        let policy = backend_policy();
-        let tmap = self.tmap.as_ref().unwrap();
-        let is_struct_sym = tmap.structurally_symmetric;
-        let (is_herm, is_cplx_sym) = if is_struct_sym {
-            let max_v = vals.iter().map(|v| v.modulus()).fold(0.0f64, f64::max);
-            let tol = 1e-12 * max_v.max(1e-300);
-            let herm = vals.iter().enumerate().all(|(k, &v)| (v - vals[tmap.t_map[k]].conj()).modulus() <= tol);
-            let sym = if !T::IS_COMPLEX {
-                herm
-            } else if herm {
-                false
+            let tmap = self
+                .tmap
+                .as_ref()
+                .ok_or(SolverError::InvalidArgument("transpose map missing for LU"))?;
+            let is_struct_sym = tmap.structurally_symmetric;
+            let (is_herm, is_cplx_sym) = if is_struct_sym {
+                let max_v = vals.iter().map(|v| v.modulus()).fold(0.0f64, f64::max);
+                let tol = 1e-12 * max_v.max(1e-300);
+                let herm = vals.iter().enumerate().all(|(k, &v)| (v - vals[tmap.t_map[k]].conj()).modulus() <= tol);
+                let sym = if !T::IS_COMPLEX {
+                    herm
+                } else if herm {
+                    false
+                } else {
+                    vals.iter().enumerate().all(|(k, &v)| (v - vals[tmap.t_map[k]]).modulus() <= tol)
+                };
+                (herm, sym)
             } else {
-                vals.iter().enumerate().all(|(k, &v)| (v - vals[tmap.t_map[k]]).modulus() <= tol)
+                (false, false)
             };
-            (herm, sym)
-        } else {
-            (false, false)
+            (vals, is_herm, is_cplx_sym)
         };
+        let policy = backend_policy();
 
         let res = match policy {
             BackendPolicy::ForceColamd => self.do_colamd_lu(sigma, &vals),
@@ -1977,13 +2052,13 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         res
     }
 
-    fn solve_raw_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+    fn solve_raw_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
         let n = self.n;
         let par = self.threads.solve.par();
         match self.active {
             ActiveFactor::Cholesky => {
                 let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut rhs[..n * nrhs]), n, nrhs);
-                let sym = self.sym_llt.as_ref().unwrap();
+                let sym = self.sym_llt.as_ref().ok_or(SolverError::NotFactored)?;
                 let mut mem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(nrhs, par));
                 LltRef::new(sym, T::faer_slice(&self.llt_vals)).solve_in_place_with_conj(
                     Conj::No,
@@ -1994,7 +2069,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             }
             ActiveFactor::HermLblt => {
                 let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut rhs[..n * nrhs]), n, nrhs);
-                let sym = self.sym_llt.as_ref().unwrap();
+                let sym = self.sym_llt.as_ref().ok_or(SolverError::NotFactored)?;
                 let mut mem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(nrhs, par));
                 let perm = PermRef::new_checked(&self.lblt_perm_fwd, &self.lblt_perm_inv, n);
                 IntranodeLbltRef::new(
@@ -2006,7 +2081,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 .solve_in_place_with_conj(Conj::No, m, par, MemStack::new(&mut mem));
             }
             ActiveFactor::SymLblt => {
-                let sym = self.sym_llt.as_ref().unwrap();
+                let sym = self.sym_llt.as_ref().ok_or(SolverError::NotFactored)?;
                 match sym.raw() {
                     SymbolicCholeskyRaw::Supernodal(sup) => solve_supernodal_sym_lblt(
                         sym,
@@ -2026,7 +2101,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             }
             ActiveFactor::ColamdLu => {
                 let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut rhs[..n * nrhs]), n, nrhs);
-                let sym = self.sym_lu.as_ref().unwrap();
+                let sym = self.sym_lu.as_ref().ok_or(SolverError::NotFactored)?;
                 let mut mem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(nrhs, par));
                 LuRef::new_unchecked(sym, &self.lu_num).solve_in_place_with_conj(
                     Conj::No,
@@ -2035,9 +2110,10 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     MemStack::new(&mut mem),
                 );
             }
-            ActiveFactor::None => panic!("set_shift must succeed before solving"),
+            ActiveFactor::None => return Err(SolverError::NotFactored),
         }
         clear_upper_vector_state();
+        Ok(())
     }
 
     fn compute_shifted_residual(&self, b: &[T], x: &[T], r: &mut [T]) {
@@ -2079,20 +2155,27 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
         result
     }
 
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+        if matches!(self.active, ActiveFactor::None) {
+            return Err(SolverError::NotFactored);
+        }
         let n = self.n;
-        assert!(rhs.len() >= n * nrhs);
+        let expected = n
+            .checked_mul(nrhs)
+            .ok_or(SolverError::InvalidArgument("rhs block size overflows usize"))?;
+        if rhs.len() < expected {
+            return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
+        }
         self.solves.fetch_add(nrhs, Ordering::Relaxed);
         if !self.refine_solves || n == 0 || nrhs == 0 {
-            self.solve_raw_block_in_place(rhs, nrhs);
-            return;
+            return self.solve_raw_block_in_place(rhs, nrhs);
         }
 
         // Save RHS for 1-2 steps of deterministic compensated-residual iterative refinement
         // (`r = b - (A - sigma B) x`, `dx = M^{-1} r`, `x += dx`) to suppress parallel faer
         // factor roundoff and moderate LBLT pivot growth below `1e-14` (`ADR 11`, `FR-29`, `FR-33`).
-        let b_orig = rhs[..n * nrhs].to_vec();
-        self.solve_raw_block_in_place(rhs, nrhs);
+        let b_orig = rhs[..expected].to_vec();
+        self.solve_raw_block_in_place(rhs, nrhs)?;
 
         let mut r = vec![T::ZERO; n];
         let mut dx = vec![T::ZERO; n];
@@ -2111,7 +2194,7 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
             }
             for _step in 0..3 {
                 dx.copy_from_slice(&r);
-                self.solve_raw_block_in_place(&mut dx, 1);
+                self.solve_raw_block_in_place(&mut dx, 1)?;
                 if !dx.iter().all(|v| v.is_finite()) {
                     break;
                 }
@@ -2131,6 +2214,7 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
                 }
             }
         }
+        Ok(())
     }
 
     fn stats(&self) -> FactorStats {
@@ -2171,12 +2255,16 @@ impl<T: Scalar, S: ShiftedSolver<T>> LinearOperator<T> for ShiftInvertOperator<'
             }
             None => y[..n * nrhs].copy_from_slice(&x[..n * nrhs]),
         }
-        self.solver.solve_block_in_place(&mut y[..n * nrhs], nrhs);
+        self.solver
+            .solve_block_in_place(&mut y[..n * nrhs], nrhs)
+            .expect("ShiftInvertOperator solver must be factored via set_shift before apply_block");
     }
     fn apply_block_with_bx(&self, _x: &[T], bx: &[T], y: &mut [T], nrhs: usize) {
         let n = self.dim();
         y[..n * nrhs].copy_from_slice(&bx[..n * nrhs]);
-        self.solver.solve_block_in_place(&mut y[..n * nrhs], nrhs);
+        self.solver
+            .solve_block_in_place(&mut y[..n * nrhs], nrhs)
+            .expect("ShiftInvertOperator solver must be factored via set_shift before apply_block_with_bx");
     }
 }
 
@@ -2197,7 +2285,9 @@ impl<'a, T: Scalar, S: ShiftedSolver<T>> ShiftedSolvePreconditioner<'a, T, S> {
 impl<T: Scalar, S: ShiftedSolver<T>> crate::linalg::linop::Preconditioner<T> for ShiftedSolvePreconditioner<'_, T, S> {
     fn apply(&self, r: &[T], z: &mut [T]) {
         z.copy_from_slice(r);
-        self.solver.solve_block_in_place(z, 1);
+        self.solver
+            .solve_block_in_place(z, 1)
+            .expect("ShiftedSolvePreconditioner solver must be factored via set_shift before apply");
     }
 }
 
@@ -2218,7 +2308,9 @@ impl<T: FaerScalar> DirectSolve<T> {
 impl<T: FaerScalar> crate::linalg::linop::Preconditioner<T> for DirectSolve<T> {
     fn apply(&self, r: &[T], z: &mut [T]) {
         z.copy_from_slice(r);
-        self.fac.solve_block_in_place(z, 1);
+        self.fac
+            .solve_block_in_place(z, 1)
+            .expect("DirectSolve is always factored in DirectSolve::new");
     }
 }
 
@@ -2264,7 +2356,7 @@ mod tests {
             C64::new(3.0, 0.2),
         ];
         let mut x = b.clone();
-        fac.solve_block_in_place(&mut x, 1);
+        fac.solve_block_in_place(&mut x, 1).unwrap();
         let mut ax = vec![C64::ZERO; 4];
         a.spmv(&x, &mut ax);
         let err = ax.iter().zip(&b).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt();
@@ -2325,8 +2417,8 @@ mod tests {
 
         let mut x_seq = rhs.clone();
         let mut x_par = rhs.clone();
-        fac_seq.solve_block_in_place(&mut x_seq, 2);
-        fac_par.solve_block_in_place(&mut x_par, 2);
+        fac_seq.solve_block_in_place(&mut x_seq, 2).unwrap();
+        fac_par.solve_block_in_place(&mut x_par, 2).unwrap();
 
         let diff = x_seq
             .iter()
@@ -2378,11 +2470,51 @@ mod tests {
 
         let mut x1 = b.clone();
         let mut x8 = b.clone();
-        fac_1.solve_block_in_place(&mut x1, 1);
-        fac_8.solve_block_in_place(&mut x8, 1);
+        fac_1.solve_block_in_place(&mut x1, 1).unwrap();
+        fac_8.solve_block_in_place(&mut x8, 1).unwrap();
 
         let diff = x1.iter().zip(&x8).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt();
         let rel = diff / vecops::norm2(&x1).max(1e-300);
         assert!(rel < 1e-13, "n=62000 1-vs-8 thread drift {rel:e} >= 1e-13");
+    }
+
+    fn spd_tridiag_4() -> Csr<f64> {
+        let mut trips = Vec::new();
+        for i in 0..4 {
+            trips.push((i, i, 2.0));
+            if i + 1 < 4 {
+                trips.push((i, i + 1, -1.0));
+                trips.push((i + 1, i, -1.0));
+            }
+        }
+        Csr::from_triplets(4, 4, &trips).unwrap()
+    }
+
+    #[test]
+    fn unfactored_solve_returns_not_factored_without_panicking() {
+        let a = spd_tridiag_4();
+        for def in [Definiteness::General, Definiteness::PositiveDefinite] {
+            let fac = ShiftedFactorization::new(&a, None, def).unwrap();
+            let mut rhs = vec![1.0, 2.0, 3.0, 4.0];
+            assert_eq!(fac.solve_block_in_place(&mut rhs, 1), Err(SolverError::NotFactored));
+            assert_eq!(rhs, vec![1.0, 2.0, 3.0, 4.0]);
+        }
+    }
+
+    #[test]
+    fn solve_after_replace_matrices_before_set_shift_returns_not_factored() {
+        let a = spd_tridiag_4();
+        let mut fac = ShiftedFactorization::new(&a, None, Definiteness::PositiveDefinite).unwrap();
+        fac.set_shift(0.0).unwrap();
+        fac.replace_matrices(&a, None).unwrap();
+
+        let mut rhs = vec![1.0; 4];
+        assert_eq!(fac.solve_block_in_place(&mut rhs, 1), Err(SolverError::NotFactored));
+
+        fac.set_shift(0.0).unwrap();
+        assert!(fac.solve_block_in_place(&mut rhs, 1).is_ok());
+
+        let mut short = vec![1.0; 3];
+        assert!(matches!(fac.solve_block_in_place(&mut short, 1), Err(SolverError::InvalidArgument(_))));
     }
 }

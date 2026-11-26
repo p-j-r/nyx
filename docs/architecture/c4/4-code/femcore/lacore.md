@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 > The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, symmetric Ruiz equilibration, problem bundles and test-problem generators.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md)  
-**Size:** 18 files, 4862 lines.
+**Size:** 18 files, 5111 lines.
 
 ## Files
 
@@ -14,8 +14,8 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | `crates/femcore/src/linalg/basis.rs` | 359 | Column-major block of `n`-vectors with cache-blocked multi-vector kernels (the role of SLEPc's `BV` and PETSc's `VecMDot`/`VecMAXPY`), generic over the scalar and with *block* (several right-hand sides at once) variants for the block Kry... |
 | `crates/femcore/src/linalg/bsr.rs` | 381 | Alternative sparse storage (port items M1 and M1b): |
 | `crates/femcore/src/linalg/bundle.rs` | 117 | Problem bundles: a directory that holds everything needed to reproduce a solve elsewhere. |
-| `crates/femcore/src/linalg/csr.rs` | 594 | Compressed sparse row matrix over a generic [`Scalar`], plus test-problem generators. |
-| `crates/femcore/src/linalg/csr/assembly.rs` | 345 | The one matrix type of the finite-element code: assembly (`Triplets`), the operations the kernels use, and the aliases that keep kernel code readable (`RCsr` real, `CCsr` complex, `Coo`, `CCoo`). Before phase 3 the kernels had a real and... |
+| `crates/femcore/src/linalg/csr.rs` | 731 | Compressed sparse row matrix over a generic [`Scalar`], plus test-problem generators. |
+| `crates/femcore/src/linalg/csr/assembly.rs` | 363 | The one matrix type of the finite-element code: assembly (`Triplets`), the operations the kernels use, and the aliases that keep kernel code readable (`RCsr` real, `CCsr` complex, `Coo`, `CCoo`). Before phase 3 the kernels had a real and... |
 | `crates/femcore/src/linalg/dense/mod.rs` | 170 | Small dense linear algebra for the projected (Rayleigh–Ritz / Schur) problems of the Krylov methods, the role of SLEPc's `DS`. |
 | `crates/femcore/src/linalg/dense/schur.rs` | 374 | Complex Schur decomposition `A = Z T Zᴴ` by Householder Hessenberg reduction and single-shift QR, plus the adjacent-swap reordering used by Krylov–Schur restarts. |
 | `crates/femcore/src/linalg/equilibrate.rs` | 210 |  |
@@ -25,7 +25,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | `crates/femcore/src/linalg/maxwell.rs` | 633 | A small **Nédélec (edge element) test-problem generator**: lowest-order `H(curl)` elements on a structured tetrahedral mesh of the unit cube with perfect-electric-conductor walls. |
 | `crates/femcore/src/linalg/mm.rs` | 292 | Matrix Market (`.mtx`) reading and writing: the export format of port item V1. |
 | `crates/femcore/src/linalg/mod.rs` | 79 | # solvers |
-| `crates/femcore/src/linalg/par.rs` | 163 | Deterministic chunk parallelism. |
+| `crates/femcore/src/linalg/par.rs` | 257 | Deterministic chunk parallelism. |
 | `crates/femcore/src/linalg/rng.rs` | 37 | Small deterministic generator for start vectors and tests (SplitMix64). |
 | `crates/femcore/src/linalg/scalar.rs` | 158 | The scalar abstraction: every solver in this crate is written once for `f64` and `Complex<f64>`. |
 | `crates/femcore/src/linalg/vecops.rs` | 168 | Level-1 operations on vectors of any [`Scalar`], with the fixed-chunk reduction order. |
@@ -201,11 +201,14 @@ classDiagram
     class fns_linalg_csr_assembly_rs {
         <<module linalg/csr/assembly.rs>>
         +c(re, im) C64
+        ~validate_sum_parts(parts) tuple
+        ~sum_block_rows(parts, r0, r1) SumBlock~T~
+        ~assemble_sum_blocks(nrows, ncols, blocks) Csr~T~
         +RCsr type
         +CCsr type
         +C type
         +Coo type
-        +more_1_items
+        +more_2_items
     }
   }
   namespace linalg_dense_mod_rs {
@@ -412,6 +415,7 @@ classDiagram
         +for_each_mut(items, parallel, f)
         +worth_parallel(elems) bool
         +PAR_MIN_ELEMS const
+        +PAR_MIN_ELEMS const
     }
   }
   namespace linalg_rng_rs {
@@ -567,6 +571,10 @@ classDiagram
 | struct | `Triplets` | `linalg/csr/assembly.rs:21` |  Coordinate-format builder; duplicate entries are summed when converted ([`Triplets::to_csr`]). |
 | type | `Coo` | `linalg/csr/assembly.rs:29` |  |
 | type | `CCoo` | `linalg/csr/assembly.rs:30` |  |
+| type | `SumBlock` | `linalg/csr/assembly.rs:147` | `<T>` |
+| fn | `validate_sum_parts` | `linalg/csr/assembly.rs:149` | `pub(super) fn validate_sum_parts<T: Scalar>(parts: &[Csr<T>]) -> (usize, usize)` |
+| fn | `sum_block_rows` | `linalg/csr/assembly.rs:162` | `pub(super) fn sum_block_rows<T: Scalar>(parts: &[Csr<T>], r0: usize, r1: usize) -> SumBlock<T>` |
+| fn | `assemble_sum_blocks` | `linalg/csr/assembly.rs:187` | `pub(super) fn assemble_sum_blocks<T: Scalar>( nrows: usize, ncols: usize, blocks: Vec<SumBlock<T>>, ) -> Csr<T>` |
 | fn | `Triplets::new` | `linalg/csr/assembly.rs:33` | `pub fn new(nrows: usize, ncols: usize) -> Self` |
 | fn | `Triplets::with_capacity` | `linalg/csr/assembly.rs:37` | `pub fn with_capacity(nrows: usize, ncols: usize, cap: usize) -> Self` |
 | fn | `Triplets::nrows` | `linalg/csr/assembly.rs:41` | `pub fn nrows(&self) -> usize` |
@@ -578,23 +586,23 @@ classDiagram
 | fn | `Triplets::extend` | `linalg/csr/assembly.rs:66` | `pub fn extend(&mut self, other: &Self)` —  Appends all entries from `other` after checking matching `(nrows, ncols)` dimensions. |
 | fn | `Triplets::push_block` | `linalg/csr/assembly.rs:84` | `pub fn push_block(&mut self, rows: &[usize], cols: &[usize], local: &[T])` —  Adds the dense block `local[a*cols.len() + b]` at `(rows[a], cols[b])`; exact zeros are skipped. |
 | fn | `Triplets::to_csr` | `linalg/csr/assembly.rs:97` | `pub fn to_csr(&self) -> Csr<T>` —  Counting sort by row, then each row sorted by column with duplicates summed. |
-| fn | `Csr::zeros` | `linalg/csr/assembly.rs:148` | `pub fn zeros(nrows: usize, ncols: usize) -> Self` |
-| fn | `Csr::from_diag` | `linalg/csr/assembly.rs:152` | `pub fn from_diag(d: &[T]) -> Self` |
-| fn | `Csr::from_raw` | `linalg/csr/assembly.rs:159` | `pub fn from_raw(nrows: usize, ncols: usize, indptr: Vec<usize>, indices: Vec<usize>, values: Vec<T>) -> Self` —  From `usize` column indices (rows sorted by the caller); panics on an inconsistent matrix, which is a bug of the caller. |
-| fn | `Csr::row_range` | `linalg/csr/assembly.rs:167` | `pub fn row_range(&self, r: usize) -> std::ops::Range<usize>` |
-| fn | `Csr::get` | `linalg/csr/assembly.rs:171` | `pub fn get(&self, r: usize, c: usize) -> T` —  Entry `(r, c)` (zero where not stored); rows must be sorted. |
-| fn | `Csr::matvec` | `linalg/csr/assembly.rs:185` | `pub fn matvec(&self, x: &[T]) -> Vec<T>` —  `A x` as a new vector. |
-| fn | `Csr::matvec_into` | `linalg/csr/assembly.rs:190` | `pub fn matvec_into(&self, x: &[T], y: &mut [T])` |
-| fn | `Csr::add_scaled` | `linalg/csr/assembly.rs:194` | `pub fn add_scaled(&self, other: &Csr<T>, alpha: T) -> Csr<T>` —  `self + alpha * other` (same shape). |
-| fn | `Csr::scaled` | `linalg/csr/assembly.rs:197` | `pub fn scaled(&self, a: T) -> Csr<T>` |
-| fn | `Csr::values_mut` | `linalg/csr/assembly.rs:203` | `pub fn values_mut(&mut self) -> &mut [T]` —  The stored values, mutable (same pattern): the row and column scaling of a generalised problem. |
-| fn | `Csr::submatrix` | `linalg/csr/assembly.rs:207` | `pub fn submatrix(&self, rows: &[usize], cols: &[usize]) -> Csr<T>` —  Rows `rows` and columns `cols` (index lists in the given order); entries whose column is not in `cols` are dropped. |
-| fn | `Csr::block_diag` | `linalg/csr/assembly.rs:235` | `pub fn block_diag(blocks: &[&Csr<T>]) -> Csr<T>` |
-| fn | `Csr::sum_all` | `linalg/csr/assembly.rs:264` | `pub fn sum_all(mut parts: Vec<Csr<T>>) -> Csr<T>` —  Sum of matrices of one shape. Blocks of rows are merged on all cores; a row of the sum is a small merge of at most `parts.len()` |
-| fn | `Csr::symmetrized` | `linalg/csr/assembly.rs:326` | `pub fn symmetrized(&self) -> Csr<T>` —  Symmetrised copy `(A + A^T)/2`. |
-| fn | `Csr::conj` | `linalg/csr/assembly.rs:330` | `pub fn conj(&self) -> Csr<T>` —  Entrywise conjugate (identity for real matrices). |
-| fn | `Csr::real_part` | `linalg/csr/assembly.rs:337` | `pub fn real_part(&self) -> Csr<f64>` —  The real part of every entry (same pattern). |
-| fn | `Csr::is_real` | `linalg/csr/assembly.rs:341` | `pub fn is_real(&self) -> bool` —  All imaginary parts are exactly zero. |
+| fn | `Csr::zeros` | `linalg/csr/assembly.rs:207` | `pub fn zeros(nrows: usize, ncols: usize) -> Self` |
+| fn | `Csr::from_diag` | `linalg/csr/assembly.rs:211` | `pub fn from_diag(d: &[T]) -> Self` |
+| fn | `Csr::from_raw` | `linalg/csr/assembly.rs:218` | `pub fn from_raw(nrows: usize, ncols: usize, indptr: Vec<usize>, indices: Vec<usize>, values: Vec<T>) -> Self` —  From `usize` column indices (rows sorted by the caller); panics on an inconsistent matrix, which is a bug of the caller. |
+| fn | `Csr::row_range` | `linalg/csr/assembly.rs:226` | `pub fn row_range(&self, r: usize) -> std::ops::Range<usize>` |
+| fn | `Csr::get` | `linalg/csr/assembly.rs:230` | `pub fn get(&self, r: usize, c: usize) -> T` —  Entry `(r, c)` (zero where not stored); rows must be sorted. |
+| fn | `Csr::matvec` | `linalg/csr/assembly.rs:244` | `pub fn matvec(&self, x: &[T]) -> Vec<T>` —  `A x` as a new vector. |
+| fn | `Csr::matvec_into` | `linalg/csr/assembly.rs:249` | `pub fn matvec_into(&self, x: &[T], y: &mut [T])` |
+| fn | `Csr::add_scaled` | `linalg/csr/assembly.rs:253` | `pub fn add_scaled(&self, other: &Csr<T>, alpha: T) -> Csr<T>` —  `self + alpha * other` (same shape). |
+| fn | `Csr::scaled` | `linalg/csr/assembly.rs:256` | `pub fn scaled(&self, a: T) -> Csr<T>` |
+| fn | `Csr::values_mut` | `linalg/csr/assembly.rs:262` | `pub fn values_mut(&mut self) -> &mut [T]` —  The stored values, mutable (same pattern): the row and column scaling of a generalised problem. |
+| fn | `Csr::submatrix` | `linalg/csr/assembly.rs:266` | `pub fn submatrix(&self, rows: &[usize], cols: &[usize]) -> Csr<T>` —  Rows `rows` and columns `cols` (index lists in the given order); entries whose column is not in `cols` are dropped. |
+| fn | `Csr::block_diag` | `linalg/csr/assembly.rs:294` | `pub fn block_diag(blocks: &[&Csr<T>]) -> Csr<T>` |
+| fn | `Csr::sum_all` | `linalg/csr/assembly.rs:323` | `pub fn sum_all(mut parts: Vec<Csr<T>>) -> Csr<T>` —  Sum of matrices of one shape. Blocks of rows are merged on all cores; a row of the sum is a small merge of at most `parts.len()` |
+| fn | `Csr::symmetrized` | `linalg/csr/assembly.rs:344` | `pub fn symmetrized(&self) -> Csr<T>` —  Symmetrised copy `(A + A^T)/2`. |
+| fn | `Csr::conj` | `linalg/csr/assembly.rs:348` | `pub fn conj(&self) -> Csr<T>` —  Entrywise conjugate (identity for real matrices). |
+| fn | `Csr::real_part` | `linalg/csr/assembly.rs:355` | `pub fn real_part(&self) -> Csr<f64>` —  The real part of every entry (same pattern). |
+| fn | `Csr::is_real` | `linalg/csr/assembly.rs:359` | `pub fn is_real(&self) -> bool` —  All imaginary parts are exactly zero. |
 | enum | `DenseError` | `linalg/dense/mod.rs:18` | variants: `NoConvergence`, `NonFinite` |
 | struct | `Dense` | `linalg/dense/mod.rs:37` |  Column-major dense matrix with leading dimension equal to the row count. |
 | fn | `hermitian_eig` | `linalg/dense/mod.rs:125` | `pub fn hermitian_eig<T: FaerScalar>(a: &Dense<T>) -> Result<(Vec<f64>, Dense<T>), DenseError>` —  Eigendecomposition `A = U diag(w) Uᴴ` of a Hermitian matrix (only the lower triangle is |
@@ -662,14 +670,15 @@ classDiagram
 | fn | `read_matrix` | `linalg/mm.rs:139` | `pub fn read_matrix<T: Scalar, R: BufRead>(mut r: R) -> Result<Csr<T>, MmError>` —  Reads a coordinate-format matrix, expanding symmetric/skew/Hermitian storage. |
 | fn | `read_vectors` | `linalg/mm.rs:180` | `pub fn read_vectors<T: Scalar, R: BufRead>(mut r: R) -> Result<(Vec<T>, usize, usize), MmError>` —  Reads dense `array` data; returns `(column-major values, rows, cols)`. |
 | fn | `format_c64_list` | `linalg/mm.rs:208` | `pub fn format_c64_list(v: &[C64]) -> String` —  Convenience: complex eigenvalue lists as `re im` text lines (used by the bundle's |
-| const | `PAR_MIN_ELEMS` | `linalg/par.rs:15` | `usize` —  Minimum number of scalar elements touched by one kernel call before it is run in parallel. |
-| fn | `chunk_map` | `linalg/par.rs:24` | `pub fn chunk_map<R, F>(nchunks: usize, parallel: bool, f: F) -> Vec<R>` —  `f(0), f(1), …, f(nchunks-1)` collected in order, computed in parallel when `parallel`. |
-| fn | `for_chunks_mut` | `linalg/par.rs:38` | `pub fn for_chunks_mut<T, F>(data: &mut [T], chunk: usize, parallel: bool, f: F)` —  Applies `f(chunk_index, chunk)` to consecutive `chunk`-sized pieces of `data`. |
-| fn | `for_each_mut` | `linalg/par.rs:56` | `pub fn for_each_mut<X, F>(items: &mut [X], parallel: bool, f: F)` —  Applies `f` to every item, in parallel when `parallel`. The items are independent (typically disjoint |
-| fn | `worth_parallel` | `linalg/par.rs:72` | `pub fn worth_parallel(elems: usize) -> bool` —  Whether a kernel touching `elems` scalars should run in parallel (never with `NYX_THREADS=1`). |
-| struct | `RawCols` | `linalg/par.rs:84` |  Shared mutable access to disjoint row ranges of a column-major block (`ncols` columns of |
-| fn | `RawCols::new` | `linalg/par.rs:97` | `pub fn new(data: &'a mut [T], n: usize, ncols: usize) -> Self` |
-| fn | `RawCols::chunk_mut` | `linalg/par.rs:106` | `pub fn chunk_mut(&self, c: usize, start: usize, end: usize) -> &'a mut [T]` —  Mutable tile `start..end` of column `c` with release bounds checks. |
+| const | `PAR_MIN_ELEMS` | `linalg/par.rs:16` | `usize` —  Minimum number of scalar elements touched by one kernel call before it is run in parallel. |
+| const | `PAR_MIN_ELEMS` | `linalg/par.rs:19` | `usize` —  Lowered parallel threshold under Miri so small `n <= 32` tests exercise parallel `RawCols` tile paths. |
+| fn | `chunk_map` | `linalg/par.rs:28` | `pub fn chunk_map<R, F>(nchunks: usize, parallel: bool, f: F) -> Vec<R>` —  `f(0), f(1), …, f(nchunks-1)` collected in order, computed in parallel when `parallel`. |
+| fn | `for_chunks_mut` | `linalg/par.rs:42` | `pub fn for_chunks_mut<T, F>(data: &mut [T], chunk: usize, parallel: bool, f: F)` —  Applies `f(chunk_index, chunk)` to consecutive `chunk`-sized pieces of `data`. |
+| fn | `for_each_mut` | `linalg/par.rs:60` | `pub fn for_each_mut<X, F>(items: &mut [X], parallel: bool, f: F)` —  Applies `f` to every item, in parallel when `parallel`. The items are independent (typically disjoint |
+| fn | `worth_parallel` | `linalg/par.rs:76` | `pub fn worth_parallel(elems: usize) -> bool` —  Whether a kernel touching `elems` scalars should run in parallel (never with `NYX_THREADS=1`). |
+| struct | `RawCols` | `linalg/par.rs:88` |  Shared mutable access to disjoint row ranges of a column-major block (`ncols` columns of |
+| fn | `RawCols::new` | `linalg/par.rs:101` | `pub fn new(data: &'a mut [T], n: usize, ncols: usize) -> Self` |
+| fn | `RawCols::chunk_mut` | `linalg/par.rs:110` | `pub fn chunk_mut(&self, c: usize, start: usize, end: usize) -> &'a mut [T]` —  Mutable tile `start..end` of column `c` with release bounds checks. |
 | struct | `SplitMix64` | `linalg/rng.rs:6` |  |
 | fn | `random_vector` | `linalg/rng.rs:27` | `pub fn random_vector<T: Scalar>(n: usize, seed: u64) -> Vec<T>` —  Deterministic pseudo-random vector with entries in `[-1,1)` (real and imaginary parts for |
 | fn | `SplitMix64::new` | `linalg/rng.rs:9` | `pub fn new(seed: u64) -> Self` |

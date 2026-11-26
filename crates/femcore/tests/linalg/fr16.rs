@@ -131,14 +131,14 @@ fn diag_damped_1d_tridiag_accuracy() {
     f_amd.ordering = FillOrdering::Amd;
     f_amd.set_shift(C64::ZERO).unwrap();
     let mut x_amd = b.clone();
-    f_amd.solve_block_in_place(&mut x_amd, 1);
+    f_amd.solve_block_in_place(&mut x_amd, 1).unwrap();
     let r_amd = rel_residual(&t, &x_amd, &b);
 
     let mut f_nd = ShiftedFactorization::new(&t, None, Definiteness::General).unwrap();
     f_nd.ordering = FillOrdering::NestedDissection;
     f_nd.set_shift(C64::ZERO).unwrap();
     let mut x_nd = b.clone();
-    f_nd.solve_block_in_place(&mut x_nd, 1);
+    f_nd.solve_block_in_place(&mut x_nd, 1).unwrap();
     let r_nd = rel_residual(&t, &x_nd, &b);
 
     eprintln!(
@@ -173,8 +173,8 @@ fn ordering_controls_indefinite_direct_backend_and_matches_eigenvalues() {
     let shifted = Csr::axpby(1.0, &p.stiffness, -sigma, &p.mass);
     let rhs = random_vector::<f64>(n, 42);
     let (mut x_amd, mut x_nd) = (rhs.clone(), rhs.clone());
-    f_amd.solve_block_in_place(&mut x_amd, 1);
-    f_nd.solve_block_in_place(&mut x_nd, 1);
+    f_amd.solve_block_in_place(&mut x_amd, 1).unwrap();
+    f_nd.solve_block_in_place(&mut x_nd, 1).unwrap();
     assert!(rel_residual(&shifted, &x_amd, &rhs) < 1e-11);
     assert!(rel_residual(&shifted, &x_nd, &rhs) < 1e-11);
 
@@ -194,8 +194,8 @@ fn ordering_controls_indefinite_direct_backend_and_matches_eigenvalues() {
 
     let rhs_c = random_vector::<C64>(n, 43);
     let (mut xc_amd, mut xc_nd) = (rhs_c.clone(), rhs_c.clone());
-    fc_amd.solve_block_in_place(&mut xc_amd, 1);
-    fc_nd.solve_block_in_place(&mut xc_nd, 1);
+    fc_amd.solve_block_in_place(&mut xc_amd, 1).unwrap();
+    fc_nd.solve_block_in_place(&mut xc_nd, 1).unwrap();
     assert!(rel_residual(&a_cplx, &xc_amd, &rhs_c) < 1e-11);
     assert!(rel_residual(&a_cplx, &xc_nd, &rhs_c) < 1e-11);
 
@@ -392,7 +392,7 @@ fn ams_p2_jacobi_davidson_and_iterative_shift_invert_find_cavity_modes() {
     it_si.set_shift(sigma).unwrap();
     let rhs = random_vector::<f64>(p.stiffness.nrows(), 303);
     let mut x = rhs.clone();
-    it_si.solve_block_in_place(&mut x, 1);
+    it_si.solve_block_in_place(&mut x, 1).unwrap();
     let shifted = Csr::axpby(1.0, &p.stiffness, -sigma, &p.mass);
     let res = rel_residual(&shifted, &x, &rhs);
     assert!(res < 1e-8, "IterativeShiftInvertP2 res={res:e}");
@@ -443,7 +443,7 @@ fn benchmark_fr16_p2_nedelec_3d_backends() {
             let (ws1, priv1) = process_memory_mib();
             let mut x = rhs_r.clone();
             let ts = Instant::now();
-            f.solve_block_in_place(&mut x, 1);
+            f.solve_block_in_place(&mut x, 1).unwrap();
             let slv_s = ts.elapsed().as_secs_f64();
             let res = rel_residual(&shifted_r, &x, &rhs_r);
             let st = f.stats();
@@ -502,7 +502,7 @@ fn benchmark_fr16_p2_nedelec_3d_backends() {
             if ok {
                 let mut x = rhs_r.clone();
                 let ts = Instant::now();
-                f.solve_block_in_place(&mut x, 1);
+                f.solve_block_in_place(&mut x, 1).unwrap();
                 let slv_s = ts.elapsed().as_secs_f64();
                 let res = rel_residual(&shifted_r, &x, &rhs_r);
                 eprintln!(
@@ -541,7 +541,7 @@ fn benchmark_fr16_p2_nedelec_3d_backends() {
             let (ws1, priv1) = process_memory_mib();
             let mut x = rhs_c.clone();
             let ts = Instant::now();
-            f.solve_block_in_place(&mut x, 1);
+            f.solve_block_in_place(&mut x, 1).unwrap();
             let slv_s = ts.elapsed().as_secs_f64();
             let res = rel_residual(&shifted_c, &x, &rhs_c);
             let st = f.stats();

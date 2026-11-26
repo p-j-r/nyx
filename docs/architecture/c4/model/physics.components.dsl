@@ -11,7 +11,7 @@ envelope = component "Problem envelope" "The one shape every physics is given (P
     properties {
         "adr" "25, 41, 63"
         "code" "crates/nyx-physics/src: decode.rs, spec.rs, validate.rs"
-        "lines" "1566"
+        "lines" "1600"
         "codeDiagram" "4-code/physics/envelope.md"
     }
 }

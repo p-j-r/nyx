@@ -442,13 +442,13 @@ fn solve_rom_qep(rom: &CircuitRom, ports: &[RomPort], c_tot: &[Vec<f64>]) -> Res
         let k0 = t_mat[(i, i)].scale(s0);
         let f_re = k0.re * k0_to_hz;
         let f_im = k0.im * k0_to_hz;
-        if f_re > 1.0e3 {
+        if f_re.is_finite() && f_re > 1.0e3 {
             let kappa_hz = 2.0 * f_im.abs();
             let q_c = if kappa_hz > 1.0e-15 * f_re { f_re / kappa_hz } else { f64::INFINITY };
             cands.push(QepMode { f_re_hz: f_re, f_im_hz: f_im, q_c, kappa_hz });
         }
     }
-    cands.sort_by(|a, b| a.f_re_hz.partial_cmp(&b.f_re_hz).unwrap());
+    cands.sort_by(|a, b| a.f_re_hz.total_cmp(&b.f_re_hz));
 
     if !rom.modes.is_empty() && cands.len() > rom.modes.len() {
         let mut used = vec![false; cands.len()];
@@ -470,7 +470,7 @@ fn solve_rom_qep(rom: &CircuitRom, ports: &[RomPort], c_tot: &[Vec<f64>]) -> Res
                 picked.push(cands[k].clone());
             }
         }
-        picked.sort_by(|a, b| a.f_re_hz.partial_cmp(&b.f_re_hz).unwrap());
+        picked.sort_by(|a, b| a.f_re_hz.total_cmp(&b.f_re_hz));
         Ok(picked)
     } else if rom.r_static > 0 && rom.modes.is_empty() {
         Ok(cands.into_iter().filter(|m| m.f_re_hz < 50.0e9).collect())
@@ -931,7 +931,7 @@ fn extract_bbq_modes(
         }
     }
 
-    modes.sort_by(|a, b| a.f_m_hz.partial_cmp(&b.f_m_hz).unwrap());
+    modes.sort_by(|a, b| a.f_m_hz.total_cmp(&b.f_m_hz));
     modes
 }
 
@@ -1412,100 +1412,124 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
     }
 
     // Choose multi-port frequency-domain source: DrivenPortData (when present & no custom freqs_hz override on ROM) or CircuitRom synthesis
-    let use_rom_synthesis = rom_opt.is_some() && (driven_opt.is_none() || net_params.freqs_hz.is_some());
-
-    let (ports, freqs_hz, z0_ohm, z_mats, y_mats, s_mats) = if !use_rom_synthesis {
-        let drv = driven_opt.as_ref().unwrap();
-        for k in net_params.terminations_ohm.keys() {
-            if !drv.ports.iter().any(|p| p == k) {
-                return Err(Error::invalid(format!(
-                    "terminations_ohm port '{k}' does not match any port in {:?}",
-                    drv.ports
-                )));
-            }
+    enum NetworkSource<'a> {
+        Driven(&'a DrivenPortData),
+        Rom { rom: &'a CircuitRom, rports: &'a [RomPort] },
+    }
+    let source = if driven_opt.is_none() || net_params.freqs_hz.is_some() {
+        if let (Some(rom), Some(rports)) = (rom_opt.as_ref(), resolved_rom_ports.as_deref()) {
+            NetworkSource::Rom { rom, rports }
+        } else if let Some(drv) = driven_opt.as_ref() {
+            NetworkSource::Driven(drv)
+        } else {
+            return Err(Error::invalid("missing CircuitRom port definitions for ROM synthesis"));
         }
-        let n_f = drv.freqs_hz.len();
-        let p = drv.ports.len();
-        let mut z_list = Vec::with_capacity(n_f);
-        let mut y_list = Vec::with_capacity(n_f);
-        let mut s_list = Vec::with_capacity(n_f);
-        let mut z0_out = Vec::with_capacity(n_f);
+    } else if let Some(drv) = driven_opt.as_ref() {
+        NetworkSource::Driven(drv)
+    } else {
+        return Err(Error::invalid("missing DrivenPortData and CircuitRom sources"));
+    };
 
-        for k in 0..n_f {
-            let z_dense = pairs_to_dense(&drv.z_matrix[k]);
-            let y_dense = pairs_to_dense(&drv.y_matrix[k]);
-            let z0_src = drv.z0_ohm.get(k).or_else(|| drv.z0_ohm.first());
-            let mut z0_row_pairs = Vec::with_capacity(p);
-            let mut z0_re = Vec::with_capacity(p);
-            let mut has_term_override = false;
-            for (pi, p_name) in drv.ports.iter().enumerate() {
-                if let Some(&r_ov) = net_params.terminations_ohm.get(p_name) {
-                    z0_row_pairs.push([r_ov, 0.0]);
-                    z0_re.push(r_ov);
-                    has_term_override = true;
-                } else {
-                    let pair = z0_src.and_then(|r| r.get(pi)).copied().unwrap_or([50.0, 0.0]);
-                    z0_row_pairs.push(pair);
-                    z0_re.push(pair[0].max(1.0e-12));
+    let (ports, freqs_hz, z0_ohm, z_mats, y_mats, s_mats) = match source {
+        NetworkSource::Driven(drv) => {
+            for k in net_params.terminations_ohm.keys() {
+                if !drv.ports.iter().any(|p| p == k) {
+                    return Err(Error::invalid(format!(
+                        "terminations_ohm port '{k}' does not match any port in {:?}",
+                        drv.ports
+                    )));
                 }
             }
-            let s_dense =
-                if has_term_override { z_to_s_matrix(&z_dense, &z0_re) } else { pairs_to_dense(&drv.s_matrix[k]) };
-            z0_out.push(z0_row_pairs);
-            z_list.push(z_dense);
-            y_list.push(y_dense);
-            s_list.push(s_dense);
-        }
-        (drv.ports.clone(), drv.freqs_hz.clone(), z0_out, z_list, y_list, s_list)
-    } else {
-        let rom = rom_opt.as_ref().unwrap();
-        let rports = resolved_rom_ports.as_ref().unwrap();
-        let port_names: Vec<String> = rports.iter().map(|p| p.name.clone()).collect();
-        let p = port_names.len();
+            let n_f = drv.freqs_hz.len();
+            let p = drv.ports.len();
+            if drv.z_matrix.len() != n_f || drv.y_matrix.len() != n_f || drv.s_matrix.len() != n_f {
+                return Err(Error::invalid(format!(
+                    "driven port matrices length mismatch with freqs_hz (n_f={n_f}, z={}, y={}, s={})",
+                    drv.z_matrix.len(),
+                    drv.y_matrix.len(),
+                    drv.s_matrix.len()
+                )));
+            }
+            let mut z_list = Vec::with_capacity(n_f);
+            let mut y_list = Vec::with_capacity(n_f);
+            let mut s_list = Vec::with_capacity(n_f);
+            let mut z0_out = Vec::with_capacity(n_f);
 
-        // Synthesize on explicit `freqs_hz`, or auto-grid around QEP modes if BBQ / S21 / Touchstone was requested
-        let grid: Vec<f64> = if let Some(ref f_user) = net_params.freqs_hz {
-            f_user.clone()
-        } else if net_params.active_ports.is_some()
-            || net_params.s21_ports.is_some()
-            || net_params.touchstone_format.is_some()
-        {
-            if !qep_modes.is_empty() {
-                let f_lo = 0.6 * qep_modes.first().unwrap().f_re_hz;
-                let f_hi = 1.3 * qep_modes.last().unwrap().f_re_hz;
-                let n_auto = 251usize;
-                (0..n_auto).map(|k| f_lo + (f_hi - f_lo) * (k as f64) / ((n_auto - 1) as f64)).collect()
+            for k in 0..n_f {
+                let z_dense = pairs_to_dense(&drv.z_matrix[k]);
+                let y_dense = pairs_to_dense(&drv.y_matrix[k]);
+                let z0_src = drv.z0_ohm.get(k).or_else(|| drv.z0_ohm.first());
+                let mut z0_row_pairs = Vec::with_capacity(p);
+                let mut z0_re = Vec::with_capacity(p);
+                let mut has_term_override = false;
+                for (pi, p_name) in drv.ports.iter().enumerate() {
+                    if let Some(&r_ov) = net_params.terminations_ohm.get(p_name) {
+                        z0_row_pairs.push([r_ov, 0.0]);
+                        z0_re.push(r_ov);
+                        has_term_override = true;
+                    } else {
+                        let pair = z0_src.and_then(|r| r.get(pi)).copied().unwrap_or([50.0, 0.0]);
+                        z0_row_pairs.push(pair);
+                        z0_re.push(pair[0].max(1.0e-12));
+                    }
+                }
+                let s_dense =
+                    if has_term_override { z_to_s_matrix(&z_dense, &z0_re) } else { pairs_to_dense(&drv.s_matrix[k]) };
+                z0_out.push(z0_row_pairs);
+                z_list.push(z_dense);
+                y_list.push(y_dense);
+                s_list.push(s_dense);
+            }
+            (drv.ports.clone(), drv.freqs_hz.clone(), z0_out, z_list, y_list, s_list)
+        }
+        NetworkSource::Rom { rom, rports } => {
+            let port_names: Vec<String> = rports.iter().map(|p| p.name.clone()).collect();
+            let p = port_names.len();
+
+            // Synthesize on explicit `freqs_hz`, or auto-grid around QEP modes if BBQ / S21 / Touchstone was requested
+            let grid: Vec<f64> = if let Some(ref f_user) = net_params.freqs_hz {
+                f_user.clone()
+            } else if net_params.active_ports.is_some()
+                || net_params.s21_ports.is_some()
+                || net_params.touchstone_format.is_some()
+            {
+                if let (Some(first), Some(last)) = (qep_modes.first(), qep_modes.last()) {
+                    let f_lo = 0.6 * first.f_re_hz;
+                    let f_hi = 1.3 * last.f_re_hz;
+                    let n_auto = 251usize;
+                    (0..n_auto).map(|k| f_lo + (f_hi - f_lo) * (k as f64) / ((n_auto - 1) as f64)).collect()
+                } else {
+                    Vec::new()
+                }
             } else {
                 Vec::new()
+            };
+
+            let mut z0_re = Vec::with_capacity(p);
+            let mut z0_pairs_single = Vec::with_capacity(p);
+            for rp in rports {
+                let z0 = net_params.terminations_ohm.get(&rp.name).copied().or(rp.z0_ohm).unwrap_or(50.0);
+                z0_re.push(z0);
+                z0_pairs_single.push([z0, 0.0]);
             }
-        } else {
-            Vec::new()
-        };
 
-        let mut z0_re = Vec::with_capacity(p);
-        let mut z0_pairs_single = Vec::with_capacity(p);
-        for rp in rports {
-            let z0 = net_params.terminations_ohm.get(&rp.name).copied().or(rp.z0_ohm).unwrap_or(50.0);
-            z0_re.push(z0);
-            z0_pairs_single.push([z0, 0.0]);
+            let mut z_list = Vec::with_capacity(grid.len());
+            let mut y_list = Vec::with_capacity(grid.len());
+            let mut s_list = Vec::with_capacity(grid.len());
+            let mut z0_out = Vec::with_capacity(grid.len());
+
+            for &f_hz in &grid {
+                let omega = 2.0 * PI * f_hz;
+                let (z_m, y_m) = eval_rom_zy_at_omega(rom, &k_tot_rom, &m_tot_rom, &c_internal_rom, omega)
+                    .ok_or_else(|| Error::invalid(format!("CircuitRom Z/Y synthesis is singular at {f_hz} Hz")))?;
+                let s_m = z_to_s_matrix(&z_m, &z0_re);
+                z0_out.push(z0_pairs_single.clone());
+                z_list.push(z_m);
+                y_list.push(y_m);
+                s_list.push(s_m);
+            }
+            (port_names, grid, z0_out, z_list, y_list, s_list)
         }
-
-        let mut z_list = Vec::with_capacity(grid.len());
-        let mut y_list = Vec::with_capacity(grid.len());
-        let mut s_list = Vec::with_capacity(grid.len());
-        let mut z0_out = Vec::with_capacity(grid.len());
-
-        for &f_hz in &grid {
-            let omega = 2.0 * PI * f_hz;
-            let (z_m, y_m) = eval_rom_zy_at_omega(rom, &k_tot_rom, &m_tot_rom, &c_internal_rom, omega)
-                .ok_or_else(|| Error::invalid(format!("CircuitRom Z/Y synthesis is singular at {f_hz} Hz")))?;
-            let s_m = z_to_s_matrix(&z_m, &z0_re);
-            z0_out.push(z0_pairs_single.clone());
-            z_list.push(z_m);
-            y_list.push(y_m);
-            s_list.push(s_m);
-        }
-        (port_names, grid, z0_out, z_list, y_list, s_list)
     };
 
     // Validate active_ports and s21_ports against `ports`
@@ -1526,18 +1550,16 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
             }
         }
         out
-    } else if use_rom_synthesis && !freqs_hz.is_empty() {
-        resolved_rom_ports
-            .as_ref()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| is_nonlinear_port(p))
-            .map(|(i, _)| i)
-            .collect()
-    } else if !use_rom_synthesis && !net_params.terminations_ohm.is_empty() {
+    } else if !freqs_hz.is_empty() && matches!(source, NetworkSource::Rom { .. }) {
+        match source {
+            NetworkSource::Rom { rports, .. } => {
+                rports.iter().enumerate().filter(|(_, p)| is_nonlinear_port(p)).map(|(i, _)| i).collect()
+            }
+            NetworkSource::Driven(_) => Vec::new(),
+        }
+    } else if matches!(source, NetworkSource::Driven(_)) && !net_params.terminations_ohm.is_empty() {
         (0..ports.len()).filter(|&i| !net_params.terminations_ohm.contains_key(&ports[i])).collect()
-    } else if !use_rom_synthesis && ports.len() == 1 && net_params.s21_ports.is_none() {
+    } else if matches!(source, NetworkSource::Driven(_)) && ports.len() == 1 && net_params.s21_ports.is_none() {
         vec![0]
     } else {
         Vec::new()
@@ -1553,10 +1575,8 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
             if net_params.terminations_ohm.contains_key(&ports[i]) {
                 return true;
             }
-            if let Some(ref rports) = resolved_rom_ports {
-                if use_rom_synthesis {
-                    return rports[i].z0_ohm.is_some_and(|z| z.is_finite() && z > 0.0);
-                }
+            if let NetworkSource::Rom { rports, .. } = source {
+                return rports[i].z0_ohm.is_some_and(|z| z.is_finite() && z > 0.0);
             }
             true
         })
@@ -1566,9 +1586,7 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
         z0_ohm.iter().map(|row| row.iter().map(|pair| pair[0].max(1.0e-12)).collect()).collect();
 
     let bbq_modes = if !active_idx.is_empty() && freqs_hz.len() >= 2 {
-        if use_rom_synthesis {
-            let rom_ref = rom_opt.as_ref().unwrap();
-            let rports_ref = resolved_rom_ports.as_ref().unwrap();
+        if let NetworkSource::Rom { rom: rom_ref, rports: rports_ref } = source {
             let qep_hints: Vec<f64> = qep_modes.iter().map(|m| m.f_re_hz).collect();
             let z_loads_rom: Vec<f64> = term_idx
                 .iter()
@@ -1627,7 +1645,10 @@ pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<Netwo
         if freqs_hz.len() < 4 {
             return Err(Error::invalid("s21_ports circle fit requires at least 4 frequency points"));
         }
-        let rom_slice = if use_rom_synthesis { resolved_rom_ports.as_deref() } else { None };
+        let rom_slice = match source {
+            NetworkSource::Rom { rports, .. } => Some(rports),
+            NetworkSource::Driven(_) => None,
+        };
         let trace: Vec<[f64; 2]> = (0..freqs_hz.len())
             .map(|k| {
                 let sk = extract_terminated_sub_s(

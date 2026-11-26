@@ -342,7 +342,9 @@ fn parse_fock_trunc(params: &Value, n_modes: usize, default_per_mode: &[usize]) 
             }
             dims.push(d);
         }
-        let last = *dims.last().unwrap();
+        let Some(&last) = dims.last() else {
+            return Err(Error::invalid("fock_trunc array must not be empty"));
+        };
         while dims.len() < n_modes {
             dims.push(last);
         }
@@ -733,7 +735,7 @@ fn build_linear_cb_decomposition(
         let pos_modes: Vec<(f64, f64, Vec<f64>)> = all_tc
             .into_iter()
             .filter_map(|(lam, tc)| {
-                if lam > 0.0 {
+                if lam.is_finite() && lam > 0.0 {
                     let omega = lam.sqrt();
                     let freq = omega / (2.0 * PI);
                     (freq > 1.0e6).then_some((freq, omega, tc))
@@ -779,7 +781,7 @@ fn build_linear_cb_decomposition(
                     picked.push(pos_modes[k].clone());
                 }
             }
-            picked.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            picked.sort_by(|a, b| a.0.total_cmp(&b.0));
             for (_, omega, tc) in picked.into_iter().take(max_cav) {
                 omega_c_keep.push(omega);
                 t_c_keep.push(tc);
@@ -1340,7 +1342,7 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
     let port_f01_for_t1: Vec<f64> = (0..n_nl)
         .map(|j| {
             let best_m = (0..n_modes)
-                .max_by(|&m1, &m2| epr_rep.p_matrix[m1][j].partial_cmp(&epr_rep.p_matrix[m2][j]).unwrap())
+                .max_by(|&m1, &m2| epr_rep.p_matrix[m1][j].total_cmp(&epr_rep.p_matrix[m2][j]))
                 .unwrap_or(0);
             spec.f01_hz[best_m]
         })
@@ -1782,7 +1784,7 @@ impl PreparedPort1D {
                     }
                     let (evals, evecs) = if off == 0.0 {
                         let mut order: Vec<usize> = (0..n).collect();
-                        order.sort_by(|&a, &b| h_real[a * n + a].partial_cmp(&h_real[b * n + b]).unwrap());
+                        order.sort_by(|&a, &b| h_real[a * n + a].total_cmp(&h_real[b * n + b]));
                         let vals = order.iter().map(|&i| h_real[i * n + i]).collect();
                         let vecs = order
                             .iter()
@@ -2053,10 +2055,10 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             solved_ports.push(sp);
         }
 
-        let all_y_real = solved_ports.iter().all(|sp| sp.y_real.is_some());
-        let all_n_real = solved_ports.iter().all(|sp| sp.n_real.is_some());
+        let all_y: Option<Vec<&[f64]>> = solved_ports.iter().map(|sp| sp.y_real.as_deref()).collect();
+        let all_n: Option<Vec<&[f64]>> = solved_ports.iter().map(|sp| sp.n_real.as_deref()).collect();
 
-        if all_y_real {
+        if let Some(y_mats) = all_y {
             // Fast 100% real-symmetric Fluxonium path: n_j (x) i (a^dagger - a) = + y_j (x) (a^dagger - a)
             let mut h_real = vec![0.0; d_tot * d_tot];
             for idx in 0..d_tot {
@@ -2073,7 +2075,7 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             }
 
             for j in 0..n_ports {
-                let y_j = solved_ports[j].y_real.as_ref().unwrap();
+                let y_j = y_mats[j];
                 let (sj, dj) = (strides[j], dims[j]);
                 for m in 0..m_cav {
                     let g = g_jm[j][m];
@@ -2112,8 +2114,8 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                     if g.abs() <= 1e-12 {
                         continue;
                     }
-                    let y_j = solved_ports[j].y_real.as_ref().unwrap();
-                    let y_k = solved_ports[k].y_real.as_ref().unwrap();
+                    let y_j = y_mats[j];
+                    let y_k = y_mats[k];
                     let (sj, dj) = (strides[j], dims[j]);
                     let (sk, dk) = (strides[k], dims[k]);
                     for idx_r in 0..d_tot {
@@ -2147,7 +2149,7 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                 v * v
             });
             Ok((spec, flux_el_sq))
-        } else if all_n_real {
+        } else if let Some(n_mats) = all_n {
             // Fast 100% real-symmetric ChargePeriodic path under diagonal Fock gauge R_m = i^{a_m^dagger a_m}:
             // R_m^dagger i(a_m^dagger - a_m) R_m = +(a_m^dagger + a_m), preserving all Fock state probabilities!
             let mut h_real = vec![0.0; d_tot * d_tot];
@@ -2165,7 +2167,7 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             }
 
             for j in 0..n_ports {
-                let n_j = solved_ports[j].n_real.as_ref().unwrap();
+                let n_j = n_mats[j];
                 let (sj, dj) = (strides[j], dims[j]);
                 for m in 0..m_cav {
                     let g = g_jm[j][m];
@@ -2204,8 +2206,8 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                     if g.abs() <= 1e-12 {
                         continue;
                     }
-                    let n_j = solved_ports[j].n_real.as_ref().unwrap();
-                    let n_k = solved_ports[k].n_real.as_ref().unwrap();
+                    let n_j = n_mats[j];
+                    let n_k = n_mats[k];
                     let (sj, dj) = (strides[j], dims[j]);
                     let (sk, dk) = (strides[k], dims[k]);
                     for idx_r in 0..d_tot {
@@ -2261,15 +2263,16 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                 .map(|(j, sp)| {
                     let d = dims[j];
                     if let Some(ref nc) = sp.n_cplx {
-                        nc.clone()
+                        Ok(nc.clone())
                     } else if let Some(ref nr) = sp.n_real {
-                        Dense::from_fn(d, d, |r_i, c_i| C64::new(nr[r_i * d + c_i], 0.0))
+                        Ok(Dense::from_fn(d, d, |r_i, c_i| C64::new(nr[r_i * d + c_i], 0.0)))
+                    } else if let Some(ref y) = sp.y_real {
+                        Ok(Dense::from_fn(d, d, |r_i, c_i| C64::new(0.0, -y[r_i * d + c_i])))
                     } else {
-                        let y = sp.y_real.as_ref().unwrap();
-                        Dense::from_fn(d, d, |r_i, c_i| C64::new(0.0, -y[r_i * d + c_i]))
+                        Err(Error::invalid(format!("port {j} solver returned neither charge nor flux operator")))
                     }
                 })
-                .collect();
+                .collect::<Result<Vec<_>, Error>>()?;
 
             let cav_i_adag_a: Vec<Dense<C64>> = (0..m_cav)
                 .map(|m| {

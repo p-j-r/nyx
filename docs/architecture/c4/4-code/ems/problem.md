@@ -5,19 +5,19 @@ C4 level 4 (code) of the component **Typed problem** (`ems.problem`) in the cont
 > The typed ems problem the kernels read, decoded from the envelope.
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md), [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md)  
-**Size:** 1 file, 1156 lines.
+**Size:** 1 file, 1159 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/problem.rs` | 1156 |  |
+| `crates/nyx-ems/src/problem.rs` | 1159 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | linalg::csr::assembly, material, material::bcs, props | FilmModel, Materials, Periodic, Pml, PmlCoord, PmlDir, PmlProfile, TensorKind, bcs_surface_impedance, c +2 |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | linalg::csr::assembly, material, material::bcs, props, validate | FilmModel, Materials, Periodic, Pml, PmlCoord, PmlDir, PmlProfile, TensorKind, bcs_surface_impedance, c +3 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, decode, error, physics, spec | Ctx, Discretisation, Error, MaterialAssign, MixedDiscretisation, Params, Physics, ProblemSpec, TlsInterfaces, domain_names_by_label +3 |
 | [Physics adapter](./adapter.md) | crate root | Ems |
 | [Thin-film IBC and Josephson ROM](./ibc.md) | ibc | resolve_jj_l_and_ej |

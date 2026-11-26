@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of sms with fi
     properties {
         "adr" "42, 25, 68, 101, 129"
         "code" "crates/nyx-sms/src: lib.rs"
-        "lines" "666"
+        "lines" "670"
         "codeDiagram" "4-code/sms/adapter.md"
     }
 }
@@ -11,7 +11,7 @@ problem = component "Typed problem" "The typed sms problem the kernels read, dec
     properties {
         "adr" "42, 68, 101, 129"
         "code" "crates/nyx-sms/src: problem.rs"
-        "lines" "1044"
+        "lines" "1045"
         "codeDiagram" "4-code/sms/problem.md"
     }
 }
@@ -27,7 +27,7 @@ piezo = component "Piezoelectric kernel" "Coupled piezoelectric `(u, phi)` 2D/3D
     properties {
         "adr" "129, 106, 128"
         "code" "crates/nyx-sms/src: piezo.rs, piezo_asm.rs, piezo_driven.rs, piezo_mat.rs"
-        "lines" "6043"
+        "lines" "6047"
         "codeDiagram" "4-code/sms/piezo.md"
     }
 }

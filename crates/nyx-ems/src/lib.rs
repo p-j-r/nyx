@@ -506,13 +506,16 @@ impl Physics for Ems {
         let sp = nyx_physics::decode::Params::new(&spec.study.params, &sd.params);
         // a mode study resolves the wave at its frequency; the eigenfrequency studies find modes above the one they search around
         let (freq, headroom) = match spec.study.kind.as_str() {
-            "modes" | "bloch" => (sp.number("freq"), 1.0),
-            "cavity" | "axisymmetric_modes" => (sp.number("f_search"), 1.5),
+            "modes" | "bloch" => (sp.number("freq").unwrap_or(0.0), 1.0),
+            "cavity" | "axisymmetric_modes" => (sp.number("f_search").unwrap_or(0.0), 1.5),
             "driven" => {
                 let f_hi = sp
                     .optional_numbers("freqs_hz")
+                    .ok()
+                    .flatten()
                     .and_then(|fs| fs.into_iter().filter(|f| f.is_finite() && *f > 0.0).reduce(f64::max))
-                    .unwrap_or_else(|| sp.number("f_max"));
+                    .or_else(|| sp.number("f_max").ok())
+                    .unwrap_or(0.0);
                 (f_hi, 1.0)
             }
             _ => return empty,

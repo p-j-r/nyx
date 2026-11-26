@@ -5,7 +5,7 @@ One page per component, C4 level 4. [Component view](../../3-components/dfs.md) 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
 | [Physics adapter](./adapter.md) | 1 | 632 | 2 | 1 |
-| [Typed problem](./problem.md) | 1 | 873 | 29 | 7 |
+| [Typed problem](./problem.md) | 1 | 897 | 29 | 7 |
 | [Heat kernel](./heat.md) | 1 | 712 | 7 | 2 |
 | [Electrostatics kernel](./electro.md) | 3 | 3979 | 26 | 3 |
 | [Magnetostatics kernel](./magneto.md) | 1 | 2123 | 3 | 0 |

@@ -78,7 +78,9 @@ impl<T: FaerScalar> DirectSolver<T> {
     pub fn solve(&self, b: &[T]) -> Vec<T> {
         assert_eq!(b.len(), self.n);
         let mut x = b.to_vec();
-        self.fac.solve_block_in_place(&mut x, 1);
+        self.fac
+            .solve_block_in_place(&mut x, 1)
+            .expect("DirectSolver must be factored via set_shift before solving");
         x
     }
 
@@ -702,18 +704,24 @@ impl<T: FaerScalar> ParShiftInvert<'_, T> {
     fn solve_block(&self, y: &mut [T], nrhs: usize) {
         let n = self.fac.dim();
         if self.min_n == 0 || nrhs <= 1 || n < self.min_n {
-            self.fac.solve_block_in_place(&mut y[..n * nrhs], nrhs);
+            self.fac
+                .solve_block_in_place(&mut y[..n * nrhs], nrhs)
+                .expect("ParShiftInvert solver must be factored before apply");
             return;
         }
         // Always solve 1 column per call when column-parallel mode is enabled so `NYX_THREADS=1`
         // and `NYX_THREADS=N` execute the exact same triangular-solve kernel (`ADR 11`).
         if crate::par::threads() <= 1 {
             for chunk in y[..n * nrhs].chunks_mut(n) {
-                self.fac.solve_block_in_place(chunk, 1);
+                self.fac
+                    .solve_block_in_place(chunk, 1)
+                    .expect("ParShiftInvert solver must be factored before apply");
             }
         } else {
             y[..n * nrhs].par_chunks_mut(n).for_each(|chunk| {
-                self.fac.solve_block_in_place(chunk, 1);
+                self.fac
+                    .solve_block_in_place(chunk, 1)
+                    .expect("ParShiftInvert solver must be factored before apply");
             });
         }
     }
@@ -753,18 +761,24 @@ impl QepShiftInvert<'_> {
     fn solve_block(&self, rhs: &mut [C64], nrhs: usize) {
         let n = self.fac.dim();
         if self.min_n == 0 || nrhs <= 1 || n < self.min_n {
-            self.fac.solve_block_in_place(&mut rhs[..n * nrhs], nrhs);
+            self.fac
+                .solve_block_in_place(&mut rhs[..n * nrhs], nrhs)
+                .expect("QepShiftInvert solver must be factored before apply");
             return;
         }
         // Always solve 1 column per call when column-parallel mode is enabled so `NYX_THREADS=1`
         // and `NYX_THREADS=N` execute the exact same triangular-solve kernel (`ADR 11`).
         if crate::par::threads() <= 1 {
             for chunk in rhs[..n * nrhs].chunks_mut(n) {
-                self.fac.solve_block_in_place(chunk, 1);
+                self.fac
+                    .solve_block_in_place(chunk, 1)
+                    .expect("QepShiftInvert solver must be factored before apply");
             }
         } else {
             rhs[..n * nrhs].par_chunks_mut(n).for_each(|chunk| {
-                self.fac.solve_block_in_place(chunk, 1);
+                self.fac
+                    .solve_block_in_place(chunk, 1)
+                    .expect("QepShiftInvert solver must be factored before apply");
             });
         }
     }
@@ -1013,11 +1027,18 @@ impl<T: FaerScalar> ShiftedSolver<T> for IterativeShiftInvertP2<T> {
         Ok(())
     }
 
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), crate::linalg::direct::SolverError> {
+        use crate::linalg::direct::SolverError;
         use crate::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
-        let a = self.shifted.as_ref().expect("set_shift must succeed before solving");
-        let ams = self.ams.as_ref().expect("set_shift must succeed before solving");
+        let a = self.shifted.as_ref().ok_or(SolverError::NotFactored)?;
+        let ams = self.ams.as_ref().ok_or(SolverError::NotFactored)?;
         let n = self.dim();
+        let expected = n
+            .checked_mul(nrhs)
+            .ok_or(SolverError::InvalidArgument("rhs block size overflows usize"))?;
+        if rhs.len() < expected {
+            return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
+        }
         let mut gmres = Gmres::<T>::new(GmresOptions {
             tol: Tolerances { rtol: self.opts.rtol, atol: self.opts.atol, max_it: self.opts.max_it, ..Default::default() },
             restart: self.opts.restart.max(2),
@@ -1034,6 +1055,7 @@ impl<T: FaerScalar> ShiftedSolver<T> for IterativeShiftInvertP2<T> {
             col.copy_from_slice(&x);
         }
         self.solves.set(self.solves.get() + nrhs);
+        Ok(())
     }
 
     fn stats(&self) -> FactorStats {

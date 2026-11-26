@@ -520,10 +520,13 @@ impl Physics for Sms {
         let sp = nyx_physics::decode::Params::new(&spec.study.params, &sd.params);
         let f = if spec.study.kind == "driven" {
             sp.optional_numbers("freqs_hz")
+                .ok()
+                .flatten()
                 .and_then(|fs| fs.into_iter().filter(|f| f.is_finite() && *f > 0.0).reduce(f64::max))
-                .unwrap_or_else(|| sp.number("f_max"))
+                .or_else(|| sp.number("f_max").ok())
+                .unwrap_or(0.0)
         } else {
-            sp.number("f_search")
+            sp.number("f_search").unwrap_or(0.0)
         };
         if !(f > 0.0 && f.is_finite()) {
             return empty;
@@ -531,7 +534,8 @@ impl Physics for Sms {
         let Ok((names, m)) = nyx_physics::decode::materials_by_region(spec, library, None, &self.properties()) else {
             return empty;
         };
-        let inactive: Vec<String> = nyx_physics::decode::Params::new(&spec.params, &self.params()).names("inactive");
+        let inactive: Vec<String> =
+            nyx_physics::decode::Params::new(&spec.params, &self.params()).names("inactive").unwrap_or_default();
         let mut wavelengths = std::collections::BTreeMap::new();
         for (i, region) in names.iter().enumerate() {
             let label = i as i32 + 1;

@@ -5,19 +5,19 @@ C4 level 4 (code) of the component **Typed problem** (`dfs.problem`) in the cont
 > The typed dfs problem the kernels read, decoded from the ProblemSpec envelope.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md)  
-**Size:** 1 file, 873 lines.
+**Size:** 1 file, 897 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/problem.rs` | 873 |  |
+| `crates/nyx-dfs/src/problem.rs` | 897 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::bcs, props | FilmModel, LinearSolver, Materials, PmlDir, bcs_surface_impedance |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | material, material::bcs, props, validate | FilmModel, LinearSolver, Materials, PmlDir, bcs_surface_impedance, non_finite_token |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, decode, error, physics, spec | Ctx, Error, Params, Physics, ProblemSpec, TlsInterfaces, domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec |
 | [Physics adapter](./adapter.md) | crate root | Dfs |
 
@@ -140,7 +140,7 @@ classDiagram
 | struct | `Bc` | `problem.rs:210` | fields: `labels`, `kind` —  A condition on boundary numbers of the mesh. |
 | enum | `Study` | `problem.rs:216` | variants: `Electrostatic`, `HeatStationary`, `HeatTransient`, `Magnetostatic` |
 | struct | `Problem` | `problem.rs:244` | fields: `order`, `study`, `materials`, `domain_names`, `bcs`, `solver`, `tol`, `amg_line_smooth`, `formulation`, `singular_edges`, `richardson`, `tls_interfaces`, ... |
-| fn | `decode` | `problem.rs:526` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
+| fn | `decode` | `problem.rs:547` | `pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error>` —  Reads the envelope. The structural checks against the descriptors (`validate_spec`) are the engine's job; this resolves names and |
 | fn | `IeCoordKind::parse` | `problem.rs:28` | `pub fn parse(s: &str) -> Result<Self, String>` |
 | fn | `IeProfile::parse` | `problem.rs:52` | `pub fn parse(s: &str) -> Result<Self, String>` |
 | fn | `BcKind::name` | `problem.rs:153` | `pub fn name(&self) -> &'static str` |

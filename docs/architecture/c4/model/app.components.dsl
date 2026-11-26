@@ -43,7 +43,7 @@ headless = component "Scripts and batch" "Runs without a person at the window: s
     properties {
         "adr" "23, 89, 93, 123, 124, 130"
         "code" "crates/app/src: apicmd.rs, batch.rs, console.rs, matcmd.rs, pyscript.rs, runfile.rs, script.rs"
-        "lines" "1578"
+        "lines" "1607"
         "codeDiagram" "4-code/app/headless.md"
     }
 }

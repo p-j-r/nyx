@@ -3,7 +3,7 @@ featurelist = component "Feature list" "The serialisable feature list (single so
     properties {
         "adr" "2, 3, 63"
         "code" "crates/geom/src: error.rs, expr.rs, gds.rs, lib.rs, model.rs, print.rs"
-        "lines" "4416"
+        "lines" "4492"
         "codeDiagram" "4-code/geom/featurelist.md"
     }
 }
@@ -27,7 +27,7 @@ kernel3d = component "3D kernel" "Prismatic models as a layer stack, general pla
     properties {
         "adr" "3, 1"
         "code" "crates/geom/src: planar.rs, stack.rs, topo3.rs"
-        "lines" "2762"
+        "lines" "2766"
         "codeDiagram" "4-code/geom/kernel3d.md"
     }
 }

@@ -51,6 +51,11 @@ classDiagram
         +summary str
         +url Option~String~
     }
+    class ValidatedUrl {
+        <<struct>>
+        +url String
+        +host String
+    }
     class Engine {
         <<impl block>>
         +list_remote_materials(domain) Result
@@ -69,8 +74,10 @@ classDiagram
         +default_materials_folder() Option~PathBuf~
         +convert_to_toml(format, content, name, description, extends, source_url) Result
         +resolve_remote_url(format, target) Result
+        +validate_remote_url(url) Result
         +fetch_url_text(url) Result
         +fetch_url_text_with_api_key(url, api_key) Result
+        +validate_material_name(name) Result
         +default_name_from_target(target) String
     }
   }
@@ -96,8 +103,11 @@ classDiagram
 | fn | `default_materials_folder` | `material_fetch.rs:73` | `pub fn default_materials_folder() -> Option<PathBuf>` —  First writable `materials/` directory for CLI `--save` or GUI save-to-library toggles. |
 | fn | `convert_to_toml` | `material_fetch.rs:90` | `pub fn convert_to_toml( format: &str, content: &str, name: &str, description: Option<&str>, extends: Option<&str>, source_url: Option<&str>, ) -> Result<String, Error>` —  Converts raw external database text into validated `format = 1` material TOML text (`rii`, `aflow`, `mp`, `numbat`). |
 | fn | `resolve_remote_url` | `material_fetch.rs:104` | `pub fn resolve_remote_url(format: &str, target: &str) -> Result<String, Error>` —  Resolves a format + database coordinate into its HTTPS URL (for GUI hints or diagnostics). |
+| struct | `ValidatedUrl` | `material_fetch.rs:117` | fields: `url`, `host` |
+| fn | `validate_remote_url` | `material_fetch.rs:123` | `pub fn validate_remote_url(url: &str) -> Result<ValidatedUrl, Error>` —  Validates that `url` is a clean `https://` URL targeting an allowlisted remote material host (no userinfo, custom port, backslash, or path traversal). |
 | fn | `fetch_url_text` | `material_fetch.rs:200` | `pub fn fetch_url_text(url: &str) -> Result<String, Error>` —  Downloads a UTF-8 text payload over HTTPS using system `curl` (`--proto =https --max-redirs 0 --max-time 20`, 5 MiB cap). |
 | fn | `fetch_url_text_with_api_key` | `material_fetch.rs:206` | `pub fn fetch_url_text_with_api_key(url: &str, api_key: Option<&str>) -> Result<String, Error>` —  Downloads a UTF-8 text payload over HTTPS using system `curl` (`--proto =https --max-redirs 0 --max-time 20`, 5 MiB cap), |
+| fn | `validate_material_name` | `material_fetch.rs:261` | `pub fn validate_material_name(name: &str) -> Result<&str, Error>` |
 | fn | `default_name_from_target` | `material_fetch.rs:277` | `pub fn default_name_from_target(target: &str) -> String` —  Derives a safe material filename/identifier stem from a database entry path or query. |
 | fn | `Engine::list_remote_materials` | `material_fetch.rs:345` | `pub fn list_remote_materials(&self, domain: Option<&str>) -> Result<Value, Error>` —  Lists curated remote materials in `REMOTE_CATALOG`, optionally filtered by `domain` (`photonics`, `phononics`, `superconducting`, `all`). |
 | fn | `Engine::import_material` | `material_fetch.rs:375` | `pub fn import_material( &mut self, name: &str, format: &str, content: &str, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Converts raw database text (`rii`, `aflow`, `mp`, `numbat`), validates it against the library and adds/saves as requested. |

@@ -392,8 +392,33 @@ impl Problem {
                 }
             }
         }
+        if !self.tol.is_finite() {
+            return Err(format!("solver tolerance 'tol' is {}: it must be a finite number", self.tol));
+        }
+        if !self.freq.is_finite() {
+            return Err(format!("study parameter 'freq' is {}: it must be a finite number", self.freq));
+        }
+        if !self.adapt_rel_tol.is_finite() {
+            return Err(format!(
+                "study parameter 'adapt_rel_tol' is {}: it must be a finite number",
+                self.adapt_rel_tol
+            ));
+        }
+        if !self.adapt_growth.is_finite() {
+            return Err(format!("study parameter 'adapt_growth' is {}: it must be a finite number", self.adapt_growth));
+        }
         if !self.farfield_t_inf.is_finite() {
             return Err(format!("far_field ambient temperature t_inf is {}: it must be finite", self.farfield_t_inf));
+        }
+        for (&dom, &v) in &self.sheet_thickness_m {
+            if !v.is_finite() {
+                return Err(format!("sheet_thickness_m of boundary {dom} is {v}: it must be a finite number"));
+            }
+        }
+        for (&dom, &v) in &self.sheet_etch_depth_m {
+            if !v.is_finite() {
+                return Err(format!("sheet_etch_depth_m of boundary {dom} is {v}: it must be a finite number"));
+            }
         }
         for (i, bc) in self.bcs.iter().enumerate() {
             let vals: Vec<f64> = match &bc.kind {
@@ -505,17 +530,13 @@ impl Problem {
                 return Err("the study's end time is NaN or infinite".into());
             }
         }
-        if matches!(self.study, Study::Electrostatic)
-            && (!self.freq.is_finite() || !self.adapt_rel_tol.is_finite() || !self.adapt_growth.is_finite())
-        {
+        // Tensor data of anisotropic domains, PMLs, and TLS interface definitions: scan outside quoted strings
+        let text = format!("{:?} {:?} {:?}", m.aniso, m.pml, self.tls_interfaces);
+        if femcore::validate::non_finite_token(&text).is_some() {
             return Err(
-                "electrostatic study parameter (freq, adapt_rel_tol, or adapt_growth) is NaN or infinite".into()
+                "the problem description contains a NaN or infinite number (an anisotropic material, layer or interface)"
+                    .into(),
             );
-        }
-        // tensor data of anisotropic domains
-        let text = format!("{:?}", m.aniso);
-        if text.contains("NaN") || text.contains("inf") {
-            return Err("the problem description contains a NaN or infinite number in an anisotropic material".into());
         }
         Ok(())
     }
@@ -545,33 +566,33 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let mut farfield_t_inf = 293.15_f64;
     let study = match sd.kind.as_str() {
         "electrostatic" => {
-            formulation = sp.text("formulation");
-            singular_edges = sp.text("singular_edges");
-            richardson = sp.boolean("richardson");
-            let ap = sp.integer("adapt_passes");
+            formulation = sp.text("formulation")?;
+            singular_edges = sp.text("singular_edges")?;
+            richardson = sp.boolean("richardson")?;
+            let ap = sp.integer("adapt_passes")?;
             if ap < 1 {
                 return Err(Error::invalid("study 'electrostatic': parameter 'adapt_passes' must be >= 1"));
             }
             adapt_passes = ap as usize;
-            adapt_rel_tol = sp.number("adapt_rel_tol");
+            adapt_rel_tol = sp.number("adapt_rel_tol")?;
             if !(adapt_rel_tol.is_finite() && adapt_rel_tol > 0.0) {
                 return Err(Error::invalid("study 'electrostatic': parameter 'adapt_rel_tol' must be > 0"));
             }
-            let amc = sp.integer("adapt_min_converged_passes");
+            let amc = sp.integer("adapt_min_converged_passes")?;
             if amc < 1 {
                 return Err(Error::invalid(
                     "study 'electrostatic': parameter 'adapt_min_converged_passes' must be >= 1",
                 ));
             }
             adapt_min_converged_passes = amc as usize;
-            adapt_growth = sp.number("adapt_growth");
+            adapt_growth = sp.number("adapt_growth")?;
             if !(adapt_growth.is_finite() && adapt_growth > 1.0) {
                 return Err(Error::invalid("study 'electrostatic': parameter 'adapt_growth' must be > 1"));
             }
-            adapt_mode = sp.text("adapt_mode");
-            adapt_estimator = sp.text("adapt_estimator");
-            flux_bounds = sp.text("flux_bounds");
-            freq = sp.number("freq");
+            adapt_mode = sp.text("adapt_mode")?;
+            adapt_estimator = sp.text("adapt_estimator")?;
+            flux_bounds = sp.text("flux_bounds")?;
+            freq = sp.number("freq")?;
             if !(freq.is_finite() && freq >= 0.0) {
                 return Err(Error::invalid("study 'electrostatic': parameter 'freq' must be >= 0"));
             }
@@ -579,24 +600,27 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         }
         "heat_stationary" => Study::HeatStationary,
         "heat_transient" => Study::HeatTransient {
-            t_end: sp.number("t_end"),
-            n_out: sp.integer("n_out").max(0) as usize,
-            t0: sp.text("t0"),
+            t_end: sp.number("t_end")?,
+            n_out: sp.integer("n_out")?.max(0) as usize,
+            t0: sp.text("t0")?,
         },
-        "magnetostatic" => Study::Magnetostatic { formulation: sp.text("formulation") },
+        "magnetostatic" => Study::Magnetostatic { formulation: sp.text("formulation")? },
         other => return Err(Error::Unsupported(format!("dfs has no study '{other}'"))),
     };
     let kinds = dfs.bc_kinds();
     let mut bcs = vec![];
     for r in resolve_conditions(&spec.bcs, &kinds, ctx)? {
-        let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
+        let d = kinds
+            .iter()
+            .find(|k| k.kind == r.kind)
+            .ok_or_else(|| Error::Unsupported(format!("dfs has no condition '{}'", r.kind)))?;
         let p = Params::new(&r.params, &d.params);
         let kind = match r.kind.as_str() {
-            "potential" => BcKind::Potential(p.number("value")),
+            "potential" => BcKind::Potential(p.number("value")?),
             "ground" => BcKind::Ground,
-            "surface_charge" => BcKind::SurfaceCharge(p.number("density")),
+            "surface_charge" => BcKind::SurfaceCharge(p.number("density")?),
             "terminal" => {
-                let name = p.text("name").trim().to_string();
+                let name = p.text("name")?.trim().to_string();
                 if name.is_empty() {
                     return Err(Error::invalid("terminal condition requires a non-empty 'name'"));
                 }
@@ -604,7 +628,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             }
             "open" => {
                 let origin = if p.has("origin") {
-                    let v = p.vector("origin");
+                    let v = p.vector("origin")?;
                     if v.len() != 3 || v.iter().any(|x| !x.is_finite()) {
                         return Err(Error::invalid("open boundary 'origin' must be 3 finite numbers [x, y, z]"));
                     }
@@ -615,18 +639,18 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 BcKind::Open { origin }
             }
             "far_field" => {
-                let order_i = p.integer("order");
+                let order_i = p.integer("order")?;
                 if !(1..=2).contains(&order_i) {
                     return Err(Error::invalid(format!("far_field condition 'order' must be 1 or 2, got {order_i}")));
                 }
-                let decay_power = p.number("decay_power");
+                let decay_power = p.number("decay_power")?;
                 if !decay_power.is_finite() || decay_power <= 0.0 {
                     return Err(Error::invalid(format!(
                         "far_field condition 'decay_power' must be positive, got {decay_power}"
                     )));
                 }
                 let center = if p.has("center") {
-                    let cv = p.vector("center");
+                    let cv = p.vector("center")?;
                     if cv.len() != 3 || cv.iter().any(|x| !x.is_finite()) {
                         return Err(Error::invalid(
                             "far_field condition 'center' must be 3 finite numbers [cx, cy, cz]",
@@ -637,7 +661,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     None
                 };
                 if p.has("t_inf") {
-                    let t_val = p.number("t_inf");
+                    let t_val = p.number("t_inf")?;
                     if !t_val.is_finite() {
                         return Err(Error::invalid("far_field condition 't_inf' must be a finite number"));
                     }
@@ -646,13 +670,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 BcKind::FarField { order: order_i as usize, decay_power, center }
             }
             "infinite_element" => {
-                let coord = IeCoordKind::parse(&p.text("coord")).map_err(Error::invalid)?;
-                let profile = IeProfile::parse(&p.text("profile")).map_err(Error::invalid)?;
-                let x = parse_pml_dir(&p.text("x")).map_err(Error::invalid)?;
-                let y = parse_pml_dir(&p.text("y")).map_err(Error::invalid)?;
-                let z = parse_pml_dir(&p.text("z")).map_err(Error::invalid)?;
+                let coord = IeCoordKind::parse(&p.text("coord")?).map_err(Error::invalid)?;
+                let profile = IeProfile::parse(&p.text("profile")?).map_err(Error::invalid)?;
+                let x = parse_pml_dir(&p.text("x")?).map_err(Error::invalid)?;
+                let y = parse_pml_dir(&p.text("y")?).map_err(Error::invalid)?;
+                let z = parse_pml_dir(&p.text("z")?).map_err(Error::invalid)?;
                 let center = if p.has("center") {
-                    let cv = p.vector("center");
+                    let cv = p.vector("center")?;
                     if cv.len() != 3 || cv.iter().any(|v| !v.is_finite()) {
                         return Err(Error::invalid("infinite_element 'center' must be 3 finite numbers [cx, cy, cz]"));
                     }
@@ -660,7 +684,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 } else {
                     None
                 };
-                let ax_v = p.vector("axis");
+                let ax_v = p.vector("axis")?;
                 if ax_v.len() != 3 || ax_v.iter().any(|v| !v.is_finite()) {
                     return Err(Error::invalid("infinite_element 'axis' must be 3 finite numbers [ax, ay, az]"));
                 }
@@ -668,15 +692,15 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 if axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2] <= 1e-30 {
                     return Err(Error::invalid("infinite_element 'axis' must be a non-zero vector"));
                 }
-                let r_in = p.optional_number("r_in").filter(|&r| r > 0.0);
-                let thickness = p.optional_number("thickness").filter(|&t| t > 0.0);
-                let pole_dist = p.optional_number("pole_dist").filter(|&pd| pd > 0.0);
-                let decay = p.number("decay");
+                let r_in = p.optional_number("r_in")?.filter(|&r| r > 0.0);
+                let thickness = p.optional_number("thickness")?.filter(|&t| t > 0.0);
+                let pole_dist = p.optional_number("pole_dist")?.filter(|&pd| pd > 0.0);
+                let decay = p.number("decay")?;
                 if !decay.is_finite() || decay < 1.0 {
                     return Err(Error::invalid(format!("infinite_element 'decay' (chi) must be >= 1.0, got {decay}")));
                 }
                 let bounds_lo = if p.has("bounds_lo") {
-                    let v = p.vector("bounds_lo");
+                    let v = p.vector("bounds_lo")?;
                     if v.len() != 3 || v.iter().any(|x| !x.is_finite()) {
                         return Err(Error::invalid("infinite_element 'bounds_lo' must be 3 finite numbers [x, y, z]"));
                     }
@@ -685,7 +709,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     None
                 };
                 let bounds_hi = if p.has("bounds_hi") {
-                    let v = p.vector("bounds_hi");
+                    let v = p.vector("bounds_hi")?;
                     if v.len() != 3 || v.iter().any(|x| !x.is_finite()) {
                         return Err(Error::invalid("infinite_element 'bounds_hi' must be 3 finite numbers [x, y, z]"));
                     }
@@ -709,17 +733,17 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     bounds_hi,
                 })
             }
-            "temperature" => BcKind::Temperature(p.number("value")),
-            "flux" => BcKind::Flux(p.number("value")),
-            "convection" => BcKind::Convection { h: p.number("h"), text: p.number("t_ext") },
+            "temperature" => BcKind::Temperature(p.number("value")?),
+            "flux" => BcKind::Flux(p.number("value")?),
+            "convection" => BcKind::Convection { h: p.number("h")?, text: p.number("t_ext")? },
             "london_sheet" => {
-                let l_k_sq_given = p.number("L_k_sq");
-                let mat_name = p.text("material");
+                let l_k_sq_given = p.number("L_k_sq")?;
+                let mat_name = p.text("material")?;
                 let mat_trim = mat_name.trim();
                 let l_k_sq = if !mat_trim.is_empty() {
-                    let thickness = p.number("thickness");
-                    let temperature = p.number("temperature");
-                    let fm_str = p.text("film_model");
+                    let thickness = p.number("thickness")?;
+                    let temperature = p.number("temperature")?;
+                    let fm_str = p.text("film_model")?;
                     let film_model = FilmModel::parse(&fm_str)
                         .ok_or_else(|| Error::invalid(format!("unknown london_sheet film_model '{fm_str}'")))?;
                     let lib = ctx.library.as_ref().ok_or_else(|| {
@@ -743,12 +767,12 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 BcKind::LondonSheet { l_k_sq }
             }
             "current_terminal" => {
-                let name = p.text("name").trim().to_string();
+                let name = p.text("name")?.trim().to_string();
                 if name.is_empty() {
                     return Err(Error::invalid("current_terminal condition requires a non-empty 'name'"));
                 }
-                let current = p.number("current");
-                let dir_v = p.vector("direction");
+                let current = p.number("current")?;
+                let dir_v = p.vector("direction")?;
                 let direction = [
                     dir_v.first().copied().unwrap_or(1.0),
                     dir_v.get(1).copied().unwrap_or(0.0),
@@ -757,11 +781,11 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 BcKind::CurrentTerminal { name, current, direction }
             }
             "flux_loop" => {
-                let name = p.text("name").trim().to_string();
+                let name = p.text("name")?.trim().to_string();
                 if name.is_empty() {
                     return Err(Error::invalid("flux_loop condition requires a non-empty 'name'"));
                 }
-                BcKind::FluxLoop { name, flux_wb: p.number("flux_wb") }
+                BcKind::FluxLoop { name, flux_wb: p.number("flux_wb")? }
             }
             other => return Err(Error::Unsupported(format!("dfs has no condition '{other}'"))),
         };
@@ -825,13 +849,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     }
     let params = dfs.params();
     let pp = Params::new(&spec.params, &params);
-    let solver = match pp.text("solver").as_str() {
+    let solver = match pp.text("solver")?.as_str() {
         "direct" => LinearSolver::Direct,
         "iterative" => LinearSolver::Iterative,
         _ => LinearSolver::Auto,
     };
-    let tol = pp.number("tol");
-    let amg_line_smooth = pp.boolean("amg_line_smooth");
+    let tol = pp.number("tol")?;
+    let amg_line_smooth = pp.boolean("amg_line_smooth")?;
     let tls_ifaces = tls_interfaces_from_spec(spec, ctx);
     let tls_interfaces = (!tls_ifaces.is_empty()).then_some(tls_ifaces);
     let materials = materials_by_label(spec, ctx, &dfs.properties())?;

@@ -15,12 +15,12 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Adaptation operators](./adaptops.md) | 4 | 2526 | 53 | 14 |
 | [Adaptation drivers](./adaptdrive.md) | 4 | 721 | 22 | 9 |
 | [Error estimators](./estimators.md) | 4 | 2653 | 44 | 18 |
-| [Matrices and vectors](./lacore.md) | 18 | 4862 | 208 | 30 |
-| [Linear algebra driver](./ladriver.md) | 3 | 1432 | 44 | 19 |
-| [Direct solvers](./ladirect.md) | 6 | 4966 | 102 | 36 |
+| [Matrices and vectors](./lacore.md) | 18 | 5111 | 213 | 30 |
+| [Linear algebra driver](./ladriver.md) | 3 | 1454 | 44 | 19 |
+| [Direct solvers](./ladirect.md) | 6 | 5128 | 102 | 36 |
 | [Krylov solvers](./laksp.md) | 9 | 2131 | 53 | 25 |
-| [Eigensolvers](./laeigen.md) | 12 | 4692 | 95 | 36 (+11 not shown) |
-| [Preconditioners](./laprecond.md) | 8 | 4019 | 86 | 27 |
+| [Eigensolvers](./laeigen.md) | 12 | 4694 | 95 | 36 (+11 not shown) |
+| [Preconditioners](./laprecond.md) | 8 | 4112 | 86 | 27 |
 | [Time, nonlinear, sweeps](./laother.md) | 11 | 4859 | 110 | 33 |
 | [Finite-element basics](./fem.md) | 10 | 10398 | 236 | 36 |
 | [Material specification](./material.md) | 13 | 10179 | 251 | 36 (+8 not shown) |

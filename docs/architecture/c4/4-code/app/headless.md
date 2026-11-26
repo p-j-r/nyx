@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 > Runs without a person at the window: scripted runs with screenshots (--script driving ADR 124 shell and deterministic feedback waits), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
 
 **Decisions:** [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 89](../../../adr/0089-command-lists-are-a-front-end-checked-planned-and-run.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
-**Size:** 7 files, 1578 lines.
+**Size:** 7 files, 1607 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Scripts and batch** (`app.headless`) in the
 |---|---:|---|
 | `crates/app/src/apicmd.rs` | 71 |  |
 | `crates/app/src/batch.rs` | 58 |  |
-| `crates/app/src/console.rs` | 78 |  |
+| `crates/app/src/console.rs` | 107 |  |
 | `crates/app/src/matcmd.rs` | 559 |  |
 | `crates/app/src/pyscript.rs` | 55 |  |
 | `crates/app/src/runfile.rs` | 237 |  |
@@ -100,7 +100,7 @@ classDiagram
 | fn | `run` | `batch.rs:16` | `pub fn run(args: &[String]) -> Result<(), String>` |
 | fn | `wants_console` | `console.rs:10` | `pub fn wants_console(args: &[String]) -> bool` —  Whether the arguments ask for a command-line mode that prints (and so needs the console of the terminal). |
 | fn | `attach_parent` | `console.rs:17` | `pub fn attach_parent()` —  Joins the console of the parent process, when it has one, for the command-line modes. Never fails: without a console the output goes nowhere, |
-| fn | `attach_parent` | `console.rs:58` | `pub fn attach_parent()` |
+| fn | `attach_parent` | `console.rs:87` | `pub fn attach_parent()` |
 | type | `Exit` | `matcmd.rs:18` |  |
 | fn | `run` | `matcmd.rs:33` | `pub fn run(args: &[String]) -> Result<(), Exit>` |
 | fn | `spawn` | `pyscript.rs:11` | `pub fn spawn(script: PathBuf, project_json: String, csv: Option<String>, tx: Sender<(u64, Msg)>, ctx: egui::Context)` |

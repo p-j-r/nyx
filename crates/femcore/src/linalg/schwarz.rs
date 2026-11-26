@@ -299,7 +299,9 @@ impl<T: FaerScalar> Schwarz<T> {
         for (o, &g) in out.iter_mut().zip(&d.idx) {
             *o = r[g as usize];
         }
-        d.fac.solve_block_in_place(out, 1);
+        d.fac
+            .solve_block_in_place(out, 1)
+            .expect("Schwarz domain solver is always factored in construction");
     }
 }
 
@@ -342,7 +344,9 @@ impl<T: FaerScalar + Send + Sync> Preconditioner<T> for Schwarz<T> {
         if let Some(c) = &self.coarse {
             let mut rc = vec![T::ZERO; c.zt.nrows()];
             c.zt.spmv(r, &mut rc);
-            c.fac.solve_block_in_place(&mut rc, 1);
+            c.fac
+                .solve_block_in_place(&mut rc, 1)
+                .expect("Schwarz coarse solver is always factored in construction");
             let mut corr = vec![T::ZERO; self.n];
             c.z.spmv(&rc, &mut corr);
             for (zi, ci) in z.iter_mut().zip(&corr) {

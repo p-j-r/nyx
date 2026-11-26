@@ -82,7 +82,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/tests/gds.rs` | 114, 3, 131 | binary GDSII parser, IBM hex float, hierarchy, `PATH`, keyhole cutline, `TEXT` pin, and `GdsImportLimits`/ROI DoS tests |
 | `crates/geom/tests/arc_fitting.rs` | 121, 102, 114 | 1-DOF circular arc fitting (`Polygons::arc_tol` & `GdsImportOptions::arc_tol`) and `Curve::Circle` preservation tests |
 | `crates/geom/tests/thick_sheet_stack.rs` | 121, 102 | conformal finite-thickness metal (`thickness`) and substrate trench (`etch_depth`) 3D stack tests |
-| `crates/geom/tests/*` | 3 | |
+| `crates/geom/tests/{fuzz_gds,bvh}.rs` | 131, 114, 116, 3 | Phase 1 `bolero` GDSII fuzz target and `proptest` BVH brute-force equivalence suite |
+| `crates/geom/tests/*` | 3, 131 | |
 | `crates/geom/golden/*` | 10, 2 | |
 | `crates/geom/examples/*` | none | benchmarks and studies |
 | `crates/geom/*.md` | 2, 3 | |
@@ -185,6 +186,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/curved.rs` | 82 | a periodic dielectric sphere with `curved` on and off |
 | `crates/femcore/tests/geom_meshes.rs` | 2, 6 | |
 | `crates/femcore/tests/pml_curvilinear.rs` | 128, 52, 82 | verification of all 7 canonical PML topologies, zero-pyramid conformity, lockstep curved shells, ray-invariance guards, and thread determinism |
+| `crates/femcore/tests/{portable_kernels,vvuq_props}.rs` | 131, 11, 33 | `portable-kernels` `< 1e-13` differential parity and `proptest` mesh/Csr/formula invariants |
 | `crates/femcore/tests/*` | 9, 12 | physics tests: solid, solid_pml, anisotropic, common |
 | `crates/femcore/examples/fs_*.rs` | 8 | ported CLI tools |
 | `crates/femcore/examples/mesh_*.rs` | 7, 16 | mesher studies |
@@ -193,7 +195,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-storage/*` | 107, 62, 99, 131 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer with `max_solutions` & byte budgets, XDMF, sweep checkpoint |
 | `crates/nyx-store/*` | 14, 39, 130, 131 | JSON specs, settings (`scale_mode`, `zoom`), `.nys`/`.xdmf` archive rules, and the card function (39) |
 | `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124, 130 | colour tokens as data, the looks built from them (`weak_text_color`), the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
-| `crates/app/src/console.rs` | 123, 122 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles |
+| `crates/app/src/console.rs` | 123, 122, 131 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles (`// SAFETY:` audited) |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
 | `crates/app/src/{feedback,spans}.rs` | 92, 130 | the problem and size lines of an edit (`Feedback::is_busy`), the polarization thread, and the timing spans of the frame log |
 | `crates/app/src/{shell,wfview,sheets,dashboard}.rs` | 14, 23, 124, 130 | the workflow view: the one bar, the five tabs with the viewport always on, high-DPI scaling/persistence (`NYX_SCALE`, `scale_mode`), WSL workspace hint, responsive cards, non-overlapping toolbars |
@@ -203,6 +205,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-mcp/tests/{reset_session,multi_session}.rs` | 113, 94 | `reset_session` REPL global reset and isolated concurrent multi-session (`session`) MCP tests |
 | `crates/nyx-mcp/*` | 94, 97, 15, 113, 131 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels with bounded framing/sessions |
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
+| `.github/workflows/*` | 131, 20 | 3-tier VVUQ CI workflow (PR fast gate, full workspace + portable-kernels differential, Linux nightly Miri/Kani/bolero/cross-OS) |
+| `tools/vvuq_ci.*` | 131, 20 | local Linux/WSL and Windows PowerShell VVUQ 3-tier CI playbook runners |
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27, 107 | shared target directory (no `HDF5_DIR` C dependency) |
 | `crates/nyx-physics/src/decode.rs` | 41, 25, 109, 113 | typed parameters, inline tensor decoding (`PropValue`), and name resolution shared by every physics |
@@ -220,7 +224,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-dfs/tests/capacitance_qubit.rs` | 103 | multi-terminal capacitance matrix & magnetostatic inductance benchmarks (Test 1) |
 | `crates/nyx-dfs/tests/qcap_solvers.rs` | 115, 103 | vertical-line AMG Block-CG bit-determinism, quarter-point P2 rim edges, and `planar_bem` verification |
 | `crates/nyx-dfs/tests/open_boundaries_ie.rs` | 128, 120, 41 | 3-tier open-boundary verification (`heat_stationary` & `magneto` curl-Robin `far_field`, native `Quad`/`Prism`/`Hex` Rational & Exponential Infinite Elements, `heat_transient` guard) |
-| `crates/nyx-dfs/*` | 41, 25, 12, 9, 103, 115, 118, 120, 121 | diffusion: typed problem, multi-RHS electrostatics, Prager–Synge bounds, AC loss, planar BEM, magnetostatics, and heat kernels |
+| `crates/nyx-dfs/tests/finite_guard.rs` | 131, 41 | non-finite parameter, material, mesh, and BC guard tests for `nyx-dfs` |
+| `crates/nyx-dfs/*` | 41, 25, 12, 9, 103, 115, 118, 120, 121, 131 | diffusion: typed problem, multi-RHS electrostatics, Prager–Synge bounds, AC loss, planar BEM, magnetostatics, and heat kernels |
 | `crates/nyx-sms/tests/golden/*` | 10, 42 | the sms goldens (and `ring_model_axes`), moved unchanged from femcore |
 | `crates/nyx-sms/src/{piezo_mat,piezo_asm,piezo,piezo_driven}.rs` | 129, 42, 106, 128 | coupled piezoelectric `(u, phi)` constitutive condensation, simplex/mixed assembly, equilibrated direct / Schur Krylov-Schur / QEP / Schur-AMG Right-FGMRES static/eigen solvers, and driven multi-port `Y`/`Z`/`S` PROM sweep |
 | `crates/nyx-sms/src/{axisym,cross_section,waveguide}.rs` | 43, 42, 68, 69, 80, 101, 129 | bodies of revolution on their half-plane and 2.5D waveguide cross-sections (`exp(-j q y)`): library entries, `axisymmetric_eigenfrequency` and `modes` studies, piezoelectric 4-block extensions, axis regularity, cylindrical/planar PMLs, and mode scalars |
@@ -242,7 +247,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-ems/tests/driven_prom.rs` | 106, 127 | 3D driven PROM, waveport, BBQ admittance, and `FR-33` `blr`/`ams_fgmres` symbolic-reuse verification (Test 6) |
 | `crates/nyx-ems/src/mixed_ops.rs` | 128, 45, 9 | native mixed-cell Maxwell assemblers, Gauss-point curvilinear PML pullbacks, mixed ports/IBC/ROM, and `Ams`/`AmsP2` curl-curl drivers |
 | `crates/nyx-ems/tests/pml_mixed_curvilinear.rs` | 128, 45, 106 | native mixed-cell EM verification ($r=0$ spherical Bessel modes, $C_{4v}$ doublets, 2D Cartesian/Cylindrical reflection, `Ams`/`AmsP2`, driven `P_pml` PROM, Option B DOF & `LBL^H` speedup) |
-| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106, 109, 110, 125, 127, 128 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, Bloch, and driven kernels |
+| `crates/nyx-ems/tests/finite_guard.rs` | 131, 45 | non-finite parameter, material, mesh, and BC guard tests for `nyx-ems` |
+| `crates/nyx-ems/*` | 45, 25, 12, 9, 46, 67, 104, 106, 109, 110, 125, 127, 128, 131 | electromagnetic waves: typed problem, mode, complex-mode, axisymmetric, cavity, Bloch, and driven kernels |
 | `crates/nyx-analysis/src/capacitance.rs` | 103, 115, 118, 120, 121, 125, 126 | `capacitance_matrix` (Schur elimination, `Xmon`/`TransmonPocket` reduction, 3D `metal_thickness_m` outer-die guard, Prager–Synge Loewner brackets, AC conductance/$Q$, 3-level Stieltjes–Padé AMR extrapolation) and `inductance_matrix` |
 | `crates/nyx-analysis/src/view3d.rs` | 111, 99 | un-averaged 8-subtet P2 3D slices, cutaways, marching-tets isosurfaces, mesh views, and Bloch phase tiling |
 | `crates/nyx-analysis/src/network.rs` | 118, 105, 106 | unified `NetworkAnalysis` (`id: "network"`): companion QEP, ROM `Z/Y/S`, Schur BBQ, Taubin $S_{21}$ circle fit, Touchstone v1.1 |
@@ -255,7 +261,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-analysis/tests/{tls_benchmark,park2026_transmon_benchmark,fluxonium_benchmark}.rs` | 105 | quantitative cQED acceptance benchmarks (Tests 2, 4, 5) |
 | `crates/nyx-analysis/tests/squadds_smoke.rs` | 103, 105, 118, 120, 125 | PR CI smoke suite for TransmonCross Mode G2 + `far_field` + `I_edge` (`bug1`), DC-SQUID `Dissipator` sweep, and `MUNINN` 3D TLS |
 | `crates/nyx-analysis/src/piezo_resonator.rs` | 129, 118 | piezoelectric resonator mBVD 6-param fit, Schur-reduced multi-port admittance, phase-slope `Q_s`/`Q_p`, and IEEE `k_t^2`/`k_eff^2` |
-| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127, 129 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, piezo_resonator, 2D/3D mode figures) |
+| `crates/nyx-analysis/*` | 56, 25, 21, 99, 103, 105, 111, 115, 127, 129, 131 | analyses of results (polarization, capacitance/inductance, EPR, circuit Hamiltonian, TLS, piezo_resonator, 2D/3D mode figures) |
 | `crates/nyx-engine/tests/layering.rs` | 26, 107 | the layering table |
 | `crates/nyx-engine/tests/jobs.rs` | 85 | every long operation is a job: cancel tests per kind, the dropped job of a replaced project, the window never blocks |
 | `crates/nyx-engine/tests/queue.rs` | 87 | the queue: lanes, priority, round robin, ageing, supersede, hold, shared stages, order never changes a number |
@@ -303,7 +309,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-script/src/bin/nyx-script-worker.rs` | 93, 86 | the script worker program: Monty's worker mode, the only place the interpreter runs |
 | `crates/nyx-script/tests/resilience.rs` | 113, 93, 94 | per-turn suspension budget rollover, fatal turn recovery, `reset`, UTF-8 BOM, and dict-traced lambda tests |
 | `crates/nyx-script/tests/accuracy_features_script.rs` | 120, 121, 93 | Monty `.nys` script static check and execution of `AF-1..AF-6` electrostatic accuracy features |
-| `crates/nyx-script/{Cargo.toml,tests/script.rs,tests/trace.rs,tests/kernel.rs,tests/export.rs,tests/contract.rs}` | 94, 93, 90 | the nyx-script package, its tests (limits, the path guard, determinism, the static check, same numbers as plain commands) and the `script_api.v1` exemplar test |
+| `crates/nyx-script/{Cargo.toml,tests/script.rs,tests/trace.rs,tests/kernel.rs,tests/export.rs,tests/contract.rs,tests/fuzz_script_trace.rs}` | 94, 93, 90, 131 | the nyx-script package, its tests (limits, the path guard, determinism, the static check, same numbers as plain commands), `bolero` trace/formula/timeout fuzz target, and the `script_api.v1` exemplar test |
 | `crates/nyx-engine/src/path_guard.rs` | 93 | the path guard: file and folder arguments of commands kept inside one folder |
 | `crates/nyx-engine/tests/path_guard.rs` | 93 | the path guard: every path-like argument of the catalog is guarded, no command writes or reads outside the root |
 | `docs/scripting-samples/*` | 93 | a sample script (the strip sweep) |

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 > The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 3 files, 1566 lines.
+**Size:** 3 files, 1600 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-physics/src/decode.rs` | 1017 |  |
+| `crates/nyx-physics/src/decode.rs` | 1051 |  |
 | `crates/nyx-physics/src/spec.rs` | 114 |  |
 | `crates/nyx-physics/src/validate.rs` | 435 |  |
 
@@ -55,12 +55,12 @@ classDiagram
         <<struct>>
         +new(value, descs) Params
         +is_null(name) bool
-        +optional_number(name) Option~f64~
+        +optional_number(name) Result
         +has(name) bool
-        +number(name) f64
-        +integer(name) i64
-        +boolean(name) bool
-        +text(name) String
+        +number(name) Result
+        +integer(name) Result
+        +boolean(name) Result
+        +text(name) Result
         +more_4_methods()
     }
     class ResolvedBc {
@@ -142,26 +142,26 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Params` | `decode.rs:18` |  Typed access to the parameters of a study, a condition or the physics: a value that was given, else the default of the descriptor. |
-| fn | `materials_by_label` | `decode.rs:132` | `pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error>` —  The material properties of every region as numbers per domain label: a region name or pattern (`sapphire*`) can match several |
-| fn | `domain_names_by_label` | `decode.rs:441` | `pub fn domain_names_by_label(spec: &ProblemSpec, ctx: &Ctx) -> Result<std::collections::BTreeMap<i32, String>, Error>` —  Resolves each material assignment region key in `spec.materials` to its domain labels. |
-| fn | `tls_interface_from_material_name` | `decode.rs:456` | `pub fn tls_interface_from_material_name(name: &str, ctx: &Ctx) -> Option<TlsInterfaces>` —  Resolves `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters for a named material from `ctx.library`. |
-| fn | `tls_interfaces_from_spec` | `decode.rs:478` | `pub fn tls_interfaces_from_spec(spec: &ProblemSpec, ctx: &Ctx) -> TlsInterfaces` —  Resolves `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters from named/oriented domain materials in |
-| struct | `ResolvedBc` | `decode.rs:811` | fields: `kind`, `labels`, `applies`, `params` —  A condition of the problem with its selector resolved to numbers: boundary numbers when the descriptor says `Boundary`, domain |
-| fn | `resolve_conditions` | `decode.rs:819` | `pub fn resolve_conditions(bcs: &[BcSpec], kinds: &[BcDesc], ctx: &Ctx) -> Result<Vec<ResolvedBc>, Error>` —  Resolves the `on` selector of every condition. A selector that matches nothing is an error, naming the selector. |
-| fn | `materials_by_region` | `decode.rs:840` | `pub fn materials_by_region( spec: &ProblemSpec, library: Option<&std::sync::Arc<femcore::material::Library>>, wavelength: Option<f64>, props: &[PropDesc], ) -> Result<(Vec<String>, Materials), Error>` —  Names the regions a problem gives materials to, for the physics' `sizing`: region `i` of the result is label `i + 1` of the returned |
-| fn | `Params::new` | `decode.rs:24` | `pub fn new(value: &'a Value, descs: &'a [ParamDesc]) -> Params<'a>` |
-| fn | `Params::is_null` | `decode.rs:40` | `pub fn is_null(&self, name: &str) -> bool` —  True if the parameter key was explicitly passed with JSON `null`. |
-| fn | `Params::optional_number` | `decode.rs:46` | `pub fn optional_number(&self, name: &str) -> Option<f64>` —  Optional numeric parameter: returns `None` when explicitly passed as `null`, |
-| fn | `Params::has` | `decode.rs:55` | `pub fn has(&self, name: &str) -> bool` —  Whether the parameter was given with a non-null value in the problem (not defaulted). |
-| fn | `Params::number` | `decode.rs:59` | `pub fn number(&self, name: &str) -> f64` |
-| fn | `Params::integer` | `decode.rs:67` | `pub fn integer(&self, name: &str) -> i64` |
-| fn | `Params::boolean` | `decode.rs:75` | `pub fn boolean(&self, name: &str) -> bool` |
-| fn | `Params::text` | `decode.rs:84` | `pub fn text(&self, name: &str) -> String` —  Text or a choice. |
-| fn | `Params::vector` | `decode.rs:92` | `pub fn vector(&self, name: &str) -> Vec<f64>` |
-| fn | `Params::names` | `decode.rs:100` | `pub fn names(&self, name: &str) -> Vec<String>` |
-| fn | `Params::numbers` | `decode.rs:108` | `pub fn numbers(&self, name: &str) -> Vec<f64>` |
-| fn | `Params::optional_numbers` | `decode.rs:117` | `pub fn optional_numbers(&self, name: &str) -> Option<Vec<f64>>` —  Optional number-list parameter: returns `None` when explicitly passed as `null` or when the resolved list is empty. |
+| struct | `Params` | `decode.rs:17` |  Typed access to the parameters of a study, a condition or the physics: returns the given value or the descriptor default, |
+| fn | `materials_by_label` | `decode.rs:160` | `pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error>` —  The material properties of every region as numbers per domain label: a region name or pattern (`sapphire*`) can match several |
+| fn | `domain_names_by_label` | `decode.rs:469` | `pub fn domain_names_by_label(spec: &ProblemSpec, ctx: &Ctx) -> Result<std::collections::BTreeMap<i32, String>, Error>` —  Resolves each material assignment region key in `spec.materials` to its domain labels. |
+| fn | `tls_interface_from_material_name` | `decode.rs:484` | `pub fn tls_interface_from_material_name(name: &str, ctx: &Ctx) -> Option<TlsInterfaces>` —  Resolves `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters for a named material from `ctx.library`. |
+| fn | `tls_interfaces_from_spec` | `decode.rs:506` | `pub fn tls_interfaces_from_spec(spec: &ProblemSpec, ctx: &Ctx) -> TlsInterfaces` —  Resolves `[interfaces.{ma,ms,sa}]` TLS surface-loss parameters from named/oriented domain materials in |
+| struct | `ResolvedBc` | `decode.rs:838` | fields: `kind`, `labels`, `applies`, `params` —  A condition of the problem with its selector resolved to numbers: boundary numbers when the descriptor says `Boundary`, domain |
+| fn | `resolve_conditions` | `decode.rs:846` | `pub fn resolve_conditions(bcs: &[BcSpec], kinds: &[BcDesc], ctx: &Ctx) -> Result<Vec<ResolvedBc>, Error>` —  Resolves the `on` selector of every condition. A selector that matches nothing is an error, naming the selector. |
+| fn | `materials_by_region` | `decode.rs:867` | `pub fn materials_by_region( spec: &ProblemSpec, library: Option<&std::sync::Arc<femcore::material::Library>>, wavelength: Option<f64>, props: &[PropDesc], ) -> Result<(Vec<String>, Materials), Error>` —  Names the regions a problem gives materials to, for the physics' `sizing`: region `i` of the result is label `i + 1` of the returned |
+| fn | `Params::new` | `decode.rs:23` | `pub fn new(value: &'a Value, descs: &'a [ParamDesc]) -> Params<'a>` |
+| fn | `Params::is_null` | `decode.rs:36` | `pub fn is_null(&self, name: &str) -> bool` —  True if the parameter key was explicitly passed with JSON `null`. |
+| fn | `Params::optional_number` | `decode.rs:42` | `pub fn optional_number(&self, name: &str) -> Result<Option<f64>, Error>` —  Optional numeric parameter: returns `None` when explicitly passed as `null`, |
+| fn | `Params::has` | `decode.rs:51` | `pub fn has(&self, name: &str) -> bool` —  Whether the parameter was given with a non-null value in the problem (not defaulted). |
+| fn | `Params::number` | `decode.rs:55` | `pub fn number(&self, name: &str) -> Result<f64, Error>` |
+| fn | `Params::integer` | `decode.rs:64` | `pub fn integer(&self, name: &str) -> Result<i64, Error>` |
+| fn | `Params::boolean` | `decode.rs:73` | `pub fn boolean(&self, name: &str) -> Result<bool, Error>` |
+| fn | `Params::text` | `decode.rs:83` | `pub fn text(&self, name: &str) -> Result<String, Error>` —  Text or a choice. |
+| fn | `Params::vector` | `decode.rs:94` | `pub fn vector(&self, name: &str) -> Result<Vec<f64>, Error>` |
+| fn | `Params::names` | `decode.rs:110` | `pub fn names(&self, name: &str) -> Result<Vec<String>, Error>` |
+| fn | `Params::numbers` | `decode.rs:128` | `pub fn numbers(&self, name: &str) -> Result<Vec<f64>, Error>` |
+| fn | `Params::optional_numbers` | `decode.rs:145` | `pub fn optional_numbers(&self, name: &str) -> Result<Option<Vec<f64>>, Error>` —  Optional number-list parameter: returns `None` when explicitly passed as `null` or when the resolved list is empty. |
 | enum | `PropValue` | `spec.rs:16` | variants: `Scalar`, `Diag`, `Sym6`, `Matrix`, `Matrix3x6` —  A material property value given inline: a scalar, three diagonal components `[xx, yy, zz]`, six symmetric components `[xx, yy, zz, xy, xz, yz]`, a symmetric 3x3 tensor, or a 3x6 coupling matrix. |
 | enum | `MaterialAssign` | `spec.rs:27` | variants: `Named`, `Oriented`, `Props`, `PropsTensor` —  What the material of a region is. |
 | struct | `StudySpec` | `spec.rs:40` | fields: `kind`, `params` —  The study: a `kind` the physics lists in `studies()` and its parameters. |

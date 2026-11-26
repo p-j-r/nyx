@@ -39,7 +39,8 @@ const POLL: Duration = Duration::from_millis(20);
 /// Maximum duration accepted for script execution or job waits (24 hours), preventing host `Duration`/`Instant` panics.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(86_400);
 
-fn parse_timeout_secs(t: f64, field: &str) -> Result<Duration, String> {
+/// Parses a timeout in seconds into a [`Duration`] clamped to [`MAX_TIMEOUT`], rejecting non-finite or negative values.
+pub fn parse_timeout_secs(t: f64, field: &str) -> Result<Duration, String> {
     if !t.is_finite() || t < 0.0 {
         return Err(format!("`{field}` must be a finite non-negative number of seconds, got {t}"));
     }
@@ -286,22 +287,27 @@ pub struct Kernel {
     root_before: Option<Option<PathBuf>>,
 }
 
+/// Appends as much of `text` as fits within `cap` bytes of `out`, snapping down to a UTF-8 character boundary.
+pub fn push_bounded_output(out: &mut String, cap: usize, text: &str) {
+    let rem = cap.saturating_sub(out.len());
+    if rem > 0 {
+        let mut end = text.len().min(rem);
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end > 0 {
+            out.push_str(&text[..end]);
+        }
+    }
+}
+
 macro_rules! printer {
     ($k:expr) => {{
         let sink = $k.out.clone();
         let cap = $k.limits.output_bytes;
         on_print_sync(move |_stream, text| {
             let mut o = sink.lock().unwrap();
-            let rem = cap.saturating_sub(o.len());
-            if rem > 0 {
-                let mut end = text.len().min(rem);
-                while end > 0 && !text.is_char_boundary(end) {
-                    end -= 1;
-                }
-                if end > 0 {
-                    o.push_str(&text[..end]);
-                }
-            }
+            push_bounded_output(&mut o, cap, text);
         })
     }};
 }

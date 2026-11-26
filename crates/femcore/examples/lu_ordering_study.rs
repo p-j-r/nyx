@@ -58,7 +58,7 @@ fn study(name: &str, a: &Csr<C64>) {
     let st = f.stats();
     let mut x = b.clone();
     let ts = Instant::now();
-    f.solve_block_in_place(&mut x, 1);
+    f.solve_block_in_place(&mut x, 1).unwrap();
     println!(
         "{:<22} {:>12} {:>10.3} {:>10.3} {:>10.4} {:>10.1e}",
         "faer LU (colamd)",

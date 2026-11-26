@@ -11,7 +11,7 @@ kernel = component "Script kernel" "One Monty session in a worker process that o
     properties {
         "adr" "94, 93"
         "code" "crates/nyx-script/src: kernel.rs"
-        "lines" "768"
+        "lines" "774"
         "codeDiagram" "4-code/script/kernel.md"
     }
 }
@@ -27,7 +27,7 @@ tracing = component "Tracing of script functions" "A Python function given as a 
     properties {
         "adr" "90, 93"
         "code" "crates/nyx-script/src: trace.rs"
-        "lines" "417"
+        "lines" "419"
         "codeDiagram" "4-code/script/tracing.md"
     }
 }

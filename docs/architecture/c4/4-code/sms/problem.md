@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Typed problem** (`sms.problem`) in the cont
 > The typed sms problem the kernels read, decoded from the envelope.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 68](../../../adr/0068-the-axisymmetric-solid-gets-a-study.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md), [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md)  
-**Size:** 1 file, 1044 lines.
+**Size:** 1 file, 1045 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/problem.rs` | 1044 |  |
+| `crates/nyx-sms/src/problem.rs` | 1045 |  |
 
 ## What it uses
 

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Streaming HDF5 reader** (`storage.reader`) 
 > Bounded-memory streaming reader over hdf5_pure::File::open_streaming: checked_mul read-budget guards, O(1) mode-header scan, mesh reader (with optional curved edges), and transparent single-mode cell-field slicing across L2/L3 packed 5D and legacy L1/v3 files.
 
 **Decisions:** [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md), [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md)  
-**Size:** 1 file, 1099 lines.
+**Size:** 1 file, 1245 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-storage/src/reader.rs` | 1099 |  |
+| `crates/nyx-storage/src/reader.rs` | 1245 |  |
 
 ## What it uses
 
@@ -92,21 +92,21 @@ classDiagram
 | struct | `NyxSolutionData` | `reader.rs:48` | fields: `eig_re`, `eig_im`, `label`, `cell_fields`, `fields_order_json`, `fields`, `viz_fields` —  Per-solution data in a legacy `nyx-results` v3 file. |
 | struct | `NyxV3Summary` | `reader.rs:63` | fields: `format`, `version`, `writer`, `processes`, `project_bytes`, `mesh_cell_labels`, `mesh_cells_shape`, `mesh_cells`, `mesh_facet_labels`, `mesh_facets_shape`, `mesh_facets`, `mesh_points_shape`, ... —  Complete representation of a `nyx-results` v3 file for Gate 2 (`EC-01`) & Gate 3 (`EC-02`) 0-ULP verification. |
 | struct | `NyxReader` | `reader.rs:204` |  Bounded-memory streaming HDF5 reader for `nyx-results` files (Layouts L1, L2, and L3). |
-| fn | `fuzz_walk_untrusted` | `reader.rs:921` | `pub fn fuzz_walk_untrusted(bytes: &[u8], budget: ReadBudgetConfig) -> Result<usize>` —  Walks an untrusted HDF5 byte buffer enforcing [`ReadBudgetConfig`] (`checked_mul` byte ceiling |
+| fn | `fuzz_walk_untrusted` | `reader.rs:985` | `pub fn fuzz_walk_untrusted(bytes: &[u8], budget: ReadBudgetConfig) -> Result<usize>` —  Walks an untrusted HDF5 byte buffer enforcing [`ReadBudgetConfig`] (`checked_mul` byte ceiling |
 | fn | `NyxV3Summary::verify_0_ulp` | `reader.rs:96` | `pub fn verify_0_ulp(&self, expected: &Self, check_viz_links: bool) -> Result<()>` —  Verifies exact 0-ULP (`to_bits()`) bitwise equality against another [`NyxV3Summary`]. |
 | fn | `NyxReader::open` | `reader.rs:212` | `pub fn open(path: &Path, budget: ReadBudgetConfig) -> Result<Self>` —  Opens an `.h5` file in streaming (`pread`) mode without buffering datasets into RAM. |
 | fn | `NyxReader::from_bytes` | `reader.rs:219` | `pub fn from_bytes(bytes: Vec<u8>, budget: ReadBudgetConfig) -> Result<Self>` —  Opens an in-memory `.h5` image with [`ReadBudgetConfig`] protection (used by untrusted fuzzing). |
 | fn | `NyxReader::budget` | `reader.rs:226` | `pub fn budget(&self) -> ReadBudgetConfig` —  Configured read budget for dataset and group traversal operations. |
 | fn | `NyxReader::file` | `reader.rs:231` | `pub fn file(&self) -> &File` —  Underlying `hdf5-pure` [`File`] handle. |
-| fn | `NyxReader::check_dataset_budget` | `reader.rs:251` | `pub fn check_dataset_budget(&self, ds: &Dataset, elem_bytes: u64) -> Result<u64>` —  Enforces [`ReadBudgetConfig::max_dataset_bytes`] using checked multiplication across `ds.shape()`. |
-| fn | `NyxReader::read_raw_checked` | `reader.rs:314` | `pub fn read_raw_checked(&self, ds: &Dataset) -> Result<Vec<u8>>` —  Reads raw dataset bytes only after checking datatype size and dataspace dimensions against [`ReadBudgetConfig`]. |
-| fn | `NyxReader::scan_mode_headers` | `reader.rs:323` | `pub fn scan_mode_headers(&self, physics: &str) -> Result<Vec<ModeHeader>>` —  Fast O(1) metadata scan of eigenmode headers for `physics` (`"ems"`, `"sms"`, etc.). |
-| fn | `NyxReader::scan_mode_headers_with_budget` | `reader.rs:329` | `pub fn scan_mode_headers_with_budget(&self, physics: &str, total_bytes: &mut u64) -> Result<Vec<ModeHeader>>` —  Same as [`Self::scan_mode_headers`] while charging cumulative bytes against `total_bytes`. |
-| fn | `NyxReader::read_mesh` | `reader.rs:396` | `pub fn read_mesh(&self) -> Result<MeshData>` —  Reads `/mesh` topology, connectivity, coordinates, and optional curved-edge geometry (`edge_node_pairs`, `edge_node_points`). |
-| fn | `NyxReader::read_packed_components_meta` | `reader.rs:499` | `pub fn read_packed_components_meta(&self, physics: &str) -> Result<Option<Vec<PackedComponentMeta>>>` —  Reads `/results/<physics>/cell_fields_meta` component descriptors if present. |
-| fn | `NyxReader::packed_logical_shape` | `reader.rs:512` | `pub fn packed_logical_shape(&self, physics: &str) -> Result<Option<[usize` —  Returns the logical 5D shape `[M, C, N_c, N_v, 2]` of `/results/<physics>/cell_fields_packed` |
-| fn | `NyxReader::read_mode_cell_fields` | `reader.rs:560` | `pub fn read_mode_cell_fields(&self, physics: &str, mode_idx: usize) -> Result<Vec<f64>>` —  Bounded-memory single-mode slice reader (Gate 4 `EC-09` & `BM-2`). |
-| fn | `NyxReader::read_mode_cell_fields_with_budget` | `reader.rs:566` | `pub fn read_mode_cell_fields_with_budget( &self, physics: &str, mode_idx: usize, total_bytes: &mut u64, ) -> Result<Vec<f64>>` —  Same as [`Self::read_mode_cell_fields`] while charging cumulative bytes against `total_bytes`. |
-| fn | `NyxReader::read_nyx_v3_summary` | `reader.rs:678` | `pub fn read_nyx_v3_summary(&self, read_viz_links: bool) -> Result<NyxV3Summary>` —  Reads the complete `nyx-results` v3 structure for the first alphabetically sorted physics group under `/results`. |
-| fn | `NyxReader::read_nyx_v3_summary_for_physics` | `reader.rs:687` | `pub fn read_nyx_v3_summary_for_physics(&self, physics: &str, read_viz_links: bool) -> Result<NyxV3Summary>` —  Reads the complete `nyx-results` v3 structure for a specific `physics` group under `/results`. |
-| fn | `NyxReader::read_nyx_v3_summary_for_physics_with_budget` | `reader.rs:693` | `pub fn read_nyx_v3_summary_for_physics_with_budget( &self, physics: &str, read_viz_links: bool, total_bytes: &mut u64, ) -> Result<NyxV3Summary>` —  Same as [`Self::read_nyx_v3_summary_for_physics`] while charging cumulative bytes against `total_bytes`. |
+| fn | `NyxReader::check_dataset_budget` | `reader.rs:240` | `pub fn check_dataset_budget(&self, ds: &Dataset, elem_bytes: u64) -> Result<u64>` —  Enforces [`ReadBudgetConfig::max_dataset_bytes`] using checked multiplication across `ds.shape()`. |
+| fn | `NyxReader::read_raw_checked` | `reader.rs:269` | `pub fn read_raw_checked(&self, ds: &Dataset) -> Result<Vec<u8>>` —  Reads raw dataset bytes only after checking datatype size and dataspace dimensions against [`ReadBudgetConfig`]. |
+| fn | `NyxReader::scan_mode_headers` | `reader.rs:278` | `pub fn scan_mode_headers(&self, physics: &str) -> Result<Vec<ModeHeader>>` —  Fast O(1) metadata scan of eigenmode headers for `physics` (`"ems"`, `"sms"`, etc.). |
+| fn | `NyxReader::scan_mode_headers_with_budget` | `reader.rs:284` | `pub fn scan_mode_headers_with_budget(&self, physics: &str, total_bytes: &mut u64) -> Result<Vec<ModeHeader>>` —  Same as [`Self::scan_mode_headers`] while charging cumulative bytes against `total_bytes`. |
+| fn | `NyxReader::read_mesh` | `reader.rs:351` | `pub fn read_mesh(&self) -> Result<MeshData>` —  Reads `/mesh` topology, connectivity, coordinates, and optional curved-edge geometry (`edge_node_pairs`, `edge_node_points`). |
+| fn | `NyxReader::read_packed_components_meta` | `reader.rs:454` | `pub fn read_packed_components_meta(&self, physics: &str) -> Result<Option<Vec<PackedComponentMeta>>>` —  Reads `/results/<physics>/cell_fields_meta` component descriptors if present. |
+| fn | `NyxReader::packed_logical_shape` | `reader.rs:467` | `pub fn packed_logical_shape(&self, physics: &str) -> Result<Option<[usize` —  Returns the logical 5D shape `[M, C, N_c, N_v, 2]` of `/results/<physics>/cell_fields_packed` |
+| fn | `NyxReader::read_mode_cell_fields` | `reader.rs:497` | `pub fn read_mode_cell_fields(&self, physics: &str, mode_idx: usize) -> Result<Vec<f64>>` —  Bounded-memory single-mode slice reader (Gate 4 `EC-09` & `BM-2`). |
+| fn | `NyxReader::read_mode_cell_fields_with_budget` | `reader.rs:503` | `pub fn read_mode_cell_fields_with_budget( &self, physics: &str, mode_idx: usize, total_bytes: &mut u64, ) -> Result<Vec<f64>>` —  Same as [`Self::read_mode_cell_fields`] while charging cumulative bytes against `total_bytes`. |
+| fn | `NyxReader::read_nyx_v3_summary` | `reader.rs:585` | `pub fn read_nyx_v3_summary(&self, read_viz_links: bool) -> Result<NyxV3Summary>` —  Reads the complete `nyx-results` v3 structure for the first alphabetically sorted physics group under `/results`. |
+| fn | `NyxReader::read_nyx_v3_summary_for_physics` | `reader.rs:594` | `pub fn read_nyx_v3_summary_for_physics(&self, physics: &str, read_viz_links: bool) -> Result<NyxV3Summary>` —  Reads the complete `nyx-results` v3 structure for a specific `physics` group under `/results`. |
+| fn | `NyxReader::read_nyx_v3_summary_for_physics_with_budget` | `reader.rs:600` | `pub fn read_nyx_v3_summary_for_physics_with_budget( &self, physics: &str, read_viz_links: bool, total_bytes: &mut u64, ) -> Result<NyxV3Summary>` —  Same as [`Self::read_nyx_v3_summary_for_physics`] while charging cumulative bytes against `total_bytes`. |

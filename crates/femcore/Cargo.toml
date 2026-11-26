@@ -21,6 +21,8 @@ toml = { version = "1", features = ["preserve_order"] }
 # Krylov-Schur eigensolver through faer GEMM, which is much faster but picks FMA/blocking by CPU, so its last bits
 # can differ between machines (never between thread counts).
 portable-kernels = []
+[dev-dependencies]
+proptest = "1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

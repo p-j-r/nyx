@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **cQED quantization and TLS participation** (
 > KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, `NetworkAnalysis`, and edge-regularized 3D TLS participation ratios.
 
 **Decisions:** [ADR 105](../../../adr/0105-kicq-epr-craig-bampton-quantization-and-tls-participation.md), [ADR 118](../../../adr/0118-cqed-cavity-driven-open-robin-network-bbq-and-squid.md)  
-**Size:** 4 files, 7358 lines.
+**Size:** 4 files, 7382 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-analysis/src/epr.rs` | 956 |  |
-| `crates/nyx-analysis/src/hamiltonian.rs` | 2728 |  |
-| `crates/nyx-analysis/src/network.rs` | 1970 |  |
+| `crates/nyx-analysis/src/hamiltonian.rs` | 2731 |  |
+| `crates/nyx-analysis/src/network.rs` | 1991 |  |
 | `crates/nyx-analysis/src/tls.rs` | 1704 |  |
 
 ## What it uses
@@ -276,9 +276,9 @@ classDiagram
 | struct | `HamiltonianReport` | `hamiltonian.rs:77` | fields: `basis`, `hilbert_dim`, `subsystems`, `dims`, `f01_hz`, `f12_hz`, `f02_hz`, `alpha_hz`, `chi_matrix_hz`, `eigenvalues_hz`, `min_overlap`, `elapsed_s`, ... —  Typed output of [`hamiltonian`] and [`hamiltonian_with_params`]. |
 | fn | `hamiltonian_applies` | `hamiltonian.rs:129` | `pub fn hamiltonian_applies(result: &SolveResult) -> bool` —  True when `result` carries a [`CircuitRom`] with at least one nonlinear port (`lumped_jj`). |
 | fn | `resolve_sweep_port` | `hamiltonian.rs:135` | `pub fn resolve_sweep_port(ports: &[RomPort], params: &Value) -> Result<usize, Error>` —  Resolves `"sweep_port"` in `params` (0-based integer index or port `name` string) against `ports` |
-| fn | `hamiltonian` | `hamiltonian.rs:2413` | `pub fn hamiltonian(result: &SolveResult) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with default parameters (`basis = "normal_fock"`). |
-| fn | `hamiltonian_with_params` | `hamiltonian.rs:2418` | `pub fn hamiltonian_with_params(result: &SolveResult, params: &Value) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with optional JSON `params`. |
-| struct | `HamiltonianAnalysis` | `hamiltonian.rs:2430` |  Full cosine-potential circuit quantization analysis behind the [`Analysis`] trait (`id: "hamiltonian"`). |
+| fn | `hamiltonian` | `hamiltonian.rs:2416` | `pub fn hamiltonian(result: &SolveResult) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with default parameters (`basis = "normal_fock"`). |
+| fn | `hamiltonian_with_params` | `hamiltonian.rs:2421` | `pub fn hamiltonian_with_params(result: &SolveResult, params: &Value) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with optional JSON `params`. |
+| struct | `HamiltonianAnalysis` | `hamiltonian.rs:2433` |  Full cosine-potential circuit quantization analysis behind the [`Analysis`] trait (`id: "hamiltonian"`). |
 | fn | `FluxSweepPoint::to_json` | `hamiltonian.rs:56` | `pub fn to_json(&self) -> Value` |
 | fn | `HamiltonianReport::to_json` | `hamiltonian.rs:99` | `pub fn to_json(&self) -> Value` |
 | struct | `QepMode` | `network.rs:36` | fields: `f_re_hz`, `f_im_hz`, `q_c`, `kappa_hz` —  Complex eigenmode extracted from the `2r x 2r` damped `CircuitRom` quadratic eigenvalue problem. |
@@ -289,7 +289,7 @@ classDiagram
 | fn | `schur_reduced_admittance` | `network.rs:611` | `pub(crate) fn schur_reduced_admittance( y_full: &Dense<C64>, z_full: &Dense<C64>, y_is_exact: bool, active_idx: &[usize], term_idx: &[usize], z_load_ohm: &[f64], ) -> Dense<C64>` —  Computes `Y_red = Y_AA - Y_AT (Y_TT + Y_load)^-1 Y_TA`, using the algebraically identical dual |
 | fn | `network` | `network.rs:1371` | `pub fn network(result: &SolveResult) -> Result<NetworkReport, Error>` —  Runs [`NetworkAnalysis`] with default parameters. |
 | fn | `network_with_params` | `network.rs:1376` | `pub fn network_with_params(result: &SolveResult, params: &Value) -> Result<NetworkReport, Error>` —  Runs [`NetworkAnalysis`] with optional JSON parameters. |
-| struct | `NetworkAnalysis` | `network.rs:1692` |  Unified multi-port microwave network, QEP, BBQ, `S_21` fit, and Touchstone analysis (`id: "network"`). |
+| struct | `NetworkAnalysis` | `network.rs:1713` |  Unified multi-port microwave network, QEP, BBQ, `S_21` fit, and Touchstone analysis (`id: "network"`). |
 | fn | `QepMode::to_json` | `network.rs:44` | `pub fn to_json(&self) -> Value` |
 | fn | `BbqMode::to_json` | `network.rs:67` | `pub fn to_json(&self) -> Value` |
 | fn | `S21CircleFit::to_json` | `network.rs:96` | `pub fn to_json(&self) -> Value` |

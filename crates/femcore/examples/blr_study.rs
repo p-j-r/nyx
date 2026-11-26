@@ -69,7 +69,7 @@ fn study(name: &str, a: &Csr<C64>, block: usize, min_front: usize) {
     let st = f.stats();
     let mut x = b.clone();
     let t = Instant::now();
-    f.solve_block_in_place(&mut x, 1);
+    f.solve_block_in_place(&mut x, 1).unwrap();
     println!(
         "faer LU (reference): factor {:.2} s, solve {:.2} ms, residual {:.1e}",
         st.numeric_secs_last,

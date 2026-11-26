@@ -32,12 +32,12 @@ fn run<T: femcore::linalg::faer_glue::FaerScalar>(label: &str, a: &Csr<T>, def: 
     let mut base = 0.0;
     for &nrhs in &[1usize, 2, 4, 8] {
         let mut rhs = random_vector::<T>(n * nrhs, 1);
-        f.solve_block_in_place(&mut rhs, nrhs); // warm-up
+        f.solve_block_in_place(&mut rhs, nrhs).unwrap(); // warm-up
         let mut best = f64::MAX;
         for _ in 0..5 {
             let mut r = random_vector::<T>(n * nrhs, 2);
             let t = Instant::now();
-            f.solve_block_in_place(&mut r, nrhs);
+            f.solve_block_in_place(&mut r, nrhs).unwrap();
             best = best.min(t.elapsed().as_secs_f64());
         }
         let per = best / nrhs as f64;

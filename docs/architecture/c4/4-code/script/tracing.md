@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Tracing of script functions** (`script.trac
 > A Python function given as a formula is called once with a symbolic point and becomes formula text (N3): the prelude the worker is fed (the symbolic value, the formula functions, the `nyx` wrapper), the names the stub declares for it, and the static guard that refuses a branch or comparison on a value of the point with its line (Monty does not call `__bool__` or `__lt__`).
 
 **Decisions:** [ADR 90](../../../adr/0090-whole-array-operations-are-engine-commands-over-a-typed-tree.md), [ADR 93](../../../adr/0093-scripts-are-python-text-run-by-monty-in-a-worker-process.md)  
-**Size:** 1 file, 417 lines.
+**Size:** 1 file, 419 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-script/src/trace.rs` | 417 |  |
+| `crates/nyx-script/src/trace.rs` | 419 |  |
 
 ## What it uses
 

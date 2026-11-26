@@ -150,7 +150,7 @@ fn jfnk_matches_newton_with_and_without_a_preconditioner() {
     impl Preconditioner<f64> for LuPc<'_> {
         fn apply(&self, r: &[f64], z: &mut [f64]) {
             z.copy_from_slice(r);
-            self.0.solve_block_in_place(z, 1);
+            self.0.solve_block_in_place(z, 1).unwrap();
         }
     }
     let pc = jfnk(&mut |u, o| p.f(u, o), &x0, Some(&LuPc(&fac)), &opts);
@@ -192,7 +192,7 @@ fn anderson_accelerates_picard() {
         for i in 0..30 {
             out[i] = p.g[i] - x[i] * x[i] * x[i] + 4.0 * x[i];
         }
-        fac.solve_block_in_place(out, 1);
+        fac.solve_block_in_place(out, 1).unwrap();
     };
     let x0 = vec![0.0; 30];
     let opts = FixedPointOptions { rtol: 1e-10, max_it: 3000, ..Default::default() };

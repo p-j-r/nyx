@@ -11,7 +11,7 @@ reader = component "Streaming HDF5 reader" "Bounded-memory streaming reader over
     properties {
         "adr" "107, 62, 99"
         "code" "crates/nyx-storage/src: reader.rs"
-        "lines" "1099"
+        "lines" "1245"
         "codeDiagram" "4-code/storage/reader.md"
     }
 }

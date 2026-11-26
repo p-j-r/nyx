@@ -543,10 +543,10 @@ impl Problem {
                 return Err(format!("dispersive permittivity derivative of domain {dom} contains NaN or infinity"));
             }
         }
-        let text = format!("{:?} {:?} {:?}", m.aniso, m.pml, self.periodic);
-        if text.contains("NaN") || text.contains("inf") {
+        let text = format!("{:?} {:?} {:?} {:?}", m.aniso, m.pml, self.periodic, self.tls_interfaces);
+        if femcore::validate::non_finite_token(&text).is_some() {
             return Err(
-                "the problem description contains a NaN or infinite number (an anisotropic material, a layer or a Floquet phase)"
+                "the problem description contains a NaN or infinite number (an anisotropic material, a layer, a Floquet phase or an interface)"
                     .into(),
             );
         }
@@ -574,31 +574,31 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let sp = Params::new(&spec.study.params, &sd.params);
     let study = match sd.kind.as_str() {
         "modes" => Study::Modes {
-            freq: sp.number("freq"),
-            n_target: sp.number("n_target"),
-            evanescent: sp.boolean("evanescent"),
-            n_modes: sp.integer("n_modes").max(0) as usize,
+            freq: sp.number("freq")?,
+            n_target: sp.number("n_target")?,
+            evanescent: sp.boolean("evanescent")?,
+            n_modes: sp.integer("n_modes")?.max(0) as usize,
         },
         "axisymmetric_modes" => Study::AxisymmetricModes {
-            f_search: sp.number("f_search"),
-            azimuthal_order: sp.integer("azimuthal_order"),
-            n_modes: sp.integer("n_modes").max(0) as usize,
+            f_search: sp.number("f_search")?,
+            azimuthal_order: sp.integer("azimuthal_order")?,
+            n_modes: sp.integer("n_modes")?.max(0) as usize,
         },
-        "cavity" => Study::Cavity { n_modes: sp.integer("n_modes").max(0) as usize, f_search: sp.number("f_search") },
+        "cavity" => Study::Cavity { n_modes: sp.integer("n_modes")?.max(0) as usize, f_search: sp.number("f_search")? },
         "bloch" => {
-            let freq = sp.number("freq");
+            let freq = sp.number("freq")?;
             if freq <= 0.0 || !freq.is_finite() {
                 return Err(Error::invalid(format!("bloch study requires freq > 0 (got {freq})")));
             }
             Study::Bloch {
                 freq,
-                n_target: sp.number("n_target"),
-                n_modes: sp.integer("n_modes").max(0) as usize,
-                brillouin_zone: sp.integer("brillouin_zone"),
+                n_target: sp.number("n_target")?,
+                n_modes: sp.integer("n_modes")?.max(0) as usize,
+                brillouin_zone: sp.integer("brillouin_zone")?,
             }
         }
         "driven" => {
-            let freqs_hz = sp.optional_numbers("freqs_hz");
+            let freqs_hz = sp.optional_numbers("freqs_hz")?;
             let (f_min, f_max, n_points) = if let Some(ref fs) = freqs_hz {
                 for &f in fs {
                     if !(f > 0.0 && f.is_finite()) {
@@ -617,26 +617,26 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         "driven study requires either non-empty 'freqs_hz' or both 'f_min' and 'f_max'",
                     ));
                 }
-                let f_min = sp.number("f_min");
-                let f_max = sp.number("f_max");
+                let f_min = sp.number("f_min")?;
+                let f_max = sp.number("f_max")?;
                 if !(f_min > 0.0 && f_max >= f_min) {
                     return Err(Error::invalid(format!(
                         "driven study requires 0 < f_min <= f_max (got f_min = {f_min}, f_max = {f_max})"
                     )));
                 }
-                let n_points = sp.integer("n_points").max(1) as usize;
+                let n_points = sp.integer("n_points")?.max(1) as usize;
                 (f_min, f_max, n_points)
             };
-            let prom_tol = sp.optional_number("prom_tol").filter(|&t| t > 0.0);
-            let max_hdm_raw = sp.integer("max_hdm_solves");
+            let prom_tol = sp.optional_number("prom_tol")?.filter(|&t| t > 0.0);
+            let max_hdm_raw = sp.integer("max_hdm_solves")?;
             if !(1..=64).contains(&max_hdm_raw) {
                 return Err(Error::invalid(format!(
                     "driven study requires 1 <= max_hdm_solves <= 64 (got {max_hdm_raw})"
                 )));
             }
             let max_hdm_solves = max_hdm_raw as usize;
-            let strict_prom_tol = sp.boolean("strict_prom_tol");
-            let seed_freqs_hz = sp.numbers("seed_freqs_hz");
+            let strict_prom_tol = sp.boolean("strict_prom_tol")?;
+            let seed_freqs_hz = sp.numbers("seed_freqs_hz")?;
             for &sf in &seed_freqs_hz {
                 if !(sf > 0.0 && sf.is_finite()) {
                     return Err(Error::invalid(format!(
@@ -644,13 +644,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     )));
                 }
             }
-            let solver = sp.text("solver");
+            let solver = sp.text("solver")?;
             if !DRIVEN_SOLVER_CHOICES.contains(&solver.as_str()) {
                 return Err(Error::invalid(format!(
                     "driven study: unknown solver '{solver}' (expected one of {DRIVEN_SOLVER_CHOICES:?})"
                 )));
             }
-            let blr_tol = sp.number("blr_tol");
+            let blr_tol = sp.number("blr_tol")?;
             if !blr_tol.is_finite() || blr_tol < 0.0 {
                 return Err(Error::invalid(format!("driven study requires finite blr_tol >= 0 (got {blr_tol})")));
             }
@@ -670,7 +670,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         other => return Err(Error::Unsupported(format!("ems has no study '{other}'"))),
     };
     let symmetry = if matches!(sd.kind.as_str(), "modes" | "cavity" | "bloch") {
-        Symmetry::parse(&sp.text("symmetry")).map_err(Error::invalid)?
+        Symmetry::parse(&sp.text("symmetry")?).map_err(Error::invalid)?
     } else {
         Symmetry::None
     };
@@ -727,14 +727,17 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let mut waveports: Vec<WavePortBc> = vec![];
     let kinds = ems.bc_kinds();
     for r in resolve_conditions(&spec.bcs, &kinds, &ctx_eff)? {
-        let d = kinds.iter().find(|k| k.kind == r.kind).expect("resolved against these descriptors");
+        let d = kinds
+            .iter()
+            .find(|k| k.kind == r.kind)
+            .ok_or_else(|| Error::Unsupported(format!("ems has no condition '{}'", r.kind)))?;
         let p = Params::new(&r.params, &d.params);
         match r.kind.as_str() {
             "pml" => {
-                let x_dir = pml_dir(&p.text("x"));
-                let y_dir = pml_dir(&p.text("y"));
-                let z_dir = pml_dir(&p.text("z"));
-                let coord_text = p.text("coord");
+                let x_dir = pml_dir(&p.text("x")?);
+                let y_dir = pml_dir(&p.text("y")?);
+                let z_dir = pml_dir(&p.text("z")?);
+                let coord_text = p.text("coord")?;
                 let resolved_coord = match coord_text.as_str() {
                     "cartesian" => "cartesian",
                     "cylindrical" => "cylindrical",
@@ -765,7 +768,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         )));
                     }
                 };
-                let center_vec = p.vector("center");
+                let center_vec = p.vector("center")?;
                 if center_vec.len() != 3 {
                     return Err(Error::invalid("pml: 'center' must have 3 components"));
                 }
@@ -775,7 +778,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     "cartesian" => PmlCoord::Cartesian,
                     "cylindrical" => {
                         let axis_vec = if p.has("axis") {
-                            p.vector("axis")
+                            p.vector("axis")?
                         } else if matches!(study, Study::Modes { .. }) {
                             vec![0.0, 1.0, 0.0]
                         } else {
@@ -790,35 +793,35 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                             return Err(Error::invalid("pml: 'axis' must be a non-zero finite vector"));
                         }
                         let axis = [axis_vec[0] / anorm, axis_vec[1] / anorm, axis_vec[2] / anorm];
-                        let r_in = p.number("r_in");
+                        let r_in = p.number("r_in")?;
                         let r_thickness =
-                            if p.has("r_thickness") { p.number("r_thickness") } else { p.number("thickness") };
-                        let radial_on = p.boolean("radial_on");
-                        let axial = pml_dir(&p.text("axial"));
-                        let z_in = p.number("z_in");
+                            if p.has("r_thickness") { p.number("r_thickness")? } else { p.number("thickness")? };
+                        let radial_on = p.boolean("radial_on")?;
+                        let axial = pml_dir(&p.text("axial")?);
+                        let z_in = p.number("z_in")?;
                         let z_thickness =
-                            if p.has("z_thickness") { p.number("z_thickness") } else { p.number("thickness") };
+                            if p.has("z_thickness") { p.number("z_thickness")? } else { p.number("thickness")? };
                         if r_in < 0.0 || r_thickness < 0.0 || z_thickness < 0.0 {
                             return Err(Error::invalid("pml: cylindrical radii and thicknesses must be non-negative"));
                         }
                         PmlCoord::Cylindrical { center, axis, r_in, r_thickness, radial_on, axial, z_in, z_thickness }
                     }
                     "spherical" => {
-                        let r_in = p.number("r_in");
+                        let r_in = p.number("r_in")?;
                         let thickness =
-                            if p.has("thickness") { p.number("thickness") } else { p.number("r_thickness") };
+                            if p.has("thickness") { p.number("thickness")? } else { p.number("r_thickness")? };
                         if r_in < 0.0 || thickness < 0.0 {
                             return Err(Error::invalid("pml: spherical r_in and thickness must be non-negative"));
                         }
                         PmlCoord::Spherical { center, r_in, thickness }
                     }
-                    _ => unreachable!(),
+                    other => return Err(Error::invalid(format!("pml: unexpected resolved coord '{other}'"))),
                 };
 
-                let profile_text = p.text("profile");
+                let profile_text = p.text("profile")?;
                 let profile = match profile_text.as_str() {
                     "kappa_polynomial" => {
-                        let kappa_max = p.number("kappa_max");
+                        let kappa_max = p.number("kappa_max")?;
                         if !(kappa_max >= 1.0 && kappa_max.is_finite()) {
                             return Err(Error::invalid(format!(
                                 "pml: kappa_max must satisfy kappa_max >= 1.0 (got {kappa_max})"
@@ -827,7 +830,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         PmlProfile::KappaPolynomial { kappa_max }
                     }
                     "rational" => {
-                        let curvature = p.number("curvature");
+                        let curvature = p.number("curvature")?;
                         if !((0.0..1.0).contains(&curvature) && curvature.is_finite()) {
                             return Err(Error::invalid(format!(
                                 "pml: curvature must satisfy 0.0 <= curvature < 1.0 (got {curvature})"
@@ -848,8 +851,8 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                             "pml: both 'bounds_lo' and 'bounds_hi' must be given when explicit slab bounds are specified",
                         ));
                     }
-                    let lo_v = p.vector("bounds_lo");
-                    let hi_v = p.vector("bounds_hi");
+                    let lo_v = p.vector("bounds_lo")?;
+                    let hi_v = p.vector("bounds_hi")?;
                     if lo_v.len() != 3 || hi_v.len() != 3 {
                         return Err(Error::invalid("pml: 'bounds_lo' and 'bounds_hi' must have 3 components"));
                     }
@@ -863,8 +866,8 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     None
                 };
 
-                let auto_scale = p.boolean("auto_scale");
-                let target_reflection = p.number("target_reflection");
+                let auto_scale = p.boolean("auto_scale")?;
+                let target_reflection = p.number("target_reflection")?;
                 if !(target_reflection > 0.0 && target_reflection < 1.0 && target_reflection.is_finite()) {
                     return Err(Error::invalid(format!(
                         "pml: target_reflection must lie in (0, 1) (got {target_reflection})"
@@ -875,9 +878,9 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     x: x_dir,
                     y: y_dir,
                     z: z_dir,
-                    strength: p.number("strength"),
-                    order: p.number("order"),
-                    re: p.number("re"),
+                    strength: p.number("strength")?,
+                    order: p.number("order")?,
+                    re: p.number("re")?,
                     coord,
                     bounds,
                     profile,
@@ -896,14 +899,14 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         study.kind()
                     )));
                 }
-                let dest = ctx_eff.resolver.boundaries(&p.text("dest"))?;
+                let dest_name = p.text("dest")?;
+                let dest = ctx_eff.resolver.boundaries(&dest_name)?;
                 if dest.is_empty() {
                     return Err(Error::invalid(format!(
-                        "the destination '{}' of a periodic pair selects nothing",
-                        p.text("dest")
+                        "the destination '{dest_name}' of a periodic pair selects nothing"
                     )));
                 }
-                periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase") });
+                periodic.push(Periodic { source: r.labels, dest, phase: p.number("phase")? });
             }
             "pmc" => {
                 pmc.extend(r.labels);
@@ -912,22 +915,22 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 pec.extend(r.labels);
             }
             "surface_impedance" => {
-                let mut l_k_sq = p.number("L_k_sq");
-                let mut r_s = p.number("R_s");
-                let material = p.text("material");
-                let mut thickness = p.number("thickness");
-                let temperature = p.number("temperature");
-                let f_ref_given = p.optional_number("f_ref").unwrap_or(0.0);
+                let mut l_k_sq = p.number("L_k_sq")?;
+                let mut r_s = p.number("R_s")?;
+                let material = p.text("material")?;
+                let mut thickness = p.number("thickness")?;
+                let temperature = p.number("temperature")?;
+                let f_ref_given = p.optional_number("f_ref")?.unwrap_or(0.0);
                 let f_ref = if f_ref_given > 0.0 { f_ref_given } else { study.reference_freq() };
-                let lossless = p.boolean("lossless");
-                let ibc_mode_raw = p.text("ibc_mode");
+                let lossless = p.boolean("lossless")?;
+                let ibc_mode_raw = p.text("ibc_mode")?;
                 let ibc_mode = if ibc_mode_raw.is_empty() { "direct".to_string() } else { ibc_mode_raw };
                 if !IBC_MODE_CHOICES.contains(&ibc_mode.as_str()) {
                     return Err(Error::invalid(format!(
                         "surface_impedance: unknown ibc_mode '{ibc_mode}' (expected one of {IBC_MODE_CHOICES:?})"
                     )));
                 }
-                let film_model = p.text("film_model");
+                let film_model = p.text("film_model")?;
                 let mut fm = FilmModel::parse(&film_model).ok_or_else(|| {
                     Error::invalid(format!(
                         "surface_impedance: unknown film_model '{film_model}' (expected 'two_sided', 'kerr' or 'thin_limit')"
@@ -989,7 +992,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         study.kind()
                     )));
                 }
-                let name = p.text("name");
+                let name = p.text("name")?;
                 if name.trim().is_empty() {
                     return Err(Error::invalid("lumped_jj requires a non-empty 'name'"));
                 }
@@ -999,13 +1002,13 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 {
                     return Err(Error::invalid(format!("duplicate port name '{name}'")));
                 }
-                let l_j_in = p.number("L_j");
-                let e_j_in = p.number("E_j_Hz");
-                let c_j = p.number("C_j");
-                let e_l_hz = p.number("E_l_Hz");
-                let phi_ext_rad = p.number("phi_ext_rad");
-                let n_g = p.number("n_g");
-                let squid_asymmetry = p.has("squid_asymmetry").then(|| p.number("squid_asymmetry"));
+                let l_j_in = p.number("L_j")?;
+                let e_j_in = p.number("E_j_Hz")?;
+                let c_j = p.number("C_j")?;
+                let e_l_hz = p.number("E_l_Hz")?;
+                let phi_ext_rad = p.number("phi_ext_rad")?;
+                let n_g = p.number("n_g")?;
+                let squid_asymmetry = if p.has("squid_asymmetry") { Some(p.number("squid_asymmetry")?) } else { None };
                 if let Some(d) = squid_asymmetry {
                     if !d.is_finite() || !(0.0..1.0).contains(&d) {
                         return Err(Error::invalid(format!(
@@ -1019,7 +1022,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         "lumped_jj '{name}' requires a positive L_j, E_j_Hz, E_l_Hz, or C_j"
                     )));
                 }
-                let dir_vec = p.vector("direction");
+                let dir_vec = p.vector("direction")?;
                 if dir_vec.len() != 3 {
                     return Err(Error::invalid(format!("lumped_jj '{name}': direction must have 3 components")));
                 }
@@ -1028,7 +1031,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     return Err(Error::invalid(format!("lumped_jj '{name}': direction vector must be non-zero")));
                 }
                 let direction = [dir_vec[0] / dnorm, dir_vec[1] / dnorm, dir_vec[2] / dnorm];
-                let formulation = p.text("formulation");
+                let formulation = p.text("formulation")?;
                 if formulation != "rank1" && formulation != "distributed_sheet" {
                     return Err(Error::invalid(format!(
                         "lumped_jj '{name}': unknown formulation '{formulation}' (expected 'rank1' or 'distributed_sheet')"
@@ -1055,7 +1058,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         study.kind()
                     )));
                 }
-                let name = p.text("name");
+                let name = p.text("name")?;
                 if name.trim().is_empty() {
                     return Err(Error::invalid("lumped_port requires a non-empty 'name'"));
                 }
@@ -1065,11 +1068,11 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 {
                     return Err(Error::invalid(format!("duplicate port name '{name}'")));
                 }
-                let z0 = p.number("Z_0");
+                let z0 = p.number("Z_0")?;
                 if !(z0 > 0.0 && z0.is_finite()) {
                     return Err(Error::invalid(format!("lumped_port '{name}': Z_0 must be positive (got {z0})")));
                 }
-                let dir_vec = p.vector("direction");
+                let dir_vec = p.vector("direction")?;
                 if dir_vec.len() != 3 {
                     return Err(Error::invalid(format!("lumped_port '{name}': direction must have 3 components")));
                 }
@@ -1078,8 +1081,8 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     return Err(Error::invalid(format!("lumped_port '{name}': direction vector must be non-zero")));
                 }
                 let direction = [dir_vec[0] / dnorm, dir_vec[1] / dnorm, dir_vec[2] / dnorm];
-                let complex_damping = p.boolean("complex_damping");
-                let mode = p.text("mode");
+                let complex_damping = p.boolean("complex_damping")?;
+                let mode = p.text("mode")?;
                 if mode != "single" && mode != "cpw_even" {
                     return Err(Error::invalid(format!(
                         "lumped_port '{name}': unknown mode '{mode}' (expected 'single' or 'cpw_even')"
@@ -1094,7 +1097,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                         study.kind()
                     )));
                 }
-                let name = p.text("name");
+                let name = p.text("name")?;
                 if name.trim().is_empty() {
                     return Err(Error::invalid("waveport requires a non-empty 'name'"));
                 }
@@ -1104,9 +1107,9 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                 {
                     return Err(Error::invalid(format!("duplicate port name '{name}'")));
                 }
-                let mode = p.integer("mode").max(1) as usize;
+                let mode = p.integer("mode")?.max(1) as usize;
                 let n_eff_guess = if p.has("n_eff_guess") {
-                    let v = p.number("n_eff_guess");
+                    let v = p.number("n_eff_guess")?;
                     if !(v > 0.0 && v.is_finite()) {
                         return Err(Error::invalid(format!(
                             "waveport '{name}': n_eff_guess must be positive (got {v})"
@@ -1117,7 +1120,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
                     None
                 };
                 let z0_ohm = if p.has("z0_ohm") {
-                    let v = p.number("z0_ohm");
+                    let v = p.number("z0_ohm")?;
                     if !(v > 0.0 && v.is_finite()) {
                         return Err(Error::invalid(format!("waveport '{name}': z0_ohm must be positive (got {v})")));
                     }

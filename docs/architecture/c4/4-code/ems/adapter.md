@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Physics adapter** (`ems.adapter`) in the co
 > The Physics implementation of ems: descriptors, validation, solve entry.
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md), [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md)  
-**Size:** 1 file, 613 lines.
+**Size:** 1 file, 616 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/lib.rs` | 613 |  |
+| `crates/nyx-ems/src/lib.rs` | 616 |  |
 
 ## What it uses
 
@@ -56,6 +56,6 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | struct | `Ems` | `lib.rs:71` |  |
-| fn | `run` | `lib.rs:557` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
+| fn | `run` | `lib.rs:560` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
 
 Trait implementations in this component: `Ems: Physics`

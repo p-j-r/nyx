@@ -363,9 +363,9 @@ pub fn adjoint_gradient(
     let mut fac = ShiftedFactorization::new(k_mat, None, definiteness)?;
     fac.set_shift(0.0)?;
     let mut u = f.to_vec();
-    fac.solve_block_in_place(&mut u, 1);
+    fac.solve_block_in_place(&mut u, 1)?;
     let mut w = g.to_vec();
-    fac.solve_block_in_place(&mut w, 1);
+    fac.solve_block_in_place(&mut w, 1)?;
     let mut grad = vec![0.0; n_params];
     for (k, gk) in grad.iter_mut().enumerate() {
         let ku = dk_u(k, &u);

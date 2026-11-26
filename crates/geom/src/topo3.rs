@@ -94,7 +94,11 @@ pub fn build(cx: &Complex) -> (Vec<Edge3>, Vec<Vertex>) {
             }
             f.sort_unstable();
             f.dedup();
-            if f.len() >= 2 || (f.len() == 1 && cx.faces[f[0] as usize].is_sheet()) {
+            if f.len() >= 2
+                || (f.len() == 1
+                    && cx.faces[f[0] as usize].is_sheet()
+                    && matches!(cx.faces[f[0] as usize].geom, FaceGeom::Cap { .. }))
+            {
                 raws.push(Raw {
                     key: (f[0], 0, e as u32, li),
                     geom: EdgeGeom::Horizontal { edge: e as u32, z },

@@ -420,7 +420,9 @@ impl LinearOperator<C64> for NleigsOperator<'_> {
             self.p.terms[t].matrix.spmv(&u, &mut tmp);
             axpy(-C64::ONE, &tmp, &mut rhs);
         }
-        self.fac.solve_block_in_place(&mut rhs, 1);
+        self.fac
+            .solve_block_in_place(&mut rhs, 1)
+            .expect("NLEIGS operator solver must be factored before apply");
         // z_j = b_j(s) z_0 + c_j
         for j in 0..d {
             let yj = &mut y[j * n..(j + 1) * n];

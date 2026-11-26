@@ -11,7 +11,7 @@ One page per component, C4 level 4. [Component view](../../3-components/engine.m
 | [Command lists](./commandlist.md) | 1 | 618 | 11 | 7 |
 | [API reference](./apiref.md) | 1 | 293 | 9 | 1 |
 | [Meshing seam](./meshing.md) | 4 | 1616 | 36 | 6 |
-| [Materials](./materials.md) | 2 | 1347 | 28 | 2 |
+| [Materials](./materials.md) | 2 | 1347 | 31 | 3 |
 | [Analyses](./analyse.md) | 2 | 911 | 8 | 1 |
 | [Results files](./resultsIO.md) | 3 | 1735 | 27 | 7 |
 | [Store link](./storeLink.md) | 1 | 472 | 12 | 2 |

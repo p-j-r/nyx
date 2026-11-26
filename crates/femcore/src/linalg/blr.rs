@@ -861,13 +861,20 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedBlrLu<T> {
         Ok(())
     }
 
-    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) {
-        let f = self.factors.as_ref().expect("set_shift must be called before solving");
+    fn solve_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+        let f = self.factors.as_ref().ok_or(SolverError::NotFactored)?;
         let n = self.sym.n;
+        let expected = n
+            .checked_mul(nrhs)
+            .ok_or(SolverError::InvalidArgument("rhs block size overflows usize"))?;
+        if rhs.len() < expected {
+            return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
+        }
         for c in 0..nrhs {
             solve_with(&self.sym, f, &mut rhs[c * n..(c + 1) * n]);
         }
         self.solves.fetch_add(nrhs, Ordering::Relaxed);
+        Ok(())
     }
 
     fn stats(&self) -> FactorStats {
@@ -930,7 +937,7 @@ mod tests {
         assert_eq!(blr.stats().symbolic_count, 1);
         assert_eq!(blr.stats().numeric_count, 2);
         let mut x2 = rhs0.clone();
-        blr.solve_block_in_place(&mut x2, 1);
+        blr.solve_block_in_place(&mut x2, 1).unwrap();
         let mut ax2 = vec![C64::ZERO; n];
         a_2.spmv(&x2, &mut ax2);
         let rel2 = ax2.iter().zip(&rhs0).map(|(p, q)| (*p - *q).norm_sqr()).sum::<f64>().sqrt() / norm2(&rhs0);

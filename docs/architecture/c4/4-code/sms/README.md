@@ -4,10 +4,10 @@ One page per component, C4 level 4. [Component view](../../3-components/sms.md) 
 
 | Component | Files | Lines | Public items | Types in the diagram |
 |---|---:|---:|---:|---:|
-| [Physics adapter](./adapter.md) | 1 | 666 | 2 | 1 |
-| [Typed problem](./problem.md) | 1 | 1044 | 32 | 11 |
+| [Physics adapter](./adapter.md) | 1 | 670 | 2 | 1 |
+| [Typed problem](./problem.md) | 1 | 1045 | 32 | 11 |
 | [Solid kernel](./solid.md) | 1 | 2771 | 43 | 6 |
-| [Piezoelectric kernel](./piezo.md) | 4 | 6043 | 47 | 16 |
+| [Piezoelectric kernel](./piezo.md) | 4 | 6047 | 47 | 16 |
 | [Cross-section study kernel](./crosssection.md) | 1 | 1753 | 15 | 4 |
 | [Axisymmetric kernel](./axisym.md) | 1 | 1423 | 20 | 0 |
 | [Waveguide kernel](./waveguide.md) | 1 | 842 | 7 | 0 |

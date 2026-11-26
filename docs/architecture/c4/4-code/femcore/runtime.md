@@ -31,12 +31,14 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [analysis: Mode figures](../analysis/figures.md) | par | map_chunks |
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | par | threads |
+| [dfs: Typed problem](../dfs/problem.md) | validate | non_finite_token |
 | [ems: Physics adapter](../ems/adapter.md) | progress | Progress |
 | [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | par, progress | check, map_chunks |
 | [ems: Native mixed-cell EM](../ems/mixed.md) | progress | note |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
+| [ems: Typed problem](../ems/problem.md) | validate | non_finite_token |
 | [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
 | [engine: Job runner and queue](../engine/jobs.md) | progress, warm | Call, Progress, Warm, from_bytes, install, stage, to_bytes |
 | [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, Progress, stage |
