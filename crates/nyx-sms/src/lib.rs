@@ -35,6 +35,21 @@ use nyx_physics::Mesh;
 use nyx_physics::*;
 use std::sync::Arc;
 
+fn mesh_has_qp(mesh: &Mesh) -> bool {
+    match mesh {
+        Mesh::D2(c) => !c.qp_edges.is_empty(),
+        Mesh::D3(c) => !c.qp_edges.is_empty(),
+    }
+}
+
+fn kernel_err(text: String) -> Error {
+    if let Some(rest) = text.strip_prefix("unsupported: ") {
+        Error::Unsupported(rest.to_owned())
+    } else {
+        Error::from_kernel(text)
+    }
+}
+
 pub struct Sms;
 
 const WAFER: [&str; 3] = ["x", "y", "z"];
@@ -488,6 +503,12 @@ impl Physics for Sms {
             return Err(Error::Unsupported(format!("sms supports element order 1 and 2, not {}", spec.order)));
         }
         check_mesh(mesh)?;
+        if mesh_has_qp(mesh) {
+            return Err(Error::Unsupported(
+                "sms does not support Barsoum quarter-point singular edges (`qp_edges`); use smooth curved elements without quarter-point shifts"
+                    .into(),
+            ));
+        }
         if spec.study.kind == "axisymmetric_eigenfrequency" && mesh.dim() != 2 {
             return Err(Error::invalid(format!(
                 "the study 'axisymmetric_eigenfrequency' needs a 2D mesh (the (r, z) half plane), this one is {}D",
@@ -602,6 +623,12 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
         return Err(Error::Cancelled);
     }
     check_mesh(mesh)?;
+    if mesh_has_qp(mesh) {
+        return Err(Error::Unsupported(
+            "sms does not support Barsoum quarter-point singular edges (`qp_edges`); use smooth curved elements without quarter-point shifts"
+                .into(),
+        ));
+    }
     problem.check_finite().map_err(Error::NonFinite)?;
     problem.check_study_open_domains()?;
     problem.check_electrical()?;
@@ -617,10 +644,10 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             }
             problem.check_axisymmetric()?;
             if use_mixed {
-                solve_axisymmetric_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+                solve_axisymmetric_mixed(mesh, &mixed, problem).map_err(kernel_err)?
             } else {
                 let d = discretise(mesh)?;
-                solve_axisymmetric(&d, problem).map_err(Error::from_kernel)?
+                solve_axisymmetric(&d, problem).map_err(kernel_err)?
             }
         } else if matches!(problem.study, Study::Modes { .. }) {
             if mixed.dim != 2 {
@@ -628,30 +655,30 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
             }
             problem.check_modes()?;
             if use_mixed {
-                solve_waveguide_modes_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+                solve_waveguide_modes_mixed(mesh, &mixed, problem).map_err(kernel_err)?
             } else {
                 let d = discretise(mesh)?;
-                solve_waveguide_modes(&d, problem).map_err(Error::from_kernel)?
+                solve_waveguide_modes(&d, problem).map_err(kernel_err)?
             }
         } else if matches!(problem.study, Study::Driven { .. }) {
             if use_mixed {
-                piezo_driven::solve_piezo_driven_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+                piezo_driven::solve_piezo_driven_mixed(mesh, &mixed, problem).map_err(kernel_err)?
             } else {
                 let d = discretise(mesh)?;
-                piezo_driven::solve_piezo_driven(&d, problem).map_err(Error::from_kernel)?
+                piezo_driven::solve_piezo_driven(&d, problem).map_err(kernel_err)?
             }
         } else if problem.uses_piezoelectric() {
             if use_mixed {
-                piezo::solve_piezo_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+                piezo::solve_piezo_mixed(mesh, &mixed, problem).map_err(kernel_err)?
             } else {
                 let d = discretise(mesh)?;
-                piezo::solve_piezo(&d, problem).map_err(Error::from_kernel)?
+                piezo::solve_piezo(&d, problem).map_err(kernel_err)?
             }
         } else if use_mixed {
-            solve_solid_mixed(mesh, &mixed, problem).map_err(Error::from_kernel)?
+            solve_solid_mixed(mesh, &mixed, problem).map_err(kernel_err)?
         } else {
             let d = discretise(mesh)?;
-            solve_solid(&d, problem).map_err(Error::from_kernel)?
+            solve_solid(&d, problem).map_err(kernel_err)?
         }
     };
     check_result_finite(&result)?;

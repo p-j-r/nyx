@@ -298,6 +298,7 @@ pub fn assemble_stiffness_axisym(
     m: f64,
     stretch: Option<&[[C; 3]]>,
 ) -> Result<CCsr, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let re = RefElement::new(2, order, 2 * order + 2);
     let geo = geometry(mesh);
     let nloc = re.nloc;
@@ -376,6 +377,7 @@ pub(crate) fn assemble_axisym_pml_simplex(
     resolved: &ResolvedPmlDomains,
     inactive: &[i32],
 ) -> Result<(CCsr, CCsr), String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let re = RefElement::new(2, order, 2 * order + 4);
     let geo = geometry(mesh);
     let nloc = re.nloc;
@@ -1046,6 +1048,7 @@ pub(crate) fn assemble_axisym_piezo_simplex(
     m: f64,
     resolved: Option<&ResolvedPmlDomains>,
 ) -> Result<(CCsr, CCsr, Option<CCsr>), String> {
+    crate::problem::check_simplex_straight(mesh)?;
     if mesh.dim != 2 {
         return Err("an axisymmetric model needs a 2D mesh".into());
     }
@@ -1334,56 +1337,76 @@ pub(crate) fn assemble_axisym_piezo_mixed(
     Ok((kc.to_csr(), mc.to_csr(), cc.map(|x| x.to_csr())))
 }
 
+fn axis_constraints_from_coords(
+    coords: &[f64],
+    n1: usize,
+    tol: f64,
+    m: f64,
+) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize, C)>, Vec<usize>, usize), String> {
+    let on_axis: Vec<usize> = (0..n1).filter(|&d| coords[2 * d] <= tol).collect();
+    let (m_abs, blocks) = axis_mech_blocks(m, !on_axis.is_empty())?;
+    if on_axis.is_empty() {
+        return Ok((vec![], vec![], vec![], 0));
+    }
+    let pairs = on_axis.iter().flat_map(|&d| blocks.iter().map(move |&k| (k, d))).collect();
+    // Exact algebraic regularity tie u_r(0, z) = i m u_theta(0, z) for |m| = 1 eliminates the 1/r penalty.
+    let rels = if m_abs == 1 {
+        let m_sign = m.round();
+        on_axis.iter().map(|&d| (d, 2 * n1 + d, c(0.0, m_sign))).collect()
+    } else {
+        vec![]
+    };
+    let phi_fixed = if m_abs >= 1 { on_axis.clone() } else { vec![] };
+    Ok((pairs, rels, phi_fixed, on_axis.len()))
+}
+
 /// The essential conditions on the axis `r = 0` (`0 u_r`, `1 u_z`, `2 u_theta`), and the number of dofs found on the axis.
 pub fn axis_constraints(mesh: &Discretisation, order: usize, m: f64) -> Result<(Vec<(usize, usize)>, usize), String> {
-    let (mech, _, count) = axis_constraints_piezo(mesh, order, m)?;
+    let (mech, _, _, count) = axis_constraints_piezo(mesh, order, m)?;
     Ok((mech, count))
 }
 
-pub(crate) fn axis_constraints_mixed(
+/// Essential axis `r = 0` conditions plus exact `|m| = 1` MPC ties `(dest_ur, src_utheta, i*m)`.
+pub(crate) fn axis_constraints_with_mpc(
+    mesh: &Discretisation,
+    order: usize,
+    m: f64,
+) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize, C)>, usize), String> {
+    let (mech, rels, _, count) = axis_constraints_piezo(mesh, order, m)?;
+    Ok((mech, rels, count))
+}
+
+pub(crate) fn axis_constraints_mixed_with_mpc(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     m: f64,
-) -> Result<(Vec<(usize, usize)>, usize), String> {
-    let (mech, _, count) = axis_constraints_piezo_mixed(mixed, dof_map, m)?;
-    Ok((mech, count))
+) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize, C)>, usize), String> {
+    let (mech, rels, _, count) = axis_constraints_piezo_mixed(mixed, dof_map, m)?;
+    Ok((mech, rels, count))
 }
 
-/// Coupled axisymmetric axis `r = 0` regularity constraints: `(mech_pairs, phi_fixed, on_axis_count)`.
+/// Coupled axisymmetric axis `r = 0` regularity constraints: `(mech_pairs, mech_rels, phi_fixed, on_axis_count)`.
 /// At `m == 0`, `phi` has Neumann symmetry (`d_phi/d_r = 0`) and remains free on `r = 0`;
+/// at `|m| == 1`, `u_r = i m u_theta` is enforced via `mech_rels`;
 /// at `|m| >= 1`, `exp(-i m theta)` forces `phi(0, z) = 0`.
 pub(crate) fn axis_constraints_piezo(
     mesh: &Discretisation,
     order: usize,
     m: f64,
-) -> Result<(Vec<(usize, usize)>, Vec<usize>, usize), String> {
+) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize, C)>, Vec<usize>, usize), String> {
     let tol = axis_tolerance(mesh);
     let coords = mesh.dof_coordinates(order);
-    let on_axis: Vec<usize> = (0..coords.len() / 2).filter(|&d| coords[2 * d] <= tol).collect();
-    let (m_abs, blocks) = axis_mech_blocks(m, !on_axis.is_empty())?;
-    if on_axis.is_empty() {
-        return Ok((vec![], vec![], 0));
-    }
-    let pairs = on_axis.iter().flat_map(|&d| blocks.iter().map(move |&k| (k, d))).collect();
-    let phi_fixed = if m_abs >= 1 { on_axis.clone() } else { vec![] };
-    Ok((pairs, phi_fixed, on_axis.len()))
+    axis_constraints_from_coords(&coords, coords.len() / 2, tol, m)
 }
 
 pub(crate) fn axis_constraints_piezo_mixed(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     m: f64,
-) -> Result<(Vec<(usize, usize)>, Vec<usize>, usize), String> {
+) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize, C)>, Vec<usize>, usize), String> {
     let tol = axis_tolerance_mixed(mixed);
     let coords = dof_map.dof_coordinates(mixed);
-    let on_axis: Vec<usize> = (0..dof_map.n_dofs).filter(|&d| coords[2 * d] <= tol).collect();
-    let (m_abs, blocks) = axis_mech_blocks(m, !on_axis.is_empty())?;
-    if on_axis.is_empty() {
-        return Ok((vec![], vec![], 0));
-    }
-    let pairs = on_axis.iter().flat_map(|&d| blocks.iter().map(move |&k| (k, d))).collect();
-    let phi_fixed = if m_abs >= 1 { on_axis.clone() } else { vec![] };
-    Ok((pairs, phi_fixed, on_axis.len()))
+    axis_constraints_from_coords(&coords, dof_map.n_dofs, tol, m)
 }
 
 #[allow(dead_code)]

@@ -64,6 +64,7 @@ pub fn solve_solid_waveguide(
 }
 
 pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let Study::AxisymmetricEigenfrequency { azimuthal_order, .. } = problem.study else {
         return Err("solve_axisymmetric needs the axisymmetric_eigenfrequency study".into());
     };
@@ -106,6 +107,7 @@ pub fn solve_axisymmetric_mixed(
 }
 
 pub fn solve_waveguide_modes(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let Study::Modes { wavevector, .. } = problem.study else {
         return Err("solve_waveguide_modes needs the modes study".into());
     };
@@ -231,13 +233,14 @@ pub fn solve_cross_section_mixed(
         }
     }
     let axis_tol = if is_axisym { crate::axisym::axis_tolerance_mixed(mixed) } else { 0.0 };
-    let axis_dofs = match kind {
+    let (axis_rels, axis_dofs) = match kind {
         CrossSection::Axisymmetric(m_az) => {
-            let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints_mixed(mixed, &dof_map, m_az)?;
+            let (axis_pairs, axis_rels, axis_dofs) =
+                crate::axisym::axis_constraints_mixed_with_mpc(mixed, &dof_map, m_az)?;
             fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
-            axis_dofs
+            (axis_rels, axis_dofs)
         }
-        CrossSection::Waveguide(_) => 0,
+        CrossSection::Waveguide(_) => (Vec::new(), 0),
     };
     if let Some(res) = &resolved {
         for dof in outer_clamped_dofs_mixed(mixed, &dof_map, spec, res, is_axisym, axis_tol) {
@@ -275,22 +278,32 @@ pub fn solve_cross_section_mixed(
         );
     }
 
-    let (free, kf, mf, cf, red) = if matches!(kind, CrossSection::Waveguide(_)) && !spec.periodic.is_empty() {
+    let mut relations = axis_rels;
+    if matches!(kind, CrossSection::Waveguide(_)) && !spec.periodic.is_empty() {
         if !lrb_labels.is_empty() {
             return Err("low-reflecting boundaries cannot be combined with periodic conditions yet".into());
         }
-        let mut relations = Vec::new();
         for p in &spec.periodic {
             relations.extend(mixed_nodal_relations(mixed, &dof_map, 3, p)?);
         }
-        let red = femcore::periodic::Reduction::build(n, &relations, &fixed);
+    }
+
+    let (free, kf, mf, cf, cf_complex, red) = if !relations.is_empty() {
+        let red = femcore::periodic::Reduction::try_build(n, &relations, &fixed)?;
         if n_modes < 1 || n_modes + 1 >= red.n_reduced() {
             return Err("number of modes must be between 1 and the number of free dofs".into());
         }
         let pm = red.prolong();
         let kf = femcore::periodic::congruence(&pm, &k);
         let mf = femcore::periodic::congruence(&pm, &mc);
-        (vec![], kf, mf, None, Some(red))
+        let cf_complex = if lrb_labels.is_empty() {
+            None
+        } else {
+            let cfull =
+                crate::lrb::damping_matrix_mixed_weighted(mixed, &dof_map, &c6, &rho, &lrb_labels, 3, 1.0, is_axisym);
+            Some(femcore::periodic::congruence(&pm, &to_complex(&cfull)))
+        };
+        (vec![], kf, mf, None, cf_complex, Some(red))
     } else {
         let free = free_dofs(n, &fixed);
         if n_modes < 1 || n_modes + 1 >= free.len() {
@@ -302,11 +315,11 @@ pub fn solve_cross_section_mixed(
             None
         } else {
             Some(
-                crate::lrb::damping_matrix_mixed(mixed, &dof_map, &c6, &rho, &lrb_labels, 3, 1.0)
+                crate::lrb::damping_matrix_mixed_weighted(mixed, &dof_map, &c6, &rho, &lrb_labels, 3, 1.0, is_axisym)
                     .submatrix(&free, &free),
             )
         };
-        (free, kf, mf, cf, None)
+        (free, kf, mf, cf, None, None)
     };
 
     let pml_cells: Vec<bool> =
@@ -322,6 +335,7 @@ pub fn solve_cross_section_mixed(
         kf,
         mf,
         cf,
+        cf_complex,
         free,
         fixed,
         c6,
@@ -352,6 +366,7 @@ pub struct CrossAssembly {
     pub kf: CCsr,
     pub mf: CCsr,
     pub cf: Option<Csr>,
+    pub(crate) cf_complex: Option<CCsr>,
     pub free: Vec<usize>,
     pub fixed: Vec<usize>,
     pub c6: Vec<M6>,
@@ -371,6 +386,7 @@ pub fn assemble_cross_section(
     spec: &Problem,
     kind: CrossSection,
 ) -> Result<CrossAssembly, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     if mesh.dim != 2 {
         return Err("a cross-section model needs a 2D mesh".into());
     }
@@ -414,13 +430,13 @@ pub fn assemble_cross_section(
         }
     }
     let axis_tol = if is_axisym { crate::axisym::axis_tolerance(mesh) } else { 0.0 };
-    let axis_dofs = match kind {
+    let (axis_rels, axis_dofs) = match kind {
         CrossSection::Axisymmetric(m_az) => {
-            let (axis_pairs, axis_dofs) = crate::axisym::axis_constraints(mesh, order, m_az)?;
+            let (axis_pairs, axis_rels, axis_dofs) = crate::axisym::axis_constraints_with_mpc(mesh, order, m_az)?;
             fixed_set.extend(axis_pairs.into_iter().map(|(k, dof)| dof + k * n1));
-            axis_dofs
+            (axis_rels, axis_dofs)
         }
-        CrossSection::Waveguide(_) => 0,
+        CrossSection::Waveguide(_) => (Vec::new(), 0),
     };
     if let Some(res) = &resolved {
         for dof in outer_clamped_dofs_simplex(mesh, order, spec, res, is_axisym, axis_tol) {
@@ -461,23 +477,37 @@ pub fn assemble_cross_section(
             "low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into()
         );
     }
-    let (free, kf, mf, cf, red) = if matches!(kind, CrossSection::Waveguide(_)) && !spec.periodic.is_empty() {
+    let mut relations = axis_rels;
+    if matches!(kind, CrossSection::Waveguide(_)) && !spec.periodic.is_empty() {
         if !lrb_labels.is_empty() {
             return Err("low-reflecting boundaries cannot be combined with periodic conditions yet".into());
         }
-        let mut relations = vec![];
         for p in &spec.periodic {
             let mt = femcore::periodic::match_vertices(mesh, p)?;
             relations.extend(femcore::periodic::nodal_relations(mesh, order, 3, &mt, p.phase)?);
         }
-        let red = femcore::periodic::Reduction::build(n, &relations, &fixed);
+    }
+    let damp_simplex = |labels: &[i32]| {
+        if is_axisym {
+            crate::lrb::damping_matrix_axisym(mesh, &c6, &rho, labels, order, 3)
+        } else {
+            crate::lrb::damping_matrix(mesh, &c6, &rho, labels, order, 3)
+        }
+    };
+    let (free, kf, mf, cf, cf_complex, red) = if !relations.is_empty() {
+        let red = femcore::periodic::Reduction::try_build(n, &relations, &fixed)?;
         if n_modes < 1 || n_modes + 1 >= red.n_reduced() {
             return Err("number of modes must be between 1 and the number of free dofs".into());
         }
         let pm = red.prolong();
         let kf = femcore::periodic::congruence(&pm, &k);
         let mf = femcore::periodic::congruence(&pm, &mc);
-        (vec![], kf, mf, None, Some(red))
+        let cf_complex = if lrb_labels.is_empty() {
+            None
+        } else {
+            Some(femcore::periodic::congruence(&pm, &to_complex(&damp_simplex(&lrb_labels))))
+        };
+        (vec![], kf, mf, None, cf_complex, Some(red))
     } else {
         let free = free_dofs(n, &fixed);
         if n_modes < 1 || n_modes + 1 >= free.len() {
@@ -485,12 +515,8 @@ pub fn assemble_cross_section(
         }
         let kf = k.submatrix(&free, &free);
         let mf = mc.submatrix(&free, &free);
-        let cf = if lrb_labels.is_empty() {
-            None
-        } else {
-            Some(crate::lrb::damping_matrix(mesh, &c6, &rho, &lrb_labels, order, 3).submatrix(&free, &free))
-        };
-        (free, kf, mf, cf, None)
+        let cf = if lrb_labels.is_empty() { None } else { Some(damp_simplex(&lrb_labels).submatrix(&free, &free)) };
+        (free, kf, mf, cf, None, None)
     };
     let pml_cells: Vec<bool> =
         (0..mesh.n_cells()).map(|ci| resolved.as_ref().is_some_and(|r| r.contains(mesh.cell_labels[ci]))).collect();
@@ -505,6 +531,7 @@ pub fn assemble_cross_section(
         kf,
         mf,
         cf,
+        cf_complex,
         free,
         fixed,
         c6,
@@ -531,7 +558,12 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
     let (kf, mf) = (&asm.kf, &asm.mf);
     let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
     type Found = (Vec<(C, usize)>, Vec<Vec<C>>, bool, usize);
-    let (mut modes, vectors, converged, kdim): Found = if let Some(cf) = asm.cf.as_ref() {
+    let (mut modes, vectors, converged, kdim): Found = if let Some(cf_c) = asm.cf_complex.as_ref() {
+        let (omegas, vecs, conv, dim) =
+            crate::lrb::quadratic_modes_complex(kf, mf, cf_c, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+        let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
+        (modes, vecs, conv, dim)
+    } else if let Some(cf) = asm.cf.as_ref() {
         let (omegas, vecs, conv, dim) =
             crate::lrb::quadratic_modes(kf, mf, cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
         let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
@@ -1047,12 +1079,12 @@ fn finish_cross_section_log(
         if solved.modes.converged { "" } else { " (not every pair converged; those are omitted)" }
     ));
     if asm.axis_dofs > 0 {
-        let held = match m_az.round().abs() as u64 {
-            0 => "u_r and u_theta",
-            1 => "u_z",
-            _ => "u_r, u_z and u_theta",
+        let rule_str = match m_az.round().abs() as u64 {
+            0 => "u_r and u_theta held at zero",
+            1 => "u_z held at zero and u_r = i m u_theta",
+            _ => "u_r, u_z and u_theta held at zero",
         };
-        log.push(format!("axis r = 0: {} dofs, {held} held at zero (regularity for m = {m_az})", asm.axis_dofs));
+        log.push(format!("axis r = 0: {} dofs, {rule_str} (regularity for m = {m_az})", asm.axis_dofs));
     }
     if asm.fixed.is_empty() {
         log.push("no fixed boundary: the lowest modes may be rigid-body-like".into());
@@ -1357,6 +1389,7 @@ fn solve_cross_section_piezo_common(inp: CrossPiezoSolveInput<'_>) -> Result<(Cr
         kf: k_red,
         mf: m_uu_red,
         cf: None,
+        cf_complex: None,
         free: free_out,
         fixed: fixed_all_vec,
         c6: c6_out.clone(),
@@ -1624,7 +1657,8 @@ fn solve_axisymmetric_piezo(mesh: &Discretisation, spec: &Problem, m: f64) -> Re
     let axis_tol = crate::axisym::axis_tolerance(mesh);
     let pml_clamped =
         resolved.as_ref().map_or_else(Vec::new, |r| outer_clamped_dofs_simplex(mesh, order, spec, r, true, axis_tol));
-    let (axis_mech_pairs, axis_phi_fixed, axis_dofs) = crate::axisym::axis_constraints_piezo(mesh, order, m)?;
+    let (axis_mech_pairs, axis_rel_u, axis_phi_fixed, axis_dofs) =
+        crate::axisym::axis_constraints_piezo(mesh, order, m)?;
 
     let (k_full, m_uu, c_uu_full) =
         crate::axisym::assemble_axisym_piezo_simplex(mesh, &mats, order, m, resolved.as_ref())?;
@@ -1650,7 +1684,7 @@ fn solve_axisymmetric_piezo(mesh: &Discretisation, spec: &Problem, m: f64) -> Re
         axis_mech_pairs,
         axis_phi_fixed,
         axis_dofs,
-        rel_u: Vec::new(),
+        rel_u: axis_rel_u,
         rel_p_local: Vec::new(),
         lrb_labels: &[],
         pml_cells,
@@ -1702,7 +1736,8 @@ fn solve_axisymmetric_piezo_mixed(
     let axis_tol = crate::axisym::axis_tolerance_mixed(mixed);
     let pml_clamped =
         resolved.as_ref().map_or_else(Vec::new, |r| outer_clamped_dofs_mixed(mixed, &dof_map, spec, r, true, axis_tol));
-    let (axis_mech_pairs, axis_phi_fixed, axis_dofs) = crate::axisym::axis_constraints_piezo_mixed(mixed, &dof_map, m)?;
+    let (axis_mech_pairs, axis_rel_u, axis_phi_fixed, axis_dofs) =
+        crate::axisym::axis_constraints_piezo_mixed(mixed, &dof_map, m)?;
 
     let (k_full, m_uu, c_uu_full) =
         crate::axisym::assemble_axisym_piezo_mixed(mixed, &dof_map, &mats, m, resolved.as_ref())?;
@@ -1731,7 +1766,7 @@ fn solve_axisymmetric_piezo_mixed(
         axis_mech_pairs,
         axis_phi_fixed,
         axis_dofs,
-        rel_u: Vec::new(),
+        rel_u: axis_rel_u,
         rel_p_local: Vec::new(),
         lrb_labels: &[],
         pml_cells,

@@ -28,13 +28,14 @@ use femcore::fields::{gradients_at_nodes, node_average, CellFields};
 use femcore::linalg::csr::{c, Coo, RCsr as Csr, C};
 use femcore::linalg::driver::{eigs_sym, EigOpts};
 use femcore::material::{self, M3, M6};
-use femcore::mesh::cells::canonical_quad_face;
+use femcore::mesh::cells::{canonical_quad_face, CellType};
 use femcore::mesh::mixed::{
     cell_local_edges, cell_local_quad_faces, cell_local_tri_faces, sorted_tri_face, FacetType, MixedDiscretisation,
     QUAD_EDGES, TRI_EDGES,
 };
 use femcore::pml::ie_exponential_stretch_1d;
 use femcore::props::{LinearSolver, Materials, Pml, PmlCoord, PmlDir, TensorKind};
+use femcore::vvuq::{SourceField, UniformSource};
 use nyx_physics::{
     cell_fields_of, CellField, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
 };
@@ -1512,8 +1513,17 @@ pub struct Setup {
     pub vals: Vec<f64>,
 }
 
-pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
+/// Setup stage (materials and essential Dirichlet constraints), supporting monomorphized [`SourceField`].
+pub fn setup_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<Setup, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let d = mesh.dim;
+    if d != D {
+        return Err(format!("SourceField<{D}> dimension does not match {d}D mesh"));
+    }
     let order = spec.order;
     check_labels(mesh, &spec.bcs)?;
     let c6: Vec<M6> = spec
@@ -1527,13 +1537,30 @@ pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
     for dof in untouched_dofs(mesh, order, d, &spec.inactive) {
         seen.insert(dof, 0.0);
     }
+    let coords = if source.is_uniform() { Vec::new() } else { mesh.dof_coordinates(order) };
     for bc in &spec.bcs {
         if let BcKind::Fixed { fixed, values } = &bc.kind {
-            let bd = boundary_dofs(mesh, &bc.labels, order);
-            for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
-                if fixed[w] {
+            if source.is_uniform() {
+                let bd = boundary_dofs(mesh, &bc.labels, order);
+                for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                    if fixed[w] {
+                        for &dof in &bd {
+                            seen.entry(dof + k * n1).or_insert(values[w]);
+                        }
+                    }
+                }
+            } else {
+                for &lbl in &bc.labels {
+                    let bd = boundary_dofs(mesh, &[lbl], order);
                     for &dof in &bd {
-                        seen.entry(dof + k * n1).or_insert(values[w]);
+                        let mut x = [0.0; D];
+                        x.copy_from_slice(&coords[dof * D..dof * D + D]);
+                        let u_bc = source.dirichlet_re(x, 0.0, lbl as u32);
+                        for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                            if fixed[w] {
+                                seen.entry(dof + k * n1).or_insert(u_bc[k]);
+                            }
+                        }
                     }
                 }
             }
@@ -1544,13 +1571,25 @@ pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
     Ok(Setup { d, n1, c6, fixed, vals })
 }
 
-fn setup_mixed(
+pub fn setup(mesh: &Discretisation, spec: &Problem) -> Result<Setup, String> {
+    match mesh.dim {
+        2 => setup_with_source::<2, UniformSource>(mesh, spec, &UniformSource),
+        3 => setup_with_source::<3, UniformSource>(mesh, spec, &UniformSource),
+        d => Err(format!("unsupported mesh dimension {d}")),
+    }
+}
+
+fn setup_mixed_with_source<const D: usize, S: SourceField<D>>(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     spec: &Problem,
     ie_domains: &ResolvedIeDomains,
+    source: &S,
 ) -> Result<Setup, String> {
     let d = mixed.dim;
+    if d != D {
+        return Err(format!("SourceField<{D}> dimension does not match {d}D mesh"));
+    }
     mixed_check_boundary_labels(mixed, &spec.bcs)?;
     let c6: Vec<M6> = mixed_cell_stiffness_skipping(&spec.materials, mixed, &spec.inactive)?
         .iter()
@@ -1561,13 +1600,30 @@ fn setup_mixed(
     for dof in mixed_untouched_dofs(mixed, dof_map, d, &spec.inactive) {
         seen.insert(dof, 0.0);
     }
+    let coords = if source.is_uniform() { Vec::new() } else { dof_map.dof_coordinates(mixed) };
     for bc in &spec.bcs {
         if let BcKind::Fixed { fixed, values } = &bc.kind {
-            let bd = dof_map.boundary_dofs(mixed, &bc.labels);
-            for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
-                if fixed[w] {
+            if source.is_uniform() {
+                let bd = dof_map.boundary_dofs(mixed, &bc.labels);
+                for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                    if fixed[w] {
+                        for &dof in &bd {
+                            seen.entry(dof + k * n1).or_insert(values[w]);
+                        }
+                    }
+                }
+            } else {
+                for &lbl in &bc.labels {
+                    let bd = dof_map.boundary_dofs(mixed, &[lbl]);
                     for &dof in &bd {
-                        seen.entry(dof + k * n1).or_insert(values[w]);
+                        let mut x = [0.0; D];
+                        x.copy_from_slice(&coords[dof * D..dof * D + D]);
+                        let u_bc = source.dirichlet_re(x, 0.0, lbl as u32);
+                        for (k, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                            if fixed[w] {
+                                seen.entry(dof + k * n1).or_insert(u_bc[k]);
+                            }
+                        }
                     }
                 }
             }
@@ -1994,22 +2050,181 @@ pub struct StaticAssembly {
     pub thermal: Option<Thermal>,
 }
 
-pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
+fn simplex_outward_normal<const D: usize>(mesh: &Discretisation, fv: &[u32], ci: usize) -> [f64; D] {
+    let pt = |v: u32| -> [f64; 3] {
+        let p = mesh.point(v as usize);
+        [p[0], p[1], if D == 3 { p[2] } else { 0.0 }]
+    };
+    let n3 = if D == 2 {
+        let (a, b) = (pt(fv[0]), pt(fv[1]));
+        [b[1] - a[1], -(b[0] - a[0]), 0.0]
+    } else {
+        let (a, b, c) = (pt(fv[0]), pt(fv[1]), pt(fv[2]));
+        let (u, v) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+        [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+    };
+    let len = (n3[0] * n3[0] + n3[1] * n3[1] + n3[2] * n3[2]).sqrt().max(1e-300);
+    let mut n_out = [0.0; D];
+    for k in 0..D {
+        n_out[k] = n3[k] / len;
+    }
+    let cv = mesh.cell(ci);
+    if let Some(&v_opp) = cv.iter().find(|v| !fv.contains(v)) {
+        let opp = pt(v_opp);
+        let mut fc = [0.0; D];
+        for &v in fv {
+            let pv = mesh.point(v as usize);
+            for k in 0..D {
+                fc[k] += pv[k] / fv.len() as f64;
+            }
+        }
+        let dot: f64 = (0..D).map(|k| (fc[k] - opp[k]) * n_out[k]).sum();
+        if dot < 0.0 {
+            for nk in &mut n_out {
+                *nk = -*nk;
+            }
+        }
+    }
+    n_out
+}
+
+fn add_simplex_mms_loads<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    thk_scale: f64,
+    source: &S,
+    f: &mut [f64],
+) {
+    let order = spec.order;
+    let n1 = mesh.n_dofs(order);
+    let geo = geometry(mesh);
+
+    // Volumetric MMS body force: degree-6 simplex quadrature handles high-order smooth MMS fields.
+    let (ct, ref_vol_inv) = if D == 2 { (CellType::Tri, 2.0) } else { (CellType::Tet, 6.0) };
+    let vrule = quad_rule_mixed(ct, 6);
+    let mut dofs = Vec::new();
+    for ci in 0..mesh.n_cells() {
+        let dom = mesh.cell_labels[ci];
+        if spec.inactive.contains(&dom) {
+            continue;
+        }
+        let cv = mesh.cell(ci);
+        mesh.cell_dofs(ci, order, &mut dofs);
+        let base_w = geo.vol[ci] * ref_vol_inv * thk_scale;
+        for (xi, &wq) in vrule.pts.iter().zip(&vrule.w) {
+            let lam = if D == 2 {
+                vec![1.0 - xi[0] - xi[1], xi[0], xi[1]]
+            } else {
+                vec![1.0 - xi[0] - xi[1] - xi[2], xi[0], xi[1], xi[2]]
+            };
+            let mut x_q = [0.0; D];
+            for (i, &v) in cv.iter().enumerate() {
+                let pv = mesh.point(v as usize);
+                for k in 0..D {
+                    x_q[k] += lam[i] * pv[k];
+                }
+            }
+            let (nv, _) = shape(&lam, order);
+            let rhs = source.volume_rhs_re(x_q, 0.0, dom as u32);
+            let w_phys = wq * base_w;
+            for (a, &gd) in dofs.iter().enumerate() {
+                let wa = w_phys * nv[a];
+                for comp in 0..D {
+                    f[comp * n1 + gd] += wa * rhs[comp];
+                }
+            }
+        }
+    }
+
+    // Spatially varying Neumann traction on `BcKind::Load` boundaries.
+    let has_load = spec.bcs.iter().any(|b| matches!(b.kind, BcKind::Load(_)));
+    if !has_load {
+        return;
+    }
+    let fkey = |v: &[u32]| -> [u32; 3] {
+        let mut k = [u32::MAX; 3];
+        k[..v.len()].copy_from_slice(v);
+        k[..v.len()].sort_unstable();
+        k
+    };
+    let mut cell_of: HashMap<[u32; 3], usize> = HashMap::new();
+    for ci in 0..mesh.n_cells() {
+        let v = mesh.cell(ci);
+        for skip in 0..=D {
+            let fv_buf: Vec<u32> = (0..=D).filter(|&i| i != skip).map(|i| v[i]).collect();
+            cell_of.entry(fkey(&fv_buf)).or_insert(ci);
+        }
+    }
+    let (ft, ref_fac_inv) = if D == 2 { (FacetType::Edge2, 0.5) } else { (FacetType::Tri3, 2.0) };
+    let frule = facet_rule_mixed(ft, 6);
+    for bc in &spec.bcs {
+        let BcKind::Load(t) = &bc.kind else { continue };
+        for fc in facets_with(mesh, &bc.labels) {
+            let fv = mesh.facet(fc);
+            let lbl = mesh.facet_labels[fc] as u32;
+            let ci = cell_of[&fkey(fv)];
+            let n_out = simplex_outward_normal::<D>(mesh, fv, ci);
+            let area = facet_measure(mesh, fc);
+            mesh.facet_dofs(fc, order, &mut dofs);
+            for (xi, &wq) in frule.pts.iter().zip(&frule.w) {
+                let lam = if D == 2 {
+                    vec![0.5 * (1.0 - xi[0]), 0.5 * (1.0 + xi[0])]
+                } else {
+                    vec![1.0 - xi[0] - xi[1], xi[0], xi[1]]
+                };
+                let mut x_q = [0.0; D];
+                for (i, &v) in fv.iter().enumerate() {
+                    let pv = mesh.point(v as usize);
+                    for k in 0..D {
+                        x_q[k] += lam[i] * pv[k];
+                    }
+                }
+                let (nv, _) = shape(&lam, order);
+                let tr = source.neumann_robin_re(x_q, n_out, 0.0, lbl);
+                let w_fac = wq * ref_fac_inv * area * thk_scale;
+                for (a, &gd) in dofs.iter().enumerate() {
+                    let wa = w_fac * nv[a];
+                    for (comp, &w) in femcore::section::wafer_axes(D).iter().enumerate() {
+                        f[comp * n1 + gd] += wa * (t[w] + tr[comp]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Static assembly supporting monomorphized [`SourceField`].
+pub fn assemble_static_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    k: Csr,
+    source: &S,
+) -> Result<StaticAssembly, String> {
+    crate::problem::check_simplex_straight(mesh)?;
+    if st.d != D || mesh.dim != D {
+        return Err(format!("SourceField<{D}> dimension mismatch (mesh is {}D)", mesh.dim));
+    }
     if st.fixed.is_empty() {
         return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
     }
     let (d, n1, order, thk) = (st.d, st.n1, spec.order, spec.thickness);
     let n = d * n1;
     let mut f = vec![0.0; n];
-    for bc in &spec.bcs {
-        if let BcKind::Load(t) = &bc.kind {
-            for (comp, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
-                if t[w] != 0.0 {
-                    let tc = t[w] * if d == 2 { thk } else { 1.0 };
-                    add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f, d, comp);
+    if source.is_uniform() {
+        for bc in &spec.bcs {
+            if let BcKind::Load(t) = &bc.kind {
+                for (comp, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                    if t[w] != 0.0 {
+                        let tc = t[w] * if d == 2 { thk } else { 1.0 };
+                        add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f, d, comp);
+                    }
                 }
             }
         }
+    } else {
+        let thk_scale = if d == 2 { thk } else { 1.0 };
+        add_simplex_mms_loads::<D, S>(mesh, spec, thk_scale, source, &mut f);
     }
     let mut thermal: Option<Thermal> = None;
     if let Some(th) = &spec.thermal {
@@ -2031,6 +2246,14 @@ pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr
         thermal = Some(Thermal { alpha, t, tref: th.t_ref });
     }
     Ok(StaticAssembly { k, f, thermal })
+}
+
+pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr) -> Result<StaticAssembly, String> {
+    match mesh.dim {
+        2 => assemble_static_with_source::<2, UniformSource>(mesh, spec, st, k, &UniformSource),
+        3 => assemble_static_with_source::<3, UniformSource>(mesh, spec, st, k, &UniformSource),
+        d => Err(format!("unsupported mesh dimension {d}")),
+    }
 }
 
 pub(crate) fn add_boundary_load_mixed(
@@ -2065,7 +2288,134 @@ pub(crate) fn add_boundary_load_mixed(
     }
 }
 
-fn assemble_static_mixed(
+fn add_mixed_mms_loads<const D: usize, S: SourceField<D>>(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    spec: &Problem,
+    ie_domains: &ResolvedIeDomains,
+    thk_scale: f64,
+    source: &S,
+    f: &mut [f64],
+) {
+    let n1 = dof_map.n_dofs;
+    let space = dof_map.space;
+    let (mut vals, mut dxi, mut sn, mut sdn) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+
+    for ci in 0..mixed.n_cells() {
+        let dom = mixed.cell_labels[ci];
+        if spec.inactive.contains(&dom) {
+            continue;
+        }
+        let ct = mixed.cell_type(ci);
+        let iso = IsoparametricCell::from_mesh(mixed, ci);
+        let in_ie = ie_domains.contains(dom);
+        let rule = quad_rule_mixed(ct, if in_ie { 10 } else { 6 });
+        let cdofs = dof_map.cell_dofs(ci);
+        for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+            let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+            lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+            let ie_det = if in_ie { ie_domains.eval_cell_jacobian(dom, &iso, &jg, &sn, &sdn, D).det } else { 1.0 };
+            let mut x_q = [0.0; D];
+            x_q.copy_from_slice(&jg.x[..D]);
+            let rhs = source.volume_rhs_re(x_q, 0.0, dom as u32);
+            let w_eff = wq * jg.det.abs() * ie_det * thk_scale;
+            for (a, &gd) in cdofs.iter().enumerate() {
+                let wa = w_eff * vals[a];
+                for comp in 0..D {
+                    f[comp * n1 + gd] += wa * rhs[comp];
+                }
+            }
+        }
+    }
+
+    let has_load = spec.bcs.iter().any(|b| matches!(b.kind, BcKind::Load(_)));
+    if !has_load {
+        return;
+    }
+    let mut edge_cell: HashMap<(u32, u32), usize> = HashMap::new();
+    let mut tri_cell: HashMap<[u32; 3], usize> = HashMap::new();
+    let mut quad_cell: HashMap<[u32; 4], usize> = HashMap::new();
+    for ci in 0..mixed.n_cells() {
+        if spec.inactive.contains(&mixed.cell_labels[ci]) {
+            continue;
+        }
+        let vs = mixed.cell(ci);
+        let ct = mixed.cell_type(ci);
+        if D == 2 {
+            for &(i, j) in cell_local_edges(ct) {
+                let (a, b) = (vs[i], vs[j]);
+                edge_cell.entry((a.min(b), a.max(b))).or_insert(ci);
+            }
+        } else {
+            for lf in cell_local_tri_faces(ct) {
+                tri_cell.entry(sorted_tri_face([vs[lf[0]], vs[lf[1]], vs[lf[2]]])).or_insert(ci);
+            }
+            for lq in cell_local_quad_faces(ct) {
+                quad_cell.entry(canonical_quad_face([vs[lq[0]], vs[lq[1]], vs[lq[2]], vs[lq[3]]])).or_insert(ci);
+            }
+        }
+    }
+    let cell_centroid = |ci: usize| -> [f64; D] {
+        let vs = mixed.cell(ci);
+        let mut c0 = [0.0; D];
+        for &v in vs {
+            let pt = mixed.point(v as usize);
+            for k in 0..D {
+                c0[k] += pt[k] / vs.len() as f64;
+            }
+        }
+        c0
+    };
+    let mut dofs = Vec::new();
+    for bc in &spec.bcs {
+        let BcKind::Load(t) = &bc.kind else { continue };
+        for fc in 0..mixed.n_facets() {
+            if !bc.labels.contains(&mixed.facet_labels[fc]) {
+                continue;
+            }
+            let lbl = mixed.facet_labels[fc] as u32;
+            let ft = mixed.facet_type(fc);
+            let fv = mixed.facet(fc);
+            let ci_opt = match ft {
+                FacetType::Edge2 => edge_cell.get(&(fv[0].min(fv[1]), fv[0].max(fv[1]))).copied(),
+                FacetType::Tri3 => tri_cell.get(&sorted_tri_face([fv[0], fv[1], fv[2]])).copied(),
+                FacetType::Quad4 => quad_cell.get(&canonical_quad_face([fv[0], fv[1], fv[2], fv[3]])).copied(),
+            };
+            let xc = ci_opt.map(cell_centroid);
+            dof_map.facet_dofs(mixed, fc, &mut dofs);
+            let rule = facet_rule_mixed(ft, 6);
+            for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
+                let (x3, ds, n3) = eval_facet_jacobian(mixed, fc, xi);
+                if ds <= 0.0 {
+                    continue;
+                }
+                let mut x_q = [0.0; D];
+                x_q.copy_from_slice(&x3[..D]);
+                let mut n_out = [0.0; D];
+                n_out.copy_from_slice(&n3[..D]);
+                if let Some(c0) = xc {
+                    let dot: f64 = (0..D).map(|k| (x_q[k] - c0[k]) * n_out[k]).sum();
+                    if dot < 0.0 {
+                        for nk in &mut n_out {
+                            *nk = -*nk;
+                        }
+                    }
+                }
+                let (nv, _) = facet_lagrange_shape(ft, space, xi);
+                let tr = source.neumann_robin_re(x_q, n_out, 0.0, lbl);
+                let w_fac = wq * ds * thk_scale;
+                for (a, &gd) in dofs.iter().enumerate() {
+                    let wa = w_fac * nv[a];
+                    for (comp, &w) in femcore::section::wafer_axes(D).iter().enumerate() {
+                        f[comp * n1 + gd] += wa * (t[w] + tr[comp]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn assemble_static_mixed_with_source<const D: usize, S: SourceField<D>>(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
     simplex: &Discretisation,
@@ -2073,22 +2423,31 @@ fn assemble_static_mixed(
     st: &Setup,
     ie_domains: &ResolvedIeDomains,
     k: Csr,
+    source: &S,
 ) -> Result<StaticAssembly, String> {
+    if st.d != D || mixed.dim != D {
+        return Err(format!("SourceField<{D}> dimension mismatch (mesh is {}D)", mixed.dim));
+    }
     if st.fixed.is_empty() && !ie_domains.has_exponential_robin() {
         return Err("a static solid problem needs a fixed boundary (otherwise it floats freely)".into());
     }
     let (d, n1, order, thk) = (st.d, st.n1, spec.order, spec.thickness);
     let n = d * n1;
     let mut f = vec![0.0; n];
-    for bc in &spec.bcs {
-        if let BcKind::Load(t) = &bc.kind {
-            for (comp, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
-                if t[w] != 0.0 {
-                    let tc = t[w] * if d == 2 { thk } else { 1.0 };
-                    add_boundary_load_mixed(mixed, dof_map, &bc.labels, tc, &mut f, comp);
+    if source.is_uniform() {
+        for bc in &spec.bcs {
+            if let BcKind::Load(t) = &bc.kind {
+                for (comp, &w) in femcore::section::wafer_axes(d).iter().enumerate() {
+                    if t[w] != 0.0 {
+                        let tc = t[w] * if d == 2 { thk } else { 1.0 };
+                        add_boundary_load_mixed(mixed, dof_map, &bc.labels, tc, &mut f, comp);
+                    }
                 }
             }
         }
+    } else {
+        let thk_scale = if d == 2 { thk } else { 1.0 };
+        add_mixed_mms_loads::<D, S>(mixed, dof_map, spec, ie_domains, thk_scale, source, &mut f);
     }
     let mut thermal: Option<Thermal> = None;
     if let Some(th) = &spec.thermal {
@@ -2365,9 +2724,16 @@ pub(crate) fn cell_rho(
     Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
 }
 
-/// Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting
-/// boundaries in their own modules. The result carries `physics`, `study`, `order`, `dim`, the solutions, scalars, log, time and dofs.
-pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+/// Solves the solid mechanics problem with a monomorphized [`SourceField<D>`] (VVUQ Pillar b MMS).
+pub fn solve_solid_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<SolveResult, String> {
+    crate::problem::check_simplex_straight(mesh)?;
+    if mesh.dim != D {
+        return Err(format!("SourceField<{D}> dimension mismatch (mesh is {}D)", mesh.dim));
+    }
     spec.check_study_open_domains().map_err(|e| e.to_string())?;
     if matches!(spec.study, Study::AxisymmetricEigenfrequency { .. }) {
         return crate::cross_section::solve_axisymmetric(mesh, spec);
@@ -2378,18 +2744,36 @@ pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
     if spec.has_infinite_elements() {
         let raw = Mesh::from_solver_mesh(mesh)?;
         let mixed = nyx_physics::discretise_mixed(&raw).map_err(|e| e.to_string())?;
-        return solve_solid_mixed(&raw, &mixed, spec);
+        return solve_solid_mixed_with_source::<D, S>(&raw, &mixed, spec, source);
     }
     let t0 = Instant::now();
     let mut tl = Instant::now();
-    let mut result = solve_variant(mesh, spec, t0, &mut tl)?;
+    let mut result = solve_variant_with_source::<D, S>(mesh, spec, t0, &mut tl, source)?;
     result.physics = "sms".into();
     result.study = spec.study.kind().into();
     Ok(result)
 }
 
-/// Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) and Static Infinite Element solid solver.
-pub fn solve_solid_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String> {
+/// Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting
+/// boundaries in their own modules. The result carries `physics`, `study`, `order`, `dim`, the solutions, scalars, log, time and dofs.
+pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    match mesh.dim {
+        2 => solve_solid_with_source::<2, UniformSource>(mesh, spec, &UniformSource),
+        3 => solve_solid_with_source::<3, UniformSource>(mesh, spec, &UniformSource),
+        d => Err(format!("unsupported mesh dimension {d}")),
+    }
+}
+
+/// Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) solid solver with monomorphized [`SourceField<D>`].
+pub fn solve_solid_mixed_with_source<const D: usize, S: SourceField<D>>(
+    raw_mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<SolveResult, String> {
+    if mixed.dim != D {
+        return Err(format!("SourceField<{D}> dimension mismatch (mesh is {}D)", mixed.dim));
+    }
     spec.check_study_open_domains().map_err(|e| e.to_string())?;
     if matches!(spec.study, Study::AxisymmetricEigenfrequency { .. }) {
         return crate::cross_section::solve_axisymmetric_mixed(raw_mesh, mixed, spec);
@@ -2399,18 +2783,28 @@ pub fn solve_solid_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
     }
     let t0 = Instant::now();
     let mut tl = Instant::now();
-    let mut result = solve_variant_mixed(raw_mesh, mixed, spec, t0, &mut tl)?;
+    let mut result = solve_variant_mixed_with_source::<D, S>(raw_mesh, mixed, spec, t0, &mut tl, source)?;
     result.physics = "sms".into();
     result.study = spec.study.kind().into();
     Ok(result)
 }
 
-fn solve_variant_mixed(
+/// Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) and Static Infinite Element solid solver.
+pub fn solve_solid_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String> {
+    match mixed.dim {
+        2 => solve_solid_mixed_with_source::<2, UniformSource>(raw_mesh, mixed, spec, &UniformSource),
+        3 => solve_solid_mixed_with_source::<3, UniformSource>(raw_mesh, mixed, spec, &UniformSource),
+        d => Err(format!("unsupported mesh dimension {d}")),
+    }
+}
+
+fn solve_variant_mixed_with_source<const D: usize, S: SourceField<D>>(
     raw_mesh: &Mesh,
     mixed: &MixedDiscretisation,
     spec: &Problem,
     t0: Instant,
     tl: &mut Instant,
+    source: &S,
 ) -> Result<SolveResult, String> {
     let order = spec.order;
     if spec.materials.has_pml() {
@@ -2434,7 +2828,7 @@ fn solve_variant_mixed(
     } else {
         ResolvedIeDomains::default()
     };
-    let st = setup_mixed(mixed, &dof_map, spec, &ie_domains)?;
+    let st = setup_mixed_with_source::<D, S>(mixed, &dof_map, spec, &ie_domains, source)?;
     lap(tl, "setup (materials, constraints)");
     let (d, n1) = (st.d, st.n1);
     let n = d * n1;
@@ -2451,7 +2845,16 @@ fn solve_variant_mixed(
         }
         Study::Static => {
             let (simplex, proj) = MixedToSimplexProjector::from_mesh(raw_mesh, mixed).map_err(|e| e.to_string())?;
-            let asm = assemble_static_mixed(mixed, &dof_map, &simplex, spec, &st, &ie_domains, k)?;
+            let asm = assemble_static_mixed_with_source::<D, S>(
+                mixed,
+                &dof_map,
+                &simplex,
+                spec,
+                &st,
+                &ie_domains,
+                k,
+                source,
+            )?;
             lap(tl, "loads");
             let (u, note) = solve_static_mixed(mixed, &dof_map, spec, &st, &ie_domains, &asm)?;
             lap(tl, "linear solve");
@@ -2599,7 +3002,13 @@ fn solve_variant_mixed(
     }
 }
 
-fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut Instant) -> Result<SolveResult, String> {
+fn solve_variant_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    t0: Instant,
+    tl: &mut Instant,
+    source: &S,
+) -> Result<SolveResult, String> {
     let order = spec.order;
     if spec.materials.has_pml() {
         return match spec.study {
@@ -2612,7 +3021,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
             ),
         };
     }
-    let st = setup(mesh, spec)?;
+    let st = setup_with_source::<D, S>(mesh, spec, source)?;
     lap(tl, "setup (materials, constraints)");
     let (d, n1) = (st.d, st.n1);
     let n = d * n1;
@@ -2627,7 +3036,7 @@ fn solve_variant(mesh: &Discretisation, spec: &Problem, t0: Instant, tl: &mut In
             Err("the waveguide modes study is solved by cross_section::solve_waveguide_modes".into())
         }
         Study::Static => {
-            let asm = assemble_static(mesh, spec, &st, k)?;
+            let asm = assemble_static_with_source::<D, S>(mesh, spec, &st, k, source)?;
             lap(tl, "loads");
             let (u, note) = solve_static(mesh, spec, &st, &asm)?;
             lap(tl, "linear solve");

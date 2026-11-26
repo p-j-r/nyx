@@ -10,6 +10,17 @@ use nyx_physics::decode::{materials_by_label, resolve_conditions, Params};
 use nyx_physics::{Ctx, Error, Physics, ProblemSpec};
 use std::collections::BTreeMap;
 
+/// Refuses curved or quarter-point `SimplexMesh` inputs on affine simplex fast paths (`R32`).
+pub(crate) fn check_simplex_straight(mesh: &femcore::mesh::SimplexMesh) -> Result<(), String> {
+    if mesh.has_curved() || mesh.has_qp() {
+        return Err(
+            "unsupported: curved or quarter-point SimplexMesh elements are ignored on the affine simplex fast path; solve through nyx_sms::run(&Mesh, ...) or Sms::solve for isoparametric mixed-element assembly"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Plane {
     Strain,
