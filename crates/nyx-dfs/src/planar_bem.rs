@@ -9,12 +9,15 @@
 //! log-space SPD Richardson extrapolation (`richardson = true`).
 
 use crate::common::{components, minmax, norm_of};
+use crate::diag::DfsDiag;
 use crate::electro::{electrostatics_fields, EPS0};
 use crate::problem::{BcKind, Problem};
 use femcore::fem::{boundary_dofs, check_boundary_labels};
 use femcore::linalg::driver::dense_eigh;
 use femcore::material;
-use nyx_physics::{cell_fields_of, CapacitanceMatrixData, Discretisation, Scalar, Solution, SolveResult, TlsMeta};
+use nyx_physics::{
+    cell_fields_of, CapacitanceMatrixData, Discretisation, Scalar, Solution, SolveResult, SpatialErrorEstimate, TlsMeta,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
 use std::time::Instant;
@@ -355,9 +358,39 @@ fn panel_pair_elastance(pi: &Panel, pj: &Panel, c0: f64, images: &[(f64, f64)], 
     c0 * val
 }
 
+/// Computes maximum dense backward residual `||P q_a - e_a||_2 / (||P||_F ||q_a||_2 + ||e_a||_2)` across terminals.
+fn bem_dense_residual_real(p_flat: &[f64], panels: &[Panel], q_cols: &[Vec<f64>]) -> f64 {
+    let n = panels.len();
+    let p_fro = p_flat.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let mut worst = 0.0_f64;
+    for (t, q) in q_cols.iter().enumerate() {
+        let q_norm = q.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let mut r2 = 0.0_f64;
+        let mut b2 = 0.0_f64;
+        for i in 0..n {
+            let rhs_i = if panels[i].terminal == Some(t) { 1.0 } else { 0.0 };
+            b2 += rhs_i * rhs_i;
+            let row = &p_flat[i * n..(i + 1) * n];
+            let mut pq_i = 0.0_f64;
+            for j in 0..n {
+                pq_i += row[j] * q[j];
+            }
+            let d = pq_i - rhs_i;
+            r2 += d * d;
+        }
+        let denom = (p_fro * q_norm + b2.sqrt()).max(1e-30);
+        worst = worst.max(r2.sqrt() / denom);
+    }
+    worst
+}
+
 /// Assembles the symmetric `n x n` BEM elastance matrix `P`, factors it via `dense_eigh`, and
-/// returns `(maxwell_matrix_f, panel_charges_per_terminal)`.
-fn assemble_and_solve_bem(panels: &[Panel], n_term: usize, stack: &LayeredStack) -> Result<(Matrix, Matrix), String> {
+/// returns `(maxwell_matrix_f, panel_charges_per_terminal, max_backward_residual)`.
+fn assemble_and_solve_bem(
+    panels: &[Panel],
+    n_term: usize,
+    stack: &LayeredStack,
+) -> Result<(Matrix, Matrix, f64), String> {
     let n = panels.len();
     if n == 0 {
         return Err("planar_bem found zero conductor sheet triangles".into());
@@ -420,7 +453,8 @@ fn assemble_and_solve_bem(panels: &[Panel], n_term: usize, stack: &LayeredStack)
             }
         }
     }
-    Ok((c_mat, q_cols))
+    let rel_res = bem_dense_residual_real(&p_flat, panels, &q_cols);
+    Ok((c_mat, q_cols, rel_res))
 }
 
 /// Applies log-space SPD Richardson extrapolation (`r = 2`, `w_1 = 2.0`) to coarse (`c0`) and
@@ -1362,13 +1396,32 @@ pub fn solve_planar_bem_with_stack(
     let n_term = terminals.len();
     let n_panels = panels.len();
 
-    let (c_coarse, _q_coarse) = assemble_and_solve_bem(&panels, n_term, &stack)?;
+    let (c_coarse, _q_coarse, coarse_res) = assemble_and_solve_bem(&panels, n_term, &stack)?;
+    let mut diag = DfsDiag::new("dense_eigh");
+    diag.max_algebraic_residual = coarse_res;
     let mut log = Vec::new();
     let fine_panels_opt = spec.richardson.then(|| subdivide_panels_1_to_4(&panels));
     let mut maxwell_matrix_f = if let Some(ref fine_panels) = fine_panels_opt {
         let n_fine = fine_panels.len();
-        let (c_fine, _) = assemble_and_solve_bem(fine_panels, n_term, &stack)?;
+        let (c_fine, _, fine_res) = assemble_and_solve_bem(fine_panels, n_term, &stack)?;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(fine_res);
         let c_ext = extrapolate_spd_log_space(&c_coarse, &c_fine, 2.0)?;
+        let mut max_delta = 0.0_f64;
+        for i in 0..n_term {
+            for j in 0..n_term {
+                let scale = c_ext[i][j].abs().max(c_coarse[i][j].abs()).max(1e-30);
+                max_delta = max_delta.max((c_ext[i][j] - c_coarse[i][j]).abs() / scale);
+            }
+        }
+        diag.set_spatial_estimate(SpatialErrorEstimate {
+            method: "richardson_1_to_4".into(),
+            rel_bound: max_delta,
+            is_epistemic_bound: false,
+            observed_order: Some(1.0),
+            refinement_ratio: Some(2.0),
+            safety_factor: None,
+            extrapolated_scalars_only: Some(true),
+        });
         log.push(format!(
             "planar_bem (Richardson 1->4, w_1=2.0): {n_panels} -> {n_fine} sheet panels, eps_top={:.3}, eps_sub={:.3}, eps_bot={:.3}, t_sub={:.2e} m, grounded_backplane={}",
             stack.eps_top, stack.eps_sub, stack.eps_bot, stack.t_sub, stack.grounded_backplane
@@ -1509,6 +1562,7 @@ pub fn solve_planar_bem_with_stack(
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());
+    let (diagnostics, error_budget) = diag.finish();
 
     Ok(SolveResult {
         physics: "dfs".into(),
@@ -1520,7 +1574,8 @@ pub fn solve_planar_bem_with_stack(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n_panels,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 

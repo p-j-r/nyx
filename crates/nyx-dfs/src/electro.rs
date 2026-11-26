@@ -9,21 +9,22 @@ use crate::common::{
     assemble_source_mixed, cell_gradient, cell_tensor_mixed, cell_values_mixed, check_boundary_labels_mixed,
     classify_ie_outer_facets_mixed, components, dirichlet_constraints_field, farfield_centroid_mixed,
     farfield_positive_measure_mixed, minmax, norm_of, plane_tensors, plane_tensors_mixed, resolve_ie_domains_mixed,
-    sample_mixed_gradients_on_simplex, solve_spd_mixed,
+    sample_mixed_gradients_on_simplex,
 };
+use crate::diag::{solve_spd_checked, solve_spd_mixed_checked, DfsDiag};
 use crate::problem::{BcKind, Problem};
 use femcore::fem::*;
 use femcore::fem_mixed::{LagrangeSpace, MixedLagrangeDofMap};
 use femcore::fields::{node_average, CellFields};
 use femcore::linalg::csr::RCsr as Csr;
-use femcore::linalg::driver::{dense_eigh, DirectSolver};
+use femcore::linalg::driver::{backward_residual_many, dense_eigh, DirectSolver};
 use femcore::material::{self, M3};
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::{LinearSolver, TensorKind};
 use femcore::vvuq::{SourceField, UniformSource};
 use nyx_physics::{
-    cell_fields_of, discretise, discretise_mixed, CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Mesh,
-    MixedToSimplexProjector, Scalar, Solution, SolveResult, TlsMeta,
+    cell_fields_of, discretise, discretise_mixed, CapacitanceMatrixData, DiagnosticSeverity, Discretisation,
+    ElectroAmrData, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult, SpatialErrorEstimate, TlsMeta,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -666,8 +667,28 @@ pub fn solve_potential(
     spec: &Problem,
     asm: &ElectroAssembly,
 ) -> Result<(Vec<f64>, Option<String>), String> {
+    let (v, note, _diag) = solve_potential_checked(mesh, spec, asm)?;
+    Ok((v, note))
+}
+
+pub(crate) fn solve_potential_checked(
+    mesh: &Discretisation,
+    spec: &Problem,
+    asm: &ElectroAssembly,
+) -> Result<(Vec<f64>, Option<String>, DfsDiag), String> {
     let tol = if spec.tol > 0.0 { spec.tol } else { 1e-10 };
-    solve_spd_with(mesh, spec.order, 1, spec.solver, &asm.k, &asm.f, &asm.fixed, &asm.vals, tol, spec.amg_line_smooth)
+    solve_spd_checked(
+        mesh,
+        spec.order,
+        1,
+        spec.solver,
+        &asm.k,
+        &asm.f,
+        &asm.fixed,
+        &asm.vals,
+        tol,
+        spec.amg_line_smooth,
+    )
 }
 
 /// Stage 3: the fields `V` and `E` (the flat names `|E|`, `Ex`, `Ez` come from `Solution::flat_fields`) and the same without averaging over
@@ -1219,7 +1240,7 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
     });
 
     if terminals.is_empty() {
-        let (v, solver_note) = solve_potential(m_work, spec, &asm)?;
+        let (v, solver_note, diag) = solve_potential_checked(m_work, spec, &asm)?;
         let (fields, cell_fields) = electrostatics_fields(m_work, order, &v);
         let en = norm_of(&components(&fields[1].values, m_work.dim));
         let kv = asm.k.matvec(&v);
@@ -1261,6 +1282,7 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
             scalars.push(amr.scalar());
         }
         scalars.push(tls.scalar());
+        let (diagnostics, error_budget) = diag.finish();
         return Ok(SolveResult {
             physics: "dfs".into(),
             study: spec.study.kind().into(),
@@ -1276,7 +1298,8 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
             log: solver_note.into_iter().collect(),
             seconds: t0.elapsed().as_secs_f64(),
             dofs: asm.k.nrows(),
-            ..Default::default()
+            diagnostics: Some(diagnostics),
+            error_budget: Some(error_budget),
         });
     }
 
@@ -1348,19 +1371,21 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
         }
     }
 
+    let mut diag = DfsDiag::new("direct_chol");
     if n_free > 0 {
-        let solve_direct = |log: &mut Vec<String>| -> Result<Vec<Vec<f64>>, String> {
-            let kff = asm.k.submatrix(&free, &free);
-            let kfx = asm.k.submatrix(&free, &fixed);
-            let rhs_list: Vec<Vec<f64>> = vals_list
-                .iter()
-                .map(|vals| {
-                    let kx = kfx.matvec(vals);
-                    free.iter().enumerate().map(|(a, &i)| asm.f[i] - kx[a]).collect()
-                })
-                .collect();
+        let kff = asm.k.submatrix(&free, &free);
+        let kfx = asm.k.submatrix(&free, &fixed);
+        let rhs_list: Vec<Vec<f64>> = vals_list
+            .iter()
+            .map(|vals| {
+                let kx = kfx.matvec(vals);
+                free.iter().enumerate().map(|(a, &i)| asm.f[i] - kx[a]).collect()
+            })
+            .collect();
+        let solve_direct = |log: &mut Vec<String>, diag: &mut DfsDiag| -> Result<Vec<Vec<f64>>, String> {
             let solver = DirectSolver::new(&kff, true)?;
-            let sols = solver.solve_many(&rhs_list);
+            let (sols, chk) = solver.solve_many_checked(&kff, &rhs_list);
+            diag.absorb_direct(&chk);
             log.push(format!(
                 "direct Cholesky: 1 factorization ({n_free} free dofs) served {n_term} terminal right-hand side(s)"
             ));
@@ -1373,25 +1398,29 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
             let sys = AmgSystem::new_with(m_work, order, 1, &asm.k, &fixed, opts)?;
             let base_tol = if spec.tol > 0.0 { spec.tol } else { 1e-10 };
             let tol = if need_rt { base_tol.min(1e-11) } else { base_tol };
-            let mut rhs_list = Vec::with_capacity(n_term);
+            let mut amg_rhs_list = Vec::with_capacity(n_term);
             let mut fv_list = Vec::with_capacity(n_term);
             for j in 0..n_term {
                 let ku = asm.k.matvec(&v_all[j]);
                 let rhs: Vec<f64> = (0..n).map(|i| asm.f[i] - ku[i]).collect();
                 let fv: Vec<(usize, f64)> = fixed.iter().copied().zip(vals_list[j].iter().copied()).collect();
-                rhs_list.push(rhs);
+                amg_rhs_list.push(rhs);
                 fv_list.push(fv);
             }
-            let (u_all, its, worst_rel) = sys.solve_block_with(None, &rhs_list, &fv_list, tol, 600);
-            let amg_ok = worst_rel <= (tol * 1e3).max(1e-7);
+            let (u_all, its, worst_rel) = sys.solve_block_with(None, &amg_rhs_list, &fv_list, tol, 600);
+            let u_free_all: Vec<Vec<f64>> = (0..n_term).map(|j| free.iter().map(|&i| u_all[j][i]).collect()).collect();
+            let bw_rel = backward_residual_many(&kff, &rhs_list, &u_free_all);
+            let max_rel = worst_rel.max(bw_rel);
+            let amg_ok = worst_rel.is_finite() && worst_rel <= tol * 2.0;
             if amg_ok {
                 for j in 0..n_term {
                     for &i in &free {
                         v_all[j][i] = u_all[j][i];
                     }
                 }
+                diag.record_amg(its, max_rel, true);
                 log.push(format!(
-                    "AMG-CG: 1 hierarchy setup ({} levels {:?}{}, {:.1} s) served {n_term} terminal right-hand side(s) ({its} block iterations, max residual {worst_rel:.1e})",
+                    "AMG-CG: 1 hierarchy setup ({} levels {:?}{}, {:.1} s) served {n_term} terminal right-hand side(s) ({its} block iterations, max residual {max_rel:.1e})",
                     sys.n_levels(),
                     sys.sizes(),
                     if sys.line_smooth_active() {
@@ -1401,20 +1430,43 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
                     },
                     sys.setup_seconds
                 ));
-            } else if spec.solver == LinearSolver::Auto {
-                let sols = solve_direct(&mut log)?;
+            } else if spec.solver == LinearSolver::Auto || n_free <= 50_000 {
+                let sols = solve_direct(&mut log, &mut diag)?;
                 for j in 0..n_term {
                     for (a, &i) in free.iter().enumerate() {
                         v_all[j][i] = sols[j][a];
                     }
                 }
+                diag.push_warning(
+                    "amg_fallback_to_direct",
+                    DiagnosticSeverity::Warning,
+                    format!(
+                        "AMG block CG residual {worst_rel:.2e} exceeded tight threshold {:.2e}; fell back to direct Cholesky",
+                        tol * 2.0
+                    ),
+                );
             } else {
-                return Err(format!(
-                    "the iterative solver did not converge (residual {worst_rel:.2e}); choose the direct solver"
+                for j in 0..n_term {
+                    for &i in &free {
+                        v_all[j][i] = u_all[j][i];
+                    }
+                }
+                diag.record_amg(its, max_rel, false);
+                diag.push_warning(
+                    "amg_not_converged",
+                    DiagnosticSeverity::Error,
+                    format!(
+                        "the iterative AMG solver did not converge (residual {worst_rel:.2e} > {:.2e} after {its} iterations)",
+                        tol * 2.0
+                    ),
+                );
+                log.push(format!(
+                    "AMG-CG: NOT converged ({its} iterations, residual {worst_rel:.2e} > {:.2e})",
+                    tol * 2.0
                 ));
             }
         } else {
-            let sols = solve_direct(&mut log)?;
+            let sols = solve_direct(&mut log, &mut diag)?;
             for j in 0..n_term {
                 for (a, &i) in free.iter().enumerate() {
                     v_all[j][i] = sols[j][a];
@@ -1505,6 +1557,21 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
             if spec.flux_bounds == "midpoint" {
                 maxwell_matrix_f = eq.c_mid_matrix.clone();
             }
+            let err_frob = eq.c_error_bound_matrix.iter().flatten().map(|v| v * v).sum::<f64>().sqrt();
+            let c_frob = maxwell_matrix_f.iter().flatten().map(|v| v * v).sum::<f64>().sqrt();
+            let mut rel_bound = err_frob / c_frob.max(1e-30);
+            for i in 0..n_term {
+                let cii = maxwell_matrix_f[i][i].abs();
+                if cii > 0.0 {
+                    rel_bound = rel_bound.max(eq.c_error_bound_matrix[i][i].abs() / cii);
+                }
+            }
+            diag.set_spatial_estimate(SpatialErrorEstimate {
+                method: "prager_synge_flux_bounds".into(),
+                rel_bound,
+                is_epistemic_bound: true,
+                ..Default::default()
+            });
             maxwell_lower_matrix_f = Some(eq.c_lower_matrix.clone());
             maxwell_upper_matrix_f = Some(eq.c_upper_matrix.clone());
             maxwell_mid_matrix_f = Some(eq.c_mid_matrix.clone());
@@ -1629,6 +1696,7 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());
+    let (diagnostics, error_budget) = diag.finish();
 
     Ok(SolveResult {
         physics: "dfs".into(),
@@ -1640,7 +1708,8 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -1858,7 +1927,7 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
             fixed = pairs.iter().map(|p| p.0).collect();
             vals = pairs.iter().map(|p| p.1).collect();
         }
-        let (v_mixed, solver_note) = solve_spd_mixed(spec.solver, &k, &f, &fixed, &vals)?;
+        let (v_mixed, solver_note, diag) = solve_spd_mixed_checked(spec.solver, &k, &f, &fixed, &vals)?;
         let (fields, cell_fields, v_simplex) =
             electrostatics_fields_mixed(&mixed, &dof_map, &simplex, &proj, order, &v_mixed);
         let en = norm_of(&components(&fields[1].values, mixed.dim));
@@ -1886,6 +1955,7 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
             ));
         }
         scalars.push(tls.scalar());
+        let (diagnostics, error_budget) = diag.finish();
         return Ok(SolveResult {
             physics: "dfs".into(),
             study: spec.study.kind().into(),
@@ -1901,7 +1971,8 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
             log: solver_note.into_iter().collect(),
             seconds: t0.elapsed().as_secs_f64(),
             dofs: n,
-            ..Default::default()
+            diagnostics: Some(diagnostics),
+            error_budget: Some(error_budget),
         });
     }
 
@@ -1953,6 +2024,7 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
     }
 
     let mut log = Vec::new();
+    let mut diag = DfsDiag::new("direct_chol");
     if n_free > 0 {
         let kff = k.submatrix(&free, &free);
         let kfx = k.submatrix(&free, &fixed);
@@ -1964,7 +2036,8 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
             })
             .collect();
         let solver = DirectSolver::new(&kff, true)?;
-        let sols = solver.solve_many(&rhs_list);
+        let (sols, chk) = solver.solve_many_checked(&kff, &rhs_list);
+        diag.absorb_direct(&chk);
         for j in 0..n_term {
             for (a, &i) in free.iter().enumerate() {
                 v_all[j][i] = sols[j][a];
@@ -2085,6 +2158,7 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
     };
     scalars.push(cap_data.scalar());
     scalars.push(tls.scalar());
+    let (diagnostics, error_budget) = diag.finish();
 
     Ok(SolveResult {
         physics: "dfs".into(),
@@ -2096,6 +2170,7 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }

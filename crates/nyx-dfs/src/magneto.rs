@@ -20,6 +20,7 @@ use crate::common::{
     farfield_centroid_mixed, mesh_has_curved_edges, minmax, norm_of, quad_seg_high, resolve_ie_domains_mixed,
     sample_mixed_gradients_on_simplex, ResolvedIeDomain,
 };
+use crate::diag::DfsDiag;
 use crate::problem::{BcKind, Problem, Study};
 use femcore::edge_mixed::{eval_cell_basis_3d, NedEvalScratch, NedMixed};
 use femcore::fem::*;
@@ -29,7 +30,7 @@ use femcore::fem_mixed::{
 };
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::csr::{Coo, RCsr as Csr};
-use femcore::linalg::driver::{dense_eigh, DirectSolver};
+use femcore::linalg::driver::{dense_eigh, DirectSolveCheck, DirectSolver};
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::LinearSolver;
 use femcore::vvuq::{SourceField, UniformSource};
@@ -322,7 +323,9 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
     let kff = k.submatrix(&free, &free);
     let rhs_free_list: Vec<Vec<f64>> = rhs_full_list.iter().map(|r| free.iter().map(|&i| r[i]).collect()).collect();
     let solver = DirectSolver::new(&kff, true)?;
-    let sols_free = solver.solve_many(&rhs_free_list);
+    let (sols_free, chk) = solver.solve_many_checked(&kff, &rhs_free_list);
+    let mut diag = DfsDiag::new(chk.solver_kind);
+    diag.absorb_direct(&chk);
     let log = vec![format!(
         "2D cross_section magnetostatics: 1 factorization ({n_free} free dofs) served {n_exc} excitation(s)"
     )];
@@ -369,6 +372,7 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
     }
 
     push_inductance_scalars(&mut scalars, &excitations, &l_mat, "cross_section");
+    let (diagnostics, error_budget) = diag.finish();
 
     Ok(SolveResult {
         physics: "dfs".into(),
@@ -380,7 +384,8 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -601,7 +606,7 @@ fn solve_planar_stream(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         }
     }
 
-    if n_free > 0 {
+    let worst_dense_res = if n_free > 0 {
         let mut kff = vec![0.0; n_free * n_free];
         for (a, &i) in free.iter().enumerate() {
             for (b, &j) in free.iter().enumerate() {
@@ -610,6 +615,8 @@ fn solve_planar_stream(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         }
         let (eigs, vecs) = dense_eigh(&kff, n_free)?;
         let lam_max = eigs.iter().copied().fold(0.0_f64, f64::max).max(1e-30);
+        let kff_fro = kff.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let mut worst_dense_res = 0.0_f64;
         for p in 0..n_exc {
             let mut rhs = vec![0.0; n_free];
             for (a, &i) in free.iter().enumerate() {
@@ -629,11 +636,24 @@ fn solve_planar_stream(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
                     }
                 }
             }
+            let sol_norm = sol.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let rhs_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let mut r2 = 0.0_f64;
+            for a in 0..n_free {
+                let row = &kff[a * n_free..(a + 1) * n_free];
+                let ax: f64 = row.iter().zip(&sol).map(|(m, s)| m * s).sum();
+                let d = ax - rhs[a];
+                r2 += d * d;
+            }
+            worst_dense_res = worst_dense_res.max(r2.sqrt() / (kff_fro * sol_norm + rhs_norm + 1e-30));
             for (a, &i) in free.iter().enumerate() {
                 g_all[p][i] = sol[a];
             }
         }
-    }
+        worst_dense_res
+    } else {
+        0.0
+    };
 
     let mut kg_all = vec![vec![0.0; n]; n_exc];
     for p in 0..n_exc {
@@ -681,6 +701,9 @@ fn solve_planar_stream(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
     let log = vec![format!(
         "2D planar_stream Brandt-Clem magnetostatics: 1 eigendecomposition ({n_free} free dofs, {nc} sheet triangles) served {n_exc} excitation(s)"
     )];
+    let mut diag = DfsDiag::new("dense_eigh");
+    diag.max_algebraic_residual = worst_dense_res;
+    let (diagnostics, error_budget) = diag.finish();
 
     Ok(SolveResult {
         physics: "dfs".into(),
@@ -692,7 +715,8 @@ fn solve_planar_stream(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -1031,7 +1055,7 @@ where
     Ok((metas, rhs_u_list, c_flux_list))
 }
 
-type Mixed3dFluxoidResult = (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<String>);
+type Mixed3dFluxoidResult = (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<String>, DirectSolveCheck);
 
 #[allow(clippy::too_many_arguments)]
 fn solve_mixed_3d_fluxoids_and_inductance<P, E>(
@@ -1075,7 +1099,7 @@ where
 
     let kff = k_mag.submatrix(&free, &free);
     let solver = DirectSolver::new(&kff, true)?;
-    let w_sols_free = solver.solve_many(&rhs_w_free_list);
+    let (w_sols_free, chk) = solver.solve_many_checked(&kff, &rhs_w_free_list);
     let log = vec![format!(
         "3D mixed_3d London magnetostatics: 1 factorization ({n_free} free dofs: {n_edges} Nedelec edges + {n_sverts} sheet phi_s nodes on {} deduplicated triangles) served {n_exc} excitation(s)",
         dedup_sheets.len()
@@ -1183,7 +1207,7 @@ where
         }
     }
 
-    Ok((l_mat, u_all, log))
+    Ok((l_mat, u_all, log, chk))
 }
 
 fn mixed_3d_fields(mesh: &Discretisation, order: usize, a_edges: &[f64]) -> (Vec<Field>, CellFields) {
@@ -1542,13 +1566,15 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
         for (&d, &val) in fixed.iter().zip(&fixed_vals) {
             u[d] = val;
         }
+        let mut diag = DfsDiag::new("direct_chol");
         if n_free > 0 {
             let kff = k_mag.submatrix(&free, &free);
             let kfx = k_mag.submatrix(&free, &fixed);
             let kx = if fixed.is_empty() { vec![0.0; n_free] } else { kfx.matvec(&fixed_vals) };
             let rhs_free: Vec<f64> = free.iter().enumerate().map(|(a, &i)| rhs[i] - kx[a]).collect();
             let solver = DirectSolver::new(&kff, true)?;
-            let sol = solver.solve(&rhs_free);
+            let (sol, chk) = solver.solve_checked(&kff, &rhs_free);
+            diag.absorb_direct(&chk);
             for (a, &i) in free.iter().enumerate() {
                 u[i] = sol[a];
             }
@@ -1556,6 +1582,7 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
         let a_edges = u[..n_edges].to_vec();
         let (fields, cell_fields) = mixed_3d_fields(mesh, order, &a_edges);
         let bn = norm_of(&components(&fields[1].values, 3));
+        let (diagnostics, error_budget) = diag.finish();
         let res = SolveResult {
             physics: "dfs".into(),
             study: spec.study.kind().into(),
@@ -1571,7 +1598,8 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
             log: vec![format!("3D mixed_3d SourceField MMS ({n_free} free Nedelec DOFs)")],
             seconds: t0.elapsed().as_secs_f64(),
             dofs: n_total,
-            ..Default::default()
+            diagnostics: Some(diagnostics),
+            error_budget: Some(error_budget),
         };
         return Ok((res, a_edges));
     }
@@ -1612,7 +1640,7 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
     )?;
 
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let (l_mat, u_all, log) = solve_mixed_3d_fluxoids_and_inductance(
+    let (l_mat, u_all, log, chk) = solve_mixed_3d_fluxoids_and_inductance(
         &excitations,
         &metas,
         &dedup_sheets,
@@ -1627,6 +1655,9 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
         n_edges,
         n_sverts,
     )?;
+    let mut diag = DfsDiag::new(chk.solver_kind);
+    diag.absorb_direct(&chk);
+    let (diagnostics, error_budget) = diag.finish();
 
     let n_exc = excitations.len();
     let mut solutions = Vec::with_capacity(n_exc);
@@ -1664,7 +1695,8 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
             log,
             seconds: t0.elapsed().as_secs_f64(),
             dofs: n_total,
-            ..Default::default()
+            diagnostics: Some(diagnostics),
+            error_budget: Some(error_budget),
         },
         first_edges,
     ))
@@ -1890,7 +1922,9 @@ fn solve_cross_section_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult,
     let kff = k.submatrix(&free, &free);
     let rhs_free_list: Vec<Vec<f64>> = rhs_full_list.iter().map(|r| free.iter().map(|&i| r[i]).collect()).collect();
     let solver = DirectSolver::new(&kff, true)?;
-    let sols_free = solver.solve_many(&rhs_free_list);
+    let (sols_free, chk) = solver.solve_many_checked(&kff, &rhs_free_list);
+    let mut diag = DfsDiag::new(chk.solver_kind);
+    diag.absorb_direct(&chk);
     let log = vec![format!(
         "2D cross_section magnetostatics: 1 factorization ({n_free} free mixed-cell dofs) served {n_exc} excitation(s)"
     )];
@@ -1937,6 +1971,7 @@ fn solve_cross_section_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult,
     }
 
     push_inductance_scalars(&mut scalars, &excitations, &l_mat, "cross_section");
+    let (diagnostics, error_budget) = diag.finish();
 
     Ok(SolveResult {
         physics: "dfs".into(),
@@ -1948,7 +1983,8 @@ fn solve_cross_section_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult,
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -2402,7 +2438,7 @@ fn solve_mixed_3d_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, Stri
     )?;
 
     let fixed: Vec<usize> = fixed_set.into_iter().collect();
-    let (l_mat, u_all, log) = solve_mixed_3d_fluxoids_and_inductance(
+    let (l_mat, u_all, log, chk) = solve_mixed_3d_fluxoids_and_inductance(
         &excitations,
         &metas,
         &dedup_sheets,
@@ -2417,6 +2453,10 @@ fn solve_mixed_3d_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, Stri
         n_edges,
         n_sverts,
     )?;
+
+    let mut diag = crate::diag::DfsDiag::new("direct");
+    diag.absorb_direct(&chk);
+    let (diagnostics, error_budget) = diag.finish();
 
     let n_exc = excitations.len();
     let mut solutions = Vec::with_capacity(n_exc);
@@ -2451,7 +2491,8 @@ fn solve_mixed_3d_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, Stri
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n_total,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 

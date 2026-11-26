@@ -211,6 +211,19 @@ pub struct FactorDiagnostics {
     pub min_pivot_abs: f64,
     /// Largest pivot magnitude observed in the active symmetric/Cholesky factor (`0.0` if unavailable).
     pub max_pivot_abs: f64,
+    /// Smallest nonzero diagonal magnitude `|M_{ii}|` observed in the input matrix (`0.0` if all zero/unavailable).
+    pub min_diag_abs: f64,
+    /// Largest diagonal magnitude `max_i |M_{ii}|` observed in the input matrix.
+    pub max_diag_abs: f64,
+    /// Largest entry magnitude `max_{i,j} |M_{ij}|` observed in the input matrix.
+    pub max_entry_abs: f64,
+    /// Zero-cost pivot/diagonal growth ratio: captures upward pivot growth (`max_pivot / ref_scale`),
+    /// diagonal pivot collapse (`min_diag / min_pivot`), or LU probe condition lower bound.
+    pub pivot_growth: f64,
+    /// Dynamic range of pivots (`max_pivot / min_pivot`, or probe/diagonal ratio on LU).
+    pub pivot_ratio: f64,
+    /// `true` when explicit factor pivot extrema were extracted (Cholesky / LBL^H / LBL^T).
+    pub has_factor_pivots: bool,
     /// `1`-norm `max_j sum_i |M_{ij}|` of the shifted matrix `A - sigma B`.
     pub matrix_scale: f64,
     /// Count of pivots with magnitude `<= 1e-12 * matrix_scale`.
@@ -242,6 +255,20 @@ impl FactorDiagnostics {
     /// Returns `true` when automatic shift perturbation was applied.
     pub fn has_shift_perturbation(&self) -> bool {
         self.shift_perturbation_re != 0.0 || self.shift_perturbation_im != 0.0
+    }
+
+    /// Returns `true` when zero-cost factorization diagnostics indicate anomalous pivot/diagonal
+    /// growth, severe pivot collapse, small/bad pivots, or singular recovery.
+    pub fn is_anomalous_pivot_growth(&self) -> bool {
+        self.small_pivots > 0
+            || self.first_bad_pivot_index.is_some()
+            || self.has_shift_perturbation()
+            || self.krylov_fallback
+            || (self.has_factor_pivots && self.min_pivot_abs == 0.0 && self.matrix_scale > 0.0)
+            || !self.pivot_growth.is_finite()
+            || !self.pivot_ratio.is_finite()
+            || self.pivot_growth > 1e6
+            || self.pivot_ratio > 1e8
     }
 }
 
@@ -679,8 +706,42 @@ fn csc_one_norm<T: Scalar>(n: usize, col_ptr: &[u32], vals: &[T]) -> f64 {
     scale
 }
 
-fn lower_one_norm<T: Scalar>(n: usize, lower: &Assembled<T>, vals: &[T]) -> f64 {
+/// Computes `(one_norm, min_nonzero_diag_abs, max_diag_abs, max_entry_abs)` in a single pass
+/// over full CSC columns.
+fn csc_scale_and_diag<T: Scalar>(n: usize, col_ptr: &[u32], row_idx: &[u32], vals: &[T]) -> (f64, f64, f64, f64) {
+    let mut scale = 0.0f64;
+    let mut min_diag = f64::INFINITY;
+    let mut max_diag = 0.0f64;
+    let mut max_entry = 0.0f64;
+    for c in 0..n {
+        let mut s = 0.0f64;
+        let start = col_ptr[c] as usize;
+        let end = col_ptr[c + 1] as usize;
+        for k in start..end {
+            let m = vals[k].modulus();
+            if m.is_finite() {
+                s += m;
+                max_entry = max_entry.max(m);
+                if row_idx[k] as usize == c {
+                    max_diag = max_diag.max(m);
+                    if m > 0.0 {
+                        min_diag = min_diag.min(m);
+                    }
+                }
+            }
+        }
+        scale = scale.max(s);
+    }
+    (scale, if min_diag.is_finite() { min_diag } else { 0.0 }, max_diag, max_entry)
+}
+
+/// Computes `(one_norm, min_nonzero_diag_abs, max_diag_abs, max_entry_abs)` in a single pass
+/// over lower-triangle CSC entries.
+fn lower_scale_and_diag<T: Scalar>(n: usize, lower: &Assembled<T>, vals: &[T]) -> (f64, f64, f64, f64) {
     let mut col_sums = vec![0.0f64; n];
+    let mut min_diag = f64::INFINITY;
+    let mut max_diag = 0.0f64;
+    let mut max_entry = 0.0f64;
     for c in 0..n {
         let start = lower.col_ptr[c] as usize;
         let end = lower.col_ptr[c + 1] as usize;
@@ -691,11 +752,47 @@ fn lower_one_norm<T: Scalar>(n: usize, lower: &Assembled<T>, vals: &[T]) -> f64 
                 col_sums[c] += m;
                 if r != c {
                     col_sums[r] += m;
+                } else {
+                    max_diag = max_diag.max(m);
+                    if m > 0.0 {
+                        min_diag = min_diag.min(m);
+                    }
                 }
+                max_entry = max_entry.max(m);
             }
         }
     }
-    col_sums.into_iter().fold(0.0f64, f64::max)
+    let scale = col_sums.into_iter().fold(0.0f64, f64::max);
+    (scale, if min_diag.is_finite() { min_diag } else { 0.0 }, max_diag, max_entry)
+}
+
+fn finalize_pivot_growth(diag: &mut FactorDiagnostics, min_diag: f64, max_diag: f64, max_entry: f64) {
+    diag.min_diag_abs = min_diag;
+    diag.max_diag_abs = max_diag;
+    diag.max_entry_abs = max_entry;
+    diag.has_factor_pivots = true;
+    let ref_scale = max_diag.max(max_entry).max(diag.matrix_scale).max(1e-300);
+    let growth_up = if diag.max_pivot_abs > 0.0 {
+        diag.max_pivot_abs / ref_scale
+    } else {
+        1.0
+    };
+    let diag_ref = if min_diag > 0.0 { min_diag } else { max_entry };
+    let growth_down = if diag_ref > 0.0 && diag.min_pivot_abs > 0.0 {
+        diag_ref / diag.min_pivot_abs
+    } else if diag_ref > 0.0 && diag.matrix_scale > 0.0 {
+        f64::INFINITY
+    } else {
+        1.0
+    };
+    diag.pivot_growth = growth_up.max(growth_down).max(1.0);
+    diag.pivot_ratio = if diag.max_pivot_abs > 0.0 && diag.min_pivot_abs > 0.0 {
+        diag.max_pivot_abs / diag.min_pivot_abs
+    } else if diag.matrix_scale > 0.0 {
+        f64::INFINITY
+    } else {
+        1.0
+    };
 }
 
 fn b_one_norm_full<T: Scalar>(full: &Assembled<T>, n: usize) -> f64 {
@@ -1833,6 +1930,7 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     diagnostics: FactorDiagnostics,
     solves: AtomicUsize,
     krylov_its: AtomicUsize,
+    skip_rcond: bool,
 }
 
 impl<T: FaerScalar> ShiftedFactorization<T> {
@@ -1895,7 +1993,19 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             diagnostics: FactorDiagnostics::default(),
             solves: AtomicUsize::new(0),
             krylov_its: AtomicUsize::new(0),
+            skip_rcond: b.is_some(),
         })
+    }
+
+    /// Marks whether this factorization is for a shift-and-invert spectral pencil `(A - sigma B)`,
+    /// where intentional proximity to an eigenvalue makes `rcond` uninformative and slow to probe.
+    pub fn set_shift_invert_pencil(&mut self, skip: bool) {
+        self.skip_rcond = skip;
+    }
+
+    /// Returns `true` when dynamic `rcond` probing is skipped (shift-and-invert pencils).
+    pub fn is_shift_invert_pencil(&self) -> bool {
+        self.skip_rcond
     }
 
     /// Returns a snapshot of pivot, Sylvester inertia, and singular/Krylov recovery diagnostics (R31).
@@ -2122,7 +2232,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             .as_ref()
             .ok_or(SolverError::InvalidArgument("symbolic Cholesky factor missing"))?;
         let factor_nnz = sym.len_val();
-        let scale = lower_one_norm(n, lower, &vals);
+        let (scale, min_d, max_d, max_e) = lower_scale_and_diag(n, lower, &vals);
         self.diagnostics.matrix_scale = scale;
         let mat = SparseColMatRef::new(Self::pattern(lower, n), T::faer_slice(&vals));
         let t0 = Instant::now();
@@ -2143,6 +2253,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             Ok(_) => {
                 let sym = self.sym_llt.as_ref().unwrap();
                 record_cholesky_diagnostics(sym, &self.llt_vals, scale, &mut self.diagnostics);
+                finalize_pivot_growth(&mut self.diagnostics, min_d, max_d, max_e);
                 self.release_lu_buffers();
                 self.sigma = sigma;
                 self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
@@ -2170,7 +2281,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         self.ensure_lower()?;
         self.ensure_sym_llt()?;
         let par = self.threads.factor.par_for_factor(n);
-        let scale = csc_one_norm(n, &self.full.as_ref().unwrap().col_ptr, full_vals);
+        let full_ref = self.full.as_ref().unwrap();
+        let (scale, min_d, max_d, max_e) = csc_scale_and_diag(n, &full_ref.col_ptr, &full_ref.row_idx, full_vals);
         self.diagnostics.matrix_scale = scale;
         let (fac_secs, initial_rel_err, factor_nnz) = {
             let lower = self
@@ -2217,6 +2329,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 scale,
                 &mut self.diagnostics,
             );
+            finalize_pivot_growth(&mut self.diagnostics, min_d, max_d, max_e);
             if bad_col.is_some()
                 || !self.llt_vals.iter().all(|v| v.is_finite())
                 || !self.lblt_subdiag.iter().all(|v| v.is_finite())
@@ -2284,7 +2397,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             self.stats.analyse_secs += t0.elapsed().as_secs_f64();
         }
         let par = self.threads.factor.par_for_factor(n);
-        let scale = csc_one_norm(n, &self.full.as_ref().unwrap().col_ptr, full_vals);
+        let full_ref = self.full.as_ref().unwrap();
+        let (scale, min_d, max_d, max_e) = csc_scale_and_diag(n, &full_ref.col_ptr, &full_ref.row_idx, full_vals);
         self.diagnostics.matrix_scale = scale;
         let (fac_secs, initial_rel_err, factor_nnz) = {
             let lower = self
@@ -2342,6 +2456,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 scale,
                 &mut self.diagnostics,
             );
+            finalize_pivot_growth(&mut self.diagnostics, min_d, max_d, max_e);
             if bad_col.is_some()
                 || !self.llt_vals.iter().all(|v| v.is_finite())
                 || !self.lblt_subdiag.iter().all(|v| v.is_finite())
@@ -2433,11 +2548,17 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             .full
             .as_ref()
             .ok_or(SolverError::InvalidArgument("full matrix pattern missing for LU"))?;
-        let scale = csc_one_norm(n, &full.col_ptr, full_vals);
+        let (scale, min_d, max_d, max_e) = csc_scale_and_diag(n, &full.col_ptr, &full.row_idx, full_vals);
         self.diagnostics.matrix_scale = scale;
+        self.diagnostics.min_diag_abs = min_d;
+        self.diagnostics.max_diag_abs = max_d;
+        self.diagnostics.max_entry_abs = max_e;
+        self.diagnostics.has_factor_pivots = false;
         if n > 0 && scale == 0.0 {
             self.diagnostics.first_bad_pivot_index.get_or_insert(0);
             self.diagnostics.min_pivot_abs = 0.0;
+            self.diagnostics.pivot_growth = f64::INFINITY;
+            self.diagnostics.pivot_ratio = f64::INFINITY;
             return Err(SolverError::Singular);
         }
         let mat = SparseColMatRef::new(Self::pattern(full, n), T::faer_slice(full_vals));
@@ -2457,8 +2578,8 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 // `faer` partial-pivoting LU returns `Ok` even when a column pivot is numerically 0
                 // (`0.recip() -> inf`); guard via a deterministic probe residual before accepting.
                 let solve_par = self.threads.solve.par();
-                let probe_ok = if n == 0 {
-                    true
+                let (probe_ok, probe_cond) = if n == 0 {
+                    (true, 1.0)
                 } else {
                     let mut p = Vec::with_capacity(n);
                     for i in 0..n {
@@ -2477,7 +2598,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     );
                     clear_upper_vector_state();
                     if !x.iter().all(|v| v.is_finite()) {
-                        false
+                        (false, f64::INFINITY)
                     } else {
                         let mut r = vec![T::ZERO; n];
                         csc_residual_vals(n, &full.col_ptr, &full.row_idx, full_vals, &p, &x, &mut r);
@@ -2485,18 +2606,25 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                         let x_norm = vecops::norm2(&x);
                         let rel_err = r_norm / p_norm;
                         let bw_err = r_norm / (scale * x_norm + p_norm).max(1e-300);
-                        bw_err.is_finite()
+                        let cond_lb = (scale * x_norm) / p_norm;
+                        let ok = bw_err.is_finite()
                             && rel_err.is_finite()
                             && bw_err <= 1e-6
-                            && !(rel_err > 1e-2 && (scale * x_norm) / p_norm > 1e14)
+                            && !(rel_err > 1e-2 && cond_lb > 1e14);
+                        (ok, cond_lb)
                     }
                 };
                 if !probe_ok {
                     let bad_col = csc_bad_diag_col(n, &full.col_ptr, full_vals);
                     self.diagnostics.first_bad_pivot_index.get_or_insert(bad_col);
                     self.diagnostics.min_pivot_abs = 0.0;
+                    self.diagnostics.pivot_growth = f64::INFINITY;
+                    self.diagnostics.pivot_ratio = f64::INFINITY;
                     return Err(SolverError::Singular);
                 }
+                let diag_ratio = if min_d > 0.0 { max_d / min_d } else { 1.0 };
+                self.diagnostics.pivot_growth = probe_cond.max(1.0);
+                self.diagnostics.pivot_ratio = probe_cond.max(diag_ratio);
                 self.sigma = sigma;
                 self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
                 self.have = Used::Lu;
@@ -2773,6 +2901,144 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
         }
         clear_upper_vector_state();
         Ok(())
+    }
+
+    fn solve_transpose_factor_only_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {
+        let n = self.n;
+        let par = self.threads.solve.par();
+        match self.active {
+            ActiveFactor::Cholesky => {
+                let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut rhs[..n * nrhs]), n, nrhs);
+                let sym = self.sym_llt.as_ref().ok_or(SolverError::NotFactored)?;
+                let mut mem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(nrhs, par));
+                let conj = if T::IS_COMPLEX { Conj::Yes } else { Conj::No };
+                LltRef::new(sym, T::faer_slice(&self.llt_vals)).solve_in_place_with_conj(
+                    conj,
+                    m,
+                    par,
+                    MemStack::new(&mut mem),
+                );
+            }
+            ActiveFactor::HermLblt => {
+                let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut rhs[..n * nrhs]), n, nrhs);
+                let sym = self.sym_llt.as_ref().ok_or(SolverError::NotFactored)?;
+                let mut mem = MemBuffer::new(sym.solve_in_place_scratch::<T::Elem>(nrhs, par));
+                let perm = PermRef::new_checked(&self.lblt_perm_fwd, &self.lblt_perm_inv, n);
+                let conj = if T::IS_COMPLEX { Conj::Yes } else { Conj::No };
+                IntranodeLbltRef::new(
+                    sym,
+                    T::faer_slice(&self.llt_vals),
+                    T::faer_slice(&self.lblt_subdiag),
+                    perm,
+                )
+                .solve_in_place_with_conj(conj, m, par, MemStack::new(&mut mem));
+            }
+            ActiveFactor::SymLblt => {
+                return self.solve_factor_only_in_place(rhs, nrhs);
+            }
+            ActiveFactor::ColamdLu => {
+                let m = MatMut::from_column_major_slice_mut(T::faer_slice_mut(&mut rhs[..n * nrhs]), n, nrhs);
+                let sym = self.sym_lu.as_ref().ok_or(SolverError::NotFactored)?;
+                let mut mem = MemBuffer::new(sym.solve_transpose_in_place_scratch::<T::Elem>(nrhs, par));
+                LuRef::new_unchecked(sym, &self.lu_num).solve_transpose_in_place_with_conj(
+                    Conj::No,
+                    m,
+                    par,
+                    MemStack::new(&mut mem),
+                );
+            }
+            ActiveFactor::Krylov | ActiveFactor::None => return Err(SolverError::NotFactored),
+        }
+        clear_upper_vector_state();
+        Ok(())
+    }
+
+    /// 2-step Hager-Higham 1-norm reciprocal condition number estimate (`1 / (||M||_1 ||M^{-1}||_1)`).
+    /// Returns `None` on shift-and-invert pencils (`skip_rcond`), Krylov fallback, or unfactored instances.
+    pub fn estimate_rcond_1norm(&self) -> Option<f64> {
+        if self.skip_rcond || matches!(self.active, ActiveFactor::None | ActiveFactor::Krylov) {
+            return None;
+        }
+        let n = self.n;
+        if n == 0 {
+            return Some(1.0);
+        }
+        let norm1 = self.diagnostics.matrix_scale;
+        if norm1 <= 0.0 || !norm1.is_finite() {
+            return Some(0.0);
+        }
+
+        let norm_l1 = |v: &[T]| -> f64 { v.iter().map(|z| z.modulus()).sum() };
+        let sign_vec = |v: &[T], out: &mut [T]| {
+            for (dst, &src) in out.iter_mut().zip(v) {
+                let m = src.modulus();
+                *dst = if m > 0.0 && m.is_finite() {
+                    src.scale(1.0 / m)
+                } else {
+                    T::ONE
+                };
+            }
+        };
+        let argmax_abs = |v: &[T]| -> usize {
+            let mut best_i = 0;
+            let mut best_m = -1.0_f64;
+            for (i, &vi) in v.iter().enumerate() {
+                let m = vi.modulus();
+                if m > best_m || !m.is_finite() {
+                    best_m = m;
+                    best_i = i;
+                }
+            }
+            best_i
+        };
+
+        let mut work = vec![T::from_f64(1.0 / n as f64); n];
+        if self.solve_factor_only_in_place(&mut work, 1).is_err() || !work.iter().all(|v| v.is_finite()) {
+            return Some(0.0);
+        }
+        let mut est = norm_l1(&work);
+        let mut xi = vec![T::ZERO; n];
+        sign_vec(&work, &mut xi);
+        if self.solve_transpose_factor_only_in_place(&mut xi, 1).is_err() || !xi.iter().all(|v| v.is_finite()) {
+            return Some((1.0 / (norm1 * est).max(1e-300)).clamp(0.0, 1.0));
+        }
+        let j1 = argmax_abs(&xi);
+
+        work.fill(T::ZERO);
+        work[j1] = T::ONE;
+        if self.solve_factor_only_in_place(&mut work, 1).is_ok() && work.iter().all(|v| v.is_finite()) {
+            est = est.max(norm_l1(&work));
+            sign_vec(&work, &mut xi);
+            if self.solve_transpose_factor_only_in_place(&mut xi, 1).is_ok() && xi.iter().all(|v| v.is_finite()) {
+                let j2 = argmax_abs(&xi);
+                if j2 != j1 {
+                    work.fill(T::ZERO);
+                    work[j2] = T::ONE;
+                    if self.solve_factor_only_in_place(&mut work, 1).is_ok() && work.iter().all(|v| v.is_finite()) {
+                        est = est.max(norm_l1(&work));
+                    }
+                }
+            }
+        }
+
+        if n > 1 {
+            let denom = (n - 1) as f64;
+            for i in 0..n {
+                let s = if i % 2 == 0 { 1.0 } else { -1.0 };
+                work[i] = T::from_f64(s * (1.0 + i as f64 / denom) / (2.0 * n as f64));
+            }
+            if self.solve_factor_only_in_place(&mut work, 1).is_ok() && work.iter().all(|v| v.is_finite()) {
+                est = est.max(norm_l1(&work));
+            }
+        }
+
+        if !est.is_finite() {
+            return Some(0.0);
+        }
+        if est <= 0.0 {
+            return Some(1.0);
+        }
+        Some((1.0 / (norm1 * est)).clamp(0.0, 1.0))
     }
 
     fn solve_raw_block_in_place(&self, rhs: &mut [T], nrhs: usize) -> Result<(), SolverError> {

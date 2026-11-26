@@ -40,14 +40,16 @@ use femcore::fem_mixed::IsoparametricCell;
 use femcore::fields::{local_bary, node_average, CellFields};
 use femcore::linalg::ams::{assemble_shifted_curl_curl, AmsFgmresOptions, AmsFgmresSolver, AmsP2Topology};
 use femcore::linalg::csr::{c, CCsr, Coo, RCsr, C};
+use femcore::linalg::driver::{backward_residual_many, DirectSolveCheck};
 use femcore::linalg::equilibrate::{ruiz_symmetric_terms, scale_symmetric, scale_vec, RuizTerm, DEFAULT_RUIZ_PASSES};
 use femcore::linalg::prom::{
-    run_greedy_prom_sweep, s_to_z_and_y, ImageProm, PromLinearSolver, PromOperator, SparseDrivenSolver,
+    run_greedy_prom_sweep, s_matrix_passivity_and_reciprocity, s_to_z_and_y_checked, ImageProm, PromLinearSolver,
+    PromOperator, SparseDrivenSolver,
 };
 use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
 use nyx_physics::{
-    cell_fields_of, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution,
-    SolveResult,
+    cell_fields_of, DiagnosticSeverity, DiagnosticWarning, Discretisation, DrivenPortData, Field, FieldFrame, Mesh,
+    MixedToSimplexProjector, Scalar, Solution, SolveResult,
 };
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
@@ -891,6 +893,58 @@ impl DrivenLinearSolver {
             }
         }
     }
+
+    fn solve_many_checked(
+        &self,
+        a_mat: &CCsr,
+        rhs_cols: &[Vec<C>],
+    ) -> Result<(Vec<Vec<C>>, DirectSolveCheck, Option<usize>), String> {
+        match self {
+            Self::Sparse(sp) => {
+                let (xs, chk) = sp.solve_many_checked(a_mat, rhs_cols)?;
+                Ok((xs, chk, None))
+            }
+            Self::AmsFgmres { solver, d_ruiz, .. } => {
+                let rhs_unscaled: Vec<Vec<C>> =
+                    rhs_cols.iter().map(|b_hat| b_hat.iter().zip(d_ruiz).map(|(&bi, &di)| bi / di).collect()).collect();
+                let (xs_unscaled, st) = solver.solve_many(&rhs_unscaled);
+                if !st.all_converged {
+                    return Err(format!(
+                        "driven solver 'ams_fgmres' failed to converge after {} total iterations (max relative residual {:.3e})",
+                        st.total_iterations, st.max_relative_residual
+                    ));
+                }
+                let out: Vec<Vec<C>> = xs_unscaled
+                    .into_iter()
+                    .map(|x_unscaled| x_unscaled.into_iter().zip(d_ruiz).map(|(xi, &di)| xi / di).collect())
+                    .collect();
+                let alg = backward_residual_many(a_mat, rhs_cols, &out);
+                let chk = DirectSolveCheck {
+                    algebraic_residual: alg.max(st.max_relative_residual),
+                    rcond_estimate: None,
+                    stats: femcore::linalg::direct::FactorStats {
+                        analyse_secs: 0.0,
+                        symbolic_count: 0,
+                        numeric_secs_total: 0.0,
+                        numeric_secs_last: 0.0,
+                        numeric_count: 1,
+                        assemble_secs_last: 0.0,
+                        used: femcore::linalg::direct::Used::None,
+                        backend: femcore::linalg::direct::FactorBackend::None,
+                        cholesky_fallbacks: 0,
+                        solves: rhs_cols.len(),
+                        factor_nnz: 0,
+                        solve_secs_total: 0.0,
+                    },
+                    diagnostics: Default::default(),
+                    cholesky_fallbacks: 0,
+                    pivot_growth: 1.0,
+                    solver_kind: "ams_fgmres",
+                };
+                Ok((out, chk, Some(st.total_iterations)))
+            }
+        }
+    }
 }
 
 struct EmsPromSolver<'a> {
@@ -1041,6 +1095,30 @@ fn compute_driven_pml_metrics(asm: &DrivenAssembly, freq_hz: f64, x_red: &[C]) -
     (p_pml_w, layer_fraction)
 }
 
+/// Optional sweep controls for [`solve_driven_with_options`] and [`solve_driven_mixed_with_options`].
+#[derive(Clone, Debug)]
+pub struct DrivenOptions {
+    /// Enable adaptive midpoint frequency bisection to resolve sharp $|S_{pq}|$ dips and phase jumps.
+    pub resonance_bisection: bool,
+    /// Maximum adaptive bisection rounds (default `3`).
+    pub bisection_max_depth: usize,
+    /// Adjacent-point complex phase jump threshold in radians triggering bisection (default `0.35`).
+    pub bisection_phase_jump_rad: f64,
+    /// Adjacent-point $|S_{pq}|$ jump threshold triggering bisection (default `0.08`).
+    pub bisection_s_dip_tol: f64,
+}
+
+impl Default for DrivenOptions {
+    fn default() -> Self {
+        Self {
+            resonance_bisection: false,
+            bisection_max_depth: 3,
+            bisection_phase_jump_rad: 0.35,
+            bisection_s_dip_tol: 0.08,
+        }
+    }
+}
+
 struct DrivenSweepCoreOut {
     driven_data: DrivenPortData,
     symbolic_count: usize,
@@ -1049,19 +1127,14 @@ struct DrivenSweepCoreOut {
     s21_min_db: f64,
     f_res_hz: f64,
     rep_x_red: Vec<C>,
+    diag: crate::diag::EmsDiag,
 }
 
-fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, String> {
-    let freqs_hz: Vec<f64> = if let Some(fs) = asm.freqs_hz.as_ref().filter(|v| !v.is_empty()) {
-        fs.to_vec()
-    } else {
-        let n_pts = asm.n_points.max(1);
-        if n_pts == 1 {
-            vec![asm.f_min]
-        } else {
-            (0..n_pts).map(|k| asm.f_min + (asm.f_max - asm.f_min) * (k as f64) / ((n_pts - 1) as f64)).collect()
-        }
-    };
+fn eval_driven_sweep_pass(
+    asm: &DrivenAssembly,
+    freqs_hz: &[f64],
+    seed_override: Option<&[f64]>,
+) -> Result<DrivenSweepCoreOut, String> {
     let n_points = freqs_hz.len();
     let omegas: Vec<f64> = freqs_hz.iter().map(|&f| 2.0 * PI * f).collect();
     let p_ports = asm.ports.len();
@@ -1076,23 +1149,51 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
     let backend_name;
     let mut rom_dim = 0usize;
     let mut anchor_freqs_hz = Vec::new();
-    let mut max_residual = 0.0_f64;
+    let max_residual;
     let mut rom_sweep_seconds = 0.0_f64;
     let mut rep_freq_idx = n_points / 2;
     let mut rep_x_red: Vec<C> = vec![c(0.0, 0.0); asm.nred];
+
+    let mut diag =
+        crate::diag::EmsDiag::new(if asm.prom_tol.is_some() { "prom_hermite_galerkin" } else { "direct_lu" });
+    for wp in &asm.waveports {
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(wp.max_eigen_residual);
+        diag.warnings.extend(wp.warnings.iter().cloned());
+    }
+    let mut wp_cutoff_warn: Vec<Option<DiagnosticWarning>> = vec![None; asm.waveports.len()];
+    for &w in &omegas {
+        for (wi, wp) in asm.waveports.iter().enumerate() {
+            if wp_cutoff_warn[wi].is_none() {
+                if let (_, Some(warn)) = wp.beta_and_derivs_checked(w) {
+                    wp_cutoff_warn[wi] = Some(warn);
+                }
+            }
+        }
+    }
+    for warn in wp_cutoff_warn.into_iter().flatten() {
+        diag.warnings.push(warn);
+    }
+
+    let mut any_conv_reg = false;
+    let mut any_conv_sing = false;
+    let mut max_conv_res = 0.0_f64;
+    let mut max_conv_pivot = 1.0_f64;
+    let mut max_passivity = 0.0_f64;
+    let mut max_reciprocity = 0.0_f64;
 
     if let Some(tol) = asm.prom_tol {
         let mut solver = EmsPromSolver { asm, slot: None };
         let mut min_s_metric = f64::INFINITY;
         const SWEEP_CHUNK: usize = 32;
+        let seeds = seed_override.unwrap_or(&asm.seed_freqs_hz);
         let summary = run_greedy_prom_sweep(
             asm,
             &mut solver,
-            &freqs_hz,
+            freqs_hz,
             tol,
             asm.max_hdm_solves,
             asm.strict_prom_tol,
-            &asm.seed_freqs_hz,
+            seeds,
             |band, b_omegas, prom: &ImageProm<'_, DrivenAssembly>, xr_band| {
                 let nb_pts = b_omegas.len();
                 let t_post = Instant::now();
@@ -1127,19 +1228,27 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
                                 }
                             }
                             let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
-                            let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
-                            (z0_pairs_k, s_out, z_out, y_out, metric)
+                            let (pass_k, recip_k) = s_matrix_passivity_and_reciprocity(&s_k);
+                            let (s_out, z_out, y_out, rep) = s_to_z_and_y_checked(&s_k, &z_circ_k);
+                            (z0_pairs_k, s_out, z_out, y_out, metric, rep, pass_k, recip_k)
                         })
                         .collect::<Vec<_>>()
                 });
                 let mut band_best_local = None;
-                for (k_loc, (z0_pairs_k, s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate()
+                for (k_loc, (z0_pairs_k, s_out, z_out, y_out, metric, rep, pass_k, recip_k)) in
+                    post_chunks.into_iter().flatten().enumerate()
                 {
                     if metric < min_s_metric {
                         min_s_metric = metric;
                         rep_freq_idx = band.start + k_loc;
                         band_best_local = Some(k_loc);
                     }
+                    any_conv_reg |= rep.used_regularization;
+                    any_conv_sing |= rep.singular_fallback;
+                    max_conv_res = max_conv_res.max(rep.max_solve_residual);
+                    max_conv_pivot = max_conv_pivot.max(rep.max_pivot_ratio);
+                    max_passivity = max_passivity.max(pass_k);
+                    max_reciprocity = max_reciprocity.max(recip_k);
                     z0_ohm.push(z0_pairs_k);
                     s_matrix.push(s_out);
                     z_matrix.push(z_out);
@@ -1161,10 +1270,16 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
         anchor_freqs_hz = summary.anchor_freqs_hz;
         max_residual = summary.max_residual;
         rom_sweep_seconds += summary.rom_sweep_seconds;
+        diag.solver_kind = format!("prom_{backend_name}");
+        diag.per_mode_residuals = summary.prom_residuals;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(max_residual).max(max_conv_res);
+        diag.set_model_truncation_rel(max_residual);
     } else {
         // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic factorization across all frequencies
         let mut solver: Option<DrivenLinearSolver> = None;
         let mut min_s_metric = f64::INFINITY;
+        let mut per_freq_res = Vec::with_capacity(n_points);
+        let mut worst_bw = 0.0_f64;
         for (k, &w) in omegas.iter().enumerate() {
             femcore::progress::check()?;
             let a_mat = asm.assemble_matrix_at(w);
@@ -1188,7 +1303,14 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
             }
             z0_ohm.push(z0_pairs_k);
 
-            let y_cols = s_ref.solve_many(&rhs_cols)?;
+            let (y_cols, chk, it_opt) = s_ref.solve_many_checked(&a_mat, &rhs_cols)?;
+            diag.absorb_direct(&chk);
+            if let Some(its) = it_opt {
+                diag.iterations = Some(diag.iterations.map_or(its, |prev| prev + its));
+            }
+            per_freq_res.push(chk.algebraic_residual);
+            worst_bw = worst_bw.max(chk.algebraic_residual);
+
             let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
             for p in 0..p_ports {
                 let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
@@ -1208,15 +1330,67 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
                 rep_freq_idx = k;
                 rep_x_red = y_cols[0].iter().zip(&asm.d_ruiz).map(|(&yi, &di)| yi * di).collect();
             }
-            let (s_out, z_out, y_out) = s_to_z_and_y(&s_k, &z_circ_k);
+            let (pass_k, recip_k) = s_matrix_passivity_and_reciprocity(&s_k);
+            max_passivity = max_passivity.max(pass_k);
+            max_reciprocity = max_reciprocity.max(recip_k);
+            let (s_out, z_out, y_out, rep) = s_to_z_and_y_checked(&s_k, &z_circ_k);
+            any_conv_reg |= rep.used_regularization;
+            any_conv_sing |= rep.singular_fallback;
+            max_conv_res = max_conv_res.max(rep.max_solve_residual);
+            max_conv_pivot = max_conv_pivot.max(rep.max_pivot_ratio);
             s_matrix.push(s_out);
             z_matrix.push(z_out);
             y_matrix.push(y_out);
         }
         symbolic_count = solver.as_ref().map_or(0, DrivenLinearSolver::symbolic_count);
         backend_name = solver.as_ref().map_or_else(|| "None".to_string(), DrivenLinearSolver::backend_name);
+        max_residual = worst_bw;
         // FR-33: Drop sparse solver before `build_driven_solution` allocates 3D `CellFields`.
         drop(solver);
+        diag.solver_kind = backend_name.clone();
+        diag.per_mode_residuals = per_freq_res;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(worst_bw).max(max_conv_res);
+    }
+
+    if any_conv_sing {
+        diag.warnings.push(DiagnosticWarning {
+            code: "s_to_z_and_y_singular".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "s_to_z_and_y_checked encountered singular (I - S) or (I + S) (max residual {max_conv_res:.2e}, max pivot ratio {max_conv_pivot:.2e})"
+            ),
+        });
+    } else if any_conv_reg || max_conv_res > 1e-8 || max_conv_pivot > 1e8 {
+        diag.warnings.push(DiagnosticWarning {
+            code: "s_to_z_and_y_ill_conditioned".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "s_to_z_and_y_checked detected ill-conditioning (max residual {max_conv_res:.2e}, max pivot ratio {max_conv_pivot:.2e})"
+            ),
+        });
+    }
+    diag.warnings.push(DiagnosticWarning {
+        code: "s_matrix_passivity_reciprocity".into(),
+        severity: DiagnosticSeverity::Info,
+        message: format!(
+            "passivity max sigma_max(S) = {max_passivity:.6}, reciprocity max ||S - S^T||_F / max(||S||_F, 1) = {max_reciprocity:.2e}"
+        ),
+    });
+    if max_passivity > 1.0 + 1e-4 {
+        diag.warnings.push(DiagnosticWarning {
+            code: "non_passive_s_matrix".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!("driven S-matrix sweep exceeds passivity bound: max sigma_max(S) = {max_passivity:.6}"),
+        });
+    }
+    if max_reciprocity > 1e-5 {
+        diag.warnings.push(DiagnosticWarning {
+            code: "non_reciprocal_s_matrix".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "driven S-matrix violates reciprocity: max ||S - S^T||_F / max(||S||_F, 1) = {max_reciprocity:.2e}"
+            ),
+        });
     }
 
     let f_res_hz = freqs_hz[rep_freq_idx];
@@ -1231,7 +1405,7 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
 
     let port_names: Vec<String> = asm.ports.iter().map(|p| p.name.clone()).collect();
     let driven_data = DrivenPortData {
-        freqs_hz,
+        freqs_hz: freqs_hz.to_vec(),
         ports: port_names,
         z0_ohm,
         s_matrix,
@@ -1251,15 +1425,88 @@ fn run_driven_sweep_core(asm: &DrivenAssembly) -> Result<DrivenSweepCoreOut, Str
         s21_min_db,
         f_res_hz,
         rep_x_red,
+        diag,
     })
+}
+
+fn run_driven_sweep_core(asm: &DrivenAssembly, opts: &DrivenOptions) -> Result<DrivenSweepCoreOut, String> {
+    let mut freqs_hz: Vec<f64> = if let Some(fs) = asm.freqs_hz.as_ref().filter(|v| !v.is_empty()) {
+        fs.to_vec()
+    } else {
+        let n_pts = asm.n_points.max(1);
+        if n_pts == 1 {
+            vec![asm.f_min]
+        } else {
+            (0..n_pts).map(|k| asm.f_min + (asm.f_max - asm.f_min) * (k as f64) / ((n_pts - 1) as f64)).collect()
+        }
+    };
+    let mut out = eval_driven_sweep_pass(asm, &freqs_hz, None)?;
+    if opts.resonance_bisection && freqs_hz.len() >= 2 {
+        let p_ports = asm.ports.len();
+        let tracked = |s_mat: &[Vec<[f64; 2]>]| -> C {
+            let pair = if p_ports >= 2 { s_mat[1][0] } else { s_mat[0][0] };
+            c(pair[0], pair[1])
+        };
+        for _depth in 0..opts.bisection_max_depth {
+            let mut insert_mids = Vec::new();
+            let s_vals: Vec<C> = out.driven_data.s_matrix.iter().map(|m| tracked(m)).collect();
+            for k in 0..freqs_hz.len().saturating_sub(1) {
+                let df = freqs_hz[k + 1] - freqs_hz[k];
+                if df <= 1e-9 * freqs_hz[k].abs().max(1.0) {
+                    continue;
+                }
+                let v0 = s_vals[k];
+                let v1 = s_vals[k + 1];
+                let mag_jump = (v1.norm() - v0.norm()).abs() > opts.bisection_s_dip_tol;
+                let phase_jump = if v0.norm() > 1e-6 && v1.norm() > 1e-6 {
+                    let ratio = v1 / v0;
+                    ratio.im.atan2(ratio.re).abs() > opts.bisection_phase_jump_rad
+                } else {
+                    false
+                };
+                let dip_nbr = (k > 0
+                    && s_vals[k].norm() < 0.9 * s_vals[k - 1].norm()
+                    && s_vals[k].norm() <= s_vals[k + 1].norm())
+                    || (k + 2 < s_vals.len()
+                        && s_vals[k + 1].norm() < 0.9 * s_vals[k + 2].norm()
+                        && s_vals[k + 1].norm() <= s_vals[k].norm());
+                if mag_jump || phase_jump || dip_nbr {
+                    insert_mids.push(0.5 * (freqs_hz[k] + freqs_hz[k + 1]));
+                }
+            }
+            if insert_mids.is_empty() {
+                break;
+            }
+            let mut seeds = asm.seed_freqs_hz.clone();
+            for &af in &out.driven_data.anchor_freqs_hz {
+                if !seeds.iter().any(|&s| (s - af).abs() <= 1e-9 * af.abs().max(1.0)) {
+                    seeds.push(af);
+                }
+            }
+            freqs_hz.extend(insert_mids);
+            freqs_hz.sort_by(|a, b| a.total_cmp(b));
+            freqs_hz.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * b.abs().max(1.0));
+            out = eval_driven_sweep_pass(asm, &freqs_hz, Some(&seeds))?;
+        }
+    }
+    Ok(out)
 }
 
 /// Solves a 3D `Study::Driven` frequency sweep via Hermite Tangential Galerkin PROM (`prom_tol = Some(tol)`)
 /// or direct point-by-point HDM factorizations (`prom_tol = None`).
 pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    solve_driven_with_options(mesh, problem, &DrivenOptions::default())
+}
+
+/// Like [`solve_driven`], with optional adaptive resonance-resolving frequency bisection.
+pub fn solve_driven_with_options(
+    mesh: &Discretisation,
+    problem: &Problem,
+    opts: &DrivenOptions,
+) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let asm = assemble_emw_driven(mesh, problem)?;
-    let out = run_driven_sweep_core(&asm)?;
+    let out = run_driven_sweep_core(&asm, opts)?;
     let (p_pml_w, layer_fraction) = compute_driven_pml_metrics(&asm, out.f_res_hz, &out.rep_x_red);
 
     let rep_sol = build_driven_solution(
@@ -1314,6 +1561,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         max_residual,
         out.rom_sweep_seconds
     )];
+    let (diagnostics, error_budget) = out.diag.finish();
 
     Ok(SolveResult {
         physics: "ems".into(),
@@ -1325,7 +1573,8 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         log,
         dofs: asm.n,
         seconds: t0.elapsed().as_secs_f64(),
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -1333,9 +1582,19 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
 
 /// Solves a 3D `Study::Driven` sweep natively on `Tet + Prism + Hex` (`MixedDiscretisation`).
 pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String> {
+    solve_driven_mixed_with_options(mesh, mixed, problem, &DrivenOptions::default())
+}
+
+/// Like [`solve_driven_mixed`], with optional adaptive resonance-resolving frequency bisection.
+pub fn solve_driven_mixed_with_options(
+    mesh: &Mesh,
+    mixed: &MixedDiscretisation,
+    problem: &Problem,
+    opts: &DrivenOptions,
+) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let (asm, ned_mixed) = assemble_emw_driven_mixed(mixed, problem)?;
-    let out = run_driven_sweep_core(&asm)?;
+    let out = run_driven_sweep_core(&asm, opts)?;
     let (p_pml_w, layer_fraction) = compute_driven_pml_metrics(&asm, out.f_res_hz, &out.rep_x_red);
 
     let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
@@ -1394,6 +1653,7 @@ pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Pr
         max_residual,
         out.rom_sweep_seconds
     )];
+    let (diagnostics, error_budget) = out.diag.finish();
 
     Ok(SolveResult {
         physics: "ems".into(),
@@ -1405,7 +1665,8 @@ pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Pr
         log,
         dofs: asm.n,
         seconds: t0.elapsed().as_secs_f64(),
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 

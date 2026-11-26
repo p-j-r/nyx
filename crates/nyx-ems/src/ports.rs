@@ -90,18 +90,46 @@ pub struct AssembledWavePort {
     pub w_red: RCsr,
     /// Quadratic dispersion coefficients `[c0, c1, c2]` for `beta_p^2(k0^2) = c0 + c1 * k0^2 + c2 * k0^4`.
     pub beta2_poly: [f64; 3],
+    /// Minimum tracked 2D modal overlap across sweep anchors (`1.0` for single-frequency solves).
+    pub min_mode_overlap: f64,
+    /// Maximum 2D eigenresidual observed during waveport modal assembly.
+    pub max_eigen_residual: f64,
+    /// Per-anchor 2D port eigenresiduals collected during waveport assembly.
+    pub eigen_residuals: Vec<f64>,
+    /// Structured waveport diagnostics (e.g. mode overlap drop, below-cutoff dispersion warnings).
+    pub warnings: Vec<nyx_physics::DiagnosticWarning>,
 }
 
 impl AssembledWavePort {
-    /// Evaluates `(beta_p(omega), d(beta_p)/d(omega), d^2(beta_p)/d(omega)^2, z0_p(omega))` at angular frequency `omega` (rad/s).
+    /// Evaluates `(beta_p(omega), d(beta_p)/d(omega), d^2(beta_p)/d(omega)^2, z0_p(omega))` at angular frequency `omega` (rad/s),
+    /// plus an optional warning if the fitted dispersion drops below cutoff (`beta_p^2 <= 0`).
     #[inline]
-    pub fn beta_and_derivs(&self, omega: f64) -> (f64, f64, f64, f64) {
+    pub fn beta_and_derivs_checked(
+        &self,
+        omega: f64,
+    ) -> ((f64, f64, f64, f64), Option<nyx_physics::DiagnosticWarning>) {
         let k0 = omega / C0;
         let s = k0 * k0;
         let ds_dw = 2.0 * omega / (C0 * C0);
         let d2s_dw2 = 2.0 / (C0 * C0);
         let [c0, c1, c2] = self.beta2_poly;
-        let beta2 = (c0 + c1 * s + c2 * s * s).max(1e-12);
+        let raw_beta2 = c0 + c1 * s + c2 * s * s;
+        let warning = if raw_beta2 <= 0.0 {
+            Some(nyx_physics::DiagnosticWarning {
+                code: "waveport_below_cutoff".into(),
+                severity: nyx_physics::DiagnosticSeverity::Warning,
+                message: format!(
+                    "waveport '{}' mode {} is below cutoff at {:.6} GHz (beta^2 = {:.3e} <= 0; clamped to 1e-12)",
+                    self.bc.name,
+                    self.bc.mode,
+                    omega / (2.0 * std::f64::consts::PI * 1e9),
+                    raw_beta2
+                ),
+            })
+        } else {
+            None
+        };
+        let beta2 = raw_beta2.max(1e-12);
         let dbeta2_ds = c1 + 2.0 * c2 * s;
         let d2beta2_ds2 = 2.0 * c2;
         let dbeta2_dw = dbeta2_ds * ds_dw;
@@ -110,7 +138,13 @@ impl AssembledWavePort {
         let dbeta_dw = 0.5 * dbeta2_dw / beta;
         let d2beta_dw2 = 0.5 * d2beta2_dw2 / beta - (dbeta_dw * dbeta_dw) / beta;
         let z0 = (omega * MU0 / beta).max(1e-12);
-        (beta, dbeta_dw, d2beta_dw2, z0)
+        ((beta, dbeta_dw, d2beta_dw2, z0), warning)
+    }
+
+    /// Evaluates `(beta_p(omega), d(beta_p)/d(omega), d^2(beta_p)/d(omega)^2, z0_p(omega))` at angular frequency `omega` (rad/s).
+    #[inline]
+    pub fn beta_and_derivs(&self, omega: f64) -> (f64, f64, f64, f64) {
+        self.beta_and_derivs_checked(omega).0
     }
 }
 
@@ -1066,7 +1100,7 @@ pub fn assemble_waveports_3d(
             (1.02 * n_max, (bc.mode + 3).max(4))
         };
 
-        let solve_2d_at = |freq: f64| -> Result<Vec<(f64, Vec<Vec<[f64; 3]>>)>, String> {
+        let solve_2d_at = |freq: f64| -> Result<Vec<(f64, Vec<Vec<[f64; 3]>>, f64)>, String> {
             let asm2 = assemble_modes_with_bcs(&mesh_2d, freq, &eps_2d, &mur_2d, order, &[1], &ibc_2d, &[2])?;
             let k_actual = k_ask.min(asm2.free.len().saturating_sub(2)).max(1);
             let modes = solve_mode_pairs(&asm2, n_search, false, k_actual)?;
@@ -1074,7 +1108,7 @@ pub fn assemble_waveports_3d(
                 return Err(format!("waveport '{}': no 2D guided modes converged at {:.4} GHz", bc.name, freq / 1e9));
             }
             let k0 = 2.0 * PI * freq / C0;
-            let mut candidates: Vec<(f64, f64, Vec<Vec<[f64; 3]>>)> = Vec::with_capacity(modes.neff.len());
+            let mut candidates: Vec<(f64, f64, Vec<Vec<[f64; 3]>>, f64)> = Vec::with_capacity(modes.neff.len());
             for (m_i, &(n_re, n_im)) in modes.neff.iter().enumerate() {
                 let beta2 = if n_re > 0.0 { (n_re * k0).powi(2) } else { -(n_im * k0).powi(2) };
                 let (e_field, score) = evaluate_and_normalize_2d_mode(
@@ -1086,7 +1120,8 @@ pub fn assemble_waveports_3d(
                     &mur_2d,
                     &tri_weights,
                 );
-                candidates.push((beta2, score, e_field));
+                let res = modes.residuals.get(m_i).copied().unwrap_or(0.0);
+                candidates.push((beta2, score, e_field, res));
             }
             if let Some(ng) = bc.n_eff_guess {
                 // Sort propagating modes (beta^2 > 0) by |n_eff - n_eff_guess| ascending, breaking ties by orientation score
@@ -1115,7 +1150,7 @@ pub fn assemble_waveports_3d(
                     }
                 });
             }
-            Ok(candidates.into_iter().map(|(b2, _, ef)| (b2, ef)).collect())
+            Ok(candidates.into_iter().map(|(b2, _, ef, r)| (b2, ef, r)).collect())
         };
 
         let mid_modes = solve_2d_at(f_mid)?;
@@ -1127,7 +1162,7 @@ pub fn assemble_waveports_3d(
                 mid_modes.len()
             ));
         }
-        let (beta2_mid, ref_e_field) = mid_modes[bc.mode - 1].clone();
+        let (beta2_mid, ref_e_field, mid_res) = mid_modes[bc.mode - 1].clone();
         if beta2_mid <= 0.0 {
             return Err(format!(
                 "waveport '{}' mode {} is evanescent (below cutoff) at midband {:.4} GHz",
@@ -1138,11 +1173,12 @@ pub fn assemble_waveports_3d(
         }
 
         // Evaluate dispersion at f_min and f_max with phase/mode tracking against ref_e_field
-        let track_beta2_at = |freq: f64| -> Result<f64, String> {
+        let track_beta2_at = |freq: f64| -> Result<(f64, f64, f64), String> {
             let cands = solve_2d_at(freq)?;
             let mut best_ov = -1.0_f64;
             let mut best_b2 = beta2_mid;
-            for (b2, mut ef) in cands {
+            let mut best_res = mid_res;
+            for (b2, mut ef, r) in cands {
                 let ov = mode_overlap(&ef, &ref_e_field, &mur_2d, &tri_weights);
                 // Enforce smooth phase alignment across anchors: flip sign if inner product < 0
                 if ov < 0.0 {
@@ -1157,17 +1193,23 @@ pub fn assemble_waveports_3d(
                 if ov.abs() > best_ov {
                     best_ov = ov.abs();
                     best_b2 = b2;
+                    best_res = r;
                 }
             }
-            Ok(best_b2)
+            Ok((best_b2, best_ov.max(0.0), best_res))
         };
 
+        let mut min_mode_overlap = 1.0_f64;
+        let mut eigen_residuals = vec![mid_res];
         let beta2_poly = if (f_max - f_min).abs() <= 1e-9 * f_mid {
             let s_mid = (2.0 * PI * f_mid / C0).powi(2);
             [0.0, beta2_mid / s_mid.max(1e-300), 0.0]
         } else {
-            let b2_min = track_beta2_at(f_min)?;
-            let b2_max = track_beta2_at(f_max)?;
+            let (b2_min, ov_min, res_min) = track_beta2_at(f_min)?;
+            let (b2_max, ov_max, res_max) = track_beta2_at(f_max)?;
+            min_mode_overlap = ov_min.min(ov_max);
+            eigen_residuals.push(res_min);
+            eigen_residuals.push(res_max);
             let s0 = (2.0 * PI * f_min / C0).powi(2);
             let s1 = (2.0 * PI * f_mid / C0).powi(2);
             let s2 = (2.0 * PI * f_max / C0).powi(2);
@@ -1183,6 +1225,27 @@ pub fn assemble_waveports_3d(
             let c0 = w0 * s1 * s2 + w1 * s0 * s2 + w2 * s0 * s1;
             [c0, c1, c2]
         };
+        let max_eigen_residual = eigen_residuals.iter().copied().fold(0.0_f64, f64::max);
+        let mut warnings = Vec::new();
+        if min_mode_overlap < 0.80 {
+            warnings.push(nyx_physics::DiagnosticWarning {
+                code: "waveport_mode_overlap_low".into(),
+                severity: nyx_physics::DiagnosticSeverity::Error,
+                message: format!(
+                    "waveport '{}' mode {} modal overlap dropped to {:.3} (< 0.80) across sweep endpoints",
+                    bc.name, bc.mode, min_mode_overlap
+                ),
+            });
+        } else if min_mode_overlap < 0.90 {
+            warnings.push(nyx_physics::DiagnosticWarning {
+                code: "waveport_mode_overlap_low".into(),
+                severity: nyx_physics::DiagnosticSeverity::Warning,
+                message: format!(
+                    "waveport '{}' mode {} modal overlap dropped to {:.3} (< 0.90) across sweep endpoints",
+                    bc.name, bc.mode, min_mode_overlap
+                ),
+            });
+        }
 
         // Assemble 3D waveport boundary matrix W_p and modal vector b_p
         let mut w_coo = Coo::new(n, n);
@@ -1219,6 +1282,10 @@ pub fn assemble_waveports_3d(
             w_full: w_coo.to_csr(),
             w_red: RCsr::zeros(0, 0),
             beta2_poly,
+            min_mode_overlap,
+            max_eigen_residual,
+            eigen_residuals,
+            warnings,
         });
     }
 

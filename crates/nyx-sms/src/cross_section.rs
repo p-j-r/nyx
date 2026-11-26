@@ -550,6 +550,9 @@ pub fn assemble_cross_section(
 pub struct CrossSolve {
     pub modes: CrossModes,
     pub dim: usize,
+    pub solver_kind: &'static str,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
 }
 
 pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, String> {
@@ -557,24 +560,26 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
     let (n_modes, f_search, free, n) = (asm.n_modes, asm.f_search, &asm.free, asm.n);
     let (kf, mf) = (&asm.kf, &asm.mf);
     let sigma = if f_search > 0.0 { (2.0 * std::f64::consts::PI * f_search).powi(2) } else { -1.0 };
-    type Found = (Vec<(C, usize)>, Vec<Vec<C>>, bool, usize);
-    let (mut modes, vectors, converged, kdim): Found = if let Some(cf_c) = asm.cf_complex.as_ref() {
-        let (omegas, vecs, conv, dim) =
-            crate::lrb::quadratic_modes_complex(kf, mf, cf_c, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
-        let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
-        (modes, vecs, conv, dim)
+    type Found = (Vec<(C, usize)>, Vec<Vec<C>>, &'static str, Vec<f64>, usize, bool, usize);
+    let (mut modes, vectors, solver_kind, raw_res, restarts, converged, kdim): Found = if let Some(cf_c) =
+        asm.cf_complex.as_ref()
+    {
+        let q =
+            crate::lrb::quadratic_modes_complex_checked(kf, mf, cf_c, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+        let modes = q.omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
+        (modes, q.vectors, "shift_invert_qep", q.residuals, q.restarts, q.converged, q.dim)
     } else if let Some(cf) = asm.cf.as_ref() {
-        let (omegas, vecs, conv, dim) =
-            crate::lrb::quadratic_modes(kf, mf, cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
-        let modes = omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
-        (modes, vecs, conv, dim)
+        let q = crate::lrb::quadratic_modes_checked(kf, mf, cf, 2.0 * std::f64::consts::PI * f_search, n_modes)?;
+        let modes = q.omegas.iter().enumerate().map(|(i, w)| (*w / (2.0 * std::f64::consts::PI), i)).collect();
+        (modes, q.vectors, "shift_invert_qep", q.residuals, q.restarts, q.converged, q.dim)
     } else {
         let pairs = femcore::linalg::driver::eigs_complex(kf, mf, c(sigma, 0.0), n_modes, 1e-9, 400)?;
+        let rg_res = crate::diag::rigal_gaches_complex_residuals(kf, mf, &pairs.values, &pairs.vectors);
         let modes = pairs
             .values
             .iter()
             .enumerate()
-            .filter(|(i, _)| pairs.residuals.get(*i).is_none_or(|r| *r < 1e-6))
+            .filter(|(i, _)| rg_res.get(*i).is_none_or(|r| *r < 1e-6))
             .map(|(i, l)| {
                 let mut f = l.sqrt() / (2.0 * std::f64::consts::PI);
                 if f.re < 0.0 {
@@ -583,11 +588,12 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
                 (f, i)
             })
             .collect();
-        (modes, pairs.vectors.clone(), pairs.converged, pairs.dim)
+        (modes, pairs.vectors.clone(), "shift_invert_complex", rg_res, pairs.restarts, pairs.converged, pairs.dim)
     };
     modes.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
     let mut out_freqs: Vec<C> = vec![];
     let mut out_vectors: Vec<Vec<C>> = vec![];
+    let mut out_residuals: Vec<f64> = vec![];
     for &(fz, i) in modes.iter() {
         let u = if let Some(red) = &asm.red {
             red.expand(&vectors[i])
@@ -600,6 +606,7 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
         };
         out_freqs.push(fz);
         out_vectors.push(u);
+        out_residuals.push(raw_res.get(i).copied().unwrap_or(0.0));
     }
     Ok(CrossSolve {
         modes: CrossModes {
@@ -611,6 +618,9 @@ pub fn solve_cross_section_modes(asm: &CrossAssembly) -> Result<CrossSolve, Stri
             converged,
         },
         dim: kdim,
+        solver_kind,
+        residuals: out_residuals,
+        restarts,
     })
 }
 
@@ -813,7 +823,25 @@ pub fn cross_section_fields(
         return Err("no eigenfrequencies converged near the shift".into());
     }
     let log = finish_cross_section_log(asm, solved, unstable_count, any_pml, has_interior, &mut scalars);
-    Ok(SolveResult { order: order as u8, dim: 2, solutions, scalars, log, dofs: asm.n, ..Default::default() })
+    let mut diag = crate::diag::SmsDiag::new(solved.solver_kind);
+    diag.record_mode_residuals(
+        solved.solver_kind,
+        solved.residuals.clone(),
+        solved.modes.converged,
+        Some(solved.restarts),
+    );
+    let (diagnostics, error_budget) = diag.finish();
+    Ok(SolveResult {
+        order: order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        dofs: asm.n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
+        ..Default::default()
+    })
 }
 
 fn cross_section_fields_mixed(
@@ -1054,7 +1082,25 @@ fn cross_section_fields_mixed(
         return Err("no eigenfrequencies converged near the shift".into());
     }
     let log = finish_cross_section_log(asm, solved, unstable_count, any_pml, has_interior, &mut scalars);
-    Ok(SolveResult { order: order as u8, dim: 2, solutions, scalars, log, dofs: asm.n, ..Default::default() })
+    let mut diag = crate::diag::SmsDiag::new(solved.solver_kind);
+    diag.record_mode_residuals(
+        solved.solver_kind,
+        solved.residuals.clone(),
+        solved.modes.converged,
+        Some(solved.restarts),
+    );
+    let (diagnostics, error_budget) = diag.finish();
+    Ok(SolveResult {
+        order: order as u8,
+        dim: 2,
+        solutions,
+        scalars,
+        log,
+        dofs: asm.n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
+        ..Default::default()
+    })
 }
 
 fn finish_cross_section_log(
@@ -1413,6 +1459,9 @@ fn solve_cross_section_piezo_common(inp: CrossPiezoSolveInput<'_>) -> Result<(Cr
             converged: solved.converged,
         },
         dim: solved.dim,
+        solver_kind: solved.solver_kind,
+        residuals: solved.residuals,
+        restarts: solved.restarts,
     };
     Ok((asm, csolve))
 }

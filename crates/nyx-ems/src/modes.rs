@@ -63,6 +63,10 @@ pub struct Modes {
     pub et: Vec<Vec<f64>>,
     /// phi = Ez / (j beta) per mode at the P1/P2 dofs
     pub phi: Vec<Vec<f64>>,
+    /// original-pencil relative residuals `||A x - lambda B x||_2 / (||A x||_2 + |lambda| ||B x||_2 + 1e-30)`
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub matvecs: usize,
     pub converged: bool,
     /// a converged complex pair of the real pencil (a leaky mode or one with a complex propagation constant) lies among the wanted
     /// eigenvalues: this real solve cannot represent it, and `solve_emw` repeats the study in the complex solver of `ems_pml`.
@@ -323,7 +327,8 @@ pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: 
         }
         let et = x[..net].to_vec();
         let phi: Vec<f64> = x[net..].iter().map(|v| v / k0).collect();
-        out.push((neff, et, phi));
+        let res = pairs.residuals.get(i).copied().unwrap_or(0.0);
+        out.push((neff, et, phi, res));
     }
     // sort by closeness to the (real or imaginary) target
     let target = if evanescent { (0.0, n_target) } else { (n_target, 0.0) };
@@ -336,6 +341,9 @@ pub fn solve_mode_pairs(asm: &ModeAssembly, n_target: f64, evanescent: bool, k: 
         neff: out.iter().map(|o| o.0).collect(),
         et: out.iter().map(|o| o.1.clone()).collect(),
         phi: out.iter().map(|o| o.2.clone()).collect(),
+        residuals: out.iter().map(|o| o.3).collect(),
+        restarts: pairs.restarts,
+        matvecs: pairs.matvecs,
         converged: pairs.converged,
         complex_wanted: pairs.complex_found,
     })
@@ -525,6 +533,9 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
         log.push(format!("only {} of {} real-valued modes were found near the target", modes.neff.len(), n_modes));
     }
     scalars.push(crate::optical::mode_frame(problem).scalar());
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_real");
+    diag.record_mode_residuals("shift_invert_real", modes.residuals.clone(), modes.converged, Some(modes.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     let result = SolveResult {
         physics: "ems".into(),
         study: "modes".into(),
@@ -535,7 +546,8 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: mesh.n_dofs(problem.order),
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     };
     Ok(result)
 }
@@ -632,6 +644,9 @@ pub fn solve_waveguide_mixed(
         log.push(format!("only {} of {} real-valued modes were found near the target", modes.neff.len(), n_modes));
     }
     scalars.push(crate::optical::mode_frame(problem).scalar());
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_real");
+    diag.record_mode_residuals("shift_invert_real", modes.residuals.clone(), modes.converged, Some(modes.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         physics: "ems".into(),
         study: "modes".into(),
@@ -642,7 +657,8 @@ pub fn solve_waveguide_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: phi_map.n_dofs,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 

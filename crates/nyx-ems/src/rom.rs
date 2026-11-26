@@ -19,7 +19,7 @@ use femcore::linalg::driver::{dense_gen_eigh, DirectSolver};
 use femcore::linalg::faer_glue::generalized_eig_c64;
 use femcore::mesh::mixed::{FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES};
 use femcore::periodic::Reduction;
-use nyx_physics::{CircuitRom, Discretisation, ModeEnergyRow, RomPort, TlsMeta};
+use nyx_physics::{CircuitRom, DiagnosticSeverity, DiagnosticWarning, Discretisation, ModeEnergyRow, RomPort, TlsMeta};
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
 
@@ -507,24 +507,34 @@ fn compute_port_capacitance_and_static_cap(
     Ok((c_port_f, q_cap_red))
 }
 
-/// Builds a real `M_0`-orthogonal projector off the gradient matrix `g_proj_red` (`nred x n_grad`).
-fn project_off_gradients(m0_red: &RCsr, g_red: &RCsr, vecs: &mut [Vec<f64>]) -> Result<(), String> {
+/// Diagnostics returned alongside [`CircuitRom`] construction.
+#[derive(Debug, Clone, Default)]
+pub struct RomBuildDiagnostics {
+    pub warnings: Vec<DiagnosticWarning>,
+    pub max_algebraic_residual: f64,
+}
+
+/// Builds a real `M_0`-orthogonal projector off the gradient matrix `g_proj_red` (`nred x n_grad`)
+/// and returns the maximum backward residual across projected vectors.
+fn project_off_gradients(m0_red: &RCsr, g_red: &RCsr, vecs: &mut [Vec<f64>]) -> Result<f64, String> {
     if g_red.ncols() == 0 || vecs.is_empty() {
-        return Ok(());
+        return Ok(0.0);
     }
     let gt = g_red.transpose();
     let s_mat = spmm(&gt, &spmm(m0_red, g_red));
     let solver = DirectSolver::new(&s_mat, true)?;
+    let mut max_res = 0.0_f64;
     for x in vecs.iter_mut() {
         let mx = m0_red.matvec(x);
         let g = gt.matvec(&mx);
-        let y = solver.solve(&g);
+        let (y, chk) = solver.solve_checked(&s_mat, &g);
+        max_res = max_res.max(chk.algebraic_residual);
         let gy = g_red.matvec(&y);
         for (xi, &gyi) in x.iter_mut().zip(&gy) {
             *xi -= gyi;
         }
     }
-    Ok(())
+    Ok(max_res)
 }
 
 /// Two-pass Modified Gram-Schmidt orthonormalization in the `M_0` inner product.
@@ -568,6 +578,19 @@ pub fn build_circuit_rom(
     modes: Vec<ModeEnergyRow>,
     pert_eval: Option<&PerturbativeIbcEvaluator>,
 ) -> Result<CircuitRom, String> {
+    Ok(build_circuit_rom_checked(mesh, problem, asm, solved_vectors, freq_indices, modes, pert_eval)?.0)
+}
+
+/// Checked variant of [`build_circuit_rom`] also returning projection/lift diagnostics.
+pub fn build_circuit_rom_checked(
+    mesh: &Discretisation,
+    problem: &Problem,
+    asm: &EmwAssembly,
+    solved_vectors: &[Vec<C>],
+    freq_indices: &[(C, usize)],
+    modes: Vec<ModeEnergyRow>,
+    pert_eval: Option<&PerturbativeIbcEvaluator>,
+) -> Result<(CircuitRom, RomBuildDiagnostics), String> {
     let caps = compute_port_capacitance_and_static_cap(mesh, problem, asm)?;
     build_circuit_rom_with_caps(asm, solved_vectors, freq_indices, modes, caps, pert_eval)
 }
@@ -583,6 +606,20 @@ pub fn build_circuit_rom_mixed(
     modes: Vec<ModeEnergyRow>,
     pert_eval: Option<&PerturbativeIbcEvaluator>,
 ) -> Result<CircuitRom, String> {
+    Ok(build_circuit_rom_mixed_checked(mesh, ned, problem, asm, solved_vectors, freq_indices, modes, pert_eval)?.0)
+}
+
+/// Checked variant of [`build_circuit_rom_mixed`] also returning projection/lift diagnostics.
+pub fn build_circuit_rom_mixed_checked(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    problem: &Problem,
+    asm: &EmwAssembly,
+    solved_vectors: &[Vec<C>],
+    freq_indices: &[(C, usize)],
+    modes: Vec<ModeEnergyRow>,
+    pert_eval: Option<&PerturbativeIbcEvaluator>,
+) -> Result<(CircuitRom, RomBuildDiagnostics), String> {
     let caps = compute_port_capacitance_and_static_cap_mixed(mesh, ned, problem, asm)?;
     build_circuit_rom_with_caps(asm, solved_vectors, freq_indices, modes, caps, pert_eval)
 }
@@ -936,7 +973,8 @@ fn build_circuit_rom_with_caps(
     modes: Vec<ModeEnergyRow>,
     (c_port_f, mut q_cap_list): (Vec<Vec<f64>>, Vec<Vec<f64>>),
     pert_eval: Option<&PerturbativeIbcEvaluator>,
-) -> Result<CircuitRom, String> {
+) -> Result<(CircuitRom, RomBuildDiagnostics), String> {
+    let mut rom_diag = RomBuildDiagnostics::default();
     let mut ports: Vec<RomPort> = asm
         .jj_ports
         .iter()
@@ -979,25 +1017,50 @@ fn build_circuit_rom_with_caps(
     let g_red_r = asm.g_red.real_part();
 
     // Project electrostatic fields off interior gradients g_red
-    let _ = project_off_gradients(m0_red, &g_red_r, &mut q_cap_list);
+    match project_off_gradients(m0_red, &g_red_r, &mut q_cap_list) {
+        Ok(res) => rom_diag.max_algebraic_residual = rom_diag.max_algebraic_residual.max(res),
+        Err(err) => rom_diag.warnings.push(DiagnosticWarning {
+            code: "rom_gradient_projection_failed".into(),
+            severity: DiagnosticSeverity::Error,
+            message: format!("circuit ROM static capacitive gradient projection failed: {err}"),
+        }),
+    }
 
     // Compute static inductive lifts u_j = (K_passive + eps_reg M_0)^-1 b_j projected off gradients
     let mut q_ind_list: Vec<Vec<f64>> = Vec::new();
     if !asm.jj_ports.is_empty() || !asm.lumped_ports.is_empty() {
         let eps_reg = (1e-4 * asm.sigma).max(1e-6);
         let a_reg = k_passive_reg.add_scaled(m0_red, eps_reg);
-        if let Ok(reg_solver) = DirectSolver::new(&a_reg, true) {
-            for port in &asm.jj_ports {
-                if port.b_red.iter().any(|&v| v.abs() > 0.0) {
-                    q_ind_list.push(reg_solver.solve(&port.b_red));
+        match DirectSolver::new(&a_reg, true) {
+            Ok(reg_solver) => {
+                for port in &asm.jj_ports {
+                    if port.b_red.iter().any(|&v| v.abs() > 0.0) {
+                        let (sol, chk) = reg_solver.solve_checked(&a_reg, &port.b_red);
+                        rom_diag.max_algebraic_residual = rom_diag.max_algebraic_residual.max(chk.algebraic_residual);
+                        q_ind_list.push(sol);
+                    }
+                }
+                for lp in &asm.lumped_ports {
+                    if lp.b_red.iter().any(|&v| v.abs() > 0.0) {
+                        let (sol, chk) = reg_solver.solve_checked(&a_reg, &lp.b_red);
+                        rom_diag.max_algebraic_residual = rom_diag.max_algebraic_residual.max(chk.algebraic_residual);
+                        q_ind_list.push(sol);
+                    }
+                }
+                match project_off_gradients(m0_red, &g_red_r, &mut q_ind_list) {
+                    Ok(res) => rom_diag.max_algebraic_residual = rom_diag.max_algebraic_residual.max(res),
+                    Err(err) => rom_diag.warnings.push(DiagnosticWarning {
+                        code: "rom_gradient_projection_failed".into(),
+                        severity: DiagnosticSeverity::Error,
+                        message: format!("circuit ROM static inductive gradient projection failed: {err}"),
+                    }),
                 }
             }
-            for lp in &asm.lumped_ports {
-                if lp.b_red.iter().any(|&v| v.abs() > 0.0) {
-                    q_ind_list.push(reg_solver.solve(&lp.b_red));
-                }
-            }
-            let _ = project_off_gradients(m0_red, &g_red_r, &mut q_ind_list);
+            Err(err) => rom_diag.warnings.push(DiagnosticWarning {
+                code: "rom_inductive_lift_failed".into(),
+                severity: DiagnosticSeverity::Error,
+                message: format!("circuit ROM static inductive lift factorization failed: {err}"),
+            }),
         }
     }
 
@@ -1266,7 +1329,7 @@ fn build_circuit_rom_with_caps(
         }
     }
 
-    Ok(CircuitRom { ports, r_static, r_dyn, k_r, c_r, m_r, b_r, c_port_f, modes })
+    Ok((CircuitRom { ports, r_static, r_dyn, k_r, c_r, m_r, b_r, c_port_f, modes }, rom_diag))
 }
 
 /// Evaluates the linearized resonant eigenfrequencies (Hz, ascending) of a `CircuitRom` by solving the

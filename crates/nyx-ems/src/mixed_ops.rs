@@ -1686,7 +1686,7 @@ pub fn assemble_waveports_3d_mixed(
             (1.02 * n_max, (bc.mode + 3).max(4))
         };
 
-        let solve_2d_sorted = |fa: f64| -> Result<Vec<(f64, Vec<f64>)>, String> {
+        let solve_2d_sorted = |fa: f64| -> Result<Vec<(f64, Vec<f64>, f64)>, String> {
             let asm2 = assemble_modes_with_bcs(&mesh2, fa, &eps2, &mur2, order, &[1], &[], &[2])?;
             let k_actual = k_ask.min(asm2.free.len().saturating_sub(2)).max(1);
             let m2 = solve_mode_pairs(&asm2, n_search, false, k_actual)?;
@@ -1694,13 +1694,14 @@ pub fn assemble_waveports_3d_mixed(
                 return Err(format!("waveport '{}': no 2D guided modes converged at {:.4} GHz", bc.name, fa / 1e9));
             }
             let k0_a = 2.0 * PI * fa / C0;
-            let mut cands: Vec<(f64, Vec<f64>)> = m2
+            let mut cands: Vec<(f64, Vec<f64>, f64)> = m2
                 .neff
                 .iter()
                 .enumerate()
                 .map(|(i, &(nr, ni))| {
                     let b2 = if nr > 0.0 { (nr * k0_a).powi(2) } else { -(ni * k0_a).powi(2) };
-                    (b2, m2.et[i].clone())
+                    let r = m2.residuals.get(i).copied().unwrap_or(0.0);
+                    (b2, m2.et[i].clone(), r)
                 })
                 .collect();
             if let Some(ng) = bc.n_eff_guess {
@@ -1729,7 +1730,7 @@ pub fn assemble_waveports_3d_mixed(
                 mid_cands.len()
             ));
         }
-        let (beta2_mid, mut et_mid) = mid_cands[bc.mode - 1].clone();
+        let (beta2_mid, mut et_mid, mid_res) = mid_cands[bc.mode - 1].clone();
         if beta2_mid <= 0.0 {
             return Err(format!(
                 "waveport '{}' mode {} is evanescent (below cutoff) at midband {:.4} GHz",
@@ -1770,25 +1771,55 @@ pub fn assemble_waveports_3d_mixed(
             *v *= e_scale;
         }
 
+        let mut min_mode_overlap = 1.0_f64;
+        let mut eigen_residuals = vec![mid_res];
         let beta2_samples = if (f_max - f_min).abs() <= 1e-9 * f_mid.max(1.0) {
             [beta2_mid, beta2_mid, beta2_mid]
         } else {
-            let track_at = |fa: f64| -> Result<f64, String> {
+            let track_at = |fa: f64| -> Result<(f64, f64, f64), String> {
                 let cands = solve_2d_sorted(fa)?;
                 let mut best_ov = -1.0_f64;
                 let mut best_b2 = beta2_mid;
-                for (b2, et_c) in cands {
+                let mut best_res = mid_res;
+                for (b2, et_c, r) in cands {
                     let ov = overlap_2d(&et_c, &et_mid).abs();
                     if ov > best_ov {
                         best_ov = ov;
                         best_b2 = b2;
+                        best_res = r;
                     }
                 }
-                Ok(best_b2)
+                Ok((best_b2, best_ov.max(0.0), best_res))
             };
-            [track_at(f_min)?, beta2_mid, track_at(f_max)?]
+            let (b2_min, ov_min, res_min) = track_at(f_min)?;
+            let (b2_max, ov_max, res_max) = track_at(f_max)?;
+            min_mode_overlap = ov_min.min(ov_max);
+            eigen_residuals.push(res_min);
+            eigen_residuals.push(res_max);
+            [b2_min, beta2_mid, b2_max]
         };
         let beta2_poly = fit_beta2_poly(anchor_fs, beta2_samples);
+        let max_eigen_residual = eigen_residuals.iter().copied().fold(0.0_f64, f64::max);
+        let mut warnings = Vec::new();
+        if min_mode_overlap < 0.80 {
+            warnings.push(nyx_physics::DiagnosticWarning {
+                code: "waveport_mode_overlap_low".into(),
+                severity: nyx_physics::DiagnosticSeverity::Error,
+                message: format!(
+                    "waveport '{}' mode {} modal overlap dropped to {:.3} (< 0.80) across sweep endpoints",
+                    bc.name, bc.mode, min_mode_overlap
+                ),
+            });
+        } else if min_mode_overlap < 0.90 {
+            warnings.push(nyx_physics::DiagnosticWarning {
+                code: "waveport_mode_overlap_low".into(),
+                severity: nyx_physics::DiagnosticSeverity::Warning,
+                message: format!(
+                    "waveport '{}' mode {} modal overlap dropped to {:.3} (< 0.90) across sweep endpoints",
+                    bc.name, bc.mode, min_mode_overlap
+                ),
+            });
+        }
 
         // Assemble 3D `W_p` and `b_p` directly over the 3D `Tri3` / `Quad4` port facets!
         let mut w_coo = Coo::new(n, n);
@@ -1831,6 +1862,10 @@ pub fn assemble_waveports_3d_mixed(
             w_full,
             w_red: RCsr::zeros(0, 0),
             beta2_poly,
+            min_mode_overlap,
+            max_eigen_residual,
+            eigen_residuals,
+            warnings,
         });
     }
 
@@ -2100,7 +2135,15 @@ pub fn eigs_mixed_curl_curl_ams(
     opts.m_max = (opts.m_min + 16).min(n.saturating_sub(2));
     let res = jacobi_davidson(k, Some(m), &ams, None, &opts).map_err(|e| format!("Jacobi-Davidson failed: {e}"))?;
     let vectors = (0..res.values.len()).map(|j| res.vectors.col(j).to_vec()).collect();
-    Ok(CEigPairs { values: res.values, vectors, residuals: res.residuals, dim: opts.m_max, converged: res.converged })
+    Ok(CEigPairs {
+        values: res.values,
+        vectors,
+        residuals: res.residuals,
+        dim: opts.m_max,
+        restarts: res.iterations,
+        matvecs: res.matvecs,
+        converged: res.converged,
+    })
 }
 
 /// Used by `MixedLagrange` scalar nullspace reduction on `MixedDiscretisation`.

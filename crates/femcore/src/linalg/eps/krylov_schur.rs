@@ -194,7 +194,10 @@ where
                 match opts.original_shift {
                     None => rho / theta.norm(),
                     Some(sigma) => {
-                        let denom = theta.norm() * (sigma + C64::ONE / theta).norm();
+                        let lam_norm = (sigma + C64::ONE / theta).norm();
+                        // Never relax stopping below transformed residual `rho / |theta|` when |lambda| > 1
+                        // (e.g. SI-unit FEM pencils where omega^2 or k0^2 >> 1); only tighten when |lambda| < 1.
+                        let denom = theta.norm() * lam_norm.min(1.0);
                         if denom > 0.0 { rho / denom } else { f64::MAX }
                     }
                 }

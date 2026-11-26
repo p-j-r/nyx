@@ -236,6 +236,14 @@ pub(crate) fn solve_floquet_mixed(
         solved.dim,
         if solved.converged { "" } else { " (not every pair converged; those are omitted)" }
     )];
+    let mut diag = crate::diag::SmsDiag::new("shift_invert_hermitian");
+    diag.record_mode_residuals(
+        "shift_invert_hermitian",
+        solved.residuals.clone(),
+        solved.converged,
+        Some(solved.restarts),
+    );
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         order: spec.order as u8,
         dim: d as u8,
@@ -244,6 +252,8 @@ pub(crate) fn solve_floquet_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
         ..Default::default()
     })
 }
@@ -266,6 +276,8 @@ pub struct FloquetAssembly {
 pub struct FloquetSolve {
     pub modes: Vec<(f64, usize)>,
     pub vectors: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
     pub dim: usize,
     pub converged: bool,
 }
@@ -303,18 +315,27 @@ pub fn assemble_floquet(
 pub fn solve_floquet_modes(asm: &FloquetAssembly) -> Result<FloquetSolve, String> {
     let sigma = if asm.f_search > 0.0 { (2.0 * std::f64::consts::PI * asm.f_search).powi(2) } else { -1.0 };
     let pairs = eigs_complex(&asm.kc, &asm.mc, c(sigma, 0.0), asm.n_modes, 1e-9, 500)?;
+    let rg_res = crate::diag::rigal_gaches_complex_residuals(&asm.kc, &asm.mc, &pairs.values, &pairs.vectors);
     let mut modes: Vec<(f64, usize)> = pairs
         .values
         .iter()
         .enumerate()
-        .filter(|(i, _)| pairs.residuals.get(*i).is_none_or(|r| *r < 1e-6))
+        .filter(|(i, _)| rg_res.get(*i).is_none_or(|r| *r < 1e-6))
         .map(|(i, l)| (l.re.max(0.0).sqrt() / (2.0 * std::f64::consts::PI), i))
         .collect();
     modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     if modes.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
-    Ok(FloquetSolve { modes, vectors: pairs.vectors.clone(), dim: pairs.dim, converged: pairs.converged })
+    let residuals: Vec<f64> = modes.iter().map(|&(_, i)| rg_res.get(i).copied().unwrap_or(0.0)).collect();
+    Ok(FloquetSolve {
+        modes,
+        vectors: pairs.vectors.clone(),
+        residuals,
+        restarts: pairs.restarts,
+        dim: pairs.dim,
+        converged: pairs.converged,
+    })
 }
 
 /// Stage 3: plot fields and per-cell complex displacement of every mode.
@@ -345,5 +366,23 @@ pub fn floquet_fields(
         solved.dim,
         if solved.converged { "" } else { " (not every pair converged; those are omitted)" }
     )];
-    Ok(SolveResult { order: order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
+    let mut diag = crate::diag::SmsDiag::new("shift_invert_hermitian");
+    diag.record_mode_residuals(
+        "shift_invert_hermitian",
+        solved.residuals.clone(),
+        solved.converged,
+        Some(solved.restarts),
+    );
+    let (diagnostics, error_budget) = diag.finish();
+    Ok(SolveResult {
+        order: order as u8,
+        dim: d as u8,
+        solutions,
+        scalars,
+        log,
+        dofs: n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
+        ..Default::default()
+    })
 }

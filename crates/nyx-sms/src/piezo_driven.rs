@@ -24,13 +24,15 @@ use femcore::linalg::csr::{c, CCoo, CCsr, RCsr, C};
 use femcore::linalg::driver::DirectSolver;
 use femcore::linalg::equilibrate::{ruiz_symmetric_terms, scale_symmetric, RuizTerm, DEFAULT_RUIZ_PASSES};
 use femcore::linalg::prom::{
-    run_greedy_prom_sweep, y_to_z_and_s, ImageProm, PromLinearSolver, PromOperator, SparseDrivenSolver,
+    run_greedy_prom_sweep, s_matrix_passivity_and_reciprocity, y_to_z_and_s_checked, ImageProm, PromOperator,
+    SparseDrivenSolver,
 };
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::mesh::SimplexMesh;
 use femcore::periodic::congruence_fast;
 use nyx_physics::{
-    cell_fields_of, DrivenPortData, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
+    cell_fields_of, DiagnosticSeverity, DiagnosticWarning, DrivenPortData, FieldFrame, Mesh, MixedToSimplexProjector,
+    Scalar, Solution, SolveResult,
 };
 use std::f64::consts::PI;
 use std::ops::Range;
@@ -261,7 +263,7 @@ impl PiezoDrivenAssembly {
         })
     }
 
-    fn compute_clamped_c0(&self) -> Result<Vec<Vec<f64>>, String> {
+    fn compute_clamped_c0(&self) -> Result<(Vec<Vec<f64>>, Option<femcore::linalg::driver::DirectSolveCheck>), String> {
         let p_ports = self.port_names.len();
         let n_u_red = self.constraints.n_u_red;
         let n_phi_red = self.constraints.n_phi_red;
@@ -273,12 +275,12 @@ impl PiezoDrivenAssembly {
                     c0[p][q] = -self.k_pp[p][q].re;
                 }
             }
-            return Ok(c0);
+            return Ok((c0, None));
         }
 
         let phi_solver = DirectSolver::new(&self.k_pp_neg_sub, false)?;
         let rhs_phi: Vec<Vec<C>> = self.b_drive_unscaled.iter().map(|b| b[n_u_red..].to_vec()).collect();
-        let phi_sols = phi_solver.solve_many(&rhs_phi);
+        let (phi_sols, chk) = phi_solver.solve_many_checked(&self.k_pp_neg_sub, &rhs_phi);
         for p in 0..p_ports {
             let b_recv_p = self.b_recv_unscaled.as_ref().map_or(&self.b_drive_unscaled[p], |v| &v[p]);
             let b_phi = &b_recv_p[n_u_red..];
@@ -290,7 +292,7 @@ impl PiezoDrivenAssembly {
                 c0[p][q] = -(self.k_pp[p][q] - inner).re;
             }
         }
-        Ok(c0)
+        Ok((c0, Some(chk)))
     }
 }
 
@@ -348,6 +350,7 @@ struct SweepCoreResult {
     rom_sweep_seconds: f64,
     f_rep_hz: f64,
     rep_x_red: Vec<C>,
+    diag: crate::diag::SmsDiag,
 }
 
 fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, String> {
@@ -365,7 +368,7 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
     let omegas: Vec<f64> = freqs_hz.iter().map(|&f| 2.0 * PI * f).collect();
     let p_ports = asm.port_names.len();
 
-    let c0_matrix = asm.compute_clamped_c0()?;
+    let (c0_matrix, c0_chk) = asm.compute_clamped_c0()?;
 
     let mut z0_ohm = Vec::with_capacity(n_points);
     let mut s_matrix = Vec::with_capacity(n_points);
@@ -384,6 +387,16 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
     let mut rep_freq_idx = n_points / 2;
     let mut rep_x_red = vec![c(0.0, 0.0); asm.nred];
     let mut max_ceff_metric = -1.0_f64;
+    let mut diag =
+        crate::diag::SmsDiag::new(if asm.prom_tol.is_some() { "prom_hermite_galerkin" } else { "direct_lu" });
+    if let Some(ref chk) = c0_chk {
+        diag.absorb_direct(chk);
+    }
+    let mut any_conv_reg = false;
+    let mut any_conv_sing = false;
+    let mut max_conv_res = 0.0_f64;
+    let mut max_passivity = 0.0_f64;
+    let mut max_reciprocity = 0.0_f64;
 
     if let Some(tol) = asm.prom_tol {
         let mut solver = SparseDrivenSolver::new(&asm.solver, asm.blr_tol);
@@ -419,18 +432,28 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
                                 }
                             }
                             let metric = y_k[0][0].norm() / w.max(1.0);
-                            let (s_out, z_out, y_out) = y_to_z_and_s(&y_k, &asm.z0_ports);
-                            (s_out, z_out, y_out, metric)
+                            let (s_out, z_out, y_out, rep) = y_to_z_and_s_checked(&y_k, &asm.z0_ports);
+                            let s_c: Vec<Vec<C>> =
+                                s_out.iter().map(|row| row.iter().map(|&[re, im]| c(re, im)).collect()).collect();
+                            let (pass_k, recip_k) = s_matrix_passivity_and_reciprocity(&s_c);
+                            (s_out, z_out, y_out, metric, rep, pass_k, recip_k)
                         })
                         .collect::<Vec<_>>()
                 });
                 let mut band_best_local = None;
-                for (k_loc, (s_out, z_out, y_out, metric)) in post_chunks.into_iter().flatten().enumerate() {
+                for (k_loc, (s_out, z_out, y_out, metric, rep, pass_k, recip_k)) in
+                    post_chunks.into_iter().flatten().enumerate()
+                {
                     if metric > max_ceff_metric {
                         max_ceff_metric = metric;
                         rep_freq_idx = band.start + k_loc;
                         band_best_local = Some(k_loc);
                     }
+                    any_conv_reg |= rep.used_regularization;
+                    any_conv_sing |= rep.singular_fallback;
+                    max_conv_res = max_conv_res.max(rep.max_solve_residual);
+                    max_passivity = max_passivity.max(pass_k);
+                    max_reciprocity = max_reciprocity.max(recip_k);
                     z0_ohm.push(z0_pairs_row.clone());
                     s_matrix.push(s_out);
                     z_matrix.push(z_out);
@@ -451,14 +474,24 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
         anchor_freqs_hz = summary.anchor_freqs_hz;
         max_residual = summary.max_residual;
         rom_sweep_seconds += summary.rom_sweep_seconds;
+        diag.solver_kind = format!("prom_{backend_name}");
+        diag.per_mode_residuals = summary.prom_residuals;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(max_residual).max(max_conv_res);
+        diag.model_truncation_rel = Some(max_residual);
     } else {
         let mut solver = SparseDrivenSolver::new(&asm.solver, asm.blr_tol);
         let rhs_hat = asm.b_drive_hat.clone();
         let mut anchors = Vec::with_capacity(n_points);
+        let mut per_freq_res = Vec::with_capacity(n_points);
+        let mut worst_bw = 0.0_f64;
         for (k, &w) in omegas.iter().enumerate() {
             femcore::progress::check()?;
             let a_mat = asm.assemble_matrix_at(w);
-            let x_hat_cols = solver.update_and_solve(w, &a_mat, &rhs_hat)?;
+            solver.update_matrix(&a_mat)?;
+            let (x_hat_cols, chk) = solver.solve_many_checked(&a_mat, &rhs_hat)?;
+            diag.absorb_direct(&chk);
+            per_freq_res.push(chk.algebraic_residual);
+            worst_bw = worst_bw.max(chk.algebraic_residual);
             anchors.push(freqs_hz[k]);
 
             let mut y_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
@@ -478,7 +511,14 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
                 rep_freq_idx = k;
                 rep_x_red = x_hat_cols[0].iter().zip(&asm.d_ruiz).map(|(&xi, &di)| xi * di).collect();
             }
-            let (s_out, z_out, y_out) = y_to_z_and_s(&y_k, &asm.z0_ports);
+            let (s_out, z_out, y_out, rep) = y_to_z_and_s_checked(&y_k, &asm.z0_ports);
+            any_conv_reg |= rep.used_regularization;
+            any_conv_sing |= rep.singular_fallback;
+            max_conv_res = max_conv_res.max(rep.max_solve_residual);
+            let s_c: Vec<Vec<C>> = s_out.iter().map(|row| row.iter().map(|&[re, im]| c(re, im)).collect()).collect();
+            let (pass_k, recip_k) = s_matrix_passivity_and_reciprocity(&s_c);
+            max_passivity = max_passivity.max(pass_k);
+            max_reciprocity = max_reciprocity.max(recip_k);
             z0_ohm.push(z0_pairs_row.clone());
             s_matrix.push(s_out);
             z_matrix.push(z_out);
@@ -487,10 +527,52 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
         hdm_solves = n_points;
         rom_dim = 0;
         anchor_freqs_hz = anchors;
-        max_residual = 0.0;
+        max_residual = worst_bw;
         symbolic_count = solver.symbolic_count();
         backend_name = solver.backend_name();
         drop(solver);
+        diag.solver_kind = backend_name.clone();
+        diag.per_mode_residuals = per_freq_res;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(worst_bw).max(max_conv_res);
+    }
+
+    if any_conv_sing {
+        diag.warnings.push(DiagnosticWarning {
+            code: "y_to_z_and_s_singular".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "y_to_z_and_s_checked encountered singular port transformation (max solve residual {max_conv_res:.2e})"
+            ),
+        });
+    } else if any_conv_reg || max_conv_res > 1e-8 {
+        diag.warnings.push(DiagnosticWarning {
+            code: "y_to_z_and_s_ill_conditioned".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!("y_to_z_and_s_checked used regularization or elevated residual ({max_conv_res:.2e})"),
+        });
+    }
+    diag.warnings.push(DiagnosticWarning {
+        code: "s_matrix_passivity_reciprocity".into(),
+        severity: DiagnosticSeverity::Info,
+        message: format!(
+            "passivity max sigma_max(S) = {max_passivity:.6}, reciprocity max ||S - S^T||_F / max(||S||_F, 1) = {max_reciprocity:.2e}"
+        ),
+    });
+    if max_passivity > 1.0 + 1e-4 {
+        diag.warnings.push(DiagnosticWarning {
+            code: "non_passive_s_matrix".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "piezoelectric S-matrix sweep exceeds passivity bound: max sigma_max(S) = {max_passivity:.6}"
+            ),
+        });
+    }
+    if asm.is_sym && asm.b_recv_hat.is_none() && max_reciprocity > 1e-5 {
+        diag.warnings.push(DiagnosticWarning {
+            code: "non_reciprocal_s_matrix".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!("symmetric piezoelectric S-matrix violates reciprocity: max ||S - S^T||_F / max(||S||_F, 1) = {max_reciprocity:.2e}"),
+        });
     }
 
     let f_rep_hz = freqs_hz[rep_freq_idx];
@@ -507,7 +589,16 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
         max_residual,
     };
 
-    Ok(SweepCoreResult { driven_data, c0_matrix, symbolic_count, backend_name, rom_sweep_seconds, f_rep_hz, rep_x_red })
+    Ok(SweepCoreResult {
+        driven_data,
+        c0_matrix,
+        symbolic_count,
+        backend_name,
+        rom_sweep_seconds,
+        f_rep_hz,
+        rep_x_red,
+        diag,
+    })
 }
 
 fn normalize_and_split_mode(x_full: &[C], n1: usize, d: usize, n_mech: usize) -> (Vec<C>, Vec<C>, bool) {
@@ -602,6 +693,7 @@ fn finish_driven_result(
         out.c0_matrix[0][0],
     ));
 
+    let (diagnostics, error_budget) = out.diag.finish();
     SolveResult {
         physics: "sms".into(),
         study: "driven".into(),
@@ -612,8 +704,8 @@ fn finish_driven_result(
         log,
         dofs: asm.constraints.n_tot,
         seconds: t0.elapsed().as_secs_f64(),
-        diagnostics: None,
-        error_budget: None,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     }
 }
 

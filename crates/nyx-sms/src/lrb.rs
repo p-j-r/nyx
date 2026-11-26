@@ -303,13 +303,35 @@ fn to_complex(a: &Csr) -> CCsr {
 /// Eigenvalues, eigenvectors, whether all converged, and the Krylov dimension used.
 pub type QuadraticModes = (Vec<C>, Vec<Vec<C>>, bool, usize);
 
+/// Detailed quadratic eigenproblem solution retaining per-mode residuals and restart count.
+pub(crate) struct QuadraticModesChecked {
+    pub omegas: Vec<C>,
+    pub vectors: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub converged: bool,
+    pub dim: usize,
+}
+
 /// Eigenpairs `omega` (complex, rad/s) near `omega_s` of `(K + i omega C - omega^2 M) u = 0` over the free
 /// dofs; also returns the displacement vectors, whether all converged and the Krylov dimension.
 pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize) -> Result<QuadraticModes, String> {
-    quadratic_modes_complex(kf, mf, &to_complex(cf), omega_s, nev)
+    let q = quadratic_modes_complex_checked(kf, mf, &to_complex(cf), omega_s, nev)?;
+    Ok((q.omegas, q.vectors, q.converged, q.dim))
+}
+
+pub(crate) fn quadratic_modes_checked(
+    kf: &CCsr,
+    mf: &CCsr,
+    cf: &Csr,
+    omega_s: f64,
+    nev: usize,
+) -> Result<QuadraticModesChecked, String> {
+    quadratic_modes_complex_checked(kf, mf, &to_complex(cf), omega_s, nev)
 }
 
 /// Complex damping variant of [`quadratic_modes`] (supports congruence-reduced complex LRB matrices).
+#[allow(dead_code)]
 pub(crate) fn quadratic_modes_complex(
     kf: &CCsr,
     mf: &CCsr,
@@ -317,6 +339,18 @@ pub(crate) fn quadratic_modes_complex(
     omega_s: f64,
     nev: usize,
 ) -> Result<QuadraticModes, String> {
+    let q = quadratic_modes_complex_checked(kf, mf, cc, omega_s, nev)?;
+    Ok((q.omegas, q.vectors, q.converged, q.dim))
+}
+
+/// Complex damping quadratic eigenproblem solver retaining per-mode residuals and restarts.
+pub(crate) fn quadratic_modes_complex_checked(
+    kf: &CCsr,
+    mf: &CCsr,
+    cc: &CCsr,
+    omega_s: f64,
+    nev: usize,
+) -> Result<QuadraticModesChecked, String> {
     let n = kf.nrows();
     // A = [[0, I], [-K, -C]], B = [[I, 0], [0, M]]
     let mut a = CCoo::new(2 * n, 2 * n);
@@ -341,18 +375,44 @@ pub(crate) fn quadratic_modes_complex(
     let pairs = eigs_complex(&ac, &bc, c(0.0, omega_s), nev, 1e-9, 600)?;
     let mut omegas = vec![];
     let mut vecs = vec![];
-    for (i, l) in pairs.values.iter().enumerate() {
-        if pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {
+    let mut residuals = vec![];
+    let vec_norm2 = |v: &[C]| -> f64 { v.iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt() };
+    for (i, &l) in pairs.values.iter().enumerate() {
+        let u_raw = &pairs.vectors[i][..n];
+        let u_norm = vec_norm2(u_raw);
+        let r_i = if u_norm > 0.0 {
+            let u: Vec<C> = u_raw.iter().map(|&z| z / u_norm).collect();
+            let ku = kf.matvec(&u);
+            let cu = cc.matvec(&u);
+            let mu = mf.matvec(&u);
+            let lam2 = l * l;
+            let num = (0..n).map(|idx| (ku[idx] + l * cu[idx] + lam2 * mu[idx]).norm_sqr()).sum::<f64>().sqrt();
+            let den = vec_norm2(&ku) + l.norm() * vec_norm2(&cu) + lam2.norm() * vec_norm2(&mu) + 1e-30;
+            num / den
+        } else {
+            pairs.residuals.get(i).copied().unwrap_or(f64::INFINITY)
+        };
+        if !r_i.is_finite() || r_i > 0.5 {
             continue;
         }
-        let omega = c(0.0, -1.0) * *l; // omega = -i lambda
-        if omega.re < 0.0 {
+        let omega = c(0.0, -1.0) * l; // omega = -i lambda
+                                      // Reject negative-frequency conjugates as well as purely imaginary non-oscillatory LRB roots
+                                      // (omega.re = 0 +/- rounding noise when Re(lambda) < 0, Im(lambda) = 0).
+        if omega.re <= 1e-6 * omega.im.abs() {
             continue;
         }
         omegas.push(omega);
         vecs.push(pairs.vectors[i][..n].to_vec());
+        residuals.push(r_i);
     }
-    Ok((omegas, vecs, pairs.converged, pairs.dim))
+    Ok(QuadraticModesChecked {
+        omegas,
+        vectors: vecs,
+        residuals,
+        restarts: pairs.restarts,
+        converged: pairs.converged,
+        dim: pairs.dim,
+    })
 }
 
 /// Eigenfrequencies with low-reflecting boundaries for the real stiffness and mass matrices of
@@ -462,6 +522,9 @@ pub(crate) fn solve_lrb_mixed(
         scalars.push(("unstable_modes".into(), Scalar::Num(unstable_count as f64)));
         log.push(format!("WARNING: {unstable_count} amplifying mode(s) detected (Im f < -1e-9 Re f)"));
     }
+    let mut diag = crate::diag::SmsDiag::new("shift_invert_qep");
+    diag.record_mode_residuals("shift_invert_qep", solved.residuals.clone(), solved.converged, Some(solved.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         order: asm.order as u8,
         dim: d as u8,
@@ -470,6 +533,8 @@ pub(crate) fn solve_lrb_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
         ..Default::default()
     })
 }
@@ -492,6 +557,8 @@ pub struct LrbAssembly {
 pub struct LrbSolve {
     pub omegas: Vec<C>,
     pub vectors: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
     pub converged: bool,
     pub dim: usize,
 }
@@ -546,12 +613,18 @@ pub fn assemble_lrb(
 
 /// Stage 2: the quadratic eigenpairs nearest the search frequency.
 pub fn solve_lrb_modes(asm: &LrbAssembly) -> Result<LrbSolve, String> {
-    let (omegas, vectors, converged, dim) =
-        quadratic_modes(&asm.kf, &asm.mf, &asm.cf, 2.0 * std::f64::consts::PI * asm.f_search, asm.n_modes)?;
-    if omegas.is_empty() {
+    let q = quadratic_modes_checked(&asm.kf, &asm.mf, &asm.cf, 2.0 * std::f64::consts::PI * asm.f_search, asm.n_modes)?;
+    if q.omegas.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
-    Ok(LrbSolve { omegas, vectors, converged, dim })
+    Ok(LrbSolve {
+        omegas: q.omegas,
+        vectors: q.vectors,
+        residuals: q.residuals,
+        restarts: q.restarts,
+        converged: q.converged,
+        dim: q.dim,
+    })
 }
 
 /// Stage 3: plot fields and per-cell complex displacement of every mode, the frequencies and signed Q.
@@ -602,5 +675,18 @@ pub fn lrb_fields(mesh: &Discretisation, asm: &LrbAssembly, solved: &LrbSolve) -
         scalars.push(("unstable_modes".into(), Scalar::Num(unstable_count as f64)));
         log.push(format!("WARNING: {unstable_count} amplifying mode(s) detected (Im f < -1e-9 Re f)"));
     }
-    Ok(SolveResult { order: asm.order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
+    let mut diag = crate::diag::SmsDiag::new("shift_invert_qep");
+    diag.record_mode_residuals("shift_invert_qep", solved.residuals.clone(), solved.converged, Some(solved.restarts));
+    let (diagnostics, error_budget) = diag.finish();
+    Ok(SolveResult {
+        order: asm.order as u8,
+        dim: d as u8,
+        solutions,
+        scalars,
+        log,
+        dofs: n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
+        ..Default::default()
+    })
 }

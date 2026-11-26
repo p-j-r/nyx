@@ -11,6 +11,7 @@
 
 pub mod ac_loss;
 mod common;
+mod diag;
 pub mod electro;
 pub mod heat;
 pub mod magneto;

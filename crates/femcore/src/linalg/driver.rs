@@ -14,7 +14,7 @@
 
 use crate::progress;
 use crate::linalg::csr::Csr;
-pub use crate::linalg::direct::{FactorBackend, FactorStats};
+pub use crate::linalg::direct::{FactorBackend, FactorDiagnostics, FactorStats, Used};
 use crate::linalg::direct::{Definiteness, ShiftedFactorization, ShiftedSolver};
 use crate::linalg::eps::{EpsOptions, EpsReason, Kind, Which, krylov_schur};
 use crate::linalg::faer_glue::FaerScalar;
@@ -27,6 +27,95 @@ use serde::{Deserialize, Serialize};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 // ------------------------------------------------------------------------------------------------------------ direct solves
+
+/// Checked backward-residual and dynamic conditioning report produced by [`DirectSolver::solve_checked`]
+/// and [`DirectSolver::solve_many_checked`].
+#[derive(Debug, Clone, Copy)]
+pub struct DirectSolveCheck {
+    /// Maximum relative backward residual `||A x - b||_2 / (||A||_F ||x||_2 + ||b||_2)` across RHS.
+    pub algebraic_residual: f64,
+    /// Dynamic 2-step Hager-Higham 1-norm `rcond` estimate (computed only when pivot/diagonal growth is
+    /// anomalous or `algebraic_residual > 1e-8`, and always `None` for shift-and-invert pencils).
+    pub rcond_estimate: Option<f64>,
+    pub stats: FactorStats,
+    pub diagnostics: FactorDiagnostics,
+    pub cholesky_fallbacks: usize,
+    pub pivot_growth: f64,
+    pub solver_kind: &'static str,
+}
+
+/// Computes `||A x - b||_2 / (a_fro * ||x||_2 + ||b||_2)` using a single `SpMV` into scratch `ax`.
+pub fn backward_residual_with_fro<T: Scalar>(a: &Csr<T>, a_fro: f64, b: &[T], x: &[T], ax: &mut [T]) -> f64 {
+    if !x.iter().all(|v| v.is_finite()) || !b.iter().all(|v| v.is_finite()) {
+        return f64::INFINITY;
+    }
+    a.spmv(x, ax);
+    let mut r2 = 0.0_f64;
+    for (&axi, &bi) in ax.iter().zip(b) {
+        let d = axi - bi;
+        if !d.is_finite() {
+            return f64::INFINITY;
+        }
+        let m = d.modulus();
+        r2 += m * m;
+    }
+    let r_norm = r2.sqrt();
+    if r_norm == 0.0 {
+        return 0.0;
+    }
+    let x_norm = norm2(x);
+    let b_norm = norm2(b);
+    let denom = a_fro * x_norm + b_norm;
+    if denom <= 0.0 || !denom.is_finite() {
+        f64::INFINITY
+    } else {
+        r_norm / denom
+    }
+}
+
+/// Computes the relative backward residual `||A x - b||_2 / (||A||_F ||x||_2 + ||b||_2)`.
+pub fn backward_residual<T: Scalar>(a: &Csr<T>, b: &[T], x: &[T]) -> f64 {
+    let a_fro = a.values().iter().map(|v| {
+        let m = v.modulus();
+        m * m
+    }).sum::<f64>().sqrt();
+    let mut ax = vec![T::ZERO; a.nrows()];
+    backward_residual_with_fro(a, a_fro, b, x, &mut ax)
+}
+
+/// Computes the worst (maximum) relative backward residual `||A x - b||_2 / (||A||_F ||x||_2 + ||b||_2)` across RHS.
+pub fn backward_residual_many<T: Scalar>(a: &Csr<T>, bs: &[Vec<T>], xs: &[Vec<T>]) -> f64 {
+    if bs.is_empty() {
+        return 0.0;
+    }
+    let a_fro = a.values().iter().map(|v| {
+        let m = v.modulus();
+        m * m
+    }).sum::<f64>().sqrt();
+    let mut ax = vec![T::ZERO; a.nrows()];
+    let mut worst = 0.0_f64;
+    for (b, x) in bs.iter().zip(xs) {
+        worst = worst.max(backward_residual_with_fro(a, a_fro, b, x, &mut ax));
+    }
+    worst
+}
+
+fn direct_solver_kind(stats: &FactorStats, diag: &FactorDiagnostics) -> &'static str {
+    if diag.krylov_fallback {
+        "krylov_fallback"
+    } else {
+        match stats.backend {
+            FactorBackend::CholeskyAmd | FactorBackend::CholeskyNd => "direct_chol",
+            FactorBackend::LbltAmd | FactorBackend::LbltNd => "direct_lbl",
+            FactorBackend::LuColamd | FactorBackend::LuAmd | FactorBackend::LuNd | FactorBackend::BlrNd => "direct_lu",
+            FactorBackend::None => match stats.used {
+                Used::Cholesky => "direct_chol",
+                Used::Lu => "direct_lu",
+                Used::None => "direct_lu",
+            },
+        }
+    }
+}
 
 /// A sparse matrix factorised once, then solved for any number of right-hand sides: Cholesky when the matrix is symmetric (Hermitian)
 /// positive definite and `spd` says so, sparse LU otherwise (and as the fallback when Cholesky finds the matrix not positive definite).
@@ -55,6 +144,12 @@ impl<T: FaerScalar> DirectSolver<T> {
         self.n
     }
 
+    /// Marks whether this factorization represents a shift-and-invert spectral pencil `(A - sigma B)`,
+    /// skipping dynamic `rcond` estimation (where proximity to an eigenvalue makes near-singularity intentional).
+    pub fn set_shift_invert_pencil(&mut self, is_pencil: bool) {
+        self.fac.set_shift_invert_pencil(is_pencil);
+    }
+
     /// Replaces the numeric values of `a` while reusing the cached symbolic analysis
     /// (requiring an identical sparsity pattern), and re-runs numeric factorisation on the factorisation pool.
     pub fn update_matrix(&mut self, a: &Csr<T>) -> Result<(), String> {
@@ -75,6 +170,17 @@ impl<T: FaerScalar> DirectSolver<T> {
         self.fac.stats()
     }
 
+    /// Snapshot of pivot, inertia, growth ratio, and singular-recovery diagnostics.
+    pub fn diagnostics(&self) -> FactorDiagnostics {
+        self.fac.diagnostics()
+    }
+
+    /// Estimates the 1-norm reciprocal condition number via 2-step Hager-Higham (returns `None` on
+    /// shift-and-invert pencils or Krylov fallback).
+    pub fn rcond_estimate(&self) -> Option<f64> {
+        self.fac.estimate_rcond_1norm()
+    }
+
     pub fn solve(&self, b: &[T]) -> Vec<T> {
         assert_eq!(b.len(), self.n);
         let mut x = b.to_vec();
@@ -82,6 +188,16 @@ impl<T: FaerScalar> DirectSolver<T> {
             .solve_block_in_place(&mut x, 1)
             .expect("DirectSolver must be factored via set_shift before solving");
         x
+    }
+
+    /// Solves `A x = b` and checks the backward residual `||A x - b||_2 / (||A||_F ||x||_2 + ||b||_2)`.
+    /// Triggers the 2-step Hager-Higham 1-norm `rcond` estimate dynamically only when pivot/diagonal
+    /// growth is anomalous or `eps_alg > 1e-8` (skipped on shift-and-invert pencils).
+    pub fn solve_checked(&self, a: &Csr<T>, b: &[T]) -> (Vec<T>, DirectSolveCheck) {
+        let x = self.solve(b);
+        let eps_alg = backward_residual(a, b, &x);
+        let check = self.build_check(eps_alg);
+        (x, check)
     }
 
     /// Several right-hand sides; the independent triangular solves are spread over the threads of the shared pool.
@@ -93,6 +209,36 @@ impl<T: FaerScalar> DirectSolver<T> {
         let chunk = bs.len().div_ceil(nt);
         let parts: Vec<Vec<Vec<T>>> = bs.par_chunks(chunk).map(|cols| cols.iter().map(|b| self.solve(b)).collect::<Vec<Vec<T>>>()).collect();
         parts.into_iter().flatten().collect()
+    }
+
+    /// Solves for several right-hand sides and checks the worst backward residual across RHS, triggering
+    /// dynamic 2-step Hager-Higham `rcond` estimation only on anomalous pivot growth or `eps_alg > 1e-8`.
+    pub fn solve_many_checked(&self, a: &Csr<T>, bs: &[Vec<T>]) -> (Vec<Vec<T>>, DirectSolveCheck) {
+        let xs = self.solve_many(bs);
+        let eps_alg = backward_residual_many(a, bs, &xs);
+        let check = self.build_check(eps_alg);
+        (xs, check)
+    }
+
+    fn build_check(&self, eps_alg: f64) -> DirectSolveCheck {
+        let stats = self.fac.stats();
+        let diagnostics = self.fac.diagnostics();
+        let trigger_rcond = !self.fac.is_shift_invert_pencil()
+            && (diagnostics.is_anomalous_pivot_growth() || !eps_alg.is_finite() || eps_alg > 1e-8);
+        let rcond_estimate = if trigger_rcond {
+            self.fac.estimate_rcond_1norm()
+        } else {
+            None
+        };
+        DirectSolveCheck {
+            algebraic_residual: eps_alg,
+            rcond_estimate,
+            cholesky_fallbacks: stats.cholesky_fallbacks,
+            pivot_growth: diagnostics.pivot_growth,
+            solver_kind: direct_solver_kind(&stats, &diagnostics),
+            stats,
+            diagnostics,
+        }
     }
 }
 
@@ -223,6 +369,7 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
         block_size: block,
         ncv: if opts.ncv > 0 { Some(opts.ncv) } else { None },
         nev,
+        original_shift: Some(sigma.to_c64()),
         ..match kind {
             Kind::Hermitian => EpsOptions::hermitian(nev),
             Kind::General => EpsOptions::general(nev),
@@ -261,7 +408,7 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
         b.spmv(x, &mut bx);
         let r2: f64 = ax.iter().zip(&bx).map(|(p, q)| (p.to_c64() - lam * q.to_c64()).norm_sqr()).sum();
         values.push(lam);
-        residuals.push(r2.sqrt() / (lam.norm() * norm2(x)).max(1e-300));
+        residuals.push(r2.sqrt() / (norm2(&ax) + lam.norm() * norm2(&bx) + 1e-30));
         errors.push(res.errors.get(i).copied().unwrap_or(0.0));
         vectors.push(x.to_vec());
     }
@@ -277,6 +424,7 @@ pub fn eigs_real_general_near(a: &Csr<f64>, b: &Csr<f64>, sigma: f64, nev: usize
         return Err("number of eigenvalues must be between 1 and n-1".into());
     }
     let (ac, bc) = (a.to_complex(), b.to_complex());
+    let (mut rax, mut rbx) = (vec![0.0; n], vec![0.0; n]);
     let mut ask = nev + 4;
     loop {
         let ask_now = ask.min(n - 1);
@@ -293,9 +441,14 @@ pub fn eigs_real_general_near(a: &Csr<f64>, b: &Csr<f64>, sigma: f64, nev: usize
             let mut x: Vec<f64> = p.vectors[i].iter().map(|z| (z * rot).re).collect();
             let xn = norm2(&x);
             x.iter_mut().for_each(|t| *t /= xn);
-            out.values.push(C64::new(lam.re, 0.0));
+            let lam_re = lam.re;
+            a.spmv(&x, &mut rax);
+            b.spmv(&x, &mut rbx);
+            let rr2: f64 = rax.iter().zip(&rbx).map(|(&ai, &bi)| (ai - lam_re * bi).powi(2)).sum();
+            let real_res = rr2.sqrt() / (norm2(&rax) + lam_re.abs() * norm2(&rbx) + 1e-30);
+            out.values.push(C64::new(lam_re, 0.0));
             out.vectors.push(x);
-            out.residuals.push(p.residuals[i]);
+            out.residuals.push(real_res);
             out.errors.push(p.errors.get(i).copied().unwrap_or(0.0));
             if out.values.len() == nev {
                 break;
@@ -523,7 +676,16 @@ fn definiteness(spd: bool) -> Definiteness {
 }
 
 fn real_pairs(p: Pairs<f64>) -> EigPairs {
-    EigPairs { values: p.values.iter().map(|z| z.re).collect(), vectors: p.vectors, dim: p.dim, converged: p.converged, complex_found: false }
+    EigPairs {
+        values: p.values.iter().map(|z| z.re).collect(),
+        vectors: p.vectors,
+        residuals: p.residuals,
+        dim: p.dim,
+        restarts: p.restarts,
+        matvecs: p.matvecs,
+        converged: p.converged,
+        complex_found: false,
+    }
 }
 
 /// Real symmetric pencil `A x = lambda M x` with `M` positive definite, eigenvalues nearest `sigma`; a shift at or below zero is taken to
@@ -550,9 +712,11 @@ pub fn eigs_general(a: &RCsr, b: &RCsr, sigma: f64, nev: usize, opts: &EigOpts) 
 pub struct CEigPairs {
     pub values: Vec<C64>,
     pub vectors: Vec<Vec<C64>>,
-    /// the eigensolver's relative error estimate of the transformed problem (what the tolerance bounds)
+    /// original-pencil relative residuals `||Ax - lambda Bx||_2 / (||Ax||_2 + |lambda| ||Bx||_2 + 1e-30)`
     pub residuals: Vec<f64>,
     pub dim: usize,
+    pub restarts: usize,
+    pub matvecs: usize,
     pub converged: bool,
 }
 
@@ -560,7 +724,15 @@ pub struct CEigPairs {
 pub fn eigs_complex_projected(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, _max_dim: usize, project: Option<Projector<C64>>) -> Result<CEigPairs, String> {
     let opts = EigenOptions { par_solve_min_n: par_solve_min_n_complex(), ..opts_of(tol, 0) };
     let p = eigs_near(a, b, sigma, nev, Symmetry::General, Definiteness::General, &opts, project)?;
-    Ok(CEigPairs { values: p.values, vectors: p.vectors, residuals: p.errors, dim: p.dim, converged: p.converged })
+    Ok(CEigPairs {
+        values: p.values,
+        vectors: p.vectors,
+        residuals: p.residuals,
+        dim: p.dim,
+        restarts: p.restarts,
+        matvecs: p.matvecs,
+        converged: p.converged,
+    })
 }
 
 pub fn eigs_complex(a: &CCsr, b: &CCsr, sigma: C64, nev: usize, tol: f64, max_dim: usize) -> Result<CEigPairs, String> {
@@ -659,7 +831,15 @@ pub fn eigs_quadratic_complex(a0: &CCsr, a1: &CCsr, a2: &CCsr, sigma: C64, nev: 
         vectors.push(u);
         residuals.push(r);
     }
-    Ok(CEigPairs { values, vectors, residuals, dim: res.ncv, converged: res.reason == EpsReason::Converged })
+    Ok(CEigPairs {
+        values,
+        vectors,
+        residuals,
+        dim: res.ncv,
+        restarts: res.iterations,
+        matvecs: res.matvecs,
+        converged: res.reason == EpsReason::Converged,
+    })
 }
 
 /// A preconditioner given as a closure over free-dof vectors (one multigrid cycle).
@@ -686,7 +866,16 @@ pub fn lobpcg_guarded(k: &RCsr, m: &RCsr, nev: usize, extra: usize, precond: &dy
     if res.reason == LobpcgReason::Stalled {
         return Err(format!("{STALLED} after {} iterations", res.iterations));
     }
-    Ok(EigPairs { values: res.values, vectors: res.vectors, dim: nev + extra, converged: res.reason == LobpcgReason::Converged, complex_found: false })
+    Ok(EigPairs {
+        values: res.values,
+        vectors: res.vectors,
+        residuals: res.residuals,
+        dim: nev + extra,
+        restarts: res.iterations,
+        matvecs: res.matvecs,
+        converged: res.reason == LobpcgReason::Converged,
+        complex_found: false,
+    })
 }
 
 // ------------------------------------------------------------------------------------------------------------ column-parallel solves
@@ -960,6 +1149,8 @@ pub fn eigs_curl_curl_p2_jd(
         vectors,
         residuals: res.residuals,
         dim: opts.m_max,
+        restarts: res.iterations,
+        matvecs: res.matvecs,
         converged: res.converged,
     })
 }
@@ -1051,7 +1242,10 @@ impl<T: FaerScalar> ShiftedSolver<T> for IterativeShiftInvertP2<T> {
         for c in 0..nrhs {
             let col = &mut rhs[c * n..(c + 1) * n];
             let b = col.to_vec();
-            let _ = gmres.solve(a, ams, &b, &mut x);
+            let info = gmres.solve(a, ams, &b, &mut x);
+            if !info.reason.is_converged() || !x.iter().all(|v| v.is_finite()) {
+                return Err(SolverError::Singular);
+            }
             col.copy_from_slice(&x);
         }
         self.solves.set(self.solves.get() + nrhs);
@@ -1213,5 +1407,146 @@ mod tests {
         for (a, b) in v2_1.iter().flatten().zip(v2_8.iter().flatten()) {
             assert_eq!(a.to_bits(), b.to_bits());
         }
+    }
+
+    #[test]
+    fn direct_solver_checked_residual_dynamic_rcond_and_pencil_skip() {
+        // 1. Well-conditioned matrix: tiny backward residual, `rcond_estimate == None` (no needless solve).
+        let a_good = tridiag_c64(16, C64::new(6.0, 0.2), C64::new(-1.0, 0.05));
+        let b = vec![C64::new(1.0, -0.5); 16];
+        let solver_good = DirectSolver::new(&a_good, false).unwrap();
+        let (x_good, chk_good) = solver_good.solve_checked(&a_good, &b);
+        assert_eq!(x_good.len(), 16);
+        assert!(chk_good.algebraic_residual < 1e-13, "good residual = {:e}", chk_good.algebraic_residual);
+        assert!(chk_good.rcond_estimate.is_none(), "well-conditioned solve must skip rcond");
+        assert!(chk_good.stats.symbolic_count == 1 && chk_good.stats.numeric_count == 1);
+        assert!(chk_good.stats.factor_nnz > 0);
+
+        // 2. Near-singular real matrix with large pivot ratio (1 vs 1e-13): dynamic 2-step Hager-Higham
+        //    `rcond` triggers automatically.
+        let a_ill = Csr::from_triplets(
+            4,
+            4,
+            &[
+                (0, 0, 1.0_f64),
+                (0, 1, 1.0),
+                (1, 0, 1.0),
+                (1, 1, 1.0 + 1e-13),
+                (2, 2, 10.0),
+                (3, 3, 10.0),
+            ],
+        )
+        .unwrap();
+        let solver_ill = DirectSolver::new(&a_ill, false).unwrap();
+        let rhs_ill = vec![1.0, 2.0, 3.0, 4.0];
+        let (_, chk_ill) = solver_ill.solve_checked(&a_ill, &rhs_ill);
+        let rcond = chk_ill.rcond_estimate.expect("ill-conditioned matrix must trigger dynamic rcond");
+        assert!(rcond > 0.0 && rcond < 1e-10, "expected tiny rcond, got {rcond:e}");
+
+        // 3. Shift-and-invert pencil: dynamic `rcond` MUST be skipped even when near-singular.
+        let mut solver_pencil = DirectSolver::new(&a_ill, false).unwrap();
+        solver_pencil.set_shift_invert_pencil(true);
+        let (_, chk_pencil) = solver_pencil.solve_checked(&a_ill, &rhs_ill);
+        assert!(chk_pencil.rcond_estimate.is_none(), "shift-invert pencil must skip rcond");
+    }
+
+    #[test]
+    fn eigensolvers_normalize_zero_modes_and_preserve_telemetry() {
+        // Diagonal stiffness with an exact zero eigenvalue plus positive spectrum -> zero-mode residual must
+        // stay well-behaved thanks to the `+ 1e-30` floor.
+        let mut a_trips = vec![(0, 0, 0.0_f64)];
+        let mut m_trips = vec![(0, 0, 1.0_f64)];
+        for i in 1..20 {
+            a_trips.push((i, i, (i * i) as f64));
+            m_trips.push((i, i, 1.0));
+        }
+        let a = RCsr::from_triplets(20, 20, &a_trips).unwrap();
+        let m = RCsr::from_triplets(20, 20, &m_trips).unwrap();
+        let pairs = eigs_sym(&a, &m, -0.5, 3, &EigOpts::default(), None).unwrap();
+        assert!(pairs.converged);
+        assert!(pairs.values[0].abs() < 1e-12, "expected zero mode, got {:?}", pairs.values);
+        // Exact zero mode has ||Ax|| ~ eps -> bounded by 1.0 instead of blowing up to 1e284; positive modes < 1e-9.
+        assert!(pairs.residuals[0].is_finite() && pairs.residuals[0] <= 1.0, "zero-mode res={:?}", pairs.residuals);
+        assert!(pairs.residuals[1..].iter().all(|&r| r.is_finite() && r < 1e-9), "residuals={:?}", pairs.residuals);
+        assert!(pairs.matvecs > 0);
+
+        // `eigs_complex_projected` returns true original-pencil residuals & restarts/matvecs.
+        let ac = CCsr::from_triplets(
+            20,
+            20,
+            &(0..20)
+                .map(|i| (i, i, C64::new(((i + 1) as f64) * 100.0, 0.5)))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let mc = CCsr::identity(20);
+        let cp = eigs_complex_projected(&ac, &mc, C64::new(90.0, 0.0), 3, 1e-10, 20, None).unwrap();
+        assert!(cp.converged);
+        assert!(cp.residuals.iter().all(|&r| r.is_finite() && r < 1e-9), "complex residuals={:?}", cp.residuals);
+        assert!(cp.matvecs > 0);
+
+        // `lobpcg_guarded` preserves residuals/restarts/matvecs.
+        let mut kt = Vec::new();
+        let mut mt = Vec::new();
+        for i in 0..24 {
+            kt.push((i, i, 2.0 + 0.5 * (i as f64)));
+            mt.push((i, i, 1.0));
+            if i + 1 < 24 {
+                kt.push((i, i + 1, -0.5));
+                kt.push((i + 1, i, -0.5));
+            }
+        }
+        let k_sym = RCsr::from_triplets(24, 24, &kt).unwrap();
+        let m_sym = RCsr::from_triplets(24, 24, &mt).unwrap();
+        let lp = lobpcg_guarded(&k_sym, &m_sym, 2, 2, &|r| r.to_vec(), 1e-9, 200, false).unwrap();
+        assert!(lp.converged);
+        assert_eq!(lp.residuals.len(), 2);
+        assert!(lp.residuals.iter().all(|&r| r < 1e-8));
+        assert!(lp.matvecs > 0);
+
+        // `eigs_real_general_near` recomputes real original-pencil residuals after dropping `.im`.
+        let mut ag_trips = Vec::new();
+        for i in 0..20 {
+            ag_trips.push((i, i, ((i + 1) as f64) * 5.0));
+            if i + 1 < 20 {
+                ag_trips.push((i, i + 1, 0.2));
+                ag_trips.push((i + 1, i, -0.1));
+            }
+        }
+        let a_gen = RCsr::from_triplets(20, 20, &ag_trips).unwrap();
+        let b_gen = RCsr::identity(20);
+        let gp = eigs_real_general_near(&a_gen, &b_gen, 4.0, 2, &EigenOptions::default()).unwrap();
+        assert!(gp.converged);
+        assert_eq!(gp.residuals.len(), 2);
+        assert!(gp.residuals.iter().all(|&r| r.is_finite() && r < 1e-8), "gen residuals={:?}", gp.residuals);
+    }
+
+    #[test]
+    fn iterative_shift_invert_p2_propagates_gmres_nonconvergence() {
+        let cube = crate::linalg::maxwell::nedelec_p2_cube(3);
+        let n = cube.stiffness.nrows();
+        let mut solver = IterativeShiftInvertP2::new(
+            &cube.stiffness,
+            &cube.mass,
+            AmsP2Topology {
+                p1_to_p2: cube.p1_to_p2,
+                gradient_p1: cube.gradient_p1,
+                gradient_p2: Some(cube.gradient_p2),
+                edge_vectors: cube.edge_vectors,
+                blocks: cube.blocks,
+            },
+            IterativeCurlCurlOptions {
+                rtol: 1e-15,
+                atol: 0.0,
+                max_it: 1,
+                restart: 2,
+                flexible: true,
+                ams: AmsP2Options::default(),
+            },
+        );
+        solver.set_shift(3.5).unwrap();
+        let mut rhs = crate::linalg::rng::random_vector::<f64>(n, 7);
+        let err = solver.solve_block_in_place(&mut rhs, 1).unwrap_err();
+        assert_eq!(err, crate::linalg::direct::SolverError::Singular);
     }
 }

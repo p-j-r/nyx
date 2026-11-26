@@ -15,7 +15,7 @@
 use crate::linalg::blr::{BlrOptions, ShiftedBlrLu};
 use crate::linalg::csr::{c, CCoo, CCsr, C};
 use crate::linalg::direct::{FactorBackend, ShiftedSolver};
-use crate::linalg::driver::{thin_svd_c64, DirectSolver};
+use crate::linalg::driver::{backward_residual_many, thin_svd_c64, DirectSolveCheck, DirectSolver};
 use std::ops::Range;
 use std::time::Instant;
 
@@ -155,6 +155,194 @@ pub fn s_to_z_and_y(
     s_mat: &[Vec<C>],
     z0_ports: &[f64],
 ) -> (PortMatrixPairs, PortMatrixPairs, PortMatrixPairs) {
+    let (s, z, y, _rep) = s_to_z_and_y_checked(s_mat, z0_ports);
+    (s, z, y)
+}
+
+/// Diagnostic metrics produced alongside $S \leftrightarrow (Z, Y)$ port conversions and
+/// scattering-matrix physicality checks.
+#[derive(Debug, Clone, Default)]
+pub struct NetworkConversionReport {
+    pub used_regularization: bool,
+    pub singular_fallback: bool,
+    pub max_solve_residual: f64,
+    pub max_pivot_ratio: f64,
+    pub warning_messages: Vec<String>,
+}
+
+/// Solves $A X = B$ for $P$ right-hand sides and returns `(x_cols, rel_backward_residual, pivot_ratio)`.
+fn solve_dense_complex_multi_checked(
+    a_mat: &[C],
+    b_cols: &[Vec<C>],
+    r: usize,
+) -> Option<(Vec<Vec<C>>, f64, f64)> {
+    let p = b_cols.len();
+    if r == 0 {
+        return Some((vec![Vec::new(); p], 0.0, 1.0));
+    }
+    let mut a = a_mat.to_vec();
+    let mut rhs = vec![c(0.0, 0.0); r * p];
+    for q in 0..p {
+        for i in 0..r {
+            rhs[i * p + q] = b_cols[q][i];
+        }
+    }
+
+    let mut min_piv = f64::INFINITY;
+    let mut max_piv = 0.0_f64;
+    for k in 0..r {
+        let mut piv_row = k;
+        let mut piv_max = a[k * r + k].norm();
+        for i in (k + 1)..r {
+            let val = a[i * r + k].norm();
+            if val > piv_max {
+                piv_max = val;
+                piv_row = i;
+            }
+        }
+        min_piv = min_piv.min(piv_max);
+        max_piv = max_piv.max(piv_max);
+        if piv_max <= 1e-300 || !piv_max.is_finite() {
+            return None;
+        }
+        if piv_row != k {
+            for j in k..r {
+                a.swap(k * r + j, piv_row * r + j);
+            }
+            for q in 0..p {
+                rhs.swap(k * p + q, piv_row * p + q);
+            }
+        }
+        let inv_piv = c(1.0, 0.0) / a[k * r + k];
+        for i in (k + 1)..r {
+            let factor = a[i * r + k] * inv_piv;
+            if factor.re == 0.0 && factor.im == 0.0 {
+                continue;
+            }
+            for j in (k + 1)..r {
+                let akj = a[k * r + j];
+                a[i * r + j] -= factor * akj;
+            }
+            for q in 0..p {
+                let rkq = rhs[k * p + q];
+                rhs[i * p + q] -= factor * rkq;
+            }
+        }
+    }
+
+    let mut x_cols = vec![vec![c(0.0, 0.0); r]; p];
+    for i in (0..r).rev() {
+        let inv_diag = c(1.0, 0.0) / a[i * r + i];
+        for q in 0..p {
+            let mut sum = rhs[i * p + q];
+            for j in (i + 1)..r {
+                sum -= a[i * r + j] * x_cols[q][j];
+            }
+            x_cols[q][i] = sum * inv_diag;
+        }
+    }
+
+    let a_fro = a_mat.iter().map(|v| v.norm_sqr()).sum::<f64>().sqrt();
+    let mut worst_res = 0.0_f64;
+    for q in 0..p {
+        let x_norm = x_cols[q].iter().map(|v| v.norm_sqr()).sum::<f64>().sqrt();
+        let b_norm = b_cols[q].iter().map(|v| v.norm_sqr()).sum::<f64>().sqrt();
+        let mut r2 = 0.0_f64;
+        for i in 0..r {
+            let mut ax_i = c(0.0, 0.0);
+            for j in 0..r {
+                ax_i += a_mat[i * r + j] * x_cols[q][j];
+            }
+            r2 += (ax_i - b_cols[q][i]).norm_sqr();
+        }
+        let res = r2.sqrt() / (a_fro * x_norm + b_norm + 1e-30);
+        worst_res = worst_res.max(res);
+    }
+    let pivot_ratio = if min_piv > 0.0 && min_piv.is_finite() {
+        max_piv / min_piv
+    } else {
+        f64::INFINITY
+    };
+    Some((x_cols, worst_res, pivot_ratio))
+}
+
+fn solve_dense_checked_with_reg(
+    label: &str,
+    mat: &[C],
+    rhs_cols: &[Vec<C>],
+    p: usize,
+    rep: &mut NetworkConversionReport,
+) -> Vec<Vec<C>> {
+    if let Some((sol, res, ratio)) = solve_dense_complex_multi_checked(mat, rhs_cols, p) {
+        rep.max_solve_residual = rep.max_solve_residual.max(res);
+        rep.max_pivot_ratio = rep.max_pivot_ratio.max(ratio);
+        if ratio > 1e8 || res > 1e-8 {
+            rep.warning_messages.push(format!(
+                "ill-conditioned {label} network conversion (pivot ratio = {ratio:.2e}, residual = {res:.2e})"
+            ));
+        }
+        return sol;
+    }
+    rep.used_regularization = true;
+    let mut reg = mat.to_vec();
+    for d in 0..p {
+        reg[d * p + d] += c(1e-14, 0.0);
+    }
+    if let Some((sol, res, ratio)) = solve_dense_complex_multi_checked(&reg, rhs_cols, p) {
+        rep.max_solve_residual = rep.max_solve_residual.max(res);
+        rep.max_pivot_ratio = rep.max_pivot_ratio.max(ratio);
+        rep.warning_messages.push(format!(
+            "{label} network conversion encountered a singular matrix and used 1e-14 diagonal regularization (pivot ratio = {ratio:.2e})"
+        ));
+        sol
+    } else {
+        rep.singular_fallback = true;
+        rep.max_solve_residual = 1.0;
+        rep.max_pivot_ratio = f64::INFINITY;
+        rep.warning_messages.push(format!(
+            "{label} network conversion failed on a singular matrix and fell back to zeros"
+        ));
+        vec![vec![c(0.0, 0.0); p]; p]
+    }
+}
+
+/// Computes `(passivity_max_sigma, reciprocity_rel_err)` of a $P \times P$ scattering matrix $\mathbf{S}$:
+/// $\sigma_{\max}(\mathbf{S})$ and $\lVert \mathbf{S} - \mathbf{S}^T \rVert_F / \max(\lVert \mathbf{S} \rVert_F, 1.0)$.
+pub fn s_matrix_passivity_and_reciprocity(s_mat: &[Vec<C>]) -> (f64, f64) {
+    let p = s_mat.len();
+    if p == 0 {
+        return (0.0, 0.0);
+    }
+    let mut s_fro2 = 0.0_f64;
+    let mut asym2 = 0.0_f64;
+    let mut col_data = Vec::with_capacity(p * p);
+    for col in 0..p {
+        for r in 0..p {
+            let s_rc = s_mat[r][col];
+            col_data.push(s_rc);
+            s_fro2 += s_rc.norm_sqr();
+            asym2 += (s_rc - s_mat[col][r]).norm_sqr();
+        }
+    }
+    let reciprocity = asym2.sqrt() / s_fro2.sqrt().max(1.0);
+    let sigma_max = if p == 1 {
+        s_mat[0][0].norm()
+    } else if !col_data.iter().all(|v| v.is_finite()) {
+        f64::INFINITY
+    } else {
+        crate::linalg::faer_glue::thin_svd_c64(&col_data, p, p)
+            .ok()
+            .and_then(|(s, _)| s.first().copied())
+            .unwrap_or_else(|| s_fro2.sqrt())
+    };
+    (sigma_max, reciprocity)
+}
+
+/// Checked variant of [`s_to_z_and_y`] returning conditioning and singularity diagnostics.
+pub fn s_to_z_and_y_checked(
+    s_mat: &[Vec<C>],
+    z0_ports: &[f64],
+) -> (PortMatrixPairs, PortMatrixPairs, PortMatrixPairs, NetworkConversionReport) {
     let p = s_mat.len();
     let sqrt_z0: Vec<f64> = z0_ports.iter().map(|&z| z.max(1e-30).sqrt()).collect();
     let inv_sqrt_z0: Vec<f64> = sqrt_z0.iter().map(|&sz| 1.0 / sz).collect();
@@ -176,19 +364,9 @@ pub fn s_to_z_and_y(
         }
     }
 
-    let solve_with_reg = |mat_t: &[C], rhs_cols_t: &[Vec<C>]| -> Vec<Vec<C>> {
-        if let Some(sol) = solve_dense_complex_multi(mat_t, rhs_cols_t, p) {
-            return sol;
-        }
-        let mut reg = mat_t.to_vec();
-        for d in 0..p {
-            reg[d * p + d] += c(1e-14, 0.0);
-        }
-        solve_dense_complex_multi(&reg, rhs_cols_t, p).unwrap_or_else(|| vec![vec![c(0.0, 0.0); p]; p])
-    };
-
-    let z_rows = solve_with_reg(&i_t, &v_cols_t);
-    let y_rows = solve_with_reg(&v_t, &i_cols_t);
+    let mut rep = NetworkConversionReport::default();
+    let z_rows = solve_dense_checked_with_reg("S->Z", &i_t, &v_cols_t, p, &mut rep);
+    let y_rows = solve_dense_checked_with_reg("S->Y", &v_t, &i_cols_t, p, &mut rep);
 
     let mut s_out = vec![vec![[0.0; 2]; p]; p];
     let mut z_out = vec![vec![[0.0; 2]; p]; p];
@@ -200,7 +378,7 @@ pub fn s_to_z_and_y(
             y_out[r][col] = [y_rows[r][col].re, y_rows[r][col].im];
         }
     }
-    (s_out, z_out, y_out)
+    (s_out, z_out, y_out, rep)
 }
 
 /// Converts a $P \times P$ admittance matrix $\mathbf{Y}$ and positive reference impedances $Z_{0,p}$
@@ -211,6 +389,15 @@ pub fn y_to_z_and_s(
     y_mat: &[Vec<C>],
     z0_ports: &[f64],
 ) -> (PortMatrixPairs, PortMatrixPairs, PortMatrixPairs) {
+    let (s, z, y, _rep) = y_to_z_and_s_checked(y_mat, z0_ports);
+    (s, z, y)
+}
+
+/// Checked variant of [`y_to_z_and_s`] returning conditioning and singularity diagnostics.
+pub fn y_to_z_and_s_checked(
+    y_mat: &[Vec<C>],
+    z0_ports: &[f64],
+) -> (PortMatrixPairs, PortMatrixPairs, PortMatrixPairs, NetworkConversionReport) {
     let p = y_mat.len();
     let sqrt_z0: Vec<f64> = z0_ports.iter().map(|&z| z.max(1e-30).sqrt()).collect();
 
@@ -230,21 +417,9 @@ pub fn y_to_z_and_s(
         }
     }
 
-    let solve_with_reg = |mat: &[C], rhs_cols: &[Vec<C>]| -> Vec<Vec<C>> {
-        if let Some(sol) = solve_dense_complex_multi(mat, rhs_cols, p) {
-            return sol;
-        }
-        let mut reg = mat.to_vec();
-        for d in 0..p {
-            reg[d * p + d] += c(1e-14, 0.0);
-        }
-        solve_dense_complex_multi(&reg, rhs_cols, p).unwrap_or_else(|| vec![vec![c(0.0, 0.0); p]; p])
-    };
-
-    // Solve (I + Y_norm) * S = I - Y_norm (columns of S -> s_cols[q][p] = S_{pq})
-    let s_cols = solve_with_reg(&ip_ynorm, &im_ynorm_cols);
-    // Solve Y * Z = I (columns of Z -> z_cols[q][p] = Z_{pq})
-    let z_cols = solve_with_reg(&y_dense, &eye_cols);
+    let mut rep = NetworkConversionReport::default();
+    let s_cols = solve_dense_checked_with_reg("Y->S", &ip_ynorm, &im_ynorm_cols, p, &mut rep);
+    let z_cols = solve_dense_checked_with_reg("Y->Z", &y_dense, &eye_cols, p, &mut rep);
 
     let mut s_out = vec![vec![[0.0; 2]; p]; p];
     let mut z_out = vec![vec![[0.0; 2]; p]; p];
@@ -259,7 +434,7 @@ pub fn y_to_z_and_s(
             y_out[r][col] = [yij.re, yij.im];
         }
     }
-    (s_out, z_out, y_out)
+    (s_out, z_out, y_out, rep)
 }
 
 /// Partitions `freqs_hz` into `[start..end)` sub-bands with `f_end / f_start <= 3.0` (`~2.5x` per band when `f_max / f_min > 3.0`).
@@ -375,6 +550,33 @@ impl SparseDrivenSolver {
                     out.push(x);
                 }
                 Ok(out)
+            }
+        }
+    }
+
+    /// Multi-RHS solve checking the relative backward residual against `a_mat` and dynamic `rcond`.
+    pub fn solve_many_checked(&self, a_mat: &CCsr, rhs_cols: &[Vec<C>]) -> Result<(Vec<Vec<C>>, DirectSolveCheck), String> {
+        match self {
+            Self::Direct { solver, .. } => {
+                let s = solver.as_ref().ok_or("Direct solver has not been factorized yet")?;
+                Ok(s.solve_many_checked(a_mat, rhs_cols))
+            }
+            Self::Blr { solver, .. } => {
+                let s = solver.as_ref().ok_or("BLR solver has not been factorized yet")?;
+                let xs = self.solve_many(rhs_cols)?;
+                let algebraic_residual = backward_residual_many(a_mat, rhs_cols, &xs);
+                Ok((
+                    xs,
+                    DirectSolveCheck {
+                        algebraic_residual,
+                        rcond_estimate: None,
+                        stats: s.stats(),
+                        diagnostics: Default::default(),
+                        cholesky_fallbacks: 0,
+                        pivot_growth: 1.0,
+                        solver_kind: "blr_lu",
+                    },
+                ))
             }
         }
     }
@@ -848,6 +1050,7 @@ pub struct PromSweepSummary {
     pub rom_dim: usize,
     pub anchor_freqs_hz: Vec<f64>,
     pub max_residual: f64,
+    pub prom_residuals: Vec<f64>,
     pub rom_sweep_seconds: f64,
 }
 
@@ -881,6 +1084,7 @@ where
     let mut rom_dim = 0usize;
     let mut anchor_freqs_hz = Vec::new();
     let mut max_residual = 0.0_f64;
+    let mut prom_residuals = vec![0.0_f64; freqs_hz.len()];
     let mut rom_sweep_seconds = 0.0_f64;
 
     for (bi, band) in bands.into_iter().enumerate() {
@@ -943,6 +1147,7 @@ where
 
         let mut xr_band: Vec<Vec<Vec<C>>>;
         let band_worst_res;
+        let band_res: Vec<f64>;
         loop {
             crate::progress::check()?;
             let t_sweep = Instant::now();
@@ -958,6 +1163,7 @@ where
                     .collect::<Vec<_>>()
             });
             xr_band = Vec::with_capacity(nb_pts);
+            let mut cur_res = Vec::with_capacity(nb_pts);
             let mut worst_res = 0.0_f64;
             let mut worst_cand_res = -1.0_f64;
             let mut worst_cand_idx = None;
@@ -970,15 +1176,18 @@ where
                     worst_cand_idx = Some(k);
                 }
                 xr_band.push(xr_k);
+                cur_res.push(res_k);
             }
             rom_sweep_seconds += t_sweep.elapsed().as_secs_f64();
 
             if worst_res <= prom_tol || band_solves >= max_solves_band || hdm_solves >= total_max_solves {
                 band_worst_res = worst_res;
+                band_res = cur_res;
                 break;
             }
             let Some(next_idx) = worst_cand_idx else {
                 band_worst_res = worst_res;
+                band_res = cur_res;
                 break;
             };
             anchor_indices.push(next_idx);
@@ -990,6 +1199,7 @@ where
 
         max_residual = max_residual.max(band_worst_res);
         rom_dim += prom.dim();
+        prom_residuals[band.clone()].copy_from_slice(&band_res);
         on_band(band, b_omegas, &prom, &xr_band)?;
     }
 
@@ -999,7 +1209,7 @@ where
         ));
     }
 
-    Ok(PromSweepSummary { hdm_solves, rom_dim, anchor_freqs_hz, max_residual, rom_sweep_seconds })
+    Ok(PromSweepSummary { hdm_solves, rom_dim, anchor_freqs_hz, max_residual, prom_residuals, rom_sweep_seconds })
 }
 
 #[cfg(test)]
@@ -1218,5 +1428,38 @@ mod tests {
         assert!((z_arr[0][1][1] - z_arr[1][0][1]).abs() < 1e-13);
         assert!((s_arr[0][1][0] - s_arr[1][0][0]).abs() < 1e-14);
         assert!((s_arr[0][1][1] - s_arr[1][0][1]).abs() < 1e-14);
+    }
+
+    #[test]
+    fn checked_port_conversions_and_passivity_report_ill_conditioning() {
+        // S = [[1, 0], [0, -1]] makes (I - S) and (I + S) rank-deficient -> triggers explicit warnings.
+        let s_open = vec![vec![c(1.0, 0.0), c(0.0, 0.0)], vec![c(0.0, 0.0), c(-1.0, 0.0)]];
+        let (_s, _z, _y, rep) = s_to_z_and_y_checked(&s_open, &[50.0, 50.0]);
+        assert!(
+            rep.used_regularization || rep.singular_fallback || !rep.warning_messages.is_empty(),
+            "expected singular S->Z/Y warning report, got {rep:?}"
+        );
+
+        // Non-passive and non-reciprocal 2x2 S-matrix triggers bounds clearly.
+        let s_active = vec![vec![c(0.2, 0.0), c(1.2, 0.0)], vec![c(0.4, 0.0), c(0.2, 0.0)]];
+        let (sigma_max, recip_err) = s_matrix_passivity_and_reciprocity(&s_active);
+        assert!(sigma_max > 1.0, "expected non-passive sigma_max > 1, got {sigma_max}");
+        assert!(recip_err > 0.1, "expected non-reciprocal error > 0.1, got {recip_err}");
+    }
+
+    #[test]
+    fn sparse_driven_solver_solve_many_checked_reports_backward_residual() {
+        let a = CCsr::from_triplets(
+            3,
+            3,
+            &[(0, 0, c(4.0, 0.5)), (1, 1, c(5.0, -0.2)), (2, 2, c(6.0, 0.1)), (0, 1, c(-1.0, 0.0)), (1, 0, c(-1.0, 0.0))],
+        )
+        .unwrap();
+        let mut solver = SparseDrivenSolver::new("auto", 0.0);
+        solver.update_matrix(&a).unwrap();
+        let rhs = vec![vec![c(1.0, 0.0), c(0.0, 1.0), c(2.0, -1.0)]];
+        let (xs, chk) = solver.solve_many_checked(&a, &rhs).unwrap();
+        assert_eq!(xs.len(), 1);
+        assert!(chk.algebraic_residual < 1e-13, "sparse driven residual = {:e}", chk.algebraic_residual);
     }
 }

@@ -1504,6 +1504,7 @@ pub(crate) fn assemble_ie_outer_robin_mixed(
 }
 
 /// Solves a real SPD system `K u = f` with Dirichlet constraints `(fixed, vals)` on a [`MixedDiscretisation`].
+#[allow(dead_code)]
 pub(crate) fn solve_spd_mixed(
     _solver_pref: LinearSolver,
     k: &Csr,

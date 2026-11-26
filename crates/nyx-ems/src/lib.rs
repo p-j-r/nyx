@@ -18,6 +18,7 @@
 pub mod axisym;
 pub mod bloch;
 pub mod cavity;
+pub(crate) mod diag;
 pub mod driven;
 pub mod ibc;
 pub mod mixed_ops;
@@ -41,7 +42,10 @@ pub use cavity::{
     assemble_emw_eigen, assemble_emw_eigen_mixed, emw_eigen_fields, solve_cavity, solve_cavity_mixed,
     solve_cavity_mixed_ams, solve_emw_modes, EmwAssembly, EmwSolve, MixedCavityMasks,
 };
-pub use driven::{assemble_emw_driven, assemble_emw_driven_mixed, solve_driven, solve_driven_mixed, DrivenAssembly};
+pub use driven::{
+    assemble_emw_driven, assemble_emw_driven_mixed, solve_driven, solve_driven_mixed, solve_driven_mixed_with_options,
+    solve_driven_with_options, DrivenAssembly, DrivenOptions,
+};
 pub use mixed_ops::{eigs_mixed_curl_curl_ams, solve_mixed_curl_curl_iterative, EmPmlTable};
 pub use modes::{
     assemble_modes, assemble_modes_mixed, assemble_modes_with_bcs, mode_fields, mode_fields_cells, n_unknowns,

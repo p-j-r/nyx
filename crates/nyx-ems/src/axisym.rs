@@ -117,6 +117,9 @@ pub struct AxiModes {
     pub freqs_c: Vec<C>,
     /// coefficient vectors over all dofs (`net` edge dofs for `(E_r, E_z)` then Lagrange dofs of `\Psi = i r E_theta`)
     pub vectors: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub matvecs: usize,
     pub order: usize,
     pub converged: bool,
 }
@@ -486,9 +489,10 @@ pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Resul
     let k0 = 2.0 * std::f64::consts::PI * f_target / C0;
     let sigma = k0 * k0;
     let pairs = eigs_complex(&asm.a, &asm.b, c(sigma, 0.0), nev, 1e-9, 800)?;
-    let mut modes: Vec<(C, Vec<C>)> = vec![];
+    let mut modes: Vec<(C, Vec<C>, f64)> = vec![];
     for (i, lam) in pairs.values.iter().enumerate() {
-        if lam.re <= 1e-6 * sigma.max(1e-30) || pairs.residuals.get(i).is_some_and(|r| *r > 1e-5) {
+        let res_i = pairs.residuals.get(i).copied().unwrap_or(0.0);
+        if lam.re <= 1e-6 * sigma.max(1e-30) || res_i > 1e-5 {
             continue;
         }
         let f = lam.sqrt() * (C0 / (2.0 * std::f64::consts::PI));
@@ -497,7 +501,7 @@ pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Resul
         for (a, &dof) in free.iter().enumerate() {
             x[dof] = pairs.vectors[i][a];
         }
-        modes.push((f, x));
+        modes.push((f, x, res_i));
     }
     modes.sort_by(|a, b| (a.0.re - f_target).abs().partial_cmp(&(b.0.re - f_target).abs()).unwrap());
     modes.truncate(nev);
@@ -508,7 +512,10 @@ pub fn solve_axisym_pairs(asm: &AxiAssembly, f_target: f64, nev: usize) -> Resul
         m,
         freqs: modes.iter().map(|x| x.0.re).collect(),
         freqs_c: modes.iter().map(|x| x.0).collect(),
+        residuals: modes.iter().map(|x| x.2).collect(),
         vectors: modes.into_iter().map(|x| x.1).collect(),
+        restarts: pairs.restarts,
+        matvecs: pairs.matvecs,
         order,
         converged: pairs.converged,
     })
@@ -626,6 +633,9 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
     let _ = TensorKind::Permittivity;
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_complex");
+    diag.record_mode_residuals("shift_invert_complex", modes.residuals.clone(), modes.converged, Some(modes.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         physics: "ems".into(),
         study: "axisymmetric_modes".into(),
@@ -636,7 +646,8 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -694,6 +705,9 @@ pub fn solve_axisymmetric_mixed(
     if !modes.converged {
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_complex");
+    diag.record_mode_residuals("shift_invert_complex", modes.residuals.clone(), modes.converged, Some(modes.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         physics: "ems".into(),
         study: "axisymmetric_modes".into(),
@@ -704,7 +718,8 @@ pub fn solve_axisymmetric_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 

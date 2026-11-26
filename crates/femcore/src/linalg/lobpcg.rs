@@ -228,7 +228,7 @@ pub fn lobpcg<T: FaerScalar>(
                 *ri -= bi.scale(lambda[j]);
             }
             let scale = norm2(&ax[j]) + lambda[j].abs() * norm2(&x[j].1);
-            residual[j] = norm2(&rj) / scale.max(1e-300);
+            residual[j] = norm2(&rj) / (scale + 1e-30);
             r.push(rj);
         }
         let wanted_ok = residual.iter().take(opts.nev).all(|&e| e <= opts.tol);
@@ -341,7 +341,7 @@ pub fn lobpcg<T: FaerScalar>(
         for (ri, bi) in rj.iter_mut().zip(&x[j].1) {
             *ri -= bi.scale(lambda[j]);
         }
-        residuals.push(norm2(&rj) / (norm2(&ax[j]) + lambda[j].abs() * norm2(&x[j].1)).max(1e-300));
+        residuals.push(norm2(&rj) / (norm2(&ax[j]) + lambda[j].abs() * norm2(&x[j].1) + 1e-30));
         vectors.push(x[j].0.clone());
     }
     Ok(LobpcgResult { values: lambda[..nev].to_vec(), vectors, residuals, iterations, reason, matvecs, active_history })

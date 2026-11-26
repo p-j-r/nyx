@@ -65,8 +65,14 @@ pub struct EigPairs {
     pub values: Vec<f64>,
     /// matching eigenvectors (unit norm: M-norm for the symmetric solver, 2-norm otherwise)
     pub vectors: Vec<Vec<f64>>,
+    /// relative residuals `||A x - lambda B x||_2 / (||A x||_2 + |lambda| ||B x||_2 + 1e-30)`
+    pub residuals: Vec<f64>,
     /// size of the Krylov basis that was used
     pub dim: usize,
+    /// Krylov restarts / cycles executed
+    pub restarts: usize,
+    /// operator matvec / shifted-solve applications executed
+    pub matvecs: usize,
     /// whether every requested pair met the tolerance
     pub converged: bool,
     /// a *converged complex pair* (conjugate Ritz values: a leaky or complex-propagation-constant mode) is among the wanted eigenvalues.
@@ -148,7 +154,8 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
         return Err("number of eigenvalues must be between 1 and n-1".into());
     }
     let shifted = a.add_scaled(b, -sigma);
-    let solver = DirectSolver::new(&shifted, false)?;
+    let mut solver = DirectSolver::new(&shifted, false)?;
+    solver.set_shift_invert_pencil(true);
     let p = if opts.block > 0 { opts.block } else { nev.min(8) };
     // a warm start (P5b): the previous solve's modes are the first block, all of them
     let ticket = crate::warm::begin("arnoldi_real", n, nev);
@@ -166,7 +173,22 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
             c.copy_from_slice(prev);
         }
     }
+    let finish_residuals = |out: &mut EigPairs| {
+        out.residuals.clear();
+        out.residuals.reserve(out.values.len());
+        let mut ax = vec![0.0; n];
+        let mut bx = vec![0.0; n];
+        for (&lam, vec) in out.values.iter().zip(&out.vectors) {
+            a.spmv(vec, &mut ax);
+            b.spmv(vec, &mut bx);
+            let ax_n = dot(&ax, &ax).sqrt();
+            let bx_n = dot(&bx, &bx).sqrt();
+            let r2: f64 = ax.iter().zip(&bx).map(|(&ai, &bi)| (ai - lam * bi).powi(2)).sum();
+            out.residuals.push(r2.sqrt() / (ax_n + lam.abs() * bx_n + 1e-30));
+        }
+    };
     let mut cycles = 0usize;
+    let mut matvecs = 0usize;
     loop {
         cycles += 1;
         crate::progress::check()?;
@@ -188,6 +210,7 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
             break;
         }
         let rhs: Vec<Vec<f64>> = (before..e).map(|j| b.matvec(&v[j])).collect();
+        matvecs += rhs.len();
         ov.extend(solver.solve_many(&rhs));
         for row in h.iter_mut() {
             row.resize(e, 0.0);
@@ -210,7 +233,16 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
             let (za, zb) = (&ritz[a].value, &ritz[b].value);
             (zb.0.hypot(zb.1)).partial_cmp(&za.0.hypot(za.1)).unwrap()
         });
-        let mut out = EigPairs { values: vec![], vectors: vec![], dim: e, converged: false, complex_found: false };
+        let mut out = EigPairs {
+            values: vec![],
+            vectors: vec![],
+            residuals: vec![],
+            dim: e,
+            restarts: cycles,
+            matvecs,
+            converged: false,
+            complex_found: false,
+        };
         let mut all_ok = true;
         for (considered, &k) in idx.iter().enumerate() {
             if out.values.len() >= nev || considered >= 3 * nev + 6 {
@@ -237,6 +269,7 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
                     if (rr + ri).sqrt() / (re.hypot(im) * xn).max(1e-300) <= opts.tol {
                         out.complex_found = true;
                         out.converged = false;
+                        finish_residuals(&mut out);
                         return Ok(out);
                     }
                 }
@@ -264,6 +297,7 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
         all_ok &= out.values.len() == nev;
         if all_ok || e + p > max_dim {
             out.converged = all_ok;
+            finish_residuals(&mut out);
             if let (Some(t), true) = (ticket, all_ok) {
                 t.finish(out.vectors.iter().map(Vec::as_slice), cycles);
             }

@@ -1134,6 +1134,8 @@ pub struct PmlAssembly {
 pub struct PmlSolve {
     pub freqs: Vec<(usize, C)>,
     pub vectors: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
     pub dim: usize,
     pub converged: bool,
 }
@@ -1374,11 +1376,12 @@ pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAs
 pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
     let sigma = if asm.f_search > 0.0 { (2.0 * std::f64::consts::PI * asm.f_search).powi(2) } else { -1.0 };
     let pairs = eigs_complex(&asm.kff, &asm.mff, c(sigma, 0.0), asm.n_modes, 1e-9, 600)?;
+    let rg_res = crate::diag::rigal_gaches_complex_residuals(&asm.kff, &asm.mff, &pairs.values, &pairs.vectors);
     let mut freqs: Vec<(usize, C)> = pairs
         .values
         .iter()
         .enumerate()
-        .filter(|(i, _)| asm.red.is_none() || pairs.residuals.get(*i).is_none_or(|r| *r < 1e-6))
+        .filter(|(i, _)| asm.red.is_none() || rg_res.get(*i).is_none_or(|r| *r < 1e-6))
         .map(|(i, l)| {
             let mut f = l.sqrt() / (2.0 * std::f64::consts::PI);
             if f.re < 0.0 {
@@ -1391,7 +1394,15 @@ pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String> {
     if asm.red.is_some() && freqs.is_empty() {
         return Err("no eigenfrequencies converged near the shift".into());
     }
-    Ok(PmlSolve { freqs, vectors: pairs.vectors.clone(), dim: pairs.dim, converged: pairs.converged })
+    let residuals: Vec<f64> = freqs.iter().map(|&(i, _)| rg_res.get(i).copied().unwrap_or(0.0)).collect();
+    Ok(PmlSolve {
+        freqs,
+        vectors: pairs.vectors.clone(),
+        residuals,
+        restarts: pairs.restarts,
+        dim: pairs.dim,
+        converged: pairs.converged,
+    })
 }
 
 pub(crate) fn push_pml_mode_scalars_and_label(
@@ -1518,7 +1529,25 @@ pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -
         });
     }
     let log = finish_pml_log(asm, solved, unstable_count, &mut scalars);
-    Ok(SolveResult { order: order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
+    let mut diag = crate::diag::SmsDiag::new("shift_invert_complex");
+    diag.record_mode_residuals(
+        "shift_invert_complex",
+        solved.residuals.clone(),
+        solved.converged,
+        Some(solved.restarts),
+    );
+    let (diagnostics, error_budget) = diag.finish();
+    Ok(SolveResult {
+        order: order as u8,
+        dim: d as u8,
+        solutions,
+        scalars,
+        log,
+        dofs: n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
+        ..Default::default()
+    })
 }
 
 fn pml_fields_mixed(
@@ -1571,5 +1600,23 @@ fn pml_fields_mixed(
         solutions.push(Solution { label, fields, cell_fields, value: Some(f_re), ..Default::default() });
     }
     let log = finish_pml_log(asm, solved, unstable_count, &mut scalars);
-    Ok(SolveResult { order: order as u8, dim: d as u8, solutions, scalars, log, dofs: n, ..Default::default() })
+    let mut diag = crate::diag::SmsDiag::new("shift_invert_complex");
+    diag.record_mode_residuals(
+        "shift_invert_complex",
+        solved.residuals.clone(),
+        solved.converged,
+        Some(solved.restarts),
+    );
+    let (diagnostics, error_budget) = diag.finish();
+    Ok(SolveResult {
+        order: order as u8,
+        dim: d as u8,
+        solutions,
+        scalars,
+        log,
+        dofs: n,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
+        ..Default::default()
+    })
 }

@@ -29,7 +29,9 @@ use crate::mixed_ops::{
 use crate::modes::C0;
 use crate::ports::{assemble_lumped_ports_3d, validate_port_contacts_3d, AssembledLumpedPort};
 use crate::problem::{symmetry_facet_flags, Problem, Study};
-use crate::rom::{build_circuit_rom, build_circuit_rom_mixed, build_tls_meta, compute_mode_energy_and_scale};
+use crate::rom::{
+    build_circuit_rom_checked, build_circuit_rom_mixed_checked, build_tls_meta, compute_mode_energy_and_scale,
+};
 use femcore::edge_mixed::{eval_cell_basis_3d, ned_mixed_periodic_relations, nedelec_nloc, NedEvalScratch, NedMixed};
 use femcore::fem::*;
 use femcore::fem_mixed::{quad_rule_mixed, IsoparametricCell};
@@ -1131,6 +1133,10 @@ pub struct EmwAssembly {
 pub struct EmwSolve {
     pub freqs: Vec<(C, usize)>,
     pub vectors: Vec<Vec<C>>,
+    pub solver_kind: &'static str,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub matvecs: usize,
     pub dim: usize,
     pub converged: bool,
 }
@@ -1661,7 +1667,15 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
     let mut tl = Instant::now();
     // eigenvalue lambda = k0^2: K x = lambda M x
     let mut freqs: Vec<(C, usize)> = vec![];
-    let (vectors, dim, converged): (Vec<Vec<C>>, usize, bool);
+    let (vectors, solver_kind, residuals, restarts, matvecs, dim, converged): (
+        Vec<Vec<C>>,
+        &'static str,
+        Vec<f64>,
+        usize,
+        usize,
+        usize,
+        bool,
+    );
 
     if asm.has_cqed {
         let (d_ruiz, kc_eq, mc_eq, g_eq, gh_eq) = ruiz_equilibrate(kc, mc, g_red, sigma);
@@ -1706,6 +1720,10 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
                 freqs.truncate(n_modes);
             }
             vectors = unscaled;
+            solver_kind = "projected_shift_invert_real";
+            residuals = pairs.residuals;
+            restarts = pairs.restarts;
+            matvecs = pairs.matvecs;
             dim = pairs.dim;
             converged = pairs.converged;
         } else {
@@ -1755,6 +1773,10 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
                 freqs.truncate(n_modes);
             }
             vectors = unscaled;
+            solver_kind = "projected_shift_invert_complex";
+            residuals = pairs.residuals;
+            restarts = pairs.restarts;
+            matvecs = pairs.matvecs;
             dim = pairs.dim;
             converged = pairs.converged;
         }
@@ -1783,6 +1805,10 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
             freqs.push((c(l.max(0.0).sqrt() * (C0 / (2.0 * PI)), 0.0), i));
         }
         vectors = pairs.vectors.iter().map(|v| v.iter().map(|&x| c(x, 0.0)).collect()).collect();
+        solver_kind = "projected_shift_invert_real";
+        residuals = pairs.residuals;
+        restarts = pairs.restarts;
+        matvecs = pairs.matvecs;
         dim = pairs.dim;
         converged = pairs.converged;
     } else {
@@ -1815,12 +1841,16 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
             freqs.push((f, i));
         }
         vectors = pairs.vectors.clone();
+        solver_kind = "projected_shift_invert_complex";
+        residuals = pairs.residuals;
+        restarts = pairs.restarts;
+        matvecs = pairs.matvecs;
         dim = pairs.dim;
         converged = pairs.converged;
     }
     lap(&mut tl, "emw3d: eigenvalue iteration");
     freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
-    Ok(EmwSolve { freqs, vectors, dim, converged })
+    Ok(EmwSolve { freqs, vectors, solver_kind, residuals, restarts, matvecs, dim, converged })
 }
 
 /// Stage 3: plot fields and per-cell complex E and H (plus sheet K when sheets are present) of every mode at the quadratic nodes,
@@ -2092,8 +2122,15 @@ pub fn emw_eigen_fields(
         }
         .scalar(),
     );
+    let mode_residuals: Vec<f64> =
+        out_freqs.iter().map(|&(_, idx)| solved.residuals.get(idx).copied().unwrap_or(0.0)).collect();
+    let mut diag = crate::diag::EmsDiag::new(solved.solver_kind);
+    diag.record_mode_residuals(solved.solver_kind, mode_residuals, converged, Some(solved.restarts));
     if asm.has_cqed {
-        let rom = build_circuit_rom(mesh, problem, asm, vectors, &out_freqs, mode_energy_rows, pert_eval.as_ref())?;
+        let (rom, rom_diag) =
+            build_circuit_rom_checked(mesh, problem, asm, vectors, &out_freqs, mode_energy_rows, pert_eval.as_ref())?;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(rom_diag.max_algebraic_residual);
+        diag.warnings.extend(rom_diag.warnings);
         scalars.push(rom.scalar());
         scalars.push(("equipartition_error".into(), Scalar::Num(max_equip_err)));
     }
@@ -2107,6 +2144,7 @@ pub fn emw_eigen_fields(
         ["x", "y", "z"][axes[1]],
         ["x", "y", "z"][axes[2]]
     ));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         physics: "ems".into(),
         study: "cavity".into(),
@@ -2117,7 +2155,8 @@ pub fn emw_eigen_fields(
         log,
         dofs: n,
         seconds: 0.0,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -2320,7 +2359,16 @@ pub fn solve_cavity_mixed_ams(
         freqs.push((f, i));
     }
     freqs.sort_by(|a, b| a.0.re.partial_cmp(&b.0.re).unwrap());
-    let solved = EmwSolve { freqs, vectors: pairs.vectors, dim: pairs.dim, converged: pairs.converged };
+    let solved = EmwSolve {
+        freqs,
+        vectors: pairs.vectors,
+        solver_kind: "ams_jacobi_davidson",
+        residuals: pairs.residuals,
+        restarts: pairs.restarts,
+        matvecs: pairs.matvecs,
+        dim: pairs.dim,
+        converged: pairs.converged,
+    };
     let mut r = emw_eigen_fields_mixed(mesh, mixed, &ned_mixed, problem, &asm, &solved)?;
     r.seconds = t0.elapsed().as_secs_f64();
     Ok(r)
@@ -3150,8 +3198,12 @@ pub fn emw_eigen_fields_mixed(
         }
         .scalar(),
     );
+    let mode_residuals: Vec<f64> =
+        out_freqs.iter().map(|&(_, idx)| solved.residuals.get(idx).copied().unwrap_or(0.0)).collect();
+    let mut diag = crate::diag::EmsDiag::new(solved.solver_kind);
+    diag.record_mode_residuals(solved.solver_kind, mode_residuals, converged, Some(solved.restarts));
     if asm.has_cqed {
-        let rom = build_circuit_rom_mixed(
+        let (rom, rom_diag) = build_circuit_rom_mixed_checked(
             mixed,
             ned,
             problem,
@@ -3161,6 +3213,8 @@ pub fn emw_eigen_fields_mixed(
             mode_energy_rows,
             pert_eval.as_ref(),
         )?;
+        diag.max_algebraic_residual = diag.max_algebraic_residual.max(rom_diag.max_algebraic_residual);
+        diag.warnings.extend(rom_diag.warnings);
         scalars.push(rom.scalar());
         scalars.push(("equipartition_error".into(), Scalar::Num(max_equip_err)));
     }
@@ -3174,6 +3228,7 @@ pub fn emw_eigen_fields_mixed(
         ["x", "y", "z"][axes[1]],
         ["x", "y", "z"][axes[2]]
     ));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         physics: "ems".into(),
         study: "cavity".into(),
@@ -3184,7 +3239,8 @@ pub fn emw_eigen_fields_mixed(
         log,
         dofs: n,
         seconds: 0.0,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 

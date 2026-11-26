@@ -2499,7 +2499,112 @@ pub fn solve_static(
     st: &Setup,
     asm: &StaticAssembly,
 ) -> Result<(Vec<f64>, Option<String>), String> {
-    solve_spd(mesh, spec.order, st.d, spec.solver, &asm.k, &asm.f, &st.fixed, &st.vals)
+    let (u, note, _) = solve_static_checked(mesh, spec, st, asm)?;
+    Ok((u, note))
+}
+
+pub(crate) fn solve_static_checked(
+    mesh: &Discretisation,
+    spec: &Problem,
+    st: &Setup,
+    asm: &StaticAssembly,
+) -> Result<(Vec<f64>, Option<String>, crate::diag::SmsDiag), String> {
+    use femcore::linalg::driver::{backward_residual_many, DirectSolver};
+    let n = asm.k.nrows();
+    let free = free_dofs(n, &st.fixed);
+    let n_free = free.len();
+    let iterative = match spec.solver {
+        LinearSolver::Direct => false,
+        LinearSolver::Iterative => true,
+        LinearSolver::Auto => femcore::fem::amg_wanted(mesh.dim, n_free),
+    } && !st.fixed.is_empty();
+
+    let solve_direct = |note_msg: Option<String>,
+                        warn_fallback: bool|
+     -> Result<(Vec<f64>, Option<String>, crate::diag::SmsDiag), String> {
+        let mut u = vec![0.0; n];
+        for (&d, &v) in st.fixed.iter().zip(&st.vals) {
+            u[d] = v;
+        }
+        let mut diag = crate::diag::SmsDiag::new("direct_chol");
+        if n_free > 0 {
+            let kff = asm.k.submatrix(&free, &free);
+            let rhs: Vec<f64> = if st.fixed.is_empty() || st.vals.iter().all(|&v| v == 0.0) {
+                free.iter().map(|&i| asm.f[i]).collect()
+            } else {
+                let kfx = asm.k.submatrix(&free, &st.fixed);
+                let kx = kfx.matvec(&st.vals);
+                free.iter().enumerate().map(|(a, &i)| asm.f[i] - kx[a]).collect()
+            };
+            let solver = DirectSolver::new(&kff, true)?;
+            let (uf, chk) = solver.solve_checked(&kff, &rhs);
+            diag.absorb_direct(&chk);
+            for (a, &i) in free.iter().enumerate() {
+                u[i] = uf[a];
+            }
+        }
+        if warn_fallback {
+            diag.push_warning(
+                "amg_fallback_to_direct",
+                nyx_physics::DiagnosticSeverity::Warning,
+                note_msg.as_deref().unwrap_or("AMG-CG fell back to direct Cholesky"),
+            );
+        }
+        Ok((u, note_msg, diag))
+    };
+
+    if !iterative {
+        return solve_direct(None, false);
+    }
+
+    let mut uvec = vec![0.0; n];
+    for (&i, &v) in st.fixed.iter().zip(&st.vals) {
+        uvec[i] = v;
+    }
+    let ku = asm.k.matvec(&uvec);
+    let rhs: Vec<f64> = (0..n).map(|i| asm.f[i] - ku[i]).collect();
+    let opts = femcore::linalg::amg_elastic::AmgOptions { line_smooth: true, ..Default::default() };
+    let sys = AmgSystem::new_with(mesh, spec.order, st.d, &asm.k, &st.fixed, opts)?;
+    let fv: Vec<(usize, f64)> = st.fixed.iter().copied().zip(st.vals.iter().copied()).collect();
+    let tol = 1e-10;
+    let t_solve = Instant::now();
+    let (mut u, its, rel) = sys.solve_with(None, &rhs, &fv, tol, 600);
+    let solve_s = t_solve.elapsed().as_secs_f64();
+    femcore::progress::check()?;
+    for (&i, &v) in st.fixed.iter().zip(&st.vals) {
+        u[i] = v;
+    }
+    let kff = asm.k.submatrix(&free, &free);
+    let rhs_free: Vec<f64> = free.iter().map(|&i| rhs[i]).collect();
+    let u_free: Vec<f64> = free.iter().map(|&i| u[i]).collect();
+    let bw_rel = if n_free > 0 { backward_residual_many(&kff, &[rhs_free], &[u_free]) } else { 0.0 };
+    let worst_rel = rel.max(bw_rel);
+    if !rel.is_finite() || rel > (tol * 1e3).max(1e-7) {
+        if spec.solver == LinearSolver::Auto {
+            return solve_direct(
+                Some(format!(
+                    "multigrid did not converge ({its} iterations, residual {rel:.1e}); used the direct solver"
+                )),
+                true,
+            );
+        }
+        return Err(format!(
+            "the iterative solver did not converge ({its} iterations, residual {rel:.2e}); choose the direct solver"
+        ));
+    }
+    let mut diag = crate::diag::SmsDiag::new("amg_pcg");
+    diag.iterations = Some(its);
+    diag.max_algebraic_residual = worst_rel;
+    let note = format!(
+        "AMG-CG: {} levels {:?}, {} iterations, residual {:.1e} (setup {:.1} s, solve {:.1} s)",
+        sys.n_levels(),
+        sys.sizes(),
+        its,
+        rel,
+        sys.setup_seconds,
+        solve_s
+    );
+    Ok((u, Some(note), diag))
 }
 
 fn near_nullspace_mixed(
@@ -2565,16 +2670,51 @@ fn solve_static_mixed(
     st: &Setup,
     ie_domains: &ResolvedIeDomains,
     asm: &StaticAssembly,
-) -> Result<(Vec<f64>, Option<String>), String> {
+) -> Result<(Vec<f64>, Option<String>, crate::diag::SmsDiag), String> {
+    use femcore::linalg::driver::{backward_residual_many, DirectSolver};
     let n = asm.k.nrows();
-    let n_free = n - st.fixed.len();
+    let free = free_dofs(n, &st.fixed);
+    let n_free = free.len();
     let iterative = match spec.solver {
         LinearSolver::Direct => false,
         LinearSolver::Iterative => true,
         LinearSolver::Auto => femcore::fem::amg_wanted(mixed.dim, n_free) && !ie_domains.has_rational(),
     };
+    let solve_direct = |note_msg: Option<String>,
+                        warn_fallback: bool|
+     -> Result<(Vec<f64>, Option<String>, crate::diag::SmsDiag), String> {
+        let mut u = vec![0.0; n];
+        for (&d, &v) in st.fixed.iter().zip(&st.vals) {
+            u[d] = v;
+        }
+        let mut diag = crate::diag::SmsDiag::new("direct_chol");
+        if n_free > 0 {
+            let kff = asm.k.submatrix(&free, &free);
+            let rhs: Vec<f64> = if st.fixed.is_empty() || st.vals.iter().all(|&v| v == 0.0) {
+                free.iter().map(|&i| asm.f[i]).collect()
+            } else {
+                let kfx = asm.k.submatrix(&free, &st.fixed);
+                let kx = kfx.matvec(&st.vals);
+                free.iter().enumerate().map(|(a, &i)| asm.f[i] - kx[a]).collect()
+            };
+            let solver = DirectSolver::new(&kff, true)?;
+            let (uf, chk) = solver.solve_checked(&kff, &rhs);
+            diag.absorb_direct(&chk);
+            for (a, &i) in free.iter().enumerate() {
+                u[i] = uf[a];
+            }
+        }
+        if warn_fallback {
+            diag.push_warning(
+                "amg_fallback_to_direct",
+                nyx_physics::DiagnosticSeverity::Warning,
+                note_msg.as_deref().unwrap_or("AMG-CG fell back to direct Cholesky"),
+            );
+        }
+        Ok((u, note_msg, diag))
+    };
     if !iterative || dof_map.space == LagrangeSpace::Order2Tensor {
-        return Ok((solve_dirichlet(&asm.k, &asm.f, &st.fixed, &st.vals)?, None));
+        return solve_direct(None, false);
     }
 
     let t_setup = Instant::now();
@@ -2656,7 +2796,7 @@ fn solve_static_mixed(
     let amg = match amg_res {
         Ok(a) => a,
         Err(_) if spec.solver == LinearSolver::Auto => {
-            return Ok((solve_dirichlet(&asm.k, &asm.f, &st.fixed, &st.vals)?, None));
+            return solve_direct(None, false);
         }
         Err(e) => return Err(e),
     };
@@ -2668,16 +2808,15 @@ fn solve_static_mixed(
     let solve_s = t_solve.elapsed().as_secs_f64();
     femcore::progress::check()?;
 
-    if res.relative_residual > 1e-7 {
+    if !res.relative_residual.is_finite() || res.relative_residual > 1e-7 {
         if spec.solver == LinearSolver::Auto {
-            let u = solve_dirichlet(&asm.k, &asm.f, &st.fixed, &st.vals)?;
-            return Ok((
-                u,
+            return solve_direct(
                 Some(format!(
                     "multigrid did not converge ({} iterations, residual {:.1e}); used the direct solver",
                     res.iterations, res.relative_residual
                 )),
-            ));
+                true,
+            );
         }
         return Err(format!(
             "the iterative solver did not converge ({} iterations, residual {:.2e}); choose the direct solver",
@@ -2692,6 +2831,13 @@ fn solve_static_mixed(
     for (&i, &v) in st.fixed.iter().zip(&st.vals) {
         u[i] = v;
     }
+    let kff = asm.k.submatrix(&free, &free);
+    let rhs_free: Vec<f64> = free.iter().map(|&i| rhs[i]).collect();
+    let u_free: Vec<f64> = free.iter().map(|&i| u[i]).collect();
+    let bw_rel = if n_free > 0 { backward_residual_many(&kff, &[rhs_free], &[u_free]) } else { 0.0 };
+    let mut diag = crate::diag::SmsDiag::new("amg_pcg");
+    diag.iterations = Some(res.iterations);
+    diag.max_algebraic_residual = res.relative_residual.max(bw_rel);
     let note = format!(
         "AMG-CG: {} levels {:?}, {} iterations, residual {:.1e} (setup {:.1} s, solve {:.1} s)",
         amg.n_levels(),
@@ -2701,7 +2847,7 @@ fn solve_static_mixed(
         setup_s,
         solve_s
     );
-    Ok((u, Some(note)))
+    Ok((u, Some(note), diag))
 }
 
 pub(crate) use femcore::progress::lap_since as lap;
@@ -2856,7 +3002,7 @@ fn solve_variant_mixed_with_source<const D: usize, S: SourceField<D>>(
                 source,
             )?;
             lap(tl, "loads");
-            let (u, note) = solve_static_mixed(mixed, &dof_map, spec, &st, &ie_domains, &asm)?;
+            let (u, note, diag) = solve_static_mixed(mixed, &dof_map, spec, &st, &ie_domains, &asm)?;
             lap(tl, "linear solve");
             let (fields, cell_fields) = fields_of_mixed(
                 mixed,
@@ -2880,6 +3026,7 @@ fn solve_variant_mixed_with_source<const D: usize, S: SourceField<D>>(
                 fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
             let mut log = ie_domains.diagnostics;
             log.extend(note);
+            let (diagnostics, error_budget) = diag.finish();
             Ok(SolveResult {
                 order: order as u8,
                 dim: d as u8,
@@ -2891,6 +3038,8 @@ fn solve_variant_mixed_with_source<const D: usize, S: SourceField<D>>(
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                diagnostics: Some(diagnostics),
+                error_budget: Some(error_budget),
                 ..Default::default()
             })
         }
@@ -2987,6 +3136,8 @@ fn solve_variant_mixed_with_source<const D: usize, S: SourceField<D>>(
                     "no fixed boundary: the first six (3D) or three (2D) modes are rigid-body motions at ~0 Hz".into(),
                 );
             }
+            let (diagnostics, error_budget) =
+                crate::diag::SmsDiag::from_eig_pairs("shift_invert_lanczos", &pairs).finish();
             Ok(SolveResult {
                 order: order as u8,
                 dim: d as u8,
@@ -2995,6 +3146,8 @@ fn solve_variant_mixed_with_source<const D: usize, S: SourceField<D>>(
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                diagnostics: Some(diagnostics),
+                error_budget: Some(error_budget),
                 ..Default::default()
             })
         }
@@ -3038,7 +3191,7 @@ fn solve_variant_with_source<const D: usize, S: SourceField<D>>(
         Study::Static => {
             let asm = assemble_static_with_source::<D, S>(mesh, spec, &st, k, source)?;
             lap(tl, "loads");
-            let (u, note) = solve_static(mesh, spec, &st, &asm)?;
+            let (u, note, diag) = solve_static_checked(mesh, spec, &st, &asm)?;
             lap(tl, "linear solve");
             let (fields, cells) = fields_of(mesh, &u, order, &st, spec.plane, asm.thermal.as_ref(), true);
             lap(tl, "fields (gradients, stress, averaging)");
@@ -3046,6 +3199,7 @@ fn solve_variant_with_source<const D: usize, S: SourceField<D>>(
             let umax = (0..n1).map(unorm).fold(0.0, f64::max);
             let vmax =
                 fields.iter().find(|f| f.name == "von Mises").unwrap().values.iter().cloned().fold(0.0, f64::max);
+            let (diagnostics, error_budget) = diag.finish();
             Ok(SolveResult {
                 order: order as u8,
                 dim: d as u8,
@@ -3062,6 +3216,8 @@ fn solve_variant_with_source<const D: usize, S: SourceField<D>>(
                 log: note.into_iter().collect(),
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                diagnostics: Some(diagnostics),
+                error_budget: Some(error_budget),
                 ..Default::default()
             })
         }
@@ -3118,12 +3274,18 @@ fn solve_variant_with_source<const D: usize, S: SourceField<D>>(
                 pairs.dim,
                 if pairs.converged { "" } else { " (not fully converged)" }
             )];
+            let solver_kind = if eig_note.as_deref().is_some_and(|s| s.contains("LOBPCG")) {
+                "lobpcg_amg"
+            } else {
+                "shift_invert_lanczos"
+            };
             log.extend(eig_note);
             if st.fixed.is_empty() {
                 log.push(
                     "no fixed boundary: the first six (3D) or three (2D) modes are rigid-body motions at ~0 Hz".into(),
                 );
             }
+            let (diagnostics, error_budget) = crate::diag::SmsDiag::from_eig_pairs(solver_kind, &pairs).finish();
             Ok(SolveResult {
                 order: order as u8,
                 dim: d as u8,
@@ -3132,6 +3294,8 @@ fn solve_variant_with_source<const D: usize, S: SourceField<D>>(
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: n,
+                diagnostics: Some(diagnostics),
+                error_budget: Some(error_budget),
                 ..Default::default()
             })
         }

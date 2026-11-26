@@ -9,6 +9,7 @@
 
 pub mod axisym;
 pub mod cross_section;
+mod diag;
 pub mod floquet;
 pub mod lrb;
 pub mod piezo;

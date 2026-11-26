@@ -74,6 +74,8 @@ pub struct BlochSolve {
     pub modes: Vec<(C, usize)>,
     pub vectors: Vec<Vec<C>>,
     pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub matvecs: usize,
     pub dim: usize,
     pub converged: bool,
 }
@@ -363,6 +365,8 @@ pub fn solve_bloch_eigen(asm: &BlochAssembly) -> Result<BlochSolve, String> {
         modes,
         vectors: pairs.vectors,
         residuals: pairs.residuals,
+        restarts: pairs.restarts,
+        matvecs: pairs.matvecs,
         dim: pairs.dim,
         converged: pairs.converged,
     })
@@ -567,6 +571,12 @@ pub fn bloch_fields_cells(
         "polarization axes: lateral x, normal z, propagation y".into(),
     ];
 
+    let mode_residuals: Vec<f64> =
+        solved.modes.iter().map(|&(_, idx)| solved.residuals.get(idx).copied().unwrap_or(0.0)).collect();
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_qep");
+    diag.record_mode_residuals("shift_invert_qep", mode_residuals, solved.converged, Some(solved.restarts));
+    let (diagnostics, error_budget) = diag.finish();
+
     Ok(SolveResult {
         physics: "ems".into(),
         study: "bloch".into(),
@@ -577,7 +587,8 @@ pub fn bloch_fields_cells(
         log,
         dofs: asm.n,
         seconds: 0.0,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
@@ -937,6 +948,12 @@ pub fn bloch_fields_cells_mixed(
         "polarization axes: lateral x, normal z, propagation y".into(),
     ];
 
+    let mode_residuals: Vec<f64> =
+        solved.modes.iter().map(|&(_, idx)| solved.residuals.get(idx).copied().unwrap_or(0.0)).collect();
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_qep");
+    diag.record_mode_residuals("shift_invert_qep", mode_residuals, solved.converged, Some(solved.restarts));
+    let (diagnostics, error_budget) = diag.finish();
+
     Ok(SolveResult {
         physics: "ems".into(),
         study: "bloch".into(),
@@ -947,6 +964,7 @@ pub fn bloch_fields_cells_mixed(
         log,
         dofs: asm.n,
         seconds: 0.0,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }

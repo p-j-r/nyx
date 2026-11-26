@@ -248,6 +248,9 @@ pub(crate) struct PiezoComplexEigenInput<'a> {
 pub(crate) struct PiezoComplexEigenSolved {
     pub freqs: Vec<C>,
     pub reduced_vecs: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub solver_kind: &'static str,
     pub dim: usize,
     pub converged: bool,
     pub backend: FactorBackend,
@@ -308,7 +311,7 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
         let th_cut = 1e-15 * th_max;
         let mut ku_buf = vec![C64::ZERO; n_tot];
         let mut mu_buf = vec![C64::ZERO; n_u];
-        let mut pairs: Vec<(C64, Vec<C64>)> = Vec::with_capacity(res.values.len());
+        let mut pairs: Vec<(C64, Vec<C64>, f64)> = Vec::with_capacity(res.values.len());
 
         let u_raws: Vec<Vec<C64>> = (0..res.values.len()).map(|i| res.vectors.col(i).to_vec()).collect();
         let p_vecs = recover_phi_complex(k_pp, k_pu, &u_raws)?;
@@ -327,24 +330,20 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
             if f.re < 0.0 {
                 f = -f;
             }
-            if input.n_pairs > 0 || input.has_pml {
-                let mut x_red = Vec::with_capacity(n_tot);
-                x_red.extend_from_slice(&u_raws[i]);
-                x_red.extend_from_slice(&p_vecs[i]);
-                k_red.spmv(&x_red, &mut ku_buf);
-                m_uu.spmv(&u_raws[i], &mut mu_buf);
-                let r_norm: f64 = (0..n_u).map(|r| (ku_buf[r] - lam * mu_buf[r]).norm_sqr()).sum::<f64>().sqrt();
-                let u_norm = norm2_vec(&u_raws[i]);
-                let denom =
-                    norm2_vec(&ku_buf[..n_u]) + lam.norm() * norm2_vec(&mu_buf) + k_diag_scale * u_norm * 1e-4 + 1e-300;
-                if input.n_pairs > 0 && r_norm / denom >= 1e-5 {
-                    continue;
-                }
-            }
             let mut x_red = Vec::with_capacity(n_tot);
             x_red.extend_from_slice(&u_raws[i]);
             x_red.extend_from_slice(&p_vecs[i]);
-            pairs.push((f, x_red));
+            k_red.spmv(&x_red, &mut ku_buf);
+            m_uu.spmv(&u_raws[i], &mut mu_buf);
+            let r_norm: f64 = (0..n_u).map(|r| (ku_buf[r] - lam * mu_buf[r]).norm_sqr()).sum::<f64>().sqrt();
+            let u_norm = norm2_vec(&u_raws[i]);
+            let denom =
+                norm2_vec(&ku_buf[..n_u]) + lam.norm() * norm2_vec(&mu_buf) + k_diag_scale * u_norm * 1e-4 + 1e-300;
+            let rel_i = r_norm / denom;
+            if input.n_pairs > 0 && rel_i >= 1e-5 {
+                continue;
+            }
+            pairs.push((f, x_red, rel_i));
         }
         if f_search > 0.0 {
             pairs.sort_by(|a, b| (a.0.re - f_search).abs().total_cmp(&(b.0.re - f_search).abs()));
@@ -357,8 +356,11 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
             return Err("no eigenfrequencies converged near the shift".into());
         }
         return Ok(PiezoComplexEigenSolved {
-            freqs: pairs.iter().map(|(f, _)| *f).collect(),
-            reduced_vecs: pairs.into_iter().map(|(_, xr)| xr).collect(),
+            freqs: pairs.iter().map(|(f, _, _)| *f).collect(),
+            residuals: pairs.iter().map(|(_, _, r)| *r).collect(),
+            reduced_vecs: pairs.into_iter().map(|(_, xr, _)| xr).collect(),
+            restarts: res.iterations,
+            solver_kind: if input.is_hermitian { "schur_shift_invert_hermitian" } else { "schur_shift_invert_complex" },
             dim: res.ncv,
             converged: res.reason == EpsReason::Converged,
             backend: fac.stats().backend,
@@ -414,7 +416,7 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
     let k_uu = crate::piezo_asm::sub_csr(k_red, 0, n_u, 0, n_u);
     let k_up = crate::piezo_asm::sub_csr(k_red, 0, n_u, n_u, n_tot);
 
-    let mut candidates: Vec<(C64, Vec<C64>)> = Vec::with_capacity(res.values.len());
+    let mut candidates: Vec<(C64, Vec<C64>, f64)> = Vec::with_capacity(res.values.len());
     for (i, &th) in res.values.iter().enumerate() {
         if th.norm() == 0.0 || th.norm() < th_cut {
             continue;
@@ -444,7 +446,8 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
         let s2 = s * s;
         let res_num: f64 = (0..n_u).map(|k| (r0[k] + s * r1[k] + s2 * r2[k]).norm_sqr()).sum::<f64>().sqrt();
         let res_den = norm2_vec(&r0) + s.norm() * norm2_vec(&r1) + s2.norm() * norm2_vec(&r2) + 1e-300;
-        if res_num / res_den > 1e-4 {
+        let rel_i = res_num / res_den;
+        if rel_i > 1e-4 {
             continue;
         }
 
@@ -463,12 +466,12 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
             f.re = 0.0;
         }
 
-        let dup = candidates.iter().any(|(fc, _)| (*fc - f).norm() <= 1e-6 * f.norm().max(1.0));
+        let dup = candidates.iter().any(|(fc, _, _)| (*fc - f).norm() <= 1e-6 * f.norm().max(1.0));
         if !dup {
             let mut x_red = Vec::with_capacity(n_tot);
             x_red.extend(u);
             x_red.extend(p_fin);
-            candidates.push((f, x_red));
+            candidates.push((f, x_red, rel_i));
         }
     }
 
@@ -484,8 +487,11 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
     candidates.sort_by(|a, b| a.0.re.total_cmp(&b.0.re));
 
     Ok(PiezoComplexEigenSolved {
-        freqs: candidates.iter().map(|(f, _)| *f).collect(),
-        reduced_vecs: candidates.into_iter().map(|(_, xr)| xr).collect(),
+        freqs: candidates.iter().map(|(f, _, _)| *f).collect(),
+        residuals: candidates.iter().map(|(_, _, r)| *r).collect(),
+        reduced_vecs: candidates.into_iter().map(|(_, xr, _)| xr).collect(),
+        restarts: res.iterations,
+        solver_kind: "schur_shift_invert_qep",
         dim: res.ncv,
         converged: res.reason == EpsReason::Converged,
         backend: fac.stats().backend,
@@ -495,6 +501,9 @@ pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> R
 pub(crate) struct PiezoModeSolved {
     pub freqs: Vec<C>,
     pub full_vecs: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub solver_kind: &'static str,
     pub dim: usize,
     pub converged: bool,
     pub backend: FactorBackend,
@@ -570,11 +579,25 @@ fn solve_piezo_eigen_modes(asm: &PiezoEigenAssembly) -> Result<PiezoModeSolved, 
         let u_vecs: Vec<Vec<f64>> = modes.iter().map(|(_, u)| u.clone()).collect();
         let p_vecs =
             recover_phi_real(asm.k_pp_red_real.as_ref().unwrap(), asm.k_pu_red_real.as_ref().unwrap(), &u_vecs)?;
+        let k_diag_scale = k_red.diagonal()[..n_u].iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(1.0);
+        let mut ku_buf = vec![0.0; n_tot];
+        let mut mu_buf = vec![0.0; n_u];
+        let mut residuals = Vec::with_capacity(modes.len());
         let mut full_vecs = Vec::with_capacity(modes.len());
-        for (u, p) in u_vecs.into_iter().zip(p_vecs) {
+        for ((&(f_val, _), u), p) in modes.iter().zip(u_vecs).zip(p_vecs) {
+            let lam = (2.0 * PI * f_val).powi(2);
             let mut xr = Vec::with_capacity(n_tot);
-            xr.extend(u);
-            xr.extend(p);
+            xr.extend(&u);
+            xr.extend(&p);
+            k_red.spmv(&xr, &mut ku_buf);
+            m_uu.spmv(&u, &mut mu_buf);
+            let r_norm: f64 = (0..n_u).map(|r| (ku_buf[r] - lam * mu_buf[r]).powi(2)).sum::<f64>().sqrt();
+            let u_norm = u.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let denom = ku_buf[..n_u].iter().map(|v| v * v).sum::<f64>().sqrt()
+                + lam.abs() * mu_buf.iter().map(|v| v * v).sum::<f64>().sqrt()
+                + k_diag_scale * u_norm * 1e-4
+                + 1e-300;
+            residuals.push(r_norm / denom);
             let full = asm
                 .constraints
                 .red_all
@@ -584,6 +607,9 @@ fn solve_piezo_eigen_modes(asm: &PiezoEigenAssembly) -> Result<PiezoModeSolved, 
         return Ok(PiezoModeSolved {
             freqs: modes.into_iter().map(|(f, _)| c(f, 0.0)).collect(),
             full_vecs,
+            residuals,
+            restarts: res.iterations,
+            solver_kind: "schur_shift_invert_hermitian",
             dim: res.ncv,
             converged: res.reason == EpsReason::Converged,
             backend: fac.stats().backend,
@@ -610,6 +636,9 @@ fn solve_piezo_eigen_modes(asm: &PiezoEigenAssembly) -> Result<PiezoModeSolved, 
     Ok(PiezoModeSolved {
         freqs: solved.freqs,
         full_vecs,
+        residuals: solved.residuals,
+        restarts: solved.restarts,
+        solver_kind: solved.solver_kind,
         dim: solved.dim,
         converged: solved.converged,
         backend: solved.backend,
@@ -1434,18 +1463,24 @@ impl Preconditioner<f64> for PiezoSchurPc<'_> {
     }
 }
 
-fn solve_static_equilibrated(asm: &PiezoStaticAssembly) -> Result<(Vec<f64>, FactorBackend), String> {
+fn solve_static_equilibrated_checked(
+    asm: &PiezoStaticAssembly,
+) -> Result<(Vec<f64>, FactorBackend, femcore::linalg::driver::DirectSolveCheck), String> {
     let n_u_red = asm.constraints.n_u_red;
     if asm.k_red.nrows() == 0 {
-        return Ok((asm.constraints.g_all.iter().map(|z| z.re).collect(), FactorBackend::None));
+        let zero_a = RCsr::zeros(0, 0);
+        let dummy = DirectSolver::new(&RCsr::from_triplets(1, 1, &[(0, 0, 1.0)]).unwrap(), false)?;
+        let (_, chk) = dummy.solve_checked(&RCsr::from_triplets(1, 1, &[(0, 0, 1.0)]).unwrap(), &[0.0]);
+        let _ = zero_a;
+        return Ok((asm.constraints.g_all.iter().map(|z| z.re).collect(), FactorBackend::None, chk));
     }
     let (k_hat, rhs_hat, d_scale) = equilibrate_real(&asm.k_red, &asm.rhs_red, n_u_red);
     let solver = DirectSolver::new(&k_hat, false)?;
-    let x_hat = solver.solve(&rhs_hat);
+    let (x_hat, chk) = solver.solve_checked(&k_hat, &rhs_hat);
     let x_red = unscale_solution(&x_hat, &d_scale);
     let g_real: Vec<f64> = asm.constraints.g_all.iter().map(|z| z.re).collect();
     let x_full = asm.constraints.red_all.expand_with(&x_red, &g_real);
-    Ok((x_full, solver.stats().backend))
+    Ok((x_full, solver.stats().backend, chk))
 }
 
 /// Solves a 3D simplex static coupled system with Right-FGMRES + [`PiezoSchurPc`].
@@ -1455,7 +1490,7 @@ fn solve_static_iterative(
     mesh: &SimplexMesh,
     spec: &Problem,
     asm: &PiezoStaticAssembly,
-) -> Result<Option<(Vec<f64>, String)>, String> {
+) -> Result<Option<(Vec<f64>, String, crate::diag::SmsDiag)>, String> {
     solve_static_iterative_with_phi_threshold(mesh, spec, asm, 50_000)
 }
 
@@ -1464,7 +1499,7 @@ fn solve_static_iterative_with_phi_threshold(
     spec: &Problem,
     asm: &PiezoStaticAssembly,
     phi_amg_threshold: usize,
-) -> Result<Option<(Vec<f64>, String)>, String> {
+) -> Result<Option<(Vec<f64>, String, crate::diag::SmsDiag)>, String> {
     let n_u_red = asm.constraints.n_u_red;
     let n_phi_red = asm.constraints.n_phi_red;
     let n_tot_red = asm.k_red.nrows();
@@ -1544,7 +1579,9 @@ fn solve_static_iterative_with_phi_threshold(
     if rhs_norm == 0.0 {
         let g_real: Vec<f64> = asm.constraints.g_all.iter().map(|z| z.re).collect();
         let x_full = asm.constraints.red_all.expand_with(&vec![0.0; n_tot_red], &g_real);
-        return Ok(Some((x_full, format!("Schur-AMG Right-FGMRES (0 iterations, {phi_desc})"))));
+        let mut diag = crate::diag::SmsDiag::new("schur_amg_fgmres");
+        diag.iterations = Some(0);
+        return Ok(Some((x_full, format!("Schur-AMG Right-FGMRES (0 iterations, {phi_desc})"), diag)));
     }
 
     let pc = PiezoSchurPc { n_u_red, n_phi_red, k_up_red, sys_u, phi_pc, d_scale: &d_scale };
@@ -1578,9 +1615,14 @@ fn solve_static_iterative_with_phi_threshold(
     let x_red = unscale_solution(&x_hat, &d_scale);
     let g_real: Vec<f64> = asm.constraints.g_all.iter().map(|z| z.re).collect();
     let x_full = asm.constraints.red_all.expand_with(&x_red, &g_real);
+    let bw_rel = femcore::linalg::driver::backward_residual_many(&k_hat, &[rhs_hat], &[x_hat]);
+    let mut diag = crate::diag::SmsDiag::new("schur_amg_fgmres");
+    diag.iterations = Some(info.iterations);
+    diag.max_algebraic_residual = rel_res.max(bw_rel);
     Ok(Some((
         x_full,
         format!("Schur-AMG Right-FGMRES ({} iterations, rel_res {:.2e}, {phi_desc})", info.iterations, rel_res),
+        diag,
     )))
 }
 
@@ -1588,7 +1630,7 @@ fn solve_static_simplex(
     mesh: &SimplexMesh,
     spec: &Problem,
     asm: &PiezoStaticAssembly,
-) -> Result<(Vec<f64>, String), String> {
+) -> Result<(Vec<f64>, String, crate::diag::SmsDiag), String> {
     if mesh.dim != 3 || !spec.periodic.is_empty() {
         if spec.solver == LinearSolver::Iterative {
             return Err(
@@ -1596,21 +1638,30 @@ fn solve_static_simplex(
                     .into(),
             );
         }
-        let (x_full, backend) = solve_static_equilibrated(asm)?;
-        return Ok((x_full, format!("backend {backend:?}")));
+        let (x_full, backend, chk) = solve_static_equilibrated_checked(asm)?;
+        let mut diag = crate::diag::SmsDiag::new(chk.solver_kind);
+        diag.absorb_direct(&chk);
+        return Ok((x_full, format!("backend {backend:?}"), diag));
     }
     let want_iter = spec.solver == LinearSolver::Iterative
         || (spec.solver == LinearSolver::Auto && asm.constraints.n_tot > 120_000);
     if want_iter {
-        if let Some((x_full, desc)) = solve_static_iterative(mesh, spec, asm)? {
-            return Ok((x_full, desc));
+        if let Some((x_full, desc, diag)) = solve_static_iterative(mesh, spec, asm)? {
+            return Ok((x_full, desc, diag));
         }
     }
-    let (x_full, backend) = solve_static_equilibrated(asm)?;
+    let (x_full, backend, chk) = solve_static_equilibrated_checked(asm)?;
+    let mut diag = crate::diag::SmsDiag::new(chk.solver_kind);
+    diag.absorb_direct(&chk);
     if want_iter {
-        Ok((x_full, format!("backend {backend:?} (iterative fallback)")))
+        diag.push_warning(
+            "fgmres_fallback_to_direct",
+            nyx_physics::DiagnosticSeverity::Warning,
+            "iterative Schur-AMG FGMRES fell back to equilibrated direct solve",
+        );
+        Ok((x_full, format!("backend {backend:?} (iterative fallback)"), diag))
     } else {
-        Ok((x_full, format!("backend {backend:?}")))
+        Ok((x_full, format!("backend {backend:?}"), diag))
     }
 }
 
@@ -1752,6 +1803,10 @@ fn build_eigen_result(
         log.push(format!("WARNING: {unstable_count} amplifying mode(s) detected (Im f < -1e-9 Re f)"));
     }
 
+    let mut diag = crate::diag::SmsDiag::new(solved.solver_kind);
+    diag.record_mode_residuals(solved.solver_kind, solved.residuals.clone(), solved.converged, Some(solved.restarts));
+    let (diagnostics, error_budget) = diag.finish();
+
     SolveResult {
         order: order as u8,
         dim: d as u8,
@@ -1760,6 +1815,8 @@ fn build_eigen_result(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.constraints.n_tot,
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
         ..Default::default()
     }
 }
@@ -1777,7 +1834,7 @@ pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
                 assemble_piezo_static_simplex(mesh, spec)?
             };
             lap(&mut tl, "assembly (piezo static)");
-            let (x_full, solver_desc) = {
+            let (x_full, solver_desc, diag) = {
                 let _s = progress::stage("coupled piezoelectric linear solve");
                 solve_static_simplex(mesh, spec, &asm)?
             };
@@ -1818,6 +1875,7 @@ pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
                 asm.constraints.gauge_pins.len(),
                 solver_desc
             ));
+            let (diagnostics, error_budget) = diag.finish();
             Ok(SolveResult {
                 order: order as u8,
                 dim: d as u8,
@@ -1826,6 +1884,8 @@ pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: asm.constraints.n_tot,
+                diagnostics: Some(diagnostics),
+                error_budget: Some(error_budget),
                 ..Default::default()
             })
         }
@@ -1871,9 +1931,9 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
                 assemble_piezo_static_mixed(mixed, &dof_map, spec)?
             };
             lap(&mut tl, "assembly (piezo mixed static)");
-            let (x_full, backend) = {
+            let (x_full, backend, chk) = {
                 let _s = progress::stage("coupled piezoelectric linear solve");
-                solve_static_equilibrated(&asm)?
+                solve_static_equilibrated_checked(&asm)?
             };
             lap(&mut tl, "linear solve");
             let u_c: Vec<C> = x_full[..asm.constraints.n_mech].iter().map(|&v| c(v, 0.0)).collect();
@@ -1911,6 +1971,9 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
                 asm.constraints.gauge_pins.len(),
                 backend
             ));
+            let mut diag = crate::diag::SmsDiag::new(chk.solver_kind);
+            diag.absorb_direct(&chk);
+            let (diagnostics, error_budget) = diag.finish();
             Ok(SolveResult {
                 order: order as u8,
                 dim: d as u8,
@@ -1919,6 +1982,8 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
                 log,
                 seconds: t0.elapsed().as_secs_f64(),
                 dofs: asm.constraints.n_tot,
+                diagnostics: Some(diagnostics),
+                error_budget: Some(error_budget),
                 ..Default::default()
             })
         }
@@ -2011,9 +2076,12 @@ mod tests {
             Bc { labels: vec![2], kind: BcKind::Potential(3.0) },
         ];
         let asm = assemble_piezo_static_simplex(&tet, &spec).unwrap();
-        let (x_dir, _) = solve_static_equilibrated(&asm).unwrap();
-        let (x_amg, desc) = solve_static_iterative_with_phi_threshold(&tet, &spec, &asm, 10).unwrap().unwrap();
+        let (x_dir, _, dir_chk) = solve_static_equilibrated_checked(&asm).unwrap();
+        assert!(dir_chk.algebraic_residual < 1e-10);
+        let (x_amg, desc, amg_diag) =
+            solve_static_iterative_with_phi_threshold(&tet, &spec, &asm, 10).unwrap().unwrap();
         assert!(desc.contains("phi=AMG"), "expected phi=AMG path, got {desc}");
+        assert!(amg_diag.max_algebraic_residual < 1e-6);
         let max_u_diff = x_dir[..asm.constraints.n_mech]
             .iter()
             .zip(&x_amg[..asm.constraints.n_mech])

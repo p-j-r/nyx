@@ -60,6 +60,9 @@ pub struct ModesC {
     pub neff: Vec<C>,
     pub et: Vec<Vec<C>>,
     pub phi: Vec<Vec<C>>,
+    pub residuals: Vec<f64>,
+    pub restarts: usize,
+    pub matvecs: usize,
     pub converged: bool,
 }
 
@@ -299,6 +302,8 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
     let (af, bf, free, n_tot, net, k0) = (&asm.a, &asm.b, &asm.free, asm.n_tot, asm.net, asm.k0);
     let sigma = -(n_target * n_target) * (k0 * k0);
     let mut pairs = eigs_complex(af, bf, sigma, k, 1e-10, 400)?;
+    let mut extra_restarts = 0usize;
+    let mut extra_matvecs = 0usize;
     if let Some(a1f) = &asm.a1 {
         // refine every mode by the fixed-point iteration on b in the linear term
         for i in 0..pairs.values.len() {
@@ -328,6 +333,8 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
                 femcore::progress::check()?;
                 let cmat = af.add_scaled(a1f, c(0.0, 1.0) * beta);
                 let one = eigs_complex(&cmat, bf, -(beta * beta), 1, 1e-11, 400)?;
+                extra_restarts += one.restarts;
+                extra_matvecs += one.matvecs;
                 let nb = pick((-one.values[0]).sqrt());
                 let change = (nb - beta).norm() / beta.norm();
                 femcore::progress::note(format!("tilted-crystal coupling, optical mode {}: refinement step {}, relative change of the propagation constant {change:.1e} (stop below {COUPLED_BETA_TOL:.0e})", i + 1, it + 1));
@@ -358,16 +365,13 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
     }
     let mut neff = vec![];
     let (mut et_all, mut phi_all): (Vec<Vec<C>>, Vec<Vec<C>>) = (vec![], vec![]);
+    let mut res_all: Vec<f64> = Vec::new();
     let n_wanted = pairs.values.len();
     let frob = |m: &CCsr| m.values().iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
     let norm_a0 = frob(af);
     let norm_a1 = asm.a1.as_ref().map(frob).unwrap_or(0.0);
     let norm_b = frob(bf);
     for (i, &lam) in pairs.values.iter().enumerate() {
-        // pairs the Krylov process could not converge (clustered radiation modes in the absorbing layers) are dropped
-        if pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {
-            continue;
-        }
         let beta2 = -lam;
         let mut nf = beta2.sqrt() / k0;
         if nf.re < 0.0 {
@@ -390,10 +394,11 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
         // Normwise backward error (Rigal-Gaches) for `(A0 + j beta A1) u = lam B u`: immune to
         // nanophotonic vs RF block-scaling skew while still rejecting unconverged spurious vectors.
         let res_true = res_num / ((norm_a0 + beta.norm() * norm_a1 + lam.norm() * norm_b) * norm_u + 1e-300);
-        if res_true > 1e-6 {
+        if !res_true.is_finite() || res_true > 1e-6 {
             continue;
         }
         neff.push(nf);
+        res_all.push(res_true);
         let mut x = vec![c(0.0, 0.0); n_tot];
         for (a, &dof) in free.iter().enumerate() {
             x[dof] = u[a];
@@ -413,6 +418,9 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
         neff: idx.iter().map(|&i| neff[i]).collect(),
         et: idx.iter().map(|&i| et_all[i].clone()).collect(),
         phi: idx.iter().map(|&i| phi_all[i].clone()).collect(),
+        residuals: idx.iter().map(|&i| res_all[i]).collect(),
+        restarts: pairs.restarts + extra_restarts,
+        matvecs: pairs.matvecs + extra_matvecs,
         converged: pairs.converged,
     })
 }
@@ -576,6 +584,7 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
             modes.neff = keep.iter().map(|&i| modes.neff[i]).collect();
             modes.et = keep.iter().map(|&i| modes.et[i].clone()).collect();
             modes.phi = keep.iter().map(|&i| modes.phi[i].clone()).collect();
+            modes.residuals = keep.iter().map(|&i| modes.residuals[i]).collect();
             mode_metrics = keep
                 .into_iter()
                 .map(|i| {
@@ -594,6 +603,7 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
             modes.neff.truncate(n_modes);
             modes.et.truncate(n_modes);
             modes.phi.truncate(n_modes);
+            modes.residuals.truncate(n_modes);
             mode_metrics.truncate(n_modes);
         }
     }
@@ -620,6 +630,9 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
     scalars.push(crate::optical::mode_frame(problem).scalar());
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_complex");
+    diag.record_mode_residuals("shift_invert_complex", modes.residuals.clone(), modes.converged, Some(modes.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     let result = SolveResult {
         physics: "ems".into(),
         study: "modes".into(),
@@ -630,7 +643,8 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: mesh.n_dofs(problem.order),
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     };
     Ok(result)
 }
@@ -1104,6 +1118,7 @@ pub fn solve_waveguide_complex_mixed(
             modes.neff = keep.iter().map(|&i| modes.neff[i]).collect();
             modes.et = keep.iter().map(|&i| modes.et[i].clone()).collect();
             modes.phi = keep.iter().map(|&i| modes.phi[i].clone()).collect();
+            modes.residuals = keep.iter().map(|&i| modes.residuals[i]).collect();
             mode_metrics = keep
                 .into_iter()
                 .map(|i| {
@@ -1122,6 +1137,7 @@ pub fn solve_waveguide_complex_mixed(
             modes.neff.truncate(n_modes);
             modes.et.truncate(n_modes);
             modes.phi.truncate(n_modes);
+            modes.residuals.truncate(n_modes);
             mode_metrics.truncate(n_modes);
         }
     }
@@ -1153,6 +1169,9 @@ pub fn solve_waveguide_complex_mixed(
         log.push("warning: the eigensolver did not converge every mode to the requested tolerance".into());
     }
     scalars.push(crate::optical::mode_frame(problem).scalar());
+    let mut diag = crate::diag::EmsDiag::new("shift_invert_complex");
+    diag.record_mode_residuals("shift_invert_complex", modes.residuals.clone(), modes.converged, Some(modes.restarts));
+    let (diagnostics, error_budget) = diag.finish();
     Ok(SolveResult {
         physics: "ems".into(),
         study: "modes".into(),
@@ -1163,7 +1182,8 @@ pub fn solve_waveguide_complex_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
-        ..Default::default()
+        diagnostics: Some(diagnostics),
+        error_budget: Some(error_budget),
     })
 }
 
