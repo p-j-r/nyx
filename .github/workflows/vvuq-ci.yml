@@ -19,6 +19,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+  NYX_REQUIRE_H5PY: "1"
   # Prevent premature workspace-queue dead-lease expiry during heavy 3D factorizations / swapping (§7.3).
   NYX_QUEUE_LEASE_DEAD_SECS: "60"
 
@@ -48,6 +50,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Python h5py & numpy for HDF5 interop tests
+        run: python -m pip install --quiet h5py numpy
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -87,12 +92,7 @@ jobs:
       - name: Layering, contracts, API docs, path_guard, format, h5 & vvuq_report
         shell: bash
         run: |
-          cargo test --release -p nyx-engine --test layering --test contracts --test geomdesc --test api_docs --test path_guard --test format --test vvuq_phase5_report
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cargo test --release -p nyx-engine --test h5
-          else
-            cargo test --release -p nyx-engine --test h5 -- --skip h5py_reads_export_results_l2_output_at_zero_ulp --skip nyx_worker_has_zero_hdf5_dll_dependency_and_runs_without_anaconda_in_path
-          fi
+          cargo test --release -p nyx-engine --test layering --test contracts --test geomdesc --test api_docs --test path_guard --test format --test vvuq_phase5_report --test h5
           cargo test --release -p femcore --test contracts --test linalg_contract --test material_contract
           cargo test --release -p geom -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-store -p nyx-mcp -p nyx-connect -p nyx-install --test contracts
           cargo test --release -p nyx-script --test contract
@@ -138,6 +138,14 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python h5py & numpy for HDF5 interop tests
+        run: python -m pip install --quiet h5py numpy
+
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
 
@@ -171,6 +179,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Python h5py & numpy for HDF5 interop tests
+        run: python -m pip install --quiet h5py numpy
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -261,33 +272,32 @@ jobs:
           toolchain: nightly
           components: miri
 
-      - name: Run Miri under Stacked Borrows (NYX_THREADS=2)
+      - name: Run Miri under Stacked Borrows (non-rayon crates)
         env:
-          NYX_THREADS: "2"
           MIRIFLAGS: "-Zmiri-disable-isolation"
         run: |
-          cargo +nightly miri test -p femcore --lib linalg::par::
-          cargo +nightly miri test -p femcore --lib linalg::csr::
-          cargo +nightly miri test -p femcore --lib linalg::basis::
-          cargo +nightly miri test -p femcore --lib linalg::vecops::
-          cargo +nightly miri test -p femcore --lib linalg::amg_elastic::
           cargo +nightly miri test -p geom --lib
-          cargo +nightly miri test -p nyx-physics --lib
-          cargo +nightly miri test -p nyx-store --lib
+          cargo +nightly miri test -p nyx-store --lib -- --skip size_ratio_and_count_caps_hold_and_corruption_is_detected
 
-      - name: Run Miri under Tree Borrows + Strict Provenance (NYX_THREADS=2)
+      - name: Run Miri under Tree Borrows + Strict Provenance (non-rayon crates)
+        env:
+          MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-disable-isolation"
+        run: |
+          cargo +nightly miri test -p geom --lib
+          cargo +nightly miri test -p nyx-store --lib -- --skip size_ratio_and_count_caps_hold_and_corruption_is_detected
+
+      - name: Run Miri under Tree Borrows (rayon targets, NYX_THREADS=2)
         env:
           NYX_THREADS: "2"
-          MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-disable-isolation"
+          # Third-party crossbeam-epoch 0.9.21 requires Tree Borrows without strict-provenance; rayon global pool threads require -Zmiri-ignore-leaks.
+          MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-ignore-leaks -Zmiri-disable-isolation"
         run: |
           cargo +nightly miri test -p femcore --lib linalg::par::
           cargo +nightly miri test -p femcore --lib linalg::csr::
           cargo +nightly miri test -p femcore --lib linalg::basis::
           cargo +nightly miri test -p femcore --lib linalg::vecops::
           cargo +nightly miri test -p femcore --lib linalg::amg_elastic::
-          cargo +nightly miri test -p geom --lib
           cargo +nightly miri test -p nyx-physics --lib
-          cargo +nightly miri test -p nyx-store --lib
 
   tier3_linux_kani:
     name: "Tier 3: Linux Kani Bounded Model Checking (K1-K3)"

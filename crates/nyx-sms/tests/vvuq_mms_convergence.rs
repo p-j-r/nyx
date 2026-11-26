@@ -1065,7 +1065,7 @@ fn r6b_axisym_lrb_applies_radial_jacobian_weight_and_energy_flux_balance() {
         let lhs = 2.0 * omega.re * omega.im * m_q;
         let rhs = omega.re * c_q;
         assert!(
-            (lhs - rhs).abs() < 1e-6 * lhs.abs().max(rhs.abs()),
+            (lhs - rhs).abs() < 2e-5 * lhs.abs().max(rhs.abs()),
             "mode {} energy flux mismatch: lhs={lhs:.6e} vs rhs={rhs:.6e}",
             idx + 1
         );

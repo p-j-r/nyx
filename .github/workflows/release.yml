@@ -1,0 +1,266 @@
+name: Release Binaries (Windows, Linux, macOS)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (defaults to Cargo.toml version + short commit)"
+        type: string
+        default: ""
+      draft:
+        description: "Create GitHub Release as draft (tag builds)"
+        type: boolean
+        default: true
+      prerelease:
+        description: "Mark GitHub Release as prerelease (tag builds)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
+jobs:
+  build:
+    name: "Build & Package (${{ matrix.os_label }})"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_label: windows-x86_64
+            ext: ".exe"
+            package_kind: sfx
+            cross: false
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            os_label: linux-x86_64
+            ext: ""
+            package_kind: sfx
+            cross: false
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            os_label: macos-arm64
+            ext: ""
+            package_kind: dmg
+            cross: false
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+            os_label: macos-x86_64
+            ext: ""
+            package_kind: dmg
+            cross: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@master
+
+      - name: Add cross-compilation target (${{ matrix.target }})
+        if: matrix.cross == true
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: release-${{ matrix.target }}
+
+      - name: Resolve release version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            ver="${{ inputs.version }}"
+          else
+            pkg_ver=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+            short_sha=$(git rev-parse --short=8 HEAD)
+            ver="${pkg_ver}-g${short_sha}"
+          fi
+          ver="${ver#v}"
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release version: ${ver}"
+
+      - name: Build release binaries (native)
+        if: matrix.cross == false
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release -p nyx -p nyx-engine -p nyx-mcp -p nyx-script -p nyx-connect -p nyx-install
+          cargo build --release -p nyx-install --features gui --bin nyx-setup
+
+      - name: Build release binaries (macOS x86_64 cross-compile)
+        if: matrix.cross == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build host packager first so `nyx-pack` executes natively on ARM64 runners.
+          cargo build --release -p nyx-install --bin nyx-pack
+          cargo build --release --target "${{ matrix.target }}" -p nyx -p nyx-engine -p nyx-mcp -p nyx-script -p nyx-connect -p nyx-install
+          cargo build --release --target "${{ matrix.target }}" -p nyx-install --features gui --bin nyx-setup
+
+      - name: Package distribution bundles with nyx-pack (Windows & Linux)
+        if: matrix.package_kind == 'sfx'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN_DIR="${CARGO_TARGET_DIR}/release"
+          PACK_BIN="${BIN_DIR}/nyx-pack${{ matrix.ext }}"
+          VER="${{ steps.ver.outputs.version }}"
+          mkdir -p release-out
+
+          "$PACK_BIN" \
+            --target-dir "$BIN_DIR" \
+            --repo-root . \
+            --target "${{ matrix.target }}" \
+            --version "$VER" \
+            --bundle "release-out/nyx-${VER}-${{ matrix.target }}.nyxpack" \
+            --self-extract "release-out/nyx-setup-${VER}-${{ matrix.target }}${{ matrix.ext }}" \
+            --zip "release-out/nyx-${VER}-${{ matrix.target }}.zip"
+
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            chmod +x "release-out/nyx-setup-${VER}-${{ matrix.target }}"
+          fi
+
+          # Smoke checks on native executables and pure-Rust HDF5 portability verification (ADR 107).
+          "${BIN_DIR}/nyx${{ matrix.ext }}" --version
+          "${BIN_DIR}/nyx-setup${{ matrix.ext }}" --version
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            for bin in nyx nyx-worker nyx-script-worker nyx-mcp nyx-connect nyx-setup nyx-pack; do
+              hit=$(ldd "${BIN_DIR}/${bin}" 2>/dev/null | grep -iE 'libhdf5|libmpi' || true)
+              if [ -n "$hit" ]; then
+                echo "Unexpected HDF5/MPI dynamic dependency in ${bin}: $hit" >&2
+                exit 1
+              fi
+            done
+          else
+            if command -v objdump >/dev/null 2>&1; then
+              for bin in nyx nyx-worker nyx-script-worker nyx-mcp nyx-connect nyx-setup nyx-pack; do
+                hit=$(objdump -p "${BIN_DIR}/${bin}.exe" 2>/dev/null | grep -iE 'DLL Name:.*(hdf5|zlib|mpi)' || true)
+                if [ -n "$hit" ]; then
+                  echo "Unexpected HDF5/zlib/MPI DLL import in ${bin}.exe: $hit" >&2
+                  exit 1
+                fi
+              done
+            fi
+          fi
+
+      - name: Package macOS .app bundles and compressed .dmg (zero trailer on Mach-O)
+        if: matrix.package_kind == 'dmg'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            BIN_DIR="${CARGO_TARGET_DIR}/${{ matrix.target }}/release"
+          else
+            BIN_DIR="${CARGO_TARGET_DIR}/release"
+          fi
+          PACK_BIN="${CARGO_TARGET_DIR}/release/nyx-pack"
+          VER="${{ steps.ver.outputs.version }}"
+          mkdir -p release-out
+          rm -rf dmg-staging
+
+          "$PACK_BIN" \
+            --target-dir "$BIN_DIR" \
+            --repo-root . \
+            --target "${{ matrix.target }}" \
+            --version "$VER" \
+            --bundle "release-out/nyx-${VER}-${{ matrix.target }}.nyxpack" \
+            --zip "release-out/nyx-${VER}-${{ matrix.target }}.zip" \
+            --dmg-staging "dmg-staging"
+
+          # Ad-hoc sign bundles cleanly without modifying Mach-O executables via trailers (ADR 122).
+          codesign --force --deep --sign - "dmg-staging/Nyx.app"
+          codesign --force --deep --sign - "dmg-staging/Set Up CLI & AI Hosts.app"
+
+          hdiutil create \
+            -volname "nyx ${VER}" \
+            -srcfolder "dmg-staging" \
+            -ov \
+            -format UDZO \
+            "release-out/nyx-${VER}-${{ matrix.target }}.dmg"
+
+          # Verify zero dynamic HDF5/MPI linkage on Mach-O binaries.
+          for bin in nyx nyx-worker nyx-script-worker nyx-mcp nyx-connect nyx-setup; do
+            hit=$(otool -L "${BIN_DIR}/${bin}" | grep -iE 'libhdf5|libmpi' || true)
+            if [ -n "$hit" ]; then
+              echo "Unexpected HDF5/MPI dynamic dependency in ${bin}: $hit" >&2
+              exit 1
+            fi
+          done
+          if [ "${{ matrix.cross }}" != "true" ]; then
+            "${BIN_DIR}/nyx" --version
+            "${BIN_DIR}/nyx-setup" --version
+          fi
+
+      - name: Upload platform release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os_label }}
+          path: release-out/*
+          if-no-files-found: error
+
+  publish:
+    name: "Checksums & GitHub Release"
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Generate SHA256SUMS.txt and consolidated BLAKE3SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shopt -s nullglob
+          artifacts=()
+          for f in *; do
+            case "$f" in
+              *.blake3|SHA256SUMS.txt|BLAKE3SUMS.txt) ;;
+              *) artifacts+=("$f") ;;
+            esac
+          done
+          sha256sum "${artifacts[@]}" > SHA256SUMS.txt
+          cat *.blake3 > BLAKE3SUMS.txt
+          ls -lh
+
+      - name: Upload combined release artifact bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyx-release-bundle
+          path: release-assets/*
+
+      - name: Publish GitHub Release on version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          draft: ${{ inputs.draft == true }}
+          prerelease: ${{ inputs.prerelease == true }}
+          generate_release_notes: true
+          body: |
+            Cross-platform binary release of `nyx` (Windows x86_64, Linux x86_64, macOS arm64 & x86_64).
+
+            ### Notes
+            - **macOS (unsigned / ad-hoc signed builds)**: after dragging `Nyx.app` into `Applications`, remove the quarantine attribute before first launch if Gatekeeper prompts:
+              `xattr -dr com.apple.quarantine /Applications/Nyx.app`
+            - Verify download integrity against `SHA256SUMS.txt` or `BLAKE3SUMS.txt`.

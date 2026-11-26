@@ -207,7 +207,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-mcp/tests/{reset_session,multi_session}.rs` | 113, 94 | `reset_session` REPL global reset and isolated concurrent multi-session (`session`) MCP tests |
 | `crates/nyx-mcp/*` | 94, 97, 15, 113, 131 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels with bounded framing/sessions |
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
-| `.github/workflows/*` | 131, 20, 133 | 3-tier VVUQ CI workflow (PR fast gate, full workspace + portable-kernels differential, Linux nightly Miri/Kani/bolero + Tier 3 Cross-OS determinism & R22 oracle matrix) |
+| `.github/workflows/*` | 122, 131, 20, 133 | 3-tier VVUQ CI workflow (`vvuq-ci.yml`) and cross-OS Windows/Linux/macOS binary release packaging (`release.yml` via `nyx-pack`) |
 | `tools/vvuq_ci.*` | 131, 20, 133 | local Linux/WSL and Windows PowerShell VVUQ 3-tier CI playbook runners |
 | `tools/vvuq_telemetry.py` | 133, 20 | best-of-N quiet-runner wall-time, peak RSS (`ru_maxrss`/`K32GetProcessMemoryInfo`), and ASME V&V 20 telemetry ledger |
 | `tools/*` | 20 | baseline and helper scripts |

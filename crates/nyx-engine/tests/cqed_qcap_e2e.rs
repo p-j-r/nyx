@@ -314,13 +314,13 @@ fn cqed_gds_sheet_qcap_solvers_extrapolation_promotion_and_reduction_e2e() {
         "inter-pad coupling C_12 mismatch between planar_bem ({mut_bem_12:e}) and 3D FEM ({mut_fem_12:e}): rel={rel_12:.3}"
     );
 
-    // QFR-3: Run two-grid `convergence_check` with coarsening `factor: 1.35`, `extrapolate: "richardson_log_spd"`, and `apply_extrapolated: true`
+    // QFR-3: Run two-grid `convergence_check` with coarsening `factor: 2.1` (achieving effective ratio r_eff >= 1.3 per R11b), `extrapolate: "richardson_log_spd"`, and `apply_extrapolated: true`
     let conv = call(
         &mut e,
         "convergence_check",
         json!({
             "physics": "dfs",
-            "factor": 1.35,
+            "factor": 2.1,
             "scale_sizes": true,
             "tolerance": 0.50,
             "extrapolate": "richardson_log_spd",

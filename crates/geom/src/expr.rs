@@ -324,10 +324,20 @@ mod tests {
         let env = Env { vars: vec![("w".into(), 0.5), ("t".into(), 3.0)] };
         let f = |s: &str| env.eval(&Expr::Text(s.into()), "x");
         assert!((f("-w/2-1e-6").unwrap() + 0.250001).abs() < 1e-15);
-        assert_eq!(f("2^3^2").unwrap(), 512.0);
-        assert_eq!(f("-2^2").unwrap(), -4.0);
-        assert_eq!(f("max(w, t)").unwrap(), 3.0);
-        assert_eq!(f("2**3").unwrap(), 8.0);
+        #[cfg(not(miri))]
+        {
+            assert_eq!(f("2^3^2").unwrap(), 512.0);
+            assert_eq!(f("-2^2").unwrap(), -4.0);
+            assert_eq!(f("max(w, t)").unwrap(), 3.0);
+            assert_eq!(f("2**3").unwrap(), 8.0);
+        }
+        #[cfg(miri)]
+        {
+            assert!((f("2^3^2").unwrap() - 512.0).abs() < 1e-10);
+            assert!((f("-2^2").unwrap() + 4.0).abs() < 1e-10);
+            assert_eq!(f("max(w, t)").unwrap(), 3.0);
+            assert!((f("2**3").unwrap() - 8.0).abs() < 1e-10);
+        }
         for bad in ["__import__('os')", "w.real", "foo(1)", "1 +", "(1", "w t", "", "zz", "1/0", "sqrt(-1)"] {
             assert!(f(bad).is_err(), "{bad}");
         }

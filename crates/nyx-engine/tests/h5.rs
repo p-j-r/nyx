@@ -431,10 +431,42 @@ fn l2_shuffle_lzf_packed_is_strictly_smaller_than_l1_legacy_gzip3_on_soi_wire() 
     }
 }
 
+fn find_h5py_python() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(p) = std::env::var_os("NYX_H5PY_PYTHON") {
+        candidates.push(PathBuf::from(p));
+    }
+    #[cfg(windows)]
+    {
+        let anaconda = PathBuf::from(r"C:\ProgramData\anaconda3\python.exe");
+        if anaconda.exists() {
+            candidates.push(anaconda);
+        }
+    }
+    candidates.push(PathBuf::from("python"));
+    candidates.push(PathBuf::from("python3"));
+
+    for cand in candidates {
+        if let Ok(out) = std::process::Command::new(&cand).args(["-c", "import h5py, numpy"]).output() {
+            if out.status.success() {
+                return Some(cand);
+            }
+        }
+    }
+    None
+}
+
 #[test]
 fn h5py_reads_export_results_l2_output_at_zero_ulp() {
-    let py = Path::new(r"C:\ProgramData\anaconda3\python.exe");
-    assert!(py.exists(), "expected Anaconda python with h5py at {}", py.display());
+    let Some(py) = find_h5py_python() else {
+        if std::env::var_os("CI").is_some() || std::env::var("NYX_REQUIRE_H5PY").as_deref() == Ok("1") {
+            panic!("no Python interpreter with h5py and numpy found; install h5py numpy or set NYX_H5PY_PYTHON");
+        }
+        eprintln!(
+            "SKIP h5py_reads_export_results_l2_output_at_zero_ulp: no Python with h5py+numpy found (set NYX_H5PY_PYTHON or NYX_REQUIRE_H5PY=1)"
+        );
+        return;
+    };
 
     let script = r#"
 import sys, json, os, h5py, numpy as np
@@ -478,7 +510,7 @@ with h5py.File(h5_path, "r") as f:
 
         e.call("export_results", &json!({ "path": h5_path.to_str().unwrap() })).unwrap();
 
-        let out = std::process::Command::new(py)
+        let out = std::process::Command::new(&py)
             .args(["-c", script, h5_path.to_str().unwrap(), dump_dir.to_str().unwrap()])
             .output()
             .expect("run python h5py check");
@@ -574,6 +606,7 @@ with h5py.File(h5_path, "r") as f:
 }
 
 /// Parses the PE import directory (`IMAGE_DIRECTORY_ENTRY_IMPORT`) of a 64-bit Windows executable and returns the imported DLL names.
+#[cfg(windows)]
 fn pe_imported_dlls(exe_bytes: &[u8]) -> Vec<String> {
     assert_eq!(&exe_bytes[0..2], b"MZ", "DOS MZ magic");
     let pe_off = u32::from_le_bytes(exe_bytes[0x3c..0x40].try_into().unwrap()) as usize;
@@ -630,17 +663,30 @@ fn pe_imported_dlls(exe_bytes: &[u8]) -> Vec<String> {
 #[test]
 fn nyx_worker_has_zero_hdf5_dll_dependency_and_runs_without_anaconda_in_path() {
     let worker = PathBuf::from(env!("CARGO_BIN_EXE_nyx-worker"));
-    let exe_bytes = std::fs::read(&worker).expect("read nyx-worker.exe");
-    let dlls = pe_imported_dlls(&exe_bytes);
-    eprintln!("nyx-worker imported DLLs: {dlls:?}");
-    assert!(!dlls.is_empty(), "PE import parser must see standard Windows OS DLLs");
-    for d in &dlls {
-        assert!(!d.contains("hdf5"), "nyx-worker must not import any hdf5 DLL, found {d} in {dlls:?}");
-        assert!(!d.contains("zlib"), "nyx-worker must not import any C zlib DLL, found {d} in {dlls:?}");
-        assert!(!d.contains("mpi"), "nyx-worker must not import any MPI DLL, found {d} in {dlls:?}");
+    #[cfg(windows)]
+    {
+        let exe_bytes = std::fs::read(&worker).expect("read nyx-worker.exe");
+        let dlls = pe_imported_dlls(&exe_bytes);
+        eprintln!("nyx-worker imported DLLs: {dlls:?}");
+        assert!(!dlls.is_empty(), "PE import parser must see standard Windows OS DLLs");
+        for d in &dlls {
+            assert!(!d.contains("hdf5"), "nyx-worker must not import any hdf5 DLL, found {d} in {dlls:?}");
+            assert!(!d.contains("zlib"), "nyx-worker must not import any C zlib DLL, found {d} in {dlls:?}");
+            assert!(!d.contains("mpi"), "nyx-worker must not import any MPI DLL, found {d} in {dlls:?}");
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(ldd_out) = std::process::Command::new("ldd").arg(&worker).output() {
+            if ldd_out.status.success() {
+                let text = String::from_utf8_lossy(&ldd_out.stdout).to_ascii_lowercase();
+                assert!(!text.contains("libhdf5"), "nyx-worker must not link libhdf5:\n{text}");
+                assert!(!text.contains("libmpi"), "nyx-worker must not link libmpi:\n{text}");
+            }
+        }
     }
 
-    // Also run nyx-worker in a clean environment with Anaconda / HDF5_DIR stripped from PATH
+    // Also run nyx-worker in a stripped PATH environment without Anaconda or HDF5_DIR
     let job_dir = tmp("worker-clean-path-job");
     let _ = std::fs::remove_dir_all(&job_dir);
     std::fs::create_dir_all(&job_dir).unwrap();
@@ -657,16 +703,21 @@ fn nyx_worker_has_zero_hdf5_dll_dependency_and_runs_without_anaconda_in_path() {
     )
     .unwrap();
 
+    #[cfg(windows)]
+    let clean_path = r"C:\Windows\System32";
+    #[cfg(not(windows))]
+    let clean_path = "/usr/bin:/bin";
+
     let mut child = std::process::Command::new(&worker)
         .arg("--job")
         .arg(&job_dir)
-        .env("PATH", r"C:\Windows\System32")
+        .env("PATH", clean_path)
         .env_remove("HDF5_DIR")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("spawn nyx-worker without Anaconda on PATH");
+        .expect("spawn nyx-worker with stripped PATH");
     let _keep_stdin = child.stdin.take();
     let out = child.wait_with_output().expect("wait for nyx-worker");
     assert!(

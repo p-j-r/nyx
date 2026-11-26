@@ -3,6 +3,7 @@
 /dist/
 /shots/
 /out/
+/.jj/
 # generated result files and autosaved runs
 *.h5
 *.hdf5

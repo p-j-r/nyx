@@ -144,7 +144,9 @@ pub fn write_xdg_desktop(
         }
     }
 
-    best_effort_refresh(&xdg_root);
+    if opts.scope != InstallScope::Custom {
+        best_effort_refresh(&xdg_root);
+    }
     Ok((entries, warnings))
 }
 
@@ -167,7 +169,9 @@ pub fn write_xdg_mime(
         std::fs::create_dir_all(p)?;
     }
     std::fs::write(&xml_path, render_mime_xml())?;
-    best_effort_refresh(&xdg_root);
+    if opts.scope != InstallScope::Custom {
+        best_effort_refresh(&xdg_root);
+    }
     Ok((
         vec![FileAssociation::FreedesktopMimeFile {
             path: xml_path.display().to_string(),
@@ -426,9 +430,11 @@ impl PlatformBackend for LinuxBackend {
                 }
             }
         }
-        if let Some(DesktopEntry::FreedesktopDesktop { path }) = entries.first() {
-            if let Some(xdg) = Path::new(path).parent().and_then(Path::parent) {
-                best_effort_refresh(xdg);
+        if opts.scope != InstallScope::Custom {
+            if let Some(DesktopEntry::FreedesktopDesktop { path }) = entries.first() {
+                if let Some(xdg) = Path::new(path).parent().and_then(Path::parent) {
+                    best_effort_refresh(xdg);
+                }
             }
         }
         Ok(removed)
@@ -466,8 +472,10 @@ impl PlatformBackend for LinuxBackend {
                 }
             }
         }
-        if let Some(xdg) = refresh_dir {
-            best_effort_refresh(&xdg);
+        if opts.scope != InstallScope::Custom {
+            if let Some(xdg) = refresh_dir {
+                best_effort_refresh(&xdg);
+            }
         }
         Ok(changed)
     }

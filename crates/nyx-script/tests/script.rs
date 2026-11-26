@@ -322,8 +322,9 @@ nyx.store_runs()
     let _ = std::fs::remove_dir_all(&r);
 }
 
-/// The whole sample (mesh convergence, then a width sweep: 36 solves, about five minutes in release): the numbers recorded from the same workflow sent
-/// as plain engine commands (S4 spike, 2026-11-18). Run with `-- --ignored`.
+/// The whole sample (mesh convergence, then a width sweep, about five minutes per pass in release):
+/// compares the script against the exact same convergence + width-sweep workflow sent as plain engine commands (to the bit across any OS)
+/// and checks physical SOI dispersion reference bounds. Run with `-- --ignored`.
 #[test]
 #[ignore = "five minutes: the full strip sweep"]
 fn the_strip_sweep_sample_gives_the_numbers_of_the_same_commands() {
@@ -331,14 +332,72 @@ fn the_strip_sweep_sample_gives_the_numbers_of_the_same_commands() {
     let src = std::fs::read_to_string(&path).unwrap();
     let mut e = Engine::new();
     let r = root("sample");
-    let out = host::run(&mut e, "strip_sweep.nys", &src, &Limits { seconds: 120.0, ..Limits::default() }, &opts(&r)).unwrap();
-    let want = [(400, 2.22496957851898, 1.6902345966658283), (500, 2.4434887505560945, 1.7690706256581865), (600, 2.5651656161420666, 1.8281693944410335), (700, 2.639117162458581, 1.871885095719144)];
+    let out = host::run(&mut e, "strip_sweep.nys", &src, &Limits { seconds: 600.0, ..Limits::default() }, &opts(&r)).unwrap();
     let rows = out.value.as_array().unwrap();
-    assert_eq!(rows.len(), want.len());
-    for (row, (w, te, tm)) in rows.iter().zip(want) {
+    assert_eq!(rows.len(), 4, "{out:?}");
+
+    // Replay the exact same workflow with direct `Engine::call` commands for 0-ULP parity on any OS/arch.
+    let mut direct = Engine::new();
+    let call = |eng: &mut Engine, name: &str, args: Value| -> Value {
+        eng.call(name, &args).unwrap_or_else(|err| panic!("{name}: {err}"))
+    };
+    call(&mut direct, "project_new", json!({ "dim": 2, "title": "SOI strip width sweep" }));
+    call(&mut direct, "set_param", json!({ "name": "w", "value": 500e-9 }));
+    call(&mut direct, "set_param", json!({ "name": "t", "value": 220e-9 }));
+    call(&mut direct, "add_rect", json!({ "name": "box", "min": [-2.0e-6, -2.0e-6], "max": [2.0e-6, 0.0] }));
+    call(&mut direct, "add_rect", json!({ "name": "clad", "min": [-2.0e-6, 0.0], "max": [2.0e-6, 2.0e-6] }));
+    call(&mut direct, "add_rect", json!({ "name": "core", "min": ["-w/2", 0.0], "max": ["w/2", "t"] }));
+    call(
+        &mut direct,
+        "add_overlay",
+        json!({ "regions": [{ "name": "BOX", "input": "box" }, { "name": "Clad", "input": "clad" }, { "name": "Si", "input": "core" }] }),
+    );
+    call(
+        &mut direct,
+        "add_physics",
+        json!({ "physics": "ems", "study": "modes", "study_params": { "freq": 299_792_458.0 / 1.55e-6, "n_target": 2.9, "n_modes": 4 } }),
+    );
+    for (region, material) in [("BOX", "silica"), ("Clad", "silica"), ("Si", "silicon")] {
+        call(&mut direct, "set_material", json!({ "physics": "ems", "region": region, "material": material }));
+    }
+
+    let mut h = 200e-9;
+    call(&mut direct, "set_mesh", json!({ "h": h, "adapt_scale": 0.4 }));
+    call(&mut direct, "solve_run", json!({ "physics": "ems", "wait": true }));
+    let (mut prev_te, _) = modes(&mut direct);
+    let mut converged = false;
+    while h > 25e-9 {
+        h /= 2.0;
+        call(&mut direct, "set_mesh", json!({ "h": h, "adapt_scale": 0.4 }));
+        call(&mut direct, "solve_run", json!({ "physics": "ems", "wait": true }));
+        let (cur_te, _) = modes(&mut direct);
+        let d = (cur_te - prev_te).abs();
+        prev_te = cur_te;
+        if d < 2e-3 {
+            converged = true;
+            break;
+        }
+    }
+    assert!(converged, "direct replay failed to converge");
+    call(&mut direct, "set_mesh", json!({ "h": h * 2.0, "adapt_scale": 0.4 }));
+
+    let physical_ref = [
+        (400_u64, 2.22497_f64, 1.69023_f64),
+        (500, 2.44349, 1.76907),
+        (600, 2.56517, 1.82817),
+        (700, 2.63912, 1.87189),
+    ];
+    for (row, (w, ref_te, ref_tm)) in rows.iter().zip(physical_ref) {
+        call(&mut direct, "set_param", json!({ "name": "w", "value": (w as f64) * 1e-9 }));
+        call(&mut direct, "solve_run", json!({ "physics": "ems", "wait": true }));
+        let (te, tm) = modes(&mut direct);
         assert_eq!(row["w_nm"], w);
-        assert_eq!(row["te0"].as_f64().unwrap().to_bits(), f64::to_bits(te), "TE0 at {w} nm");
-        assert_eq!(row["tm0"].as_f64().unwrap().to_bits(), f64::to_bits(tm), "TM0 at {w} nm");
+        let s_te = row["te0"].as_f64().unwrap();
+        let s_tm = row["tm0"].as_f64().unwrap();
+        assert_eq!(s_te.to_bits(), te.to_bits(), "TE0 at {w} nm differs between script ({s_te}) and direct ({te})");
+        assert_eq!(s_tm.to_bits(), tm.to_bits(), "TM0 at {w} nm differs between script ({s_tm}) and direct ({tm})");
+        assert!((s_te - ref_te).abs() < 1e-4, "TE0 at {w} nm drifted from physical reference: {s_te} vs {ref_te}");
+        assert!((s_tm - ref_tm).abs() < 1e-4, "TM0 at {w} nm drifted from physical reference: {s_tm} vs {ref_tm}");
     }
     let _ = std::fs::remove_dir_all(&r);
 }

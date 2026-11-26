@@ -33,15 +33,18 @@ Copyright (C) 2026 p-j-r. A commercial licence is available from the copyright h
 cargo run --release -p nyx                          # the application
 cargo test --release --workspace                    # all tests (a few minutes); `-- --ignored` adds the slow ones
 cargo clippy --release --workspace --all-targets --no-deps -- -D warnings
-bash tools/package_dist.sh                          # release programs in dist/<name>/ with LICENSE, NOTICE and the font licence
+bash tools/vvuq_ci.sh --tier 1                      # local VVUQ fast gate (PowerShell mirror: .\tools\vvuq_ci.ps1 -Tier 1)
+bash tools/package_dist.sh                          # release programs in dist/<name>/ with LICENSE, NOTICE, nyx-setup, and zip
 ```
 
 * Rust 1.99.1 (pinned in `rust-toolchain.toml`). Always build with `--release`: the solvers are unusably slow otherwise. The first build takes several
   minutes (egui, wgpu, faer).
-* Results files need the HDF5 library (cargo feature `hdf5`, on by default): set `HDF5_DIR` to its prefix (`.cargo/config.toml` has the value of the
-  development machine) and put its `bin` folder on `PATH`.
-* A nyx install is `nyx`, `nyx-worker` (solves in a child process) and `nyx-script-worker` (runs scripts) side by side, plus `nyx-mcp` and `nyx-connect`
-  for AI hosts. `cargo build --release -p nyx-script` before `cargo test -p nyx-mcp`.
+* Results files (`results.h5`, cargo feature `hdf5`, on by default) use 100% pure-Rust `hdf5-pure` + `zlib-rs` (ADR 107): **no external `HDF5_DIR`,
+  C library, or `hdf5.dll` is required** to build or run. `.cargo/config.toml` sets a shared `target-dir = "../nyx2-target"` for colocated `jj` workspaces.
+* A nyx install is `nyx`, `nyx-worker` (solves in a child process) and `nyx-script-worker` (runs scripts) side by side, plus `nyx-mcp`, `nyx-connect`
+  (AI hosts), and `nyx-uninstall`. `cargo build --release -p nyx-script` before `cargo test -p nyx-mcp`.
+* Cross-OS release bundles (`.zip`, self-extracting `nyx-setup`, `.nyxpack`, and macOS `.dmg`) are built by `nyx-pack` locally or via
+  [`.github/workflows/release.yml`](.github/workflows/release.yml) on Windows, Linux, and macOS (`arm64` + `x86_64`).
 * Several jj workspaces on one machine should each set `CARGO_TARGET_DIR`; `CLAUDE.md` has the conventions and the checks.
 
 [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md) explains in plain language what the program does from mesh to picture and what every line of the solver log
