@@ -228,13 +228,14 @@ fn a_constant_field_is_in_the_second_order_space_on_a_quadratic_image_of_a_box()
 
 const C0: f64 = 299_792_458.0;
 
-/// Mean relative error of the three modes of the lowest triplet (k r = 2.7437) of a PEC sphere of radius `r`, order 2.
+/// Mean relative error of the three modes of the lowest triplet (exact TM101 root k R = 2.743707269992266) of a PEC sphere of radius `r`, order 2.
 fn sphere_error(r: f64, h: f64, curved: bool) -> (f64, usize) {
     let mut opts = femcore::meshing::geomdrive::GeomMeshOpts::new(h);
     opts.curved = curved;
     let mesh = femcore::meshing::geomdrive3::sphere_cavity_with(r, &opts).unwrap().mesh;
     assert_eq!(mesh.has_curved(), curved);
-    let exact = C0 * 2.7437 / (2.0 * std::f64::consts::PI * r);
+    const KR_TM101: f64 = 2.743707269992266;
+    let exact = C0 * KR_TM101 / (2.0 * std::f64::consts::PI * r);
     let mut p = common::emw();
     p.order = 2;
     p.materials.default.insert("eps_r".into(), 1.0);
@@ -247,22 +248,108 @@ fn sphere_error(r: f64, h: f64, curved: bool) -> (f64, usize) {
 }
 
 #[test]
-#[ignore = "slow: four sphere meshes, straight and curved"]
 fn curved_edges_raise_the_convergence_rate_of_the_pec_sphere_cavity() {
     let r = 0.05;
     let hs = [r / 2.5, r / 3.5, r / 5.0, r / 7.0];
-    let mut rows = vec![];
+    let mut straight_errs = vec![];
+    let mut curved_errs = vec![];
     for &h in &hs {
         let (es, ns) = sphere_error(r, h, false);
         let (ec, nc) = sphere_error(r, h, true);
         eprintln!("h = r/{:.1}: straight {es:.3e} ({ns} cells), curved {ec:.3e} ({nc} cells)", r / h);
-        rows.push((es, ec));
+        straight_errs.push(es);
+        curved_errs.push(ec);
     }
-    let rate = |a: f64, b: f64, h0: f64, h1: f64| (a / b).ln() / (h0 / h1).ln();
-    let (rs, rc) = (rate(rows[1].0, rows[3].0, hs[1], hs[3]), rate(rows[1].1, rows[3].1, hs[1], hs[3]));
-    eprintln!("rate over the finer sizes: straight {rs:.2}, curved {rc:.2}");
-    assert!(rc > rs + 0.5, "curved rate {rc} vs straight {rs}");
-    assert!(rows[1].1 * 5.0 < rows[1].0, "at the middle mesh curved {} vs straight {}", rows[1].1, rows[1].0);
+    let rep_s = femcore::vvuq::convergence_rate(&hs, &straight_errs).unwrap();
+    let rep_c = femcore::vvuq::convergence_rate(&hs, &curved_errs).unwrap();
+    let p_straight = rep_s.ols_slope;
+    let p_curved = rep_c.ols_slope;
+    eprintln!(
+        "OLS convergence rate: straight {p_straight:.2} (asym {:.2}), curved {p_curved:.2} (asym {:.2})",
+        rep_s.asymptotic_slope, rep_c.asymptotic_slope
+    );
+    assert!(p_curved >= 3.5, "curved convergence rate {p_curved:.3} < 3.5 (errs {curved_errs:?})");
+    assert!(p_curved > p_straight + 1.0, "curved rate {p_curved:.3} must exceed straight {p_straight:.3} + 1.0");
+    assert!(
+        curved_errs[1] * 5.0 < straight_errs[1],
+        "at middle mesh curved {} vs straight {}",
+        curved_errs[1],
+        straight_errs[1]
+    );
+}
+
+#[test]
+fn r34_curved_spherical_pml_cavity_and_postsolve_metrics() {
+    use femcore::meshing::geomdrive::{evaluate, GeomMeshOpts};
+    use femcore::meshing::geomdrive3::mesh_geom_3d;
+    use femcore::props::{Pml, PmlCoord};
+    use geom::model::{Model, RegionKind};
+    use nyx_physics::Scalar;
+
+    let (r_core, r_air, r_pml) = (0.03, 0.045, 0.065);
+    let mut m = Model::new_3d();
+    let pml_s = m.sphere("pml", (0.0, 0.0, 0.0), r_pml);
+    let air_s = m.sphere("air", (0.0, 0.0, 0.0), r_air);
+    let core_s = m.sphere("core", (0.0, 0.0, 0.0), r_core);
+    m.overlay_full(
+        &[
+            ("pml", pml_s, RegionKind::Material, None),
+            ("air", air_s, RegionKind::Material, None),
+            ("core", core_s, RegionKind::Material, None),
+        ],
+        &[],
+    );
+    let mut opts = GeomMeshOpts::new(0.020);
+    opts.curved = true;
+    let g = mesh_geom_3d(evaluate(&m.list).unwrap(), &opts).unwrap();
+    assert!(g.mesh.has_curved(), "3-shell spherical cavity+PML must have CurvedTet elements");
+    let (d_core, d_air, d_pml) = (g.domain("core").unwrap(), g.domain("air").unwrap(), g.domain("pml").unwrap());
+
+    let solve_pml = |strength: f64| -> (f64, f64, f64) {
+        let mut p = common::emw();
+        p.order = 2;
+        p.materials.set(d_core, "eps_r", 16.0);
+        p.materials.set(d_air, "eps_r", 1.0);
+        p.materials.set(d_pml, "eps_r", 1.0);
+        p.materials.pml.insert(
+            d_pml,
+            Pml {
+                coord: PmlCoord::Spherical { center: [0.0; 3], r_in: r_air, thickness: r_pml - r_air },
+                strength,
+                order: 2.0,
+                re: 1.0,
+                ..Pml::default()
+            },
+        );
+        // Dielectric sphere TE101-like Mie resonance: k0 * r_core * sqrt(16) ~ pi => f ~ 1.25 GHz
+        p.study = nyx_ems::Study::Cavity { n_modes: 4, f_search: 1.22e9 };
+        let res = common::solve(&g.mesh, &p).unwrap();
+        let scalar = |name: &str| -> Option<f64> {
+            res.scalars.iter().find_map(|(k, v)| match (k == name, v) {
+                (true, Scalar::Num(x)) => Some(*x),
+                _ => None,
+            })
+        };
+        let mut best: Option<(f64, f64, f64)> = None;
+        for (i, sol) in res.solutions.iter().enumerate() {
+            let idx = i + 1;
+            let lf = scalar(&format!("layer fraction {idx}")).expect("layer fraction emitted");
+            assert!(lf.is_finite() && (0.0..=1.0).contains(&lf), "layer_fraction {idx} = {lf}");
+            let f_re = sol.value.unwrap();
+            let q = scalar(&format!("Q{idx}")).unwrap_or(f64::INFINITY);
+            if lf < 0.25 && f_re > 0.5e9 && best.is_none() {
+                best = Some((f_re, q, lf));
+            }
+        }
+        best.expect("at least one guided Mie core resonance with layer_fraction < 0.25")
+    };
+
+    let (f3, q3, lf3) = solve_pml(3.0);
+    let (f5, q5, lf5) = solve_pml(5.0);
+    let rel_f = ((f3 - f5) / f3).abs();
+    eprintln!("R34 curved spherical PML: s=3 f={f3:.4e} Q={q3:.2} lf={lf3:.3}, s=5 f={f5:.4e} Q={q5:.2} lf={lf5:.3}");
+    assert!(q3.is_finite() && q3 > 1.0 && q5.is_finite() && q5 > 1.0, "expected passive radiative Q: {q3}, {q5}");
+    assert!(rel_f < 0.02, "curved spherical PML resonant frequency drifted by {rel_f:.3e} across strengths");
 }
 
 #[test]

@@ -160,6 +160,12 @@ pub(crate) fn assemble_modes_with_bcs_and_symmetry(
     pmc_labels: &[i32],
     symmetry: Symmetry,
 ) -> Result<ModeAssembly, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex 2D mode kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -429,6 +435,12 @@ pub fn mode_fields_cells(
 /// when the problem has absorbing layers, a tilted crystal, or a complex pair among the wanted eigenvalues. The result carries the
 /// polarization of the modes (scalars and log, as before the move; the analysis itself is in `Solved::analysis`).
 pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex 2D mode kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     if problem.materials.has_pml()
         || problem.materials.has_complex_permittivity()
         || problem.surface_impedance.iter().any(|b| b.r_s > 0.0)

@@ -510,6 +510,92 @@ impl PerturbativeIbcEvaluator {
     }
 }
 
+/// Computes curved (quadratic edge) arc length using 3-point Gauss-Legendre quadrature on `[0, 1]`.
+fn curved_edge_length(mesh: &Discretisation, curved_edges: &HashMap<(u32, u32), [f64; 3]>, a: u32, b: u32) -> f64 {
+    let p0 = pt3(mesh, a);
+    let p1 = pt3(mesh, b);
+    let key = (a.min(b), a.max(b));
+    let Some(&pm) = curved_edges.get(&key) else {
+        return norm3(sub3(p1, p0));
+    };
+    const T: [f64; 3] = [0.112_701_665_379_258_3, 0.5, 0.887_298_334_620_741_7];
+    const W: [f64; 3] = [5.0 / 18.0, 4.0 / 9.0, 5.0 / 18.0];
+    let mut len = 0.0;
+    for (&t, &w) in T.iter().zip(&W) {
+        let dl0 = 4.0 * t - 3.0;
+        let dl1 = 4.0 * t - 1.0;
+        let dlm = 4.0 * (1.0 - 2.0 * t);
+        let dx = [
+            dl0 * p0[0] + dl1 * p1[0] + dlm * pm[0],
+            dl0 * p0[1] + dl1 * p1[1] + dlm * pm[1],
+            dl0 * p0[2] + dl1 * p1[2] + dlm * pm[2],
+        ];
+        len += w * norm3(dx);
+    }
+    len
+}
+
+/// Computes isoparametric triangle area and unit normal (pointing toward an adjacent cell centroid when
+/// `orient_into_cell` is true) using `CurvedTet::dx_dlam` on curved elements.
+fn curved_tri_area_and_normal(
+    mesh: &Discretisation,
+    face_to_cells: &HashMap<[u32; 3], Vec<(usize, [usize; 3])>>,
+    tri_sorted: [u32; 3],
+    orient_into_cell: bool,
+) -> Option<(f64, [f64; 3])> {
+    let adj = face_to_cells.get(&tri_sorted)?;
+    let (ci, lf) = adj[0];
+    let v = mesh.cell(ci);
+    let (p0, p1, p2) = (pt3(mesh, v[lf[0]]), pt3(mesh, v[lf[1]]), pt3(mesh, v[lf[2]]));
+    let mut n_flat = cross3(sub3(p1, p0), sub3(p2, p0));
+    let n_len = norm3(n_flat);
+    if n_len <= 0.0 {
+        return None;
+    }
+    if orient_into_cell {
+        let opp = 6 - lf[0] - lf[1] - lf[2];
+        let p_opp = pt3(mesh, v[opp]);
+        if dot3(n_flat, sub3(p_opp, p0)) < 0.0 {
+            n_flat = [-n_flat[0], -n_flat[1], -n_flat[2]];
+        }
+    }
+    let n_ref = [n_flat[0] / n_len, n_flat[1] / n_len, n_flat[2] / n_len];
+    if !mesh.cell_is_curved(ci) {
+        return Some((0.5 * n_len, n_ref));
+    }
+    let ct = CurvedTet::new(mesh.cell_geometry_nodes(ci));
+    let quad2 = quad_rule(2, CURVED_QUAD_DEGREE);
+    let mut area_acc = 0.0;
+    let mut n_acc = [0.0; 3];
+    for q in 0..quad2.w.len() {
+        let l2 = &quad2.lam[q];
+        let mut lam4 = [0.0; 4];
+        lam4[lf[0]] = l2[0];
+        lam4[lf[1]] = l2[1];
+        lam4[lf[2]] = l2[2];
+        let d = ct.dx_dlam(&lam4);
+        let nr = cross3(sub3(d[lf[1]], d[lf[0]]), sub3(d[lf[2]], d[lf[0]]));
+        let nl = norm3(nr);
+        if nl > 1e-30 {
+            let mut nq = [nr[0] / nl, nr[1] / nl, nr[2] / nl];
+            if dot3(nq, n_ref) < 0.0 {
+                nq = [-nq[0], -nq[1], -nq[2]];
+            }
+            let wq = quad2.w[q] * 0.5 * nl;
+            area_acc += wq;
+            n_acc[0] += wq * nq[0];
+            n_acc[1] += wq * nq[1];
+            n_acc[2] += wq * nq[2];
+        }
+    }
+    let nl_tot = norm3(n_acc);
+    if nl_tot > 1e-30 && area_acc > 0.0 {
+        Some((area_acc, [n_acc[0] / nl_tot, n_acc[1] / nl_tot, n_acc[2] / nl_tot]))
+    } else {
+        Some((0.5 * n_len, n_ref))
+    }
+}
+
 /// Evaluates the tangential Nedelec basis vectors `psi_{s,||} = w_s - (w_s . n) n` at the 6-point Dunavant
 /// quadrature points on a single triangle `tri_sorted = [v0, v1, v2]`.
 /// Returns `(area, n_hat, bnd_dofs, quad_weights, psi_parallel_at_q)` where `psi_parallel_at_q[q][k]` is the
@@ -562,6 +648,7 @@ fn eval_triangle_tangential_basis(
     let mut psi_q = Vec::with_capacity(nq);
     let (mut w, mut cu) = (Vec::new(), Vec::new());
 
+    let (mut area_acc, mut n_acc) = (0.0_f64, [0.0_f64; 3]);
     for q in 0..nq {
         let l2 = &quad2.lam[q];
         let mut lam4 = [0.0; 4];
@@ -596,11 +683,19 @@ fn eval_triangle_tangential_basis(
             let wn = dot3(ws, n_q);
             row.push([ws[0] - wn * n_q[0], ws[1] - wn * n_q[1], ws[2] - wn * n_q[2]]);
         }
-        weights.push(quad2.w[q] * area_q);
+        let wq = quad2.w[q] * area_q;
+        area_acc += wq;
+        n_acc[0] += wq * n_q[0];
+        n_acc[1] += wq * n_q[1];
+        n_acc[2] += wq * n_q[2];
+        weights.push(wq);
         psi_q.push(row);
     }
+    let n_len_acc = norm3(n_acc);
+    let n_hat_curved =
+        if n_len_acc > 1e-30 { [n_acc[0] / n_len_acc, n_acc[1] / n_len_acc, n_acc[2] / n_len_acc] } else { n_hat };
 
-    Ok((area, n_hat, bnd_dofs, weights, psi_q))
+    Ok((area_acc, n_hat_curved, bnd_dofs, weights, psi_q))
 }
 
 /// Deduplicates and assembles all 3D `pec`, `surface_impedance`, and `lumped_jj` boundary conditions
@@ -642,6 +737,13 @@ fn assemble_ibc_and_jj_3d_with_mode(
     let geo = geometry(mesh);
     let face_to_cell = build_face_to_cell_3d(mesh);
 
+    let face_to_cells = build_face_to_cells_3d(mesh);
+    let curved_edges: HashMap<(u32, u32), [f64; 3]> = if mesh.has_curved() {
+        mesh.edge_node_list().into_iter().map(|(pr, p)| ((pr[0].min(pr[1]), pr[0].max(pr[1])), p)).collect()
+    } else {
+        HashMap::new()
+    };
+
     let mut seen_pec = BTreeSet::new();
     let mut pec_tris = Vec::new();
     for f in 0..mesh.n_facets() {
@@ -665,17 +767,8 @@ fn assemble_ibc_and_jj_3d_with_mode(
     let mut face_sheet_map: HashMap<[u32; 3], SheetCellKind> = HashMap::new();
 
     for &tri in &pec_tris {
-        if let Some(&(ci, lf)) = face_to_cell.get(&tri) {
-            let v = mesh.cell(ci);
-            let (p0, p1, p2) = (pt3(mesh, v[lf[0]]), pt3(mesh, v[lf[1]]), pt3(mesh, v[lf[2]]));
-            let opp = 6 - lf[0] - lf[1] - lf[2];
-            let p_opp = pt3(mesh, v[opp]);
-            let mut n_raw = cross3(sub3(p1, p0), sub3(p2, p0));
-            if dot3(n_raw, sub3(p_opp, p0)) < 0.0 {
-                n_raw = [-n_raw[0], -n_raw[1], -n_raw[2]];
-            }
-            let nl = norm3(n_raw).max(1e-300);
-            face_sheet_map.insert(tri, SheetCellKind::Pec { n_hat: [n_raw[0] / nl, n_raw[1] / nl, n_raw[2] / nl] });
+        if let Some((_, n_hat)) = curved_tri_area_and_normal(mesh, &face_to_cells, tri, true) {
+            face_sheet_map.insert(tri, SheetCellKind::Pec { n_hat });
         }
     }
 
@@ -710,12 +803,13 @@ fn assemble_ibc_and_jj_3d_with_mode(
         let mut area_tot = 0.0_f64;
         let mut edge_counts: BTreeMap<(u32, u32), usize> = BTreeMap::new();
         for &tri in &bc_tris {
-            let (p0, p1, p2) = (pt3(mesh, tri[0]), pt3(mesh, tri[1]), pt3(mesh, tri[2]));
-            let l01 = norm3(sub3(p1, p0));
-            let l12 = norm3(sub3(p2, p1));
-            let l20 = norm3(sub3(p0, p2));
+            let l01 = curved_edge_length(mesh, &curved_edges, tri[0], tri[1]);
+            let l12 = curved_edge_length(mesh, &curved_edges, tri[1], tri[2]);
+            let l20 = curved_edge_length(mesh, &curved_edges, tri[2], tri[0]);
             edge_len_sum += (l01 + l12 + l20) / 3.0;
-            area_tot += 0.5 * norm3(cross3(sub3(p1, p0), sub3(p2, p0)));
+            if let Some((area_t, _)) = curved_tri_area_and_normal(mesh, &face_to_cells, tri, false) {
+                area_tot += area_t;
+            }
             for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])] {
                 *edge_counts.entry((a.min(b), a.max(b))).or_insert(0) += 1;
             }
@@ -724,7 +818,7 @@ fn assemble_ibc_and_jj_3d_with_mode(
         let perim_tot: f64 = edge_counts
             .iter()
             .filter(|(_, &cnt)| cnt == 1)
-            .map(|(&(a, b), _)| norm3(sub3(pt3(mesh, b), pt3(mesh, a))))
+            .map(|(&(a, b), _)| curved_edge_length(mesh, &curved_edges, a, b))
             .sum();
         let est_tris_across_width = if perim_tot > 0.0 && h_sheet_mean > 0.0 {
             (2.0 * area_tot / perim_tot) / h_sheet_mean
@@ -743,18 +837,8 @@ fn assemble_ibc_and_jj_3d_with_mode(
         if use_perturbative {
             for &key in &bc_tris {
                 pert_ibc_tris.push(PerturbativeIbcTri { tri: key, l_k_sq: bc.l_k_sq, r_s: bc.r_s, f_ref });
-                if let Some(&(ci, lf)) = face_to_cell.get(&key) {
-                    let v = mesh.cell(ci);
-                    let (p0, p1, p2) = (pt3(mesh, v[lf[0]]), pt3(mesh, v[lf[1]]), pt3(mesh, v[lf[2]]));
-                    let opp = 6 - lf[0] - lf[1] - lf[2];
-                    let p_opp = pt3(mesh, v[opp]);
-                    let mut n_raw = cross3(sub3(p1, p0), sub3(p2, p0));
-                    if dot3(n_raw, sub3(p_opp, p0)) < 0.0 {
-                        n_raw = [-n_raw[0], -n_raw[1], -n_raw[2]];
-                    }
-                    let nl = norm3(n_raw).max(1e-300);
-                    face_sheet_map
-                        .insert(key, SheetCellKind::Pec { n_hat: [n_raw[0] / nl, n_raw[1] / nl, n_raw[2] / nl] });
+                if let Some((_, n_hat)) = curved_tri_area_and_normal(mesh, &face_to_cells, key, true) {
+                    face_sheet_map.insert(key, SheetCellKind::Pec { n_hat });
                 }
             }
             continue;
@@ -828,7 +912,7 @@ fn assemble_ibc_and_jj_3d_with_mode(
             return Err(format!("lumped_jj '{}' has no active boundary triangles", bc.name));
         }
 
-        // Compute consistent sheet normal n_hat across the port triangles
+        // Compute consistent sheet normal n_hat across the port triangles (curved isoparametric when present)
         let mut n_acc = [0.0; 3];
         let mut n_ref: Option<[f64; 3]> = None;
         let mut port_verts = BTreeSet::new();
@@ -836,8 +920,10 @@ fn assemble_ibc_and_jj_3d_with_mode(
             for v in tri {
                 port_verts.insert(v);
             }
-            let (p0, p1, p2) = (pt3(mesh, tri[0]), pt3(mesh, tri[1]), pt3(mesh, tri[2]));
-            let mut nr = cross3(sub3(p1, p0), sub3(p2, p0));
+            let Some((area_t, n_t)) = curved_tri_area_and_normal(mesh, &face_to_cells, tri, false) else {
+                continue;
+            };
+            let mut nr = [area_t * n_t[0], area_t * n_t[1], area_t * n_t[2]];
             if let Some(r) = n_ref {
                 if dot3(nr, r) < 0.0 {
                     nr = [-nr[0], -nr[1], -nr[2]];
@@ -1491,6 +1577,7 @@ pub fn add_ibc_2d_waveguide_mixed(
     }
     let net = ned.n_dofs;
     let edge_to_cell = build_edge_to_cell_2d_mixed(mesh);
+
     let mut seen_pec = BTreeSet::new();
     for f in 0..mesh.n_facets() {
         if pec_labels.contains(&mesh.facet_labels[f]) {
@@ -1586,6 +1673,7 @@ pub fn add_ibc_2d_axisym_mixed(
     }
     let net = ned.n_dofs;
     let edge_to_cell = build_edge_to_cell_2d_mixed(mesh);
+
     let mut seen_pec = BTreeSet::new();
     for f in 0..mesh.n_facets() {
         if pec_labels.contains(&mesh.facet_labels[f]) {

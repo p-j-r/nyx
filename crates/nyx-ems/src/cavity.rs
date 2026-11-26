@@ -371,6 +371,22 @@ pub fn assemble_maxwell_with_pml(
     mu_inv: &[C3],
     pml: Option<&EmPmlTable>,
 ) -> (CCsr, CCsr) {
+    let (k, m, _) = assemble_maxwell_with_source(mesh, ned, eps, mu_inv, pml, &femcore::vvuq::UniformSource);
+    (k, m)
+}
+
+/// Zero-overhead monomorphized 3D Maxwell assembly supporting custom volumetric `SourceField<3>` forcing.
+///
+/// When `S = femcore::vvuq::UniformSource`, `source.is_uniform()` is a compile-time constant `true`, so no RHS
+/// load vector or non-PML physical quadrature coordinates are evaluated.
+pub fn assemble_maxwell_with_source<S: femcore::vvuq::SourceField<3>>(
+    mesh: &Discretisation,
+    ned: &Ned3,
+    eps: &[C3],
+    mu_inv: &[C3],
+    pml: Option<&EmPmlTable>,
+    source: &S,
+) -> (CCsr, CCsr, Vec<C>) {
     let geo = geometry(mesh);
     let quad = quad_rule(3, 4);
     // cells with a curved edge (ADR 82) are integrated with the geometry of their ten nodes; every other cell keeps the affine path.
@@ -450,7 +466,515 @@ pub fn assemble_maxwell_with_pml(
             }
         })
     };
-    (run(0), run(1))
+    let rhs = if source.is_uniform() {
+        Vec::new()
+    } else {
+        let mut f_vol = vec![c(0.0, 0.0); n];
+        let (mut w, mut cu) = (Vec::new(), Vec::new());
+        let mut gs = [[0.0; 3]; 4];
+        let quad_vol = quad_rule(3, 6);
+        for ci in 0..nc {
+            let gid = ned.key_pairs(mesh, ci);
+            let dom = mesh.cell_labels[ci] as u32;
+            for b in 0..4 {
+                for k in 0..3 {
+                    gs[b][k] = geo.g[ci * 12 + b * 3 + k];
+                }
+            }
+            if curved_cell[ci] {
+                let nodes10 = mesh.cell_geometry_nodes(ci);
+                let ct = CurvedTet::new(nodes10);
+                for q in 0..cquad.w.len() {
+                    let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
+                    let (gq, det) = ct.jacobian(&lam);
+                    basis3_keyed(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
+                    let wq = cquad.w[q] * det.abs() / 6.0;
+                    let xq = ct.position(&lam);
+                    let fre = source.volume_rhs_re(xq, 0.0, dom);
+                    let fim = source.volume_rhs_im(xq, 0.0, dom);
+                    for s in 0..nb {
+                        let dot_r = w[s][0] * fre[0] + w[s][1] * fre[1] + w[s][2] * fre[2];
+                        let dot_i = w[s][0] * fim[0] + w[s][1] * fim[1] + w[s][2] * fim[2];
+                        f_vol[ned.cell_dofs[ci][s]] += c(dot_r * wq, dot_i * wq);
+                    }
+                }
+            } else {
+                let vs = mesh.cell(ci);
+                let pts = [
+                    mesh.point(vs[0] as usize),
+                    mesh.point(vs[1] as usize),
+                    mesh.point(vs[2] as usize),
+                    mesh.point(vs[3] as usize),
+                ];
+                for q in 0..quad_vol.w.len() {
+                    let lam = [quad_vol.lam[q][0], quad_vol.lam[q][1], quad_vol.lam[q][2], quad_vol.lam[q][3]];
+                    basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                    let wq = quad_vol.w[q] * geo.vol[ci];
+                    let mut xq = [0.0; 3];
+                    for b in 0..4 {
+                        for k in 0..3 {
+                            xq[k] += lam[b] * pts[b][k];
+                        }
+                    }
+                    let fre = source.volume_rhs_re(xq, 0.0, dom);
+                    let fim = source.volume_rhs_im(xq, 0.0, dom);
+                    for s in 0..nb {
+                        let dot_r = w[s][0] * fre[0] + w[s][1] * fre[1] + w[s][2] * fre[2];
+                        let dot_i = w[s][0] * fim[0] + w[s][1] * fim[1] + w[s][2] * fim[2];
+                        f_vol[ned.cell_dofs[ci][s]] += c(dot_r * wq, dot_i * wq);
+                    }
+                }
+            }
+        }
+        f_vol
+    };
+    (run(0), run(1), rhs)
+}
+
+/// Solution and error norms of the 3D Maxwell curl-curl MMS BVP solver (`solve_maxwell_mms`).
+pub struct MaxwellMmsResult {
+    pub ned: Ned3,
+    pub u: Vec<C>,
+    pub l2_rel_error: f64,
+    pub curl_rel_error: f64,
+    pub hcurl_rel_error: f64,
+}
+
+/// Solves `(curl(mu_inv curl E) - k0^2 eps E = f)` on a 3D tetrahedral mesh (straight or `CurvedTet`)
+/// using monomorphized `S: femcore::vvuq::SourceField<3>` for volume forcing, non-homogeneous tangential
+/// Dirichlet data (`dirichlet_labels`), and optional Robin/Neumann trace data (`robin_labels`).
+#[allow(clippy::too_many_arguments)]
+pub fn solve_maxwell_mms<S: femcore::vvuq::SourceField<3>>(
+    mesh: &Discretisation,
+    eps: &[C3],
+    mu_inv: &[C3],
+    k0: f64,
+    order: usize,
+    dirichlet_labels: &[i32],
+    robin_labels: &[i32],
+    robin_alpha: C,
+    source: &S,
+    exact_e: &(dyn Fn([f64; 3]) -> [C; 3] + Sync),
+    exact_curl: &(dyn Fn([f64; 3]) -> [C; 3] + Sync),
+) -> Result<MaxwellMmsResult, String> {
+    if mesh.dim != 3 {
+        return Err("solve_maxwell_mms requires a 3D mesh".into());
+    }
+    let vkey: Vec<u32> = (0..mesh.n_points() as u32).collect();
+    let ned = Ned3::new(mesh, order, vkey);
+    let n = ned.n_dofs();
+    let (k_mat, m_mat, mut rhs) = assemble_maxwell_with_source(mesh, &ned, eps, mu_inv, None, source);
+    if rhs.is_empty() {
+        rhs.resize(n, c(0.0, 0.0));
+    }
+    let mut a_mat = k_mat.add_scaled(&m_mat, c(-(k0 * k0), 0.0));
+
+    let face_to_cell = build_face_to_cell_3d(mesh);
+    let geo = geometry(mesh);
+    let quad2 = quad_rule(2, 6);
+
+    // Helper evaluating facet quadrature points `(xq, wq, n_q, d_dofs, psi_q)` with `CurvedTet` support.
+    let eval_facet = |tri_sorted: [u32; 3]| -> Result<(Vec<[f64; 3]>, Vec<f64>, Vec<[f64; 3]>, Vec<usize>, Vec<Vec<[f64; 3]>>), String> {
+        let &(ci, lf_raw) = face_to_cell
+            .get(&tri_sorted)
+            .ok_or_else(|| format!("MMS boundary facet {:?} has no adjacent cell", tri_sorted))?;
+        let cv = mesh.cell(ci);
+        let mut lf = [0usize; 3];
+        for (k, &tv) in tri_sorted.iter().enumerate() {
+            lf[k] = cv.iter().position(|&v| v == tv).unwrap();
+        }
+        let opp = 6 - lf[0] - lf[1] - lf[2];
+        let pt = |idx: usize| -> [f64; 3] {
+            let p = mesh.point(cv[idx] as usize);
+            [p[0], p[1], p[2]]
+        };
+        let (p0, p1, p2, p_opp) = (pt(lf[0]), pt(lf[1]), pt(lf[2]), pt(opp));
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        };
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let norm = |a: [f64; 3]| dot(a, a).sqrt();
+        let mut n_raw = cross(sub(p1, p0), sub(p2, p0));
+        if dot(n_raw, sub(p0, p_opp)) < 0.0 {
+            n_raw = [-n_raw[0], -n_raw[1], -n_raw[2]];
+        }
+        let area_flat = 0.5 * norm(n_raw);
+        let n_flat = [n_raw[0] / norm(n_raw), n_raw[1] / norm(n_raw), n_raw[2] / norm(n_raw)];
+
+        let bnd_dofs = ned.boundary_dofs(mesh, tri_sorted);
+        let cdofs = &ned.cell_dofs[ci];
+        let local_slots: Vec<usize> = bnd_dofs.iter().map(|&gd| cdofs.iter().position(|&cd| cd == gd).unwrap()).collect();
+        let gid = ned.key_pairs(mesh, ci);
+        let mut gs = [[0.0; 3]; 4];
+        for b in 0..4 {
+            for kk in 0..3 {
+                gs[b][kk] = geo.g[ci * 12 + b * 3 + kk];
+            }
+        }
+        let curved = mesh.cell_is_curved(ci).then(|| CurvedTet::new(mesh.cell_geometry_nodes(ci)));
+        let (mut w, mut cu) = (Vec::new(), Vec::new());
+        let (mut xqs, mut wqs, mut nqs, mut psis) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for q in 0..quad2.w.len() {
+            let l2 = &quad2.lam[q];
+            let mut lam4 = [0.0; 4];
+            lam4[lf[0]] = l2[0];
+            lam4[lf[1]] = l2[1];
+            lam4[lf[2]] = l2[2];
+            let (xq, area_q, n_q) = match &curved {
+                Some(ct) => {
+                    let gq = safe_curved_jacobian(ct, &lam4, &gs);
+                    basis3_keyed(order, &lam4, &gq, &gid, &mut w, &mut cu);
+                    let d = ct.dx_dlam(&lam4);
+                    let nr = cross(sub(d[lf[1]], d[lf[0]]), sub(d[lf[2]], d[lf[0]]));
+                    let nl = norm(nr);
+                    let mut nq = if nl > 1e-30 { [nr[0] / nl, nr[1] / nl, nr[2] / nl] } else { n_flat };
+                    if dot(nq, n_flat) < 0.0 {
+                        nq = [-nq[0], -nq[1], -nq[2]];
+                    }
+                    (ct.position(&lam4), if nl > 1e-30 { 0.5 * nl } else { area_flat }, nq)
+                }
+                None => {
+                    basis3_keyed(order, &lam4, &gs, &gid, &mut w, &mut cu);
+                    let xp = [
+                        l2[0] * p0[0] + l2[1] * p1[0] + l2[2] * p2[0],
+                        l2[0] * p0[1] + l2[1] * p1[1] + l2[2] * p2[1],
+                        l2[0] * p0[2] + l2[1] * p1[2] + l2[2] * p2[2],
+                    ];
+                    (xp, area_flat, n_flat)
+                }
+            };
+            let mut row = Vec::with_capacity(local_slots.len());
+            for &s in &local_slots {
+                let ws = w[s];
+                let wn = dot(ws, n_q);
+                row.push([ws[0] - wn * n_q[0], ws[1] - wn * n_q[1], ws[2] - wn * n_q[2]]);
+            }
+            xqs.push(xq);
+            wqs.push(quad2.w[q] * area_q);
+            nqs.push(n_q);
+            psis.push(row);
+        }
+        let _ = lf_raw;
+        Ok((xqs, wqs, nqs, bnd_dofs, psis))
+    };
+
+    // Assemble optional Neumann/Robin boundary terms
+    if !robin_labels.is_empty() {
+        let mut r_coo = CCoo::new(n, n);
+        let mut seen_r = std::collections::BTreeSet::new();
+        let coeff_r = c(0.0, k0) * robin_alpha;
+        for f in 0..mesh.n_facets() {
+            let label = mesh.facet_labels[f];
+            if !robin_labels.contains(&label) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let key = crate::ibc::sorted3(fv[0], fv[1], fv[2]);
+            if !seen_r.insert(key) {
+                continue;
+            }
+            let (xqs, wqs, nqs, bnd_dofs, psis) = eval_facet(key)?;
+            let nb_f = bnd_dofs.len();
+            let mut loc_r = vec![c(0.0, 0.0); nb_f * nb_f];
+            for q in 0..wqs.len() {
+                let wq = wqs[q];
+                let xq = xqs[q];
+                let n_q = nqs[q];
+                let pq = &psis[q];
+                if !source.is_uniform() {
+                    let gre = source.neumann_robin_re(xq, n_q, 0.0, label as u32);
+                    let gim = source.neumann_robin_im(xq, n_q, 0.0, label as u32);
+                    for a in 0..nb_f {
+                        let dot_r = pq[a][0] * gre[0] + pq[a][1] * gre[1] + pq[a][2] * gre[2];
+                        let dot_i = pq[a][0] * gim[0] + pq[a][1] * gim[1] + pq[a][2] * gim[2];
+                        rhs[bnd_dofs[a]] += c(dot_r * wq, dot_i * wq);
+                    }
+                }
+                if coeff_r.norm() > 0.0 {
+                    for a in 0..nb_f {
+                        for b in 0..nb_f {
+                            let dp = pq[a][0] * pq[b][0] + pq[a][1] * pq[b][1] + pq[a][2] * pq[b][2];
+                            loc_r[a * nb_f + b] += coeff_r * (dp * wq);
+                        }
+                    }
+                }
+            }
+            if coeff_r.norm() > 0.0 {
+                r_coo.push_block(&bnd_dofs, &bnd_dofs, &loc_r);
+            }
+        }
+        let r_mat = r_coo.to_csr();
+        if r_mat.nnz() > 0 {
+            a_mat = a_mat.add_scaled(&r_mat, c(1.0, 0.0));
+        }
+    }
+
+    // Collect Dirichlet boundary DOFs using canonical edge-moment + per-face 2x2 bubble interpolation.
+    // Unlike a global L^2(Gamma_D) Gram projection, decoupling edges from faces prevents O(h^{3/2})
+    // corner contamination across perpendicular faces while remaining exact for P1/P2 Nedelec on CurvedTet.
+    let mut fixed_set = std::collections::BTreeSet::new();
+    let mut dir_tris = Vec::new();
+    let mut dir_edges = std::collections::BTreeMap::new();
+    let mut seen_d = std::collections::BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        let label = mesh.facet_labels[f];
+        if !dirichlet_labels.contains(&label) {
+            continue;
+        }
+        let fv = mesh.facet(f);
+        let key = crate::ibc::sorted3(fv[0], fv[1], fv[2]);
+        if seen_d.insert(key) {
+            dir_tris.push((key, label));
+            for (ea, eb) in [(key[0], key[1]), (key[1], key[2]), (key[0], key[2])] {
+                let eid = mesh.edge_index(ea, eb);
+                dir_edges.entry(eid).or_insert(label);
+            }
+            for gd in ned.boundary_dofs(mesh, key) {
+                fixed_set.insert(gd);
+            }
+        }
+    }
+    let fixed: Vec<usize> = fixed_set.into_iter().collect();
+    let mut u_dir = vec![c(0.0, 0.0); fixed.len()];
+    if !fixed.is_empty() && !source.is_uniform() {
+        let mut idx_map = HashMap::with_capacity(fixed.len());
+        for (li, &gd) in fixed.iter().enumerate() {
+            idx_map.insert(gd, li);
+        }
+        // 5-point Gauss-Legendre on [0, 1] for exact canonical edge tangential moments
+        const GL5_T: [f64; 5] =
+            [0.046910077030668004, 0.23076534494715845, 0.5, 0.7692346550528415, 0.9530899229693319];
+        const GL5_W: [f64; 5] =
+            [0.11846344252809454, 0.23931433524968324, 0.28444444444444444, 0.23931433524968324, 0.11846344252809454];
+        for (eid, label) in dir_edges {
+            let (v0, v1) = mesh.edges()[eid];
+            let (a, b) = if (ned.vkey[v0 as usize], v0) < (ned.vkey[v1 as usize], v1) { (v0, v1) } else { (v1, v0) };
+            let pa = mesh.point(a as usize);
+            let pb = mesh.point(b as usize);
+            let pm =
+                mesh.edge_node(eid).unwrap_or([0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1]), 0.5 * (pa[2] + pb[2])]);
+            let (mut m0, mut m1) = (c(0.0, 0.0), c(0.0, 0.0));
+            for q in 0..5 {
+                let t = GL5_T[q];
+                let wq = GL5_W[q];
+                let s0 = (1.0 - t) * (1.0 - 2.0 * t);
+                let s1 = t * (2.0 * t - 1.0);
+                let s2 = 4.0 * t * (1.0 - t);
+                let d0 = 4.0 * t - 3.0;
+                let d1 = 4.0 * t - 1.0;
+                let d2 = 4.0 * (1.0 - 2.0 * t);
+                let xq = [
+                    s0 * pa[0] + s1 * pb[0] + s2 * pm[0],
+                    s0 * pa[1] + s1 * pb[1] + s2 * pm[1],
+                    s0 * pa[2] + s1 * pb[2] + s2 * pm[2],
+                ];
+                let xp = [
+                    d0 * pa[0] + d1 * pb[0] + d2 * pm[0],
+                    d0 * pa[1] + d1 * pb[1] + d2 * pm[1],
+                    d0 * pa[2] + d1 * pb[2] + d2 * pm[2],
+                ];
+                let ere = source.dirichlet_re(xq, 0.0, label as u32);
+                let eim = source.dirichlet_im(xq, 0.0, label as u32);
+                let et = c(
+                    ere[0] * xp[0] + ere[1] * xp[1] + ere[2] * xp[2],
+                    eim[0] * xp[0] + eim[1] * xp[1] + eim[2] * xp[2],
+                );
+                m0 += et * wq;
+                m1 += et * ((1.0 - 2.0 * t) * wq);
+            }
+            if order == 1 {
+                u_dir[idx_map[&eid]] = m0;
+            } else {
+                u_dir[idx_map[&(2 * eid)]] = m0;
+                u_dir[idx_map[&(2 * eid + 1)]] = m1 * 3.0;
+            }
+        }
+        if order == 2 {
+            // Canonical De Rham [P_0(f)]^2 face-moment projection in covariant Piola coordinates:
+            // int_{\hat{f}} (w - sum u_edge w_edge) . (dx/dxi_a) d\hat{A} = int_{\hat{f}} (E* - sum u_edge w_edge) . (dx/dxi_a) d\hat{A}
+            // commutes exactly with curl (curl \Pi_h^{curl} = \Pi_h^{div} curl) on both straight and CurvedTet meshes.
+            let mut w_f = Vec::new();
+            let mut cu_f = Vec::new();
+            let mut gs_f = [[0.0; 3]; 4];
+            for (key, label) in dir_tris {
+                let &(ci, _) = face_to_cell
+                    .get(&key)
+                    .ok_or_else(|| format!("MMS boundary facet {:?} has no adjacent cell", key))?;
+                let cv = mesh.cell(ci);
+                let mut lf = [0usize; 3];
+                for (k, &tv) in key.iter().enumerate() {
+                    lf[k] = cv.iter().position(|&v| v == tv).unwrap();
+                }
+                let p0 = mesh.point(cv[lf[0]] as usize);
+                let p1 = mesh.point(cv[lf[1]] as usize);
+                let p2 = mesh.point(cv[lf[2]] as usize);
+                let t0_flat = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                let t1_flat = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+                let bnd_dofs = ned.boundary_dofs(mesh, key);
+                let cdofs = &ned.cell_dofs[ci];
+                let local_slots: Vec<usize> =
+                    bnd_dofs.iter().map(|&gd| cdofs.iter().position(|&cd| cd == gd).unwrap()).collect();
+                let gid = ned.key_pairs(mesh, ci);
+                for b in 0..4 {
+                    for kk in 0..3 {
+                        gs_f[b][kk] = geo.g[ci * 12 + b * 3 + kk];
+                    }
+                }
+                let curved = mesh.cell_is_curved(ci).then(|| CurvedTet::new(mesh.cell_geometry_nodes(ci)));
+                let mut m = [[0.0_f64; 2]; 2];
+                let mut r = [c(0.0, 0.0); 2];
+                for q in 0..quad2.w.len() {
+                    let l2 = &quad2.lam[q];
+                    let wq = quad2.w[q];
+                    let mut lam4 = [0.0; 4];
+                    lam4[lf[0]] = l2[0];
+                    lam4[lf[1]] = l2[1];
+                    lam4[lf[2]] = l2[2];
+                    let (xq, t_vecs) = match &curved {
+                        Some(ct) => {
+                            let gq = safe_curved_jacobian(ct, &lam4, &gs_f);
+                            basis3_keyed(order, &lam4, &gq, &gid, &mut w_f, &mut cu_f);
+                            let d = ct.dx_dlam(&lam4);
+                            let t0 = [d[lf[1]][0] - d[lf[0]][0], d[lf[1]][1] - d[lf[0]][1], d[lf[1]][2] - d[lf[0]][2]];
+                            let t1 = [d[lf[2]][0] - d[lf[0]][0], d[lf[2]][1] - d[lf[0]][1], d[lf[2]][2] - d[lf[0]][2]];
+                            (ct.position(&lam4), [t0, t1])
+                        }
+                        None => {
+                            basis3_keyed(order, &lam4, &gs_f, &gid, &mut w_f, &mut cu_f);
+                            let xp = [
+                                l2[0] * p0[0] + l2[1] * p1[0] + l2[2] * p2[0],
+                                l2[0] * p0[1] + l2[1] * p1[1] + l2[2] * p2[1],
+                                l2[0] * p0[2] + l2[1] * p1[2] + l2[2] * p2[2],
+                            ];
+                            (xp, [t0_flat, t1_flat])
+                        }
+                    };
+                    let ere = source.dirichlet_re(xq, 0.0, label as u32);
+                    let eim = source.dirichlet_im(xq, 0.0, label as u32);
+                    let mut res = [c(ere[0], eim[0]), c(ere[1], eim[1]), c(ere[2], eim[2])];
+                    for a in 0..6 {
+                        let ua = u_dir[idx_map[&bnd_dofs[a]]];
+                        let wa = w_f[local_slots[a]];
+                        for k in 0..3 {
+                            res[k] -= ua * wa[k];
+                        }
+                    }
+                    for a in 0..2 {
+                        let ta = t_vecs[a];
+                        let d = c(
+                            ta[0] * res[0].re + ta[1] * res[1].re + ta[2] * res[2].re,
+                            ta[0] * res[0].im + ta[1] * res[1].im + ta[2] * res[2].im,
+                        );
+                        r[a] += d * wq;
+                        for b in 0..2 {
+                            let wb = w_f[local_slots[6 + b]];
+                            m[a][b] += wq * (ta[0] * wb[0] + ta[1] * wb[1] + ta[2] * wb[2]);
+                        }
+                    }
+                }
+                let det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+                let inv_det = 1.0 / det;
+                u_dir[idx_map[&bnd_dofs[6]]] = (r[0] * m[1][1] - r[1] * m[0][1]) * inv_det;
+                u_dir[idx_map[&bnd_dofs[7]]] = (r[1] * m[0][0] - r[0] * m[1][0]) * inv_det;
+            }
+        }
+    }
+
+    let free = free_dofs(n, &fixed);
+    let mut u = vec![c(0.0, 0.0); n];
+    for (&d, &val) in fixed.iter().zip(&u_dir) {
+        u[d] = val;
+    }
+    if !free.is_empty() {
+        let a_ff = a_mat.submatrix(&free, &free);
+        let a_fd = a_mat.submatrix(&free, &fixed);
+        let ad = a_fd.matvec(&u_dir);
+        let f_free: Vec<C> = free.iter().enumerate().map(|(i, &gd)| rhs[gd] - ad[i]).collect();
+        let solver = femcore::linalg::driver::DirectSolver::new(&a_ff, false)?;
+        let u_free = solver.solve(&f_free);
+        for (i, &gd) in free.iter().enumerate() {
+            u[gd] = u_free[i];
+        }
+    }
+
+    let (l2_rel_error, curl_rel_error, hcurl_rel_error) = maxwell_field_errors(mesh, &ned, &u, exact_e, exact_curl);
+    Ok(MaxwellMmsResult { ned, u, l2_rel_error, curl_rel_error, hcurl_rel_error })
+}
+
+/// Evaluates continuous relative `L^2`, curl semi-norm, and `H(curl)` errors on curved or straight 3D tets.
+pub fn maxwell_field_errors(
+    mesh: &Discretisation,
+    ned: &Ned3,
+    u: &[C],
+    exact_e: &(dyn Fn([f64; 3]) -> [C; 3] + Sync),
+    exact_curl: &(dyn Fn([f64; 3]) -> [C; 3] + Sync),
+) -> (f64, f64, f64) {
+    let geo = geometry(mesh);
+    let cquad = quad_rule_collapsed(CURVED_QUAD_DEGREE);
+    let quad = quad_rule(3, 6);
+    let nb = ned.nb();
+    let (mut err_e2, mut ref_e2, mut err_c2, mut ref_c2) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+    let (mut w, mut cu) = (Vec::new(), Vec::new());
+    let mut gs = [[0.0; 3]; 4];
+    for ci in 0..mesh.n_cells() {
+        let gid = ned.key_pairs(mesh, ci);
+        for b in 0..4 {
+            for k in 0..3 {
+                gs[b][k] = geo.g[ci * 12 + b * 3 + k];
+            }
+        }
+        let cdofs = &ned.cell_dofs[ci];
+        let mut accum_pt = |xq: [f64; 3], wq: f64, w_b: &[[f64; 3]], cu_b: &[[f64; 3]]| {
+            let (mut eh, mut ch) = ([c(0.0, 0.0); 3], [c(0.0, 0.0); 3]);
+            for s in 0..nb {
+                let cf = u[cdofs[s]];
+                for k in 0..3 {
+                    eh[k] += cf * w_b[s][k];
+                    ch[k] += cf * cu_b[s][k];
+                }
+            }
+            let ee = exact_e(xq);
+            let ec = exact_curl(xq);
+            for k in 0..3 {
+                err_e2 += (eh[k] - ee[k]).norm_sqr() * wq;
+                ref_e2 += ee[k].norm_sqr() * wq;
+                err_c2 += (ch[k] - ec[k]).norm_sqr() * wq;
+                ref_c2 += ec[k].norm_sqr() * wq;
+            }
+        };
+        if mesh.cell_is_curved(ci) {
+            let ct = CurvedTet::new(mesh.cell_geometry_nodes(ci));
+            for q in 0..cquad.w.len() {
+                let lam = [cquad.lam[q][0], cquad.lam[q][1], cquad.lam[q][2], cquad.lam[q][3]];
+                let (gq, det) = ct.jacobian(&lam);
+                basis3_keyed(ned.order, &lam, &gq, &gid, &mut w, &mut cu);
+                accum_pt(ct.position(&lam), cquad.w[q] * det.abs() / 6.0, &w, &cu);
+            }
+        } else {
+            let vs = mesh.cell(ci);
+            let pts = [
+                mesh.point(vs[0] as usize),
+                mesh.point(vs[1] as usize),
+                mesh.point(vs[2] as usize),
+                mesh.point(vs[3] as usize),
+            ];
+            for q in 0..quad.w.len() {
+                let lam = [quad.lam[q][0], quad.lam[q][1], quad.lam[q][2], quad.lam[q][3]];
+                basis3_keyed(ned.order, &lam, &gs, &gid, &mut w, &mut cu);
+                let xq = [
+                    (0..4).map(|b| lam[b] * pts[b][0]).sum(),
+                    (0..4).map(|b| lam[b] * pts[b][1]).sum(),
+                    (0..4).map(|b| lam[b] * pts[b][2]).sum(),
+                ];
+                accum_pt(xq, quad.w[q] * geo.vol[ci], &w, &cu);
+            }
+        }
+    }
+    let l2 = (err_e2 / ref_e2.max(1e-300)).sqrt();
+    let curl = (err_c2 / ref_c2.max(1e-300)).sqrt();
+    let hcurl = ((err_e2 + err_c2) / (ref_e2 + ref_c2).max(1e-300)).sqrt();
+    (l2, curl, hcurl)
 }
 
 /// The discrete gradient over all nodes: one column per vertex (the Whitney edge coefficients
