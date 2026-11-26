@@ -87,6 +87,7 @@ impl Physics for Tst {
                 ("cells".into(), Scalar::Num(mesh.n_cells() as f64)),
             ],
             log: vec!["solved the stand-in".into()],
+            ..Default::default()
         })
     }
 }

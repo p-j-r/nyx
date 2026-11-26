@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 > The Physics trait (everything the rest of nyx may ask of a physics), the Registry of the physics a build contains, and the plain-data error every method returns.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md)  
-**Size:** 4 files, 342 lines.
+**Size:** 4 files, 343 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-physics/src/error.rs` | 66 |  |
-| `crates/nyx-physics/src/lib.rs` | 80 |  |
+| `crates/nyx-physics/src/lib.rs` | 81 |  |
 | `crates/nyx-physics/src/physics.rs` | 103 |  |
 | `crates/nyx-physics/src/registry.rs` | 93 |  |
 
@@ -24,7 +24,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [cQED result payloads](./cqed.md) | cqed | AdaptPassRecord, CAPACITANCE_KEY, CIRCUIT_ROM_KEY, CapacitanceMatrixData, CircuitRom, DRIVEN_PORT_KEY, DrivenPortData, ELECTRO_AMR_KEY, ElectroAmrData, INDUCTANCE_KEY +7 |
 | [Descriptors and schemas](./descriptors.md) | crate root, desc | BcDesc, FieldDesc, FieldLink, ParamDesc, PropDesc, Sizing, StudyDesc |
 | [Problem envelope](./envelope.md) | decode, spec, validate | BcSpec, FORMAT, MaterialAssign, ProblemSpec, PropValue, StudySpec, canonical_json, check_params, check_result_finite, tls_interface_from_material_name +2 |
-| [Result and frame](./result.md) | frame, result | CellField, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_back, cell_fields_of |
+| [Result and frame](./result.md) | frame, result | CellField, DiagnosticSeverity, DiagnosticWarning, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, NumericalErrorBudget, Scalar, Solution +5 |
 
 ## Used by
 

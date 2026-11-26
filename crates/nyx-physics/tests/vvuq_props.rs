@@ -228,6 +228,8 @@ fn arb_clean_solve_result() -> impl Strategy<Value = SolveResult> {
             solutions,
             scalars,
             log,
+            diagnostics: None,
+            error_budget: None,
         })
 }
 

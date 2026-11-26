@@ -75,7 +75,7 @@ resultsIO = component "Results files" "HDF5 results via pure-Rust hdf5-pure and 
     properties {
         "adr" "62, 63, 99, 107, 132"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "1744"
+        "lines" "1745"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }
@@ -83,7 +83,7 @@ storeLink = component "Store link" "Binds the project to a workflow of the works
     properties {
         "adr" "39, 59, 130"
         "code" "crates/nyx-engine/src: store_link.rs"
-        "lines" "472"
+        "lines" "473"
         "codeDiagram" "4-code/engine/storeLink.md"
     }
 }

@@ -650,6 +650,7 @@ pub fn solve_heat_bdf2_with_source<const D: usize, S: SourceField<D>>(
         log: st.log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: sys.k.nrows(),
+        ..Default::default()
     })
 }
 
@@ -687,6 +688,7 @@ pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, 
         log: st.log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: sys.k.nrows(),
+        ..Default::default()
     })
 }
 
@@ -982,5 +984,6 @@ pub fn solve_heat_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, Stri
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }

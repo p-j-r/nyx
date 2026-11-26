@@ -1325,6 +1325,7 @@ pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveRes
         log,
         dofs: asm.n,
         seconds: t0.elapsed().as_secs_f64(),
+        ..Default::default()
     })
 }
 
@@ -1404,6 +1405,7 @@ pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Pr
         log,
         dofs: asm.n,
         seconds: t0.elapsed().as_secs_f64(),
+        ..Default::default()
     })
 }
 

@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Store link** (`engine.storeLink`) in the co
 > Binds the project to a workflow of the workspace, commits versions, records runs (card with swept 3D detection and metrics made here).
 
 **Decisions:** [ADR 39](../../../adr/0039-the-store-takes-spec-text-and-a-card-function.md), [ADR 59](../../../adr/0059-the-store-knows-nothing-of-a-project.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
-**Size:** 1 file, 472 lines.
+**Size:** 1 file, 473 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/store_link.rs` | 472 |  |
+| `crates/nyx-engine/src/store_link.rs` | 473 |  |
 
 ## What it uses
 

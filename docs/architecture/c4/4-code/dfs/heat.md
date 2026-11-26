@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Heat kernel** (`dfs.heat`) in the container
 > Heat transfer on P1/P2 simplices, stationary and transient (`SourceField` MMS, BDF2 time-varying forcing, R32 curved guard).
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 1 file, 987 lines.
+**Size:** 1 file, 990 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/heat.rs` | 987 |  |
+| `crates/nyx-dfs/src/heat.rs` | 990 |  |
 
 ## What it uses
 
@@ -82,7 +82,7 @@ classDiagram
 | fn | `solve_heat_states_with_source` | `heat.rs:337` | `pub fn solve_heat_states_with_source<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, sys: &HeatSystem, source: &S, opts: Option<TransientHeatOptions>, ) -> Result<HeatStates, String>` |
 | fn | `solve_heat_with_source` | `heat.rs:605` | `pub fn solve_heat_with_source<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` |
 | fn | `solve_heat_bdf2_with_source` | `heat.rs:613` | `pub fn solve_heat_bdf2_with_source<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, source: &S, opts: TransientHeatOptions, ) -> Result<SolveResult, String>` |
-| fn | `solve_heat` | `heat.rs:656` | `pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
-| fn | `solve_heat_mixed` | `heat.rs:718` | `pub fn solve_heat_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves stationary or transient heat transfer natively on a mixed mesh (`Quad`, `Prism`, `Hex`) |
+| fn | `solve_heat` | `heat.rs:657` | `pub fn solve_heat(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
+| fn | `solve_heat_mixed` | `heat.rs:720` | `pub fn solve_heat_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves stationary or transient heat transfer natively on a mixed mesh (`Quad`, `Prism`, `Hex`) |
 
 Trait implementations in this component: `TransientHeatOptions: Default`

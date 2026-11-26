@@ -27,7 +27,7 @@ piezo = component "Piezoelectric kernel" "Coupled piezoelectric `(u, phi)` const
     properties {
         "adr" "129, 106, 128, 132"
         "code" "crates/nyx-sms/src: piezo.rs, piezo_asm.rs, piezo_driven.rs, piezo_mat.rs"
-        "lines" "6050"
+        "lines" "6052"
         "codeDiagram" "4-code/sms/piezo.md"
     }
 }

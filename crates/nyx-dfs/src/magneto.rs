@@ -380,6 +380,7 @@ fn solve_cross_section(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }
 
@@ -691,6 +692,7 @@ fn solve_planar_stream(mesh: &Discretisation, spec: &Problem) -> Result<SolveRes
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }
 
@@ -1569,6 +1571,7 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
             log: vec![format!("3D mixed_3d SourceField MMS ({n_free} free Nedelec DOFs)")],
             seconds: t0.elapsed().as_secs_f64(),
             dofs: n_total,
+            ..Default::default()
         };
         return Ok((res, a_edges));
     }
@@ -1661,6 +1664,7 @@ fn solve_mixed_3d_impl<S: SourceField<3>>(
             log,
             seconds: t0.elapsed().as_secs_f64(),
             dofs: n_total,
+            ..Default::default()
         },
         first_edges,
     ))
@@ -1944,6 +1948,7 @@ fn solve_cross_section_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult,
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }
 
@@ -2446,6 +2451,7 @@ fn solve_mixed_3d_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, Stri
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n_total,
+        ..Default::default()
     })
 }
 

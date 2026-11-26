@@ -892,6 +892,7 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             scalars,
             log,
             solutions: Vec::with_capacity(sol_cap),
+            ..Default::default()
         };
 
         let packed_cf = if g_fields_saved {

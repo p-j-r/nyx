@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 > HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description (`CurvedEdgesIgnored` R32 note), and opening a results file as a project with its results.
 
 **Decisions:** [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md), [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 3 files, 1744 lines.
+**Size:** 3 files, 1745 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/h5io.rs` | 1379 |  |
+| `crates/nyx-engine/src/h5io.rs` | 1380 |  |
 | `crates/nyx-engine/src/results_file.rs` | 205 |  |
 | `crates/nyx-engine/src/xdmf.rs` | 160 |  |
 
@@ -145,7 +145,7 @@ classDiagram
 | struct | `Stored` | `h5io.rs:788` | fields: `mesh`, `project`, `results`, `fields_saved` —  What a results file holds. |
 | fn | `read_results` | `h5io.rs:799` | `pub fn read_results(path: &Path) -> Result<Stored, String>` —  Reads a results file back using `File::open_streaming` and [`ReadBudgetConfig::from_env()`]. |
 | fn | `read_results_with_budget` | `h5io.rs:804` | `pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result<Stored, String>` —  Reads a results file back using `File::open_streaming` and an explicit [`ReadBudgetConfig`]. |
-| fn | `file_bytes` | `h5io.rs:1040` | `pub fn file_bytes(path: &Path) -> u64` —  The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON. |
+| fn | `file_bytes` | `h5io.rs:1041` | `pub fn file_bytes(path: &Path) -> u64` —  The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON. |
 | fn | `Partition::rows` | `h5io.rs:222` | `pub fn rows(&self, n: usize) -> std::ops::Range<usize>` —  The rows `[start, end)` of `n` this process writes; the blocks of all processes tile `0..n` exactly, with sizes differing by at most one. |
 | struct | `Snapshot` | `results_file.rs:13` | fields: `project`, `model`, `results` —  What a results file is written from: the project, the mesh and the latest result of every physics, as they were when the write was asked for. |
 | fn | `write_snapshot` | `results_file.rs:21` | `pub fn write_snapshot(snapshot: &Snapshot, path: &str, parallel: bool, atomic: bool) -> Result<Value, Error>` —  Writes `snapshot` into the HDF5 file `path` and its XDMF description. With `atomic` the file is written under another name and renamed when it |

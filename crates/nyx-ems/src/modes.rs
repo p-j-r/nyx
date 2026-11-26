@@ -535,6 +535,7 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: mesh.n_dofs(problem.order),
+        ..Default::default()
     };
     Ok(result)
 }
@@ -641,6 +642,7 @@ pub fn solve_waveguide_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: phi_map.n_dofs,
+        ..Default::default()
     })
 }
 

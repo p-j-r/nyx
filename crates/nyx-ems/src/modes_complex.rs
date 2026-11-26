@@ -630,6 +630,7 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: mesh.n_dofs(problem.order),
+        ..Default::default()
     };
     Ok(result)
 }
@@ -1162,6 +1163,7 @@ pub fn solve_waveguide_complex_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
+        ..Default::default()
     })
 }
 

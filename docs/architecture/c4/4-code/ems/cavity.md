@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **3D cavity kernel** (`ems.cavity`) in the co
 > Electromagnetic eigenmodes of 3D cavities (`SourceField` MMS, R34 curved post-integrals) and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export.
 
 **Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 2 files, 4247 lines.
+**Size:** 2 files, 4251 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/bloch.rs` | 951 |  |
-| `crates/nyx-ems/src/cavity.rs` | 3296 |  |
+| `crates/nyx-ems/src/bloch.rs` | 953 |  |
+| `crates/nyx-ems/src/cavity.rs` | 3298 |  |
 
 ## What it uses
 
@@ -165,9 +165,9 @@ classDiagram
 | fn | `assemble_bloch` | `bloch.rs:184` | `pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochAssembly, String>` —  Stage 1: validates `y`-periodicity and transverse PMLs, assembles `(A0, A1, A2)` on `Ned3`, and reduces them via `P^H (.) P` |
 | fn | `solve_bloch_eigen` | `bloch.rs:348` | `pub fn solve_bloch_eigen(asm: &BlochAssembly) -> Result<BlochSolve, String>` —  Stage 2: solves `(A0 + nu A1 + nu^2 A2) u = 0` near `sigma`, filters true QEP relative residuals `< 1e-5`, |
 | fn | `bloch_fields_cells` | `bloch.rs:375` | `pub fn bloch_fields_cells( mesh: &Discretisation, problem: &Problem, asm: &BlochAssembly, solved: &BlochSolve, ) -> Result<SolveResult, String>` —  Stage 3: reconstructs physical `E = e_tilde exp(-j k_y (y - y_min))` and |
-| fn | `solve_bloch_mixed` | `bloch.rs:586` | `pub fn solve_bloch_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Study::Bloch` problem natively on `Tet + Prism + Hex` (`MixedDiscretisation`). |
-| fn | `assemble_bloch_mixed` | `bloch.rs:595` | `pub fn assemble_bloch_mixed( mesh: &MixedDiscretisation, problem: &Problem, ) -> Result<(BlochAssembly, NedMixed), String>` |
-| fn | `bloch_fields_cells_mixed` | `bloch.rs:763` | `pub fn bloch_fields_cells_mixed( mesh: &Mesh, mixed: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &BlochAssembly, solved: &BlochSolve, ) -> Result<SolveResult, String>` |
+| fn | `solve_bloch_mixed` | `bloch.rs:587` | `pub fn solve_bloch_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Study::Bloch` problem natively on `Tet + Prism + Hex` (`MixedDiscretisation`). |
+| fn | `assemble_bloch_mixed` | `bloch.rs:596` | `pub fn assemble_bloch_mixed( mesh: &MixedDiscretisation, problem: &Problem, ) -> Result<(BlochAssembly, NedMixed), String>` |
+| fn | `bloch_fields_cells_mixed` | `bloch.rs:764` | `pub fn bloch_fields_cells_mixed( mesh: &Mesh, mixed: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &BlochAssembly, solved: &BlochSolve, ) -> Result<SolveResult, String>` |
 | struct | `Ned3` | `cavity.rs:59` | fields: `order`, `n_edges`, `n_faces`, `faces`, `cell_dofs`, `vkey` —  Global numbering of the degrees of freedom. |
 | fn | `basis3` | `cavity.rs:210` | `pub fn basis3( order: usize, lam: &[f64; 4], g: &[[f64; 3]; 4], gid: &[u32; 4], w: &mut Vec<[f64; 3]>, curl: &mut Vec<[f64; 3]>, )` —  Basis functions and their curls at the barycentric point `lam` of a tetrahedron with vertex |
 | fn | `basis3_keyed` | `cavity.rs:224` | `pub fn basis3_keyed( order: usize, lam: &[f64; 4], g: &[[f64; 3]; 4], gid: &[(u32, u32); 4], w: &mut Vec<[f64; 3]>, curl: &mut Vec<[f64; 3]>, )` —  Like [`basis3`], taking composite `(vkey, vertex_id)` keys so edges/faces touching periodic |
@@ -190,14 +190,14 @@ classDiagram
 | fn | `assemble_emw_eigen` | `cavity.rs:1138` | `pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<EmwAssembly, String>` |
 | fn | `solve_emw_modes` | `cavity.rs:1659` | `pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String>` —  Stage 2: the eigenpairs `K x = k0^2 M x` nearest the shift with the gradients projected out (real symmetric route with |
 | fn | `emw_eigen_fields` | `cavity.rs:1829` | `pub fn emw_eigen_fields( mesh: &Discretisation, problem: &Problem, asm: &EmwAssembly, solved: &EmwSolve, ) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex E and H (plus sheet K when sheets are present) of every mode at the quadratic nodes, |
-| struct | `Mode3dMetrics` | `cavity.rs:2127` | fields: `vg`, `comp_shares`, `domain_shares`, `layer_fraction` —  3D mode energy shares, PML layer fraction, and (when `compute_vg` is true) single-solve Poynting `v_g` |
-| fn | `compute_3d_mode_metrics` | `cavity.rs:2135` | `pub(crate) fn compute_3d_mode_metrics( mesh: &Discretisation, ned: &Ned3, geo: &Geometry, x: &[C], ky_envelope: C, omega: f64, pml_cells: &[bool], eps_phys_re: &[[[f64; 3]; 3]], d_omega_eps: &[[[f64; 3]; 3]], mur_phys: &[f64], compute_vg: bool, ) -> Mode3dMetrics` |
-| struct | `MixedCavityMasks` | `cavity.rs:2262` | fields: `fixed_dofs`, `fixed_edges`, `fixed_verts`, `fixed_quad_faces` —  Masks of constrained DOFs, edges, vertices, and quad faces on a 3D `MixedDiscretisation` for `Ams` / `AmsP2`. |
-| fn | `solve_cavity_mixed` | `cavity.rs:2270` | `pub fn solve_cavity_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Cavity` study natively on `Tet + Prism + Hex` (`MixedDiscretisation`), projecting Stage-3 display fields onto `SimplexMesh`. |
-| fn | `solve_cavity_mixed_ams` | `cavity.rs:2281` | `pub fn solve_cavity_mixed_ams( mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem, ) -> Result<SolveResult, String>` —  Solves a 3D `Cavity` study natively on `Tet + Prism + Hex` via iterative Jacobi-Davidson preconditioned by `Ams` (`P1`) or `AmsP2` (`P2`), |
-| fn | `assemble_emw_eigen_mixed` | `cavity.rs:2329` | `pub fn assemble_emw_eigen_mixed( mesh: &MixedDiscretisation, problem: &Problem, is_iterative: bool, ) -> Result<(EmwAssembly, NedMixed, MixedCavityMasks), String>` —  Stage 1 on a 3D `MixedDiscretisation` (`Tet + Prism + Hex`). |
-| fn | `emw_eigen_fields_mixed` | `cavity.rs:2904` | `pub fn emw_eigen_fields_mixed( mesh: &Mesh, mixed: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &EmwAssembly, solved: &EmwSolve, ) -> Result<SolveResult, String>` —  Stage 3 on a 3D `MixedDiscretisation`: evaluates native `NedMixed` fields and projects them onto `SimplexMesh` via `MixedToSimplexProjector`. |
-| fn | `compute_3d_mode_metrics_mixed` | `cavity.rs:3190` | `pub(crate) fn compute_3d_mode_metrics_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, isos: &[IsoparametricCell], x: &[C], ky_envelope: C, omega: f64, pml_cells: &[bool], eps_phys_re: &[[[f64; 3]; 3]], d_omega_eps: &[[[f64; 3]; 3]], mur_phys: &[f64], compute_vg: bool, ) -> Mode3dMetrics` |
+| struct | `Mode3dMetrics` | `cavity.rs:2128` | fields: `vg`, `comp_shares`, `domain_shares`, `layer_fraction` —  3D mode energy shares, PML layer fraction, and (when `compute_vg` is true) single-solve Poynting `v_g` |
+| fn | `compute_3d_mode_metrics` | `cavity.rs:2136` | `pub(crate) fn compute_3d_mode_metrics( mesh: &Discretisation, ned: &Ned3, geo: &Geometry, x: &[C], ky_envelope: C, omega: f64, pml_cells: &[bool], eps_phys_re: &[[[f64; 3]; 3]], d_omega_eps: &[[[f64; 3]; 3]], mur_phys: &[f64], compute_vg: bool, ) -> Mode3dMetrics` |
+| struct | `MixedCavityMasks` | `cavity.rs:2263` | fields: `fixed_dofs`, `fixed_edges`, `fixed_verts`, `fixed_quad_faces` —  Masks of constrained DOFs, edges, vertices, and quad faces on a 3D `MixedDiscretisation` for `Ams` / `AmsP2`. |
+| fn | `solve_cavity_mixed` | `cavity.rs:2271` | `pub fn solve_cavity_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Cavity` study natively on `Tet + Prism + Hex` (`MixedDiscretisation`), projecting Stage-3 display fields onto `SimplexMesh`. |
+| fn | `solve_cavity_mixed_ams` | `cavity.rs:2282` | `pub fn solve_cavity_mixed_ams( mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem, ) -> Result<SolveResult, String>` —  Solves a 3D `Cavity` study natively on `Tet + Prism + Hex` via iterative Jacobi-Davidson preconditioned by `Ams` (`P1`) or `AmsP2` (`P2`), |
+| fn | `assemble_emw_eigen_mixed` | `cavity.rs:2330` | `pub fn assemble_emw_eigen_mixed( mesh: &MixedDiscretisation, problem: &Problem, is_iterative: bool, ) -> Result<(EmwAssembly, NedMixed, MixedCavityMasks), String>` —  Stage 1 on a 3D `MixedDiscretisation` (`Tet + Prism + Hex`). |
+| fn | `emw_eigen_fields_mixed` | `cavity.rs:2905` | `pub fn emw_eigen_fields_mixed( mesh: &Mesh, mixed: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &EmwAssembly, solved: &EmwSolve, ) -> Result<SolveResult, String>` —  Stage 3 on a 3D `MixedDiscretisation`: evaluates native `NedMixed` fields and projects them onto `SimplexMesh` via `MixedToSimplexProjector`. |
+| fn | `compute_3d_mode_metrics_mixed` | `cavity.rs:3192` | `pub(crate) fn compute_3d_mode_metrics_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, isos: &[IsoparametricCell], x: &[C], ky_envelope: C, omega: f64, pml_cells: &[bool], eps_phys_re: &[[[f64; 3]; 3]], d_omega_eps: &[[[f64; 3]; 3]], mur_phys: &[f64], compute_vg: bool, ) -> Mode3dMetrics` |
 | fn | `Ned3::empty` | `cavity.rs:81` | `pub(crate) fn empty(order: usize) -> Ned3` |
 | fn | `Ned3::new` | `cavity.rs:93` | `pub fn new(mesh: &Discretisation, order: usize, vkey: Vec<u32>) -> Ned3` |
 | fn | `Ned3::n_dofs` | `cavity.rs:134` | `pub fn n_dofs(&self) -> usize` |

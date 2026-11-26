@@ -612,6 +612,8 @@ fn finish_driven_result(
         log,
         dofs: asm.constraints.n_tot,
         seconds: t0.elapsed().as_secs_f64(),
+        diagnostics: None,
+        error_budget: None,
     }
 }
 

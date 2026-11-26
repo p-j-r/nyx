@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Axisymmetric kernel** (`ems.axisym`) in the
 > Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities, `R6d` quadrature `s_theta`).
 
 **Decisions:** [ADR 46](../../../adr/0046-axisymmetric-ems-checked-and-given-a-study.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 1 file, 958 lines.
+**Size:** 1 file, 960 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/axisym.rs` | 958 |  |
+| `crates/nyx-ems/src/axisym.rs` | 960 |  |
 
 ## What it uses
 
@@ -113,8 +113,8 @@ classDiagram
 | fn | `power_along_theta` | `axisym.rs:518` | `pub fn power_along_theta(mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize) -> f64` —  Power `P = 2 Int Re(conj(E_z) H_r - conj(E_r) H_z) dA` of mode `j` along `+theta`. |
 | fn | `axisym_fields_cells` | `axisym.rs:533` | `pub fn axisym_fields_cells( mesh: &Discretisation, mat: &AxiMaterial, modes: &AxiModes, j: usize, ) -> (Vec<Field>, CellFields)` —  Stage 3 on `SimplexMesh`: plot fields (`\|E\|`, `Re Ex`, `Re Ey`, `Re Ez`) and complex cell fields (`Ex`, `Ey`, `Ez`). |
 | fn | `solve_axisymmetric` | `axisym.rs:571` | `pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves an `AxisymmetricModes` study on a `SimplexMesh` (`Discretisation`). |
-| fn | `solve_axisymmetric_mixed` | `axisym.rs:645` | `pub fn solve_axisymmetric_mixed( mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem, ) -> Result<SolveResult, String>` —  Solves a 2D `AxisymmetricModes` study natively on `Tri + Quad` (including curved 2D shells and `r = 0` Spherical PMLs). |
-| fn | `assemble_axisym_mixed` | `axisym.rs:709` | `pub fn assemble_axisym_mixed( mesh: &MixedDiscretisation, problem: &Problem, m: f64, f_search: f64, ) -> Result<(AxiAssembly, NedMixed, MixedLagrangeDofMap), String>` |
+| fn | `solve_axisymmetric_mixed` | `axisym.rs:646` | `pub fn solve_axisymmetric_mixed( mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem, ) -> Result<SolveResult, String>` —  Solves a 2D `AxisymmetricModes` study natively on `Tri + Quad` (including curved 2D shells and `r = 0` Spherical PMLs). |
+| fn | `assemble_axisym_mixed` | `axisym.rs:711` | `pub fn assemble_axisym_mixed( mesh: &MixedDiscretisation, problem: &Problem, m: f64, f_search: f64, ) -> Result<(AxiAssembly, NedMixed, MixedLagrangeDofMap), String>` |
 | fn | `AxiMaterial::from_indices` | `axisym.rs:60` | `pub fn from_indices(mesh: &Discretisation, index: &std::collections::BTreeMap<i32, f64>) -> AxiMaterial` —  Isotropic `eps_r = n^2` and `mu_r = 1` per domain (`index`: refractive index per domain label, default 1). |
 | fn | `AxiMaterial::from_materials` | `axisym.rs:74` | `pub fn from_materials(mesh: &Discretisation, m: &Materials) -> Result<AxiMaterial, String>` —  `eps_r` and `mu_r` per domain from the problem's materials (default 1), absorbing layers (`Materials::pml`) included. |
 | fn | `AxiMaterial::from_materials_at_freq` | `axisym.rs:79` | `pub fn from_materials_at_freq(mesh: &Discretisation, m: &Materials, f_ref: f64) -> Result<AxiMaterial, String>` —  Like [`Self::from_materials`], passing `f_ref` for `auto_scale` PML calibration. |

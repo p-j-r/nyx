@@ -174,6 +174,7 @@ impl Physics for SyntheticCapPhysics {
             log: vec![],
             seconds: 0.001,
             dofs: mesh.n_points(),
+            ..Default::default()
         })
     }
 }

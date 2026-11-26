@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Magnetostatics kernel** (`dfs.magneto`) in 
 > Gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`), `SourceField` MMS, R32 guard, and inductance matrix extraction.
 
 **Decisions:** [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 1 file, 2492 lines.
+**Size:** 1 file, 2498 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/magneto.rs` | 2492 |  |
+| `crates/nyx-dfs/src/magneto.rs` | 2498 |  |
 
 ## What it uses
 
@@ -49,7 +49,7 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | const | `MU0` | `magneto.rs:45` | `f64` —  Vacuum magnetic permeability `mu_0` in H/m. |
-| fn | `solve_mixed_3d_edges_with_source` | `magneto.rs:1246` | `pub fn solve_mixed_3d_edges_with_source<S: SourceField<3>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<(SolveResult, Vec<f64>), String>` —  Solves 3D Nedelec `mixed_3d` magnetostatics with a generic monomorphized [`SourceField<3>`], |
-| fn | `solve_mixed_3d_with_source` | `magneto.rs:1261` | `pub fn solve_mixed_3d_with_source<S: SourceField<3>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` —  Solves 3D Nedelec `mixed_3d` magnetostatics with a generic monomorphized [`SourceField<3>`]. |
-| fn | `solve_magnetostatics` | `magneto.rs:1670` | `pub fn solve_magnetostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a magnetostatic problem using the requested or auto-selected formulation. |
-| fn | `solve_magnetostatics_mixed` | `magneto.rs:2455` | `pub fn solve_magnetostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves a magnetostatic problem natively on a mixed mesh (`Quad`, `Prism`, `Hex`) and/or with |
+| fn | `solve_mixed_3d_edges_with_source` | `magneto.rs:1248` | `pub fn solve_mixed_3d_edges_with_source<S: SourceField<3>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<(SolveResult, Vec<f64>), String>` —  Solves 3D Nedelec `mixed_3d` magnetostatics with a generic monomorphized [`SourceField<3>`], |
+| fn | `solve_mixed_3d_with_source` | `magneto.rs:1263` | `pub fn solve_mixed_3d_with_source<S: SourceField<3>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` —  Solves 3D Nedelec `mixed_3d` magnetostatics with a generic monomorphized [`SourceField<3>`]. |
+| fn | `solve_magnetostatics` | `magneto.rs:1674` | `pub fn solve_magnetostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a magnetostatic problem using the requested or auto-selected formulation. |
+| fn | `solve_magnetostatics_mixed` | `magneto.rs:2461` | `pub fn solve_magnetostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves a magnetostatic problem natively on a mixed mesh (`Quad`, `Prism`, `Hex`) and/or with |

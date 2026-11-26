@@ -177,6 +177,7 @@ fn all_four_3d_figure_kinds_and_expressions_produce_valid_png_and_svg() {
         solutions: vec![sol],
         scalars: vec![],
         log: vec![],
+        ..Default::default()
     };
 
     for kind in [Kind::Slice3d, Kind::Cutaway3d, Kind::Isosurface3d, Kind::Mesh3d] {
@@ -241,6 +242,7 @@ fn sharp_5_79x_dielectric_jump_is_preserved_pixel_for_pixel_without_welding_smea
         solutions: vec![sol],
         scalars: vec![],
         log: vec![],
+        ..Default::default()
     };
 
     let cmap = Cmap::Viridis;
@@ -370,6 +372,7 @@ fn repeat_periodic_4_with_quarter_turn_bloch_phase_reverses_sign_every_two_perio
         solutions: vec![sol],
         scalars: vec![],
         log: vec![],
+        ..Default::default()
     };
 
     // Slice z = 0.5 maps (u = x in [0, 1], v = y in [0, 4])
@@ -480,6 +483,7 @@ fn latency_6300_tet_p2_mesh_tiled_4x_at_1600x1100_finishes_under_150_ms() {
         solutions: vec![sol],
         scalars: vec![],
         log: vec![],
+        ..Default::default()
     };
 
     // Fit exact 1600x1100 output PNG (with 2x internal supersampling = 3200x2200)
@@ -566,6 +570,7 @@ fn thread_count_determinism_1_vs_4_produces_bit_identical_png_bytes() {
             solutions: vec![sol],
             scalars: vec![],
             log: vec![],
+            ..Default::default()
         };
         let mut combined = Vec::new();
         for kind in [Kind::Slice3d, Kind::Cutaway3d, Kind::Isosurface3d, Kind::Mesh3d] {

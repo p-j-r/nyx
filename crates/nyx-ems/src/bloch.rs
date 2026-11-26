@@ -577,6 +577,7 @@ pub fn bloch_fields_cells(
         log,
         dofs: asm.n,
         seconds: 0.0,
+        ..Default::default()
     })
 }
 
@@ -946,5 +947,6 @@ pub fn bloch_fields_cells_mixed(
         log,
         dofs: asm.n,
         seconds: 0.0,
+        ..Default::default()
     })
 }

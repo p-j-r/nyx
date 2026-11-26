@@ -110,6 +110,8 @@ fn solve_result_v2_exemplar_is_stable() {
         }],
         scalars: vec![("neff 1".into(), Scalar::Num(2.4)), ("polarization 1".into(), Scalar::Text("TE".into()))],
         log: vec!["solving ems on a 2D mesh".into()],
+        diagnostics: None,
+        error_budget: None,
     };
     check_exemplar("solve_result.v2.json", &serde_json::to_value(&r).unwrap());
     let back: SolveResult = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();

@@ -199,6 +199,176 @@ pub fn assert_convergence_rate(
     report
 }
 
+/// Convergence regime classified by Roache's 3-grid Grid Convergence Index (VVUQ Layer 3, §5.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoacheGciRegime {
+    /// `0 < R < 1`: monotonic convergence toward the continuum limit.
+    Monotonic,
+    /// `-1 < R < 0`: oscillatory damped convergence.
+    Oscillatory,
+    /// `|R| >= 1` (or degenerate zero changes): non-convergent / unresolved.
+    NonConvergent,
+}
+
+/// Result of a 3-grid Roache Grid Convergence Index calculation on grids `h1 < h2 < h3`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoacheGciReport {
+    /// Classification of the convergence ratio `R = (phi2 - phi1) / (phi3 - phi2)`.
+    pub regime: RoacheGciRegime,
+    /// Convergence ratio `R = (phi2 - phi1) / (phi3 - phi2)`.
+    pub convergence_ratio: f64,
+    /// Fine-to-medium effective grid refinement ratio `r21 = (n1 / n2)^(1/d)`.
+    pub r21: f64,
+    /// Medium-to-coarse effective grid refinement ratio `r32 = (n2 / n3)^(1/d)`.
+    pub r32: f64,
+    /// Observed order of accuracy `p_obs` (`None` when non-convergent or oscillatory).
+    pub observed_order: Option<f64>,
+    /// Fine-grid GCI relative uncertainty (`GCI_21` or oscillatory envelope).
+    pub gci_21: f64,
+    /// Medium-grid GCI (`GCI_32`), if monotonic.
+    pub gci_32: Option<f64>,
+    /// Applied factor of safety (`1.25` when in asymptotic range, else `3.0`).
+    pub safety_factor: f64,
+    /// `true` when `|GCI_32 / (r21^p_obs * GCI_21) - 1| <= 0.15` and `p_obs` lies in `[0.5*p_th, 1.5*p_th]`.
+    pub in_asymptotic_range: bool,
+    /// Generalized Richardson extrapolated continuum value (when monotonic).
+    pub extrapolated_value: Option<f64>,
+}
+
+/// Computes Roache's 3-grid GCI for scalar QoIs `[phi1, phi2, phi3]` ordered fine-to-coarse (`h1 < h2 < h3`)
+/// with effective refinement ratios `r21 > 1.0`, `r32 > 1.0`, and theoretical order `theoretical_order > 0.0`.
+pub fn roache_gci(
+    phi: [f64; 3],
+    r21: f64,
+    r32: f64,
+    theoretical_order: f64,
+) -> Result<RoacheGciReport, String> {
+    let [phi1, phi2, phi3] = phi;
+    if !phi1.is_finite() || !phi2.is_finite() || !phi3.is_finite() {
+        return Err("roache_gci inputs must be finite".into());
+    }
+    if !r21.is_finite() || r21 <= 1.0 || !r32.is_finite() || r32 <= 1.0 {
+        return Err(format!("refinement ratios r21={r21}, r32={r32} must be finite and > 1.0"));
+    }
+    if !theoretical_order.is_finite() || theoretical_order <= 0.0 {
+        return Err(format!("theoretical_order={theoretical_order} must be > 0"));
+    }
+
+    let eps21 = phi2 - phi1;
+    let eps32 = phi3 - phi2;
+    let denom = phi1.abs().max(1e-30);
+    if eps21.abs() == 0.0 && eps32.abs() == 0.0 {
+        return Ok(RoacheGciReport {
+            regime: RoacheGciRegime::Monotonic,
+            convergence_ratio: 0.0,
+            r21,
+            r32,
+            observed_order: Some(theoretical_order),
+            gci_21: 0.0,
+            gci_32: Some(0.0),
+            safety_factor: 1.25,
+            in_asymptotic_range: true,
+            extrapolated_value: Some(phi1),
+        });
+    }
+    if eps32.abs() <= 1e-300 {
+        return Ok(RoacheGciReport {
+            regime: RoacheGciRegime::NonConvergent,
+            convergence_ratio: f64::INFINITY,
+            r21,
+            r32,
+            observed_order: None,
+            gci_21: eps21.abs() / denom,
+            gci_32: None,
+            safety_factor: 3.0,
+            in_asymptotic_range: false,
+            extrapolated_value: None,
+        });
+    }
+
+    let r_conv = eps21 / eps32;
+    if r_conv > 0.0 && r_conv < 1.0 {
+        // Monotonic convergence: fixed-point solve for observed order p_obs
+        let ln_r21 = r21.ln();
+        let ln_ratio = (eps32 / eps21).abs().ln();
+        let s = (eps32 / eps21).signum();
+        let mut p = theoretical_order.clamp(0.25, 8.0);
+        for _ in 0..80 {
+            let num = r21.powf(p) - s;
+            let den = r32.powf(p) - s;
+            if num <= 0.0 || den <= 0.0 {
+                break;
+            }
+            let q = (num / den).ln();
+            let p_next = ((ln_ratio + q).abs() / ln_r21).clamp(0.1, 12.0);
+            let done = (p_next - p).abs() <= 1e-10;
+            p = p_next;
+            if done {
+                break;
+            }
+        }
+        let g21_raw = eps21.abs() / (denom * (r21.powf(p) - 1.0));
+        let g32_raw = eps32.abs() / (phi2.abs().max(1e-30) * (r32.powf(p) - 1.0));
+        let asym_err = if g21_raw > 1e-300 {
+            (g32_raw / (r21.powf(p) * g21_raw) - 1.0).abs()
+        } else {
+            0.0
+        };
+        let p_in_band = p >= 0.5 * theoretical_order && p <= 1.5 * theoretical_order;
+        let in_asymptotic_range = asym_err <= 0.15 && p_in_band;
+        let safety_factor = if in_asymptotic_range { 1.25 } else { 3.0 };
+        let gci_21 = safety_factor * g21_raw;
+        let gci_32 = safety_factor * g32_raw;
+        let extrapolated_value = Some(phi1 - eps21 / (r21.powf(p) - 1.0));
+        Ok(RoacheGciReport {
+            regime: RoacheGciRegime::Monotonic,
+            convergence_ratio: r_conv,
+            r21,
+            r32,
+            observed_order: Some(p),
+            gci_21,
+            gci_32: Some(gci_32),
+            safety_factor,
+            in_asymptotic_range,
+            extrapolated_value,
+        })
+    } else if r_conv > -1.0 && r_conv <= 0.0 {
+        // Oscillatory convergence
+        let p_max = phi1.max(phi2).max(phi3);
+        let p_min = phi1.min(phi2).min(phi3);
+        let gci_21 = 3.0 * (0.5 * (p_max - p_min)) / denom;
+        Ok(RoacheGciReport {
+            regime: RoacheGciRegime::Oscillatory,
+            convergence_ratio: r_conv,
+            r21,
+            r32,
+            observed_order: None,
+            gci_21,
+            gci_32: None,
+            safety_factor: 3.0,
+            in_asymptotic_range: false,
+            extrapolated_value: None,
+        })
+    } else {
+        // |R| >= 1: non-convergent
+        let p_max = phi1.max(phi2).max(phi3);
+        let p_min = phi1.min(phi2).min(phi3);
+        let rel = (p_max - p_min).max(eps21.abs()) / denom;
+        Ok(RoacheGciReport {
+            regime: RoacheGciRegime::NonConvergent,
+            convergence_ratio: r_conv,
+            r21,
+            r32,
+            observed_order: None,
+            gci_21: rel,
+            gci_32: None,
+            safety_factor: 3.0,
+            in_asymptotic_range: false,
+            extrapolated_value: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +390,27 @@ mod tests {
         assert!((rep.asymptotic_slope - 2.0).abs() < 1e-12);
         assert!(convergence_rate(&[0.2, 0.1], &[0.1, 0.05]).is_err());
         assert!(convergence_rate(&[0.1, 0.2, 0.05], &[0.1, 0.05, 0.01]).is_err());
+    }
+
+    #[test]
+    fn roache_gci_classifies_monotonic_oscillatory_and_non_convergent() {
+        // Pure O(h^2) sequence with exact continuum value 1.0, r=2.0:
+        let phi = [1.0 + 0.04, 1.0 + 0.16, 1.0 + 0.64];
+        let mono = roache_gci(phi, 2.0, 2.0, 2.0).unwrap();
+        assert_eq!(mono.regime, RoacheGciRegime::Monotonic);
+        assert!((mono.observed_order.unwrap() - 2.0).abs() < 1e-9);
+        assert!(mono.in_asymptotic_range);
+        assert_eq!(mono.safety_factor, 1.25);
+        assert!((mono.extrapolated_value.unwrap() - 1.0).abs() < 1e-12);
+
+        // Oscillatory sequence: R = (0.1 - (-0.05)) / (-0.3 - 0.1) = -0.375
+        let osc = roache_gci([0.95, 1.1, 0.7], 2.0, 2.0, 2.0).unwrap();
+        assert_eq!(osc.regime, RoacheGciRegime::Oscillatory);
+        assert_eq!(osc.safety_factor, 3.0);
+        assert!(osc.observed_order.is_none());
+
+        // Non-convergent sequence: |R| >= 1
+        let nonconv = roache_gci([1.0, 1.5, 1.6], 2.0, 2.0, 2.0).unwrap();
+        assert_eq!(nonconv.regime, RoacheGciRegime::NonConvergent);
     }
 }

@@ -433,6 +433,7 @@ mod tests {
             solutions: vec![nyx_physics::Solution { label: "s0".into(), value: Some(1.0), ..Default::default() }],
             scalars: vec![],
             log: vec!["ok".into()],
+            ..Default::default()
         };
 
         let r_full = link

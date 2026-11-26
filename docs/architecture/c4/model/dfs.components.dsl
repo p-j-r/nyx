@@ -19,7 +19,7 @@ heat = component "Heat kernel" "Heat transfer on P1/P2 simplices, stationary and
     properties {
         "adr" "41, 9, 132"
         "code" "crates/nyx-dfs/src: heat.rs"
-        "lines" "987"
+        "lines" "990"
         "codeDiagram" "4-code/dfs/heat.md"
     }
 }
@@ -27,7 +27,7 @@ electro = component "Electrostatics kernel" "Electrostatics on P1/P2 simplices w
     properties {
         "adr" "41, 9, 103, 132"
         "code" "crates/nyx-dfs/src: ac_loss.rs, electro.rs, planar_bem.rs"
-        "lines" "4067"
+        "lines" "4072"
         "codeDiagram" "4-code/dfs/electro.md"
     }
 }
@@ -35,7 +35,7 @@ magneto = component "Magnetostatics kernel" "Gauge-stabilized London magnetostat
     properties {
         "adr" "103, 132"
         "code" "crates/nyx-dfs/src: magneto.rs"
-        "lines" "2492"
+        "lines" "2498"
         "codeDiagram" "4-code/dfs/magneto.md"
     }
 }

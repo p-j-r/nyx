@@ -58,6 +58,76 @@ impl Solution {
     }
 }
 
+/// Severity level for structured VVUQ solver, material, or discretization warnings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSeverity {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+/// Structured machine-readable diagnostic warning attached to [`SolveResult`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DiagnosticWarning {
+    pub code: String,
+    pub severity: DiagnosticSeverity,
+    pub message: String,
+}
+
+/// Algebraic solve, condition, and convergence telemetry emitted by every solver (`solve_result` `2.1`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SolverDiagnostics {
+    pub solver_kind: String,
+    pub converged: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iterations: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restarts: Option<usize>,
+    pub max_algebraic_residual: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub per_mode_residuals: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rcond_estimate: Option<f64>,
+    #[serde(default)]
+    pub cholesky_fallbacks: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<DiagnosticWarning>,
+}
+
+/// Spatial discretization uncertainty estimate (Prager–Synge bound, 3-grid Roache GCI, 2-grid delta, or indicator).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpatialErrorEstimate {
+    pub method: String,
+    pub rel_bound: f64,
+    pub is_epistemic_bound: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_order: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refinement_ratio: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_factor: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extrapolated_scalars_only: Option<bool>,
+}
+
+/// Numerical error budget pairing algebraic floor, discretization uncertainty, temporal error, and model truncation.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NumericalErrorBudget {
+    pub algebraic_rel: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_discretization: Option<SpatialErrorEstimate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporal_rel: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_truncation_rel: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combined_num_uncertainty_rel: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alg_below_disc_ratio: Option<f64>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SolveResult {
     /// the code of the physics that produced it and the study kind
@@ -72,6 +142,12 @@ pub struct SolveResult {
     pub scalars: Vec<(String, Scalar)>,
     /// the plain-language stage log of the run
     pub log: Vec<String>,
+    /// algebraic solver diagnostics and warnings (additive `solve_result` `2.1`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<SolverDiagnostics>,
+    /// decomposed numerical error budget (additive `solve_result` `2.1`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_budget: Option<NumericalErrorBudget>,
 }
 
 impl SolveResult {

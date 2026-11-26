@@ -5,15 +5,15 @@ C4 level 4 (code) of the component **Electrostatics kernel** (`dfs.electro`) in 
 > Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, `SourceField` MMS, and multi-RHS terminal conditions.
 
 **Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 3 files, 4067 lines.
+**Size:** 3 files, 4072 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-dfs/src/ac_loss.rs` | 438 |  |
-| `crates/nyx-dfs/src/electro.rs` | 2098 |  |
-| `crates/nyx-dfs/src/planar_bem.rs` | 1531 |  |
+| `crates/nyx-dfs/src/electro.rs` | 2102 |  |
+| `crates/nyx-dfs/src/planar_bem.rs` | 1532 |  |
 
 ## What it uses
 
@@ -126,14 +126,14 @@ classDiagram
 | fn | `solve_electrostatics` | `electro.rs:1118` | `pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
 | fn | `solve_electrostatics_with_source` | `electro.rs:1126` | `pub fn solve_electrostatics_with_source<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` |
 | fn | `solve_electrostatics_with_source_and_robin` | `electro.rs:1134` | `pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, source: &S, robin_bcs: &[(Vec<i32>, f64)], ) -> Result<SolveResult, String>` |
-| fn | `solve_electrostatics_mixed` | `electro.rs:1669` | `pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves electrostatics natively on a mixed mesh (`Tri`/`Quad` in 2D, `Tet`/`Prism`/`Hex` in 3D) |
+| fn | `solve_electrostatics_mixed` | `electro.rs:1671` | `pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves electrostatics natively on a mixed mesh (`Tri`/`Quad` in 2D, `Tet`/`Prism`/`Hex` in 3D) |
 | struct | `LayeredStack` | `planar_bem.rs:33` | fields: `eps_top`, `eps_sub`, `eps_bot`, `t_sub`, `grounded_backplane` —  Three-layer planar dielectric stack around a conductor sheet plane `z = z_sheet`. |
 | fn | `layered_greens_function` | `planar_bem.rs:102` | `pub fn layered_greens_function(rho: f64, stack: &LayeredStack) -> f64` —  Evaluates the exact layered-dielectric reflection image Green's function `G(rho)` on `z = z' = z_sheet` |
 | fn | `extrapolate_spd_log_space` | `planar_bem.rs:428` | `pub fn extrapolate_spd_log_space(c0: &[Vec<f64>], c1: &[Vec<f64>], w1: f64) -> Result<Vec<Vec<f64>>, String>` —  Applies log-space SPD Richardson extrapolation (`r = 2`, `w_1 = 2.0`) to coarse (`c0`) and |
 | fn | `has_thick_sheet_or_trench_geometry` | `planar_bem.rs:535` | `pub fn has_thick_sheet_or_trench_geometry(mesh: &Discretisation, spec: &Problem) -> bool` —  Detects whether `mesh` or `spec` represents a 3D resolved finite-thickness conductor sheet |
 | fn | `can_use_planar_bem` | `planar_bem.rs:602` | `pub fn can_use_planar_bem(mesh: &Discretisation, spec: &Problem) -> bool` —  Checks whether `mesh` and `spec` represent a planar sheet capacitance problem suitable for |
 | fn | `solve_planar_bem_with_stack` | `planar_bem.rs:1325` | `pub fn solve_planar_bem_with_stack( mesh: &Discretisation, spec: &Problem, stack_override: Option<LayeredStack>, ) -> Result<SolveResult, String>` —  Solves a multi-terminal planar sheet capacitance problem with an explicit [`LayeredStack`]. |
-| fn | `solve_planar_bem` | `planar_bem.rs:1528` | `pub fn solve_planar_bem(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a multi-terminal planar sheet capacitance problem by auto-detecting the layered stack |
+| fn | `solve_planar_bem` | `planar_bem.rs:1529` | `pub fn solve_planar_bem(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a multi-terminal planar sheet capacitance problem by auto-detecting the layered stack |
 | fn | `LayeredStack::eps_eff` | `planar_bem.rs:48` | `pub fn eps_eff(&self) -> f64` —  Effective half-space relative permittivity `eps_eff = (eps_1 + eps_2) / 2`. |
 | fn | `LayeredStack::k21` | `planar_bem.rs:53` | `pub fn k21(&self) -> f64` —  Reflection coefficient `k_21 = (eps_2 - eps_1) / (eps_2 + eps_1)`. |
 | fn | `LayeredStack::k23` | `planar_bem.rs:58` | `pub fn k23(&self) -> f64` —  Reflection coefficient `k_23 = -1` for a grounded backplane, or `(eps_2 - eps_3) / (eps_2 + eps_3)`. |

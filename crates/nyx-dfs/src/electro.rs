@@ -1276,6 +1276,7 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
             log: solver_note.into_iter().collect(),
             seconds: t0.elapsed().as_secs_f64(),
             dofs: asm.k.nrows(),
+            ..Default::default()
         });
     }
 
@@ -1639,6 +1640,7 @@ pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }
 
@@ -1899,6 +1901,7 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
             log: solver_note.into_iter().collect(),
             seconds: t0.elapsed().as_secs_f64(),
             dofs: n,
+            ..Default::default()
         });
     }
 
@@ -2093,5 +2096,6 @@ pub fn solve_electrostatics_mixed(mesh: &Mesh, spec: &Problem) -> Result<SolveRe
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n,
+        ..Default::default()
     })
 }

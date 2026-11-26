@@ -139,7 +139,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
 | `crates/femcore/src/validate.rs` | 9 | |
-| `crates/femcore/src/vvuq.rs` | 132, 19 | shared VVUQ Layer 2 zero-sized `SourceField`/`UniformSource` MMS trait and `assert_convergence_rate` order checker |
+| `crates/femcore/src/vvuq.rs` | 132, 133, 19 | shared VVUQ Layer 2 & Layer 3 zero-sized `SourceField`/`UniformSource` MMS trait, `assert_convergence_rate`, and `roache_gci` |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
 | `crates/femcore/src/warm.rs` | 96 | warm starts of the eigensolvers: a context on the solving thread, the previous solve's modes as the start block, bytes for a worker process |
 | `crates/femcore/tests/warm.rs` | 96 | same modes in fewer iterations; no context or an empty one is the same bits; another size is a cold start |
@@ -215,7 +215,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-physics/src/frame.rs` | 56, 25 | the frame a result states for the analyses of its vector fields (axes, handedness, absorbing domains) |
 | `crates/nyx-physics/src/cqed.rs` | 103, 104, 105, 106, 118, 120, 121 | typed cQED payloads (`CapacitanceMatrixData` bounds/loss/AMR history, `InductanceMatrixData`, `TlsMeta`, `CircuitRom`, `DrivenPortData`, `ElectroAmrData`) |
 | `crates/nyx-physics/tests/inline_tensor.rs` | 113, 25, 129 | inline diagonal, 6-component, 3x3 symmetric, and `3x6` piezoelectric tensor (`PropValue` / `PropsTensor` / `Oriented`) tests |
-| `crates/nyx-physics/*` | 25, 19, 113, 118, 120, 121, 129, 131 | the Physics trait, envelope, descriptors, registry, `check_mesh`, and `check_result_finite` |
+| `crates/nyx-physics/*` | 25, 19, 113, 118, 120, 121, 129, 131, 133 | the Physics trait, envelope, descriptors, registry, `check_mesh`, `SolveResult` diagnostics/error budgets (`2.1`), and `check_result_finite` |
 | `crates/nyx-dfs/tests/golden/*` | 10, 41, 132 | the dfs goldens, moved unchanged from femcore, plus Phase 2 `es3d_curved_coax` and `mag3d_mixed_loop` |
 | `crates/nyx-dfs/src/ac_loss.rs` | 121, 103 | quasi-electrostatic AC dielectric conductance $G_{ij}(\omega)$, $Q_{ij}$ matrix, and positive complex Schur $\Delta C^{(2)} > 0$ |
 | `crates/nyx-dfs/src/magneto.rs` | 103, 132 | gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`), `SourceField` MMS, and inductance matrix extraction |

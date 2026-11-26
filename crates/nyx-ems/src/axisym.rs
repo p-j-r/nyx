@@ -636,6 +636,7 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
+        ..Default::default()
     })
 }
 
@@ -703,6 +704,7 @@ pub fn solve_axisymmetric_mixed(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: asm.n_tot,
+        ..Default::default()
     })
 }
 

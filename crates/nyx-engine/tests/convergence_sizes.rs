@@ -475,6 +475,7 @@ impl Physics for MockModesPhysics {
             log: vec![],
             seconds: 0.001,
             dofs: mesh.n_cells() * 3,
+            ..Default::default()
         })
     }
 }
@@ -669,6 +670,7 @@ impl Physics for MockFemtofaradPhysics {
             log: vec![],
             seconds: 0.001,
             dofs: mesh.n_cells(),
+            ..Default::default()
         })
     }
 }

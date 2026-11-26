@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 > The one shape every physics is given (ProblemSpec), its decoding into typed parameters with descriptor defaults and name resolution, and its structural validation.
 
 **Decisions:** [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md)  
-**Size:** 3 files, 1600 lines.
+**Size:** 3 files, 1602 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 |---|---:|---|
 | `crates/nyx-physics/src/decode.rs` | 1051 |  |
 | `crates/nyx-physics/src/spec.rs` | 114 |  |
-| `crates/nyx-physics/src/validate.rs` | 435 |  |
+| `crates/nyx-physics/src/validate.rs` | 437 |  |
 
 ## What it uses
 

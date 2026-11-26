@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Driven frequency-domain and PROM** (`ems.dr
 > Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations (curved 2D port integrals), curvilinear PML power `P_pml`, and Hermite Tangential Galerkin PROM sweep acceleration.
 
 **Decisions:** [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 2 files, 3003 lines.
+**Size:** 2 files, 3005 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/driven.rs` | 1776 |  |
+| `crates/nyx-ems/src/driven.rs` | 1778 |  |
 | `crates/nyx-ems/src/ports.rs` | 1227 |  |
 
 ## What it uses
@@ -133,8 +133,8 @@ classDiagram
 | struct | `DrivenAssembly` | `driven.rs:233` | fields: `order`, `n`, `nred`, `ned`, `red`, `f_min`, `f_max`, `n_points`, `freqs_hz`, `prom_tol`, `max_hdm_solves`, `strict_prom_tol`, ... —  Stage 1 of the 3D driven frequency-domain solver: Nedelec numbering, PEC/periodic reduction, |
 | fn | `assemble_emw_driven` | `driven.rs:354` | `pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<DrivenAssembly, String>` —  Assembles Stage 1 (`DrivenAssembly`) for a 3D `Study::Driven` problem. |
 | fn | `solve_driven` | `driven.rs:1259` | `pub fn solve_driven(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Study::Driven` frequency sweep via Hermite Tangential Galerkin PROM (`prom_tol = Some(tol)`) |
-| fn | `solve_driven_mixed` | `driven.rs:1334` | `pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Study::Driven` sweep natively on `Tet + Prism + Hex` (`MixedDiscretisation`). |
-| fn | `assemble_emw_driven_mixed` | `driven.rs:1410` | `pub fn assemble_emw_driven_mixed( mesh: &MixedDiscretisation, problem: &Problem, ) -> Result<(DrivenAssembly, NedMixed), String>` |
+| fn | `solve_driven_mixed` | `driven.rs:1335` | `pub fn solve_driven_mixed(mesh: &Mesh, mixed: &MixedDiscretisation, problem: &Problem) -> Result<SolveResult, String>` —  Solves a 3D `Study::Driven` sweep natively on `Tet + Prism + Hex` (`MixedDiscretisation`). |
+| fn | `assemble_emw_driven_mixed` | `driven.rs:1412` | `pub fn assemble_emw_driven_mixed( mesh: &MixedDiscretisation, problem: &Problem, ) -> Result<(DrivenAssembly, NedMixed), String>` |
 | fn | `DrivenPortEntry::excitation_coeffs` | `driven.rs:141` | `pub fn excitation_coeffs(&self, omega: f64, waveports: &[AssembledWavePort]) -> (f64, C, C, C)` —  Returns `(z0_p(omega), gamma_p(omega), d(gamma_p)/d(omega), d^2(gamma_p)/d(omega)^2)` at angular frequency `omega` (rad/s), |
 | fn | `DrivenPortEntry::circuit_z0` | `driven.rs:164` | `pub fn circuit_z0(&self, z_wave: f64, waveports: &[AssembledWavePort]) -> f64` —  Returns the circuit reference impedance `Z_0` used for `DrivenPortData::z0_ohm` and `S -> Z/Y` conversion. |
 | fn | `DrivenAssembly::term_coeffs` | `driven.rs:272` | `pub fn term_coeffs(&self, omega: f64) -> Vec<(C, C, C)>` —  Evaluates the complex scalar coefficients $(\alpha_m(\omega), \alpha_m'(\omega), \alpha_m''(\omega))$ for each term $\hat{\mathbf{A}}_m$. |

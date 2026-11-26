@@ -19,7 +19,7 @@ modes = component "Mode kernel" "Full-vector mode analysis of a 2D waveguide cro
     properties {
         "adr" "45, 9, 132"
         "code" "crates/nyx-ems/src: modes.rs"
-        "lines" "862"
+        "lines" "864"
         "codeDiagram" "4-code/ems/modes.md"
     }
 }
@@ -27,7 +27,7 @@ modescx = component "Complex-mode kernel" "Complex-valued mode analysis: lossy m
     properties {
         "adr" "45, 132"
         "code" "crates/nyx-ems/src: modes_complex.rs"
-        "lines" "1557"
+        "lines" "1559"
         "codeDiagram" "4-code/ems/modescx.md"
     }
 }
@@ -35,7 +35,7 @@ axisym = component "Axisymmetric kernel" "Electromagnetic eigenmodes of a body o
     properties {
         "adr" "46, 132"
         "code" "crates/nyx-ems/src: axisym.rs"
-        "lines" "958"
+        "lines" "960"
         "codeDiagram" "4-code/ems/axisym.md"
     }
 }
@@ -43,7 +43,7 @@ cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities
     properties {
         "adr" "45, 104, 132"
         "code" "crates/nyx-ems/src: bloch.rs, cavity.rs"
-        "lines" "4247"
+        "lines" "4251"
         "codeDiagram" "4-code/ems/cavity.md"
     }
 }
@@ -59,7 +59,7 @@ driven = component "Driven frequency-domain and PROM" "Driven 3D frequency-domai
     properties {
         "adr" "106, 132"
         "code" "crates/nyx-ems/src: driven.rs, ports.rs"
-        "lines" "3003"
+        "lines" "3005"
         "codeDiagram" "4-code/ems/driven.md"
     }
 }

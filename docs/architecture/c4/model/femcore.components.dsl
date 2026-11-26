@@ -187,7 +187,7 @@ runtime = component "Runtime services" "The shared worker pool, stage log and ca
     properties {
         "adr" "9, 11, 96, 132"
         "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, vvuq.rs, warm.rs"
-        "lines" "1078"
+        "lines" "1270"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

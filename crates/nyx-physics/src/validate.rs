@@ -389,6 +389,8 @@ mod tests {
             }],
             scalars: vec![("f1".into(), Scalar::Num(1.5e9)), ("note".into(), Scalar::Text("ok".into()))],
             log: vec![],
+            diagnostics: None,
+            error_budget: None,
         }
     }
 

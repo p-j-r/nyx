@@ -7,7 +7,7 @@ One page per component, C4 level 4. [Component view](../../3-components/sms.md) 
 | [Physics adapter](./adapter.md) | 1 | 697 | 2 | 1 |
 | [Typed problem](./problem.md) | 1 | 1056 | 33 | 11 |
 | [Solid kernel](./solid.md) | 1 | 3180 | 47 | 6 |
-| [Piezoelectric kernel](./piezo.md) | 4 | 6050 | 47 | 16 |
+| [Piezoelectric kernel](./piezo.md) | 4 | 6052 | 47 | 16 |
 | [Cross-section study kernel](./crosssection.md) | 1 | 1788 | 15 | 4 |
 | [Axisymmetric kernel](./axisym.md) | 1 | 1446 | 21 | 0 |
 | [Waveguide kernel](./waveguide.md) | 1 | 843 | 7 | 0 |

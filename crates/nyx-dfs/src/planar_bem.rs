@@ -1520,6 +1520,7 @@ pub fn solve_planar_bem_with_stack(
         log,
         seconds: t0.elapsed().as_secs_f64(),
         dofs: n_panels,
+        ..Default::default()
     })
 }
 

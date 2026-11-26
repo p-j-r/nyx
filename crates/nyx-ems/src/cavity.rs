@@ -2117,6 +2117,7 @@ pub fn emw_eigen_fields(
         log,
         dofs: n,
         seconds: 0.0,
+        ..Default::default()
     })
 }
 
@@ -3183,6 +3184,7 @@ pub fn emw_eigen_fields_mixed(
         log,
         dofs: n,
         seconds: 0.0,
+        ..Default::default()
     })
 }
 

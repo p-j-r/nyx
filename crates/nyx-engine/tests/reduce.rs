@@ -131,6 +131,7 @@ impl Physics for Fld {
             }],
             scalars: vec![],
             log: vec![],
+            ..Default::default()
         })
     }
 }
@@ -1345,6 +1346,7 @@ impl Physics for MultiFld {
             solutions,
             scalars: vec![],
             log: vec![],
+            ..Default::default()
         })
     }
 }

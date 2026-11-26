@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 > The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence helpers.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 6 files, 1078 lines.
+**Size:** 6 files, 1270 lines.
 
 ## Files
 
@@ -15,7 +15,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | `crates/femcore/src/par.rs` | 163 |  |
 | `crates/femcore/src/progress.rs` | 297 |  |
 | `crates/femcore/src/validate.rs` | 48 |  |
-| `crates/femcore/src/vvuq.rs` | 225 |  |
+| `crates/femcore/src/vvuq.rs` | 417 |  |
 | `crates/femcore/src/warm.rs` | 290 |  |
 
 ## What it uses
@@ -156,10 +156,29 @@ classDiagram
         +ols_slope f64
         +asymptotic_slope f64
     }
+    class RoacheGciRegime {
+        <<enumeration>>
+        Monotonic
+        Oscillatory
+        NonConvergent
+    }
+    class RoacheGciReport {
+        <<struct>>
+        +regime RoacheGciRegime
+        +convergence_ratio f64
+        +r21 f64
+        +r32 f64
+        +observed_order Option~f64~
+        +gci_21 f64
+        +gci_32 Option~f64~
+        +safety_factor f64
+        +more_2_fields
+    }
     class fns_vvuq_rs {
         <<module vvuq.rs>>
         +convergence_rate(hs, errs) Result
         +assert_convergence_rate(hs, errs, expected_p, band) ConvergenceReport
+        +roache_gci(phi, r21, r32, theoretical_order) Result
     }
   }
   namespace warm_rs {
@@ -201,6 +220,7 @@ classDiagram
     }
   }
   UniformSource ..|> SourceField
+  RoacheGciReport --> RoacheGciRegime
 ```
 
 ## Public items
@@ -241,6 +261,9 @@ classDiagram
 | struct | `ConvergenceReport` | `vvuq.rs:99` | fields: `pairwise_slopes`, `ols_slope`, `asymptotic_slope` —  Observed convergence summary across `>= 3` grids or step sizes. |
 | fn | `convergence_rate` | `vvuq.rs:110` | `pub fn convergence_rate(hs: &[f64], errs: &[f64]) -> Result<ConvergenceReport, String>` —  Computes pairwise and OLS log-log convergence rates over strictly decreasing positive |
 | fn | `assert_convergence_rate` | `vvuq.rs:174` | `pub fn assert_convergence_rate( hs: &[f64], errs: &[f64], expected_p: f64, band: (f64, f64), ) -> ConvergenceReport` —  Asserts strictly decreasing positive `hs`, finite positive `errs`, and that both |
+| enum | `RoacheGciRegime` | `vvuq.rs:204` | variants: `Monotonic`, `Oscillatory`, `NonConvergent` —  Convergence regime classified by Roache's 3-grid Grid Convergence Index (VVUQ Layer 3, §5.3). |
+| struct | `RoacheGciReport` | `vvuq.rs:215` | fields: `regime`, `convergence_ratio`, `r21`, `r32`, `observed_order`, `gci_21`, `gci_32`, `safety_factor`, `in_asymptotic_range`, `extrapolated_value` —  Result of a 3-grid Roache Grid Convergence Index calculation on grids `h1 < h2 < h3`. |
+| fn | `roache_gci` | `vvuq.rs:240` | `pub fn roache_gci( phi: [f64; 3], r21: f64, r32: f64, theoretical_order: f64, ) -> Result<RoacheGciReport, String>` —  Computes Roache's 3-grid GCI for scalar QoIs `[phi1, phi2, phi3]` ordered fine-to-coarse (`h1 < h2 < h3`) |
 | struct | `Entry` | `warm.rs:30` | fields: `kind`, `n`, `nev`, `cols` —  The modes one eigensolve found: its kind, the number of unknowns, the number of modes asked for, and the vectors (columns). |
 | struct | `Call` | `warm.rs:39` | fields: `kind`, `n`, `nev`, `warm`, `iterations` —  What one eigensolve did with a warm context, for the run's record. |
 | struct | `Warm` | `warm.rs:50` |  The warm context of one solve: the entries of the previous solve (input), the ones this solve leaves (output) and what each call did. |
