@@ -31,32 +31,36 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [analysis: Mode figures](../analysis/figures.md) | frame, result | FieldFrame, Scalar, Solution, SolveResult |
 | [analysis: Piezo resonator analysis](../analysis/piezo.md) | result | SolveResult |
 | [analysis: Field samples](../analysis/samples.md) | frame, result | CellField, FieldFrame, Solution, SolveResult |
-| [dfs: Shared helpers](../dfs/common.md) | result | MixedToSimplexProjector |
-| [dfs: Electrostatics kernel](../dfs/electro.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [dfs: Shared helpers](../dfs/common.md) | result | DiagnosticSeverity, DiagnosticWarning, MixedToSimplexProjector, NumericalErrorBudget, SolverDiagnostics, SpatialErrorEstimate |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | result | DiagnosticSeverity, Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, SpatialErrorEstimate, cell_fields_of |
 | [dfs: Heat kernel](../dfs/heat.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Physics adapter](../ems/adapter.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, SolverDiagnostics, SpatialErrorEstimate |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: 3D cavity kernel](../ems/cavity.md) | frame, result | Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
-| [ems: Driven frequency-domain and PROM](../ems/driven.md) | frame, result | Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | frame, result | DiagnosticSeverity, DiagnosticWarning, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult +1 |
+| [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | result | DiagnosticSeverity, DiagnosticWarning |
+| [ems: Native mixed-cell EM](../ems/mixed.md) | result | DiagnosticSeverity, DiagnosticWarning |
 | [ems: Mode kernel](../ems/modes.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Complex-mode kernel](../ems/modescx.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Optical mode sets](../ems/optical.md) | frame | FieldFrame |
 | [engine: Analyses](../engine/analyse.md) | result | Scalar, SolveResult |
-| [engine: Commands](../engine/commands.md) | result | Solution, SolveResult |
-| [engine: Job runner and queue](../engine/jobs.md) | result | Scalar, SolveResult |
+| [engine: Commands](../engine/commands.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, Solution, SolveResult |
+| [engine: Job runner and queue](../engine/jobs.md) | result | DiagnosticSeverity, DiagnosticWarning, Scalar, SolveResult, SpatialErrorEstimate |
 | [engine: Meshing seam](../engine/meshing.md) | result | Scalar, SolveResult |
-| [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, Scalar, Solution, SolveResult |
+| [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, NumericalErrorBudget, Scalar, Solution, SolveResult, SolverDiagnostics |
 | [engine: Store link](../engine/storeLink.md) | result | Scalar, SolveResult |
 | [cQED result payloads](./cqed.md) | result | Scalar, SolveResult |
 | [Problem envelope](./envelope.md) | result | Scalar, SolveResult |
 | [Test support](./testsupport.md) | result | Scalar, SolveResult |
 | [Physics trait and registry](./trait.md) | frame, result | CellField, DiagnosticSeverity, DiagnosticWarning, FRAME_KEY, Field, FieldFrame, MixedToSimplexProjector, NumericalErrorBudget +7 |
+| [sms: Physics adapter](../sms/adapter.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, SolverDiagnostics, SpatialErrorEstimate |
 | [sms: Cross-section study kernel](../sms/crosssection.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [sms: Floquet kernel](../sms/floquet.md) | result | MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | result | MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
-| [sms: Piezoelectric kernel](../sms/piezo.md) | frame, result | CellField, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | frame, result | CellField, DiagnosticSeverity, DiagnosticWarning, Field, FieldFrame, MixedToSimplexProjector, Scalar, Solution +2 |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | result | MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
-| [sms: Solid kernel](../sms/solid.md) | result | CellField, Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [sms: Solid kernel](../sms/solid.md) | result | CellField, DiagnosticSeverity, Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 
 ## Class diagram
 

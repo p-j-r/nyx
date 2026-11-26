@@ -5,56 +5,56 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 11 files, 6070 lines.
+**Size:** 11 files, 6808 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-engine/src/bin/nyx-worker.rs` | 14 |  |
-| `crates/nyx-engine/src/convergence.rs` | 1627 |  |
+| `crates/nyx-engine/src/convergence.rs` | 2286 |  |
 | `crates/nyx-engine/src/estimate.rs` | 476 |  |
-| `crates/nyx-engine/src/jobs.rs` | 599 |  |
+| `crates/nyx-engine/src/jobs.rs` | 601 |  |
 | `crates/nyx-engine/src/process.rs` | 318 |  |
-| `crates/nyx-engine/src/queue.rs` | 681 |  |
+| `crates/nyx-engine/src/queue.rs` | 696 |  |
 | `crates/nyx-engine/src/reuse.rs` | 204 |  |
 | `crates/nyx-engine/src/shared_queue.rs` | 970 |  |
-| `crates/nyx-engine/src/solve.rs` | 174 |  |
-| `crates/nyx-engine/src/sweep.rs` | 500 |  |
-| `crates/nyx-engine/src/worker.rs` | 507 |  |
+| `crates/nyx-engine/src/solve.rs` | 230 |  |
+| `crates/nyx-engine/src/sweep.rs` | 501 |  |
+| `crates/nyx-engine/src/worker.rs` | 512 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | linalg::driver, material::spec, mesh, progress, warm | Call, Library, Progress, SimplexMesh, Warm, dense_eigh, from_bytes, install, stage, to_bytes |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | linalg::driver, material::spec, mesh, progress, vvuq, warm | Call, Library, Progress, RoacheGciRegime, RoacheGciReport, SimplexMesh, Warm, dense_eigh, from_bytes, install +3 |
 | [container `geom` (geom)](../../3-components/geom.md) | expr, model | Expr, Op |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, error, physics, registry, result, validate | CAPACITANCE_KEY, CapacitanceMatrixData, Ctx, ElectroAmrData, Error, Registry, Scalar, SolveResult, TlsMeta, validate_spec |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, error, physics, registry, result, spec, validate | CAPACITANCE_KEY, CapacitanceMatrixData, Ctx, DiagnosticSeverity, DiagnosticWarning, ElectroAmrData, Error, Physics, ProblemSpec, Registry +5 |
 | [container `store` (nyx-store)](../../3-components/store.md) | workspace | default_root |
 | [Analyses](./analyse.md) | analyse | analyses |
-| [Commands](./commands.md) | commands, engine | Access, Engine, Purpose |
+| [Commands](./commands.md) | commands, engine, validated | Access, Check, Engine, Purpose |
 | [Materials](./materials.md) | materials | study_frequency, study_wavelength |
-| [Meshing seam](./meshing.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, solve_dfs_with_amr |
+| [Meshing seam](./meshing.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, project_uses_ems_cavity_amr, project_uses_sms_amr, solve_dfs_with_amr_opts, solve_ems_cavity_with_amr, solve_sms_with_amr |
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
-| [Results files](./resultsIO.md) | crate root, h5io | L2ShuffleLzfPacked, read_results, write_results_with_options |
+| [Results files](./resultsIO.md) | crate root, h5io | L2ShuffleLzfPacked, read_results, write_results_with_provenance |
 | [Store link](./storeLink.md) | store_link | RunOutcome, metrics_of |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
-| [app: Window](../app/window.md) | process, queue, shared_queue, worker | QueueOpts, cli, opt_out_of_power_throttling, serve |
+| [app: Window](../app/window.md) | convergence, process, queue, shared_queue, worker | Limits, Matching, QueueOpts, cli, opt_out_of_power_throttling, serve |
 | [Command lists](./commandlist.md) | convergence | Limits, Matching |
-| [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits +33 |
+| [Commands](./commands.md) | convergence, estimate, jobs, process, queue, reuse +4 | Estimate, History, JobId, JobMeta, JobOutput, JobRunner, Lane, Limits +35 |
 | [Materials](./materials.md) | shared_queue | default_workspace |
-| [Meshing seam](./meshing.md) | estimate, solve | Estimate, History, chain_key, chain_key_for_project, solve_one_single |
+| [Meshing seam](./meshing.md) | estimate, solve | Estimate, History, build_solve_ctx, chain_key, chain_key_for_project, name_domains, solve_one_single |
 | [Registry and facade](./registry.md) | estimate, jobs, queue | Estimate, History, JobId, JobInfo, JobOutput, JobRunner, JobState, Lane +3 |
 | [Results files](./resultsIO.md) | jobs | Opened |
 
 ## Class diagram
 
-Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 4 more types than the diagram shows.**
+Public types with their public fields (or variants) and methods, free functions per file as a `module` box; arrows are field types and `impl Trait`. Capped at 36 types and a few members each; the table below is complete. **This component has 5 more types than the diagram shows.**
 
 ```mermaid
 classDiagram
@@ -78,6 +78,13 @@ classDiagram
         +from_value(t) Result
         +to_json() Value
     }
+    class ModeScalarMeta {
+        <<struct>>
+        +name String
+        +base String
+        +unit String
+        +mode_index Option~usize~
+    }
     class Matching {
         <<enumeration>>
         Index
@@ -89,6 +96,12 @@ classDiagram
         <<struct>>
         +reuse Option
         +limits Limits
+        +worker Option~PathBuf~
+        +isolate_default bool
+        +isolable bool
+        +memory_probe MemoryProbe
+        +memory_wait_timeout Option~f64~
+        +present_residual Option~f64~
         +with_limits(limits) Self
         +run(physics, factor, tolerance) Result
         +run_matched(physics, factor, tolerance, matching) Result
@@ -105,6 +118,8 @@ classDiagram
         +extrapolate_order Option~f64~
         +apply_extrapolated bool
         +quantities Option
+        +grids usize
+        +more_4_fields
         +validate() Result
         +from_args(args) Result
     }
@@ -123,10 +138,15 @@ classDiagram
     class fns_convergence_rs {
         <<module convergence.rs>>
         ~numbers(r) Vec
+        +encode_mode_scalar_meta(entries) tuple
+        +decode_mode_scalar_meta(r) Vec~ModeScalarMeta~
+        +mode_scalar_of(r, meta, name) Option
         +extrapolate_capacitance(coarse, fine, method, r, order) Result
         +apply_extrapolated_capacitance(result, cap)
         +extrapolated_capacitance(answer) Option~CapacitanceMatrixData~
         +should_apply_extrapolated(answer) bool
+        +spatial_error_estimate(answer) Option~SpatialErrorEstimate~
+        +MODE_SCALAR_META_KEY const
     }
   }
   namespace estimate_rs {
@@ -192,6 +212,7 @@ classDiagram
         +model Arc~MeshedModel~
         +results Vec
         +path String
+        +checks BTreeMap
     }
     class JobState {
         <<enumeration>>
@@ -268,7 +289,7 @@ classDiagram
         +shared Option~bool~
         +warm Option~WarmLink~
         +save_fields bool
-        +more_2_fields
+        +more_3_fields
     }
     class JobMeta {
         <<struct>>
@@ -297,6 +318,7 @@ classDiagram
         <<module queue.rs>>
         ~validate_post_analyses(entries) Result
         ~save_fields_of(args) Result
+        ~retain_amr_data_of(args) Result
         ~post_analyses_of(args) Result
         ~memory_wait_timeout_of(args) Result
         ~solve_key(problem_key, targets) String
@@ -432,9 +454,13 @@ classDiagram
   namespace solve_rs {
     class fns_solve_rs {
         <<module solve.rs>>
+        ~name_domains(result, model)
         +run_chain(registry, project, model, targets, library, progress) Result
         +run_chain_partial(registry, project, model, targets, library, progress) tuple
+        ~run_chain_partial_with(registry, project, model, targets, library, progress, retain_amr_data) tuple
         +run_chain_partial_amr(registry, project, model, targets, library, progress) tuple
+        ~run_chain_partial_amr_with(registry, project, model, targets, library, progress, retain_amr_data) tuple
+        ~build_solve_ctx(registry, model, p, spec, library, progress, done) Ctx
         ~solve_one_single(registry, project, model, id, library, progress, done) Result
     }
   }
@@ -463,16 +489,6 @@ classDiagram
     }
   }
   namespace worker_rs {
-    class RemoteSpec {
-        <<struct>>
-        +worker PathBuf
-        +project_json String
-        +materials BTreeMap
-        +targets Vec~String~
-        +warm Option~WarmIo~
-        +save_fields bool
-        +post_analyses Vec~Value~
-    }
     class fns_worker_rs {
         <<module worker.rs>>
         +material_texts(lib) BTreeMap
@@ -513,31 +529,37 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | fn | `main` | `bin/nyx-worker.rs:5` | `fn main()` |
-| fn | `numbers` | `convergence.rs:131` | `pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)>` —  Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars. |
-| struct | `TrackFilter` | `convergence.rs:156` | fields: `target`, `region`, `min_share`, `component`, `min_component`, `max_layer_fraction` —  Signature and eigenvalue target for following modes across meshes (`Matching::Track`). |
-| enum | `Matching` | `convergence.rs:402` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
-| struct | `ConvergenceJob` | `convergence.rs:602` | fields: `reuse`, `limits` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
-| struct | `Limits` | `convergence.rs:620` | fields: `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated`, `quantities` —  What a convergence check may cost and how it refines and extrapolates: it is refused, before any solve, when the comparison mesh has more cells |
-| fn | `extrapolate_capacitance` | `convergence.rs:818` | `pub fn extrapolate_capacitance( coarse: &CapacitanceMatrixData, fine: &CapacitanceMatrixData, method: &str, r: f64, order: f64, ) -> Result<(CapacitanceMatrixData, Vec<Vec<f64>>, f64), Error>` —  Two-grid Richardson extrapolation of a multi-terminal Maxwell capacitance matrix (`r = h_coarse / h_fine > 1.0`, `order = p > 0.0`). |
-| fn | `apply_extrapolated_capacitance` | `convergence.rs:916` | `pub fn apply_extrapolated_capacitance(result: &mut SolveResult, cap: &CapacitanceMatrixData)` —  Replaces the `CapacitanceMatrixData` payload (and matching `C_*` / `E_C_*` scalars and solution values) in `result` with `cap`. |
-| fn | `extrapolated_capacitance` | `convergence.rs:966` | `pub fn extrapolated_capacitance(answer: &Value) -> Option<CapacitanceMatrixData>` —  Extracts the extrapolated `CapacitanceMatrixData` from a finished `convergence_check` JSON reply, if one was computed. |
-| fn | `should_apply_extrapolated` | `convergence.rs:975` | `pub fn should_apply_extrapolated(answer: &Value) -> bool` —  Whether a finished `convergence_check` JSON reply asked to promote its extrapolated values onto the stored result. |
-| fn | `TrackFilter::has_signature` | `convergence.rs:180` | `pub fn has_signature(&self) -> bool` —  Whether any per-mode scalar signature predicate is set. |
-| fn | `TrackFilter::validate` | `convergence.rs:189` | `pub fn validate(&self) -> Result<(), Error>` —  Validates all target and threshold invariants. |
-| fn | `TrackFilter::from_value` | `convergence.rs:243` | `pub fn from_value(t: &Value) -> Result<TrackFilter, Error>` —  Parses a `track` JSON object. |
-| fn | `TrackFilter::to_json` | `convergence.rs:304` | `pub fn to_json(&self) -> Value` |
-| fn | `Matching::from_args` | `convergence.rs:415` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` filters by signature and/or target (`f`, `n_b`, `n_eff`) and implies `nearest`. |
-| fn | `Limits::validate` | `convergence.rs:646` | `pub fn validate(&self) -> Result<(), Error>` —  Validates `Limits` invariants whether parsed from JSON or constructed in Rust. |
-| fn | `Limits::from_args` | `convergence.rs:679` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated` and `quantities` of the command arguments. |
-| fn | `ConvergenceJob::with_limits` | `convergence.rs:997` | `pub fn with_limits(mut self, limits: Limits) -> Self` —  Returns this job configured with `limits`. |
-| fn | `ConvergenceJob::run` | `convergence.rs:1010` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until both solves are done. |
-| fn | `ConvergenceJob::run_matched` | `convergence.rs:1015` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
-| fn | `ConvergenceJob::run_with` | `convergence.rs:1026` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either. |
-| fn | `ConvergenceJob::plan` | `convergence.rs:1082` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the |
-| fn | `ConvergenceJob::plan_with` | `convergence.rs:1087` | `pub fn plan_with(&self, physics: &str, factor: f64, scale_sizes: bool) -> Result<Value, Error>` —  `plan` with an explicit `scale_sizes` toggle controlling whether local `add_size` features scale proportionally with `factor`. |
-| fn | `Engine::convergence_job` | `convergence.rs:1123` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
-| fn | `Engine::convergence_check` | `convergence.rs:1139` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
-| fn | `Engine::convergence_check_matched` | `convergence.rs:1146` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
+| fn | `numbers` | `convergence.rs:141` | `pub(crate) fn numbers(r: &SolveResult) -> Vec<(String, f64)>` —  Every named number of a result, in a fixed order: `eigenvalue[i].re`, `eigenvalue[i].im`, `value[i]` and the numeric scalars. |
+| struct | `TrackFilter` | `convergence.rs:166` | fields: `target`, `region`, `min_share`, `component`, `min_component`, `max_layer_fraction` —  Signature and eigenvalue target for following modes across meshes (`Matching::Track`). |
+| const | `MODE_SCALAR_META_KEY` | `convergence.rs:425` | `&str` —  Optional scalar key storing `Vec<ModeScalarMeta>` (`R11a`) so solvers can attach explicit `mode_index` metadata to per-mode scalars. |
+| struct | `ModeScalarMeta` | `convergence.rs:429` | fields: `name`, `base`, `unit`, `mode_index` —  Structured per-mode scalar metadata (`R11a`), replacing brittle trailing-digit string heuristics when present while preserving legacy fallback. |
+| fn | `encode_mode_scalar_meta` | `convergence.rs:439` | `pub fn encode_mode_scalar_meta(entries: &[ModeScalarMeta]) -> (String, Scalar)` —  Encodes `entries` as a `Scalar::Text` entry under [`MODE_SCALAR_META_KEY`]. |
+| fn | `decode_mode_scalar_meta` | `convergence.rs:444` | `pub fn decode_mode_scalar_meta(r: &SolveResult) -> Vec<ModeScalarMeta>` —  Decodes optional [`ModeScalarMeta`] entries attached to `r`. |
+| fn | `mode_scalar_of` | `convergence.rs:456` | `pub fn mode_scalar_of(r: &SolveResult, meta: &[ModeScalarMeta], name: &str) -> Option<(String, String, usize)>` —  Resolves `(base_name, unit, zero_based_mode_index)` using optional structured [`ModeScalarMeta`] (`R11a`) first, then legacy string parsing. |
+| enum | `Matching` | `convergence.rs:465` | variants: `Index`, `Nearest`, `Track` —  How the solutions of the two meshes are paired. |
+| struct | `ConvergenceJob` | `convergence.rs:665` | fields: `reuse`, `limits`, `worker`, `isolate_default`, `isolable`, `memory_probe`, `memory_wait_timeout`, `present_residual` —  Everything a convergence check needs, owned, so that a front-end can run it on its own thread while the engine stays usable. |
+| struct | `Limits` | `convergence.rs:696` | fields: `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated`, `quantities`, `grids`, `coarsen`, `coarsen_factors`, `force`, `isolate` —  What a convergence check may cost and how it refines and extrapolates: it is refused, before any solve, when the comparison mesh has more cells |
+| fn | `extrapolate_capacitance` | `convergence.rs:974` | `pub fn extrapolate_capacitance( coarse: &CapacitanceMatrixData, fine: &CapacitanceMatrixData, method: &str, r: f64, order: f64, ) -> Result<(CapacitanceMatrixData, Vec<Vec<f64>>, f64), Error>` —  Two-grid Richardson extrapolation of a multi-terminal Maxwell capacitance matrix (`r = h_coarse / h_fine > 1.0`, `order = p > 0.0`). |
+| fn | `apply_extrapolated_capacitance` | `convergence.rs:1072` | `pub fn apply_extrapolated_capacitance(result: &mut SolveResult, cap: &CapacitanceMatrixData)` —  Replaces the `CapacitanceMatrixData` payload (and matching `C_*` / `E_C_*` scalars and solution values) in `result` with `cap`. |
+| fn | `extrapolated_capacitance` | `convergence.rs:1122` | `pub fn extrapolated_capacitance(answer: &Value) -> Option<CapacitanceMatrixData>` —  Extracts the extrapolated `CapacitanceMatrixData` from a finished `convergence_check` JSON reply, if one was computed. |
+| fn | `should_apply_extrapolated` | `convergence.rs:1131` | `pub fn should_apply_extrapolated(answer: &Value) -> bool` —  Whether a finished `convergence_check` JSON reply asked to promote its extrapolated values onto the stored result. |
+| fn | `spatial_error_estimate` | `convergence.rs:1136` | `pub fn spatial_error_estimate(answer: &Value) -> Option<SpatialErrorEstimate>` —  Extracts the [`SpatialErrorEstimate`] emitted by a finished `convergence_check` JSON reply, if present. |
+| fn | `TrackFilter::has_signature` | `convergence.rs:190` | `pub fn has_signature(&self) -> bool` —  Whether any per-mode scalar signature predicate is set. |
+| fn | `TrackFilter::validate` | `convergence.rs:199` | `pub fn validate(&self) -> Result<(), Error>` —  Validates all target and threshold invariants. |
+| fn | `TrackFilter::from_value` | `convergence.rs:253` | `pub fn from_value(t: &Value) -> Result<TrackFilter, Error>` —  Parses a `track` JSON object. |
+| fn | `TrackFilter::to_json` | `convergence.rs:314` | `pub fn to_json(&self) -> Value` |
+| fn | `Matching::from_args` | `convergence.rs:478` | `pub fn from_args(args: &Value) -> Result<Matching, Error>` —  From the arguments of the command: `match` is `index` or `nearest`, `track` filters by signature and/or target (`f`, `n_b`, `n_eff`) and implies `nearest`. |
+| fn | `Limits::validate` | `convergence.rs:732` | `pub fn validate(&self) -> Result<(), Error>` —  Validates `Limits` invariants whether parsed from JSON or constructed in Rust. |
+| fn | `Limits::from_args` | `convergence.rs:784` | `pub fn from_args(args: &Value) -> Result<Limits, Error>` —  `max_cells`, `max_seconds`, `scale_sizes`, `grids`, `coarsen`, `coarsen_factors`, `extrapolate`, `extrapolate_order`, |
+| fn | `ConvergenceJob::with_limits` | `convergence.rs:1162` | `pub fn with_limits(mut self, limits: Limits) -> Self` —  Returns this job configured with `limits`. |
+| fn | `ConvergenceJob::run` | `convergence.rs:1175` | `pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Runs the check (see `Engine::convergence_check`); blocks until solves finish. |
+| fn | `ConvergenceJob::run_matched` | `convergence.rs:1180` | `pub fn run_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  The check with the solutions paired as `matching` says. |
+| fn | `ConvergenceJob::run_with` | `convergence.rs:1191` | `pub fn run_with( &self, progress: &Arc<Progress>, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  Runs the check on the calling thread under `progress`: each solve is a stage of it, and cancel stops it. |
+| fn | `ConvergenceJob::plan` | `convergence.rs:1330` | `pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error>` —  What the check would cost, without solving anything: the present mesh and comparison mesh(es) are built, and the answer gives |
+| fn | `ConvergenceJob::plan_with` | `convergence.rs:1335` | `pub fn plan_with(&self, physics: &str, factor: f64, scale_sizes: bool) -> Result<Value, Error>` —  `plan` with an explicit `scale_sizes` toggle controlling whether local `add_size` features scale proportionally with `factor`. |
+| fn | `Engine::convergence_job` | `convergence.rs:1395` | `pub fn convergence_job(&self) -> ConvergenceJob` —  A snapshot of what `convergence_check` needs. |
+| fn | `Engine::convergence_check` | `convergence.rs:1415` | `pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error>` —  Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread |
+| fn | `Engine::convergence_check_matched` | `convergence.rs:1422` | `pub fn convergence_check_matched( &self, physics: &str, factor: f64, tolerance: Option<f64>, matching: &Matching, ) -> Result<Value, Error>` —  `convergence_check` with the modes of the two meshes paired by their eigenvalues (`Matching::Nearest`) or one mode followed |
 | struct | `Row` | `estimate.rs:19` | fields: `chain`, `dim`, `cells`, `dofs`, `peak_working_set`, `peak_commit`, `seconds` —  One finished worker run. |
 | struct | `Estimate` | `estimate.rs:33` | fields: `bytes`, `bytes_with_margin`, `seconds`, `runs`, `extrapolated`, `exponent` —  An estimate with its basis. |
 | fn | `estimate` | `estimate.rs:63` | `pub fn estimate(rows: &[Row], chain: &str, dim: u8, cells: u64) -> Option<Estimate>` —  The estimate for a solve of `chain` in `dim` dimensions on `cells` cells from `rows`, or `None` when the rows do not support one. |
@@ -559,68 +581,69 @@ classDiagram
 | type | `JobId` | `jobs.rs:22` |  |
 | enum | `JobOutput` | `jobs.rs:25` | variants: `Mesh`, `Solved`, `Convergence`, `Opened`, `Exported` —  What a finished job hands back. The engine applies it to its state (`Engine::apply`). |
 | struct | `WorkerRun` | `jobs.rs:53` | fields: `peak_working_set`, `peak_commit`, `shared` —  What a worker process measured of its own solve: the most memory it used, in bytes (the in-process job cannot know: the process is shared). |
-| struct | `Opened` | `jobs.rs:62` | fields: `project`, `model`, `results`, `path` —  What opening a results file gives the engine to apply. |
-| enum | `JobState` | `jobs.rs:72` | variants: `Queued`, `Running`, `Done`, `Cancelled`, `Failed` |
-| enum | `Lane` | `jobs.rs:91` | variants: `Heavy`, `Light`, `Shared` —  The resource class of a job. The heavy lane runs one job at a time; the light lane (I/O) runs beside it. |
-| struct | `Submit` | `jobs.rs:101` | fields: `label`, `lane`, `owner`, `priority`, `key`, `supersede`, `hold` —  How a job is submitted: its name, lane, owner and priority. |
-| struct | `JobInfo` | `jobs.rs:124` | fields: `id`, `label`, `state`, `lane`, `owner`, `priority`, `held`, `position`, `queued_seconds`, `stage`, `stage_seconds`, `fraction`, ... |
-| struct | `JobRunner` | `jobs.rs:193` |  |
-| fn | `JobState::is_open` | `jobs.rs:83` | `pub fn is_open(&self) -> bool` —  Queued or running: the job has not finished. |
-| fn | `Submit::new` | `jobs.rs:118` | `pub fn new(label: &str, lane: Lane) -> Submit` |
-| fn | `JobRunner::new` | `jobs.rs:304` | `pub fn new() -> JobRunner` |
-| fn | `JobRunner::start` | `jobs.rs:323` | `pub fn start<F>(&self, label: &str, work: F) -> JobId` —  Submits `work` to the heavy lane with the default owner and priority. |
-| fn | `JobRunner::submit` | `jobs.rs:332` | `pub fn submit<F>(&self, spec: Submit, work: F) -> JobId` —  Submits `work`. It starts at once when its lane is free, otherwise it waits in the queue. The closure gets the job's `Progress`; a panic in |
-| fn | `JobRunner::info` | `jobs.rs:379` | `pub fn info(&self, id: JobId) -> Option<JobInfo>` |
-| fn | `JobRunner::progress` | `jobs.rs:419` | `pub fn progress(&self, id: JobId) -> Option<Arc<Progress>>` —  The progress handle of a job: the stage it is in, the log so far, the cancel flag. A front-end that shows a bar reads it. |
-| fn | `JobRunner::list` | `jobs.rs:424` | `pub fn list(&self) -> Vec<JobInfo>` —  All jobs, oldest first. |
-| fn | `JobRunner::running` | `jobs.rs:430` | `pub fn running(&self) -> Vec<JobId>` —  The jobs that have not finished (queued or running). |
-| fn | `JobRunner::cancel` | `jobs.rs:452` | `pub fn cancel(&self, id: JobId) -> bool` —  Asks the job to stop. A queued job stops at once and never runs; a running one notices at its next check (a factorisation finishes first). |
-| fn | `JobRunner::hold` | `jobs.rs:465` | `pub fn hold(&self, id: JobId) -> bool` —  Keeps a queued job from starting until `release`. False when it is not queued. |
-| fn | `JobRunner::release` | `jobs.rs:480` | `pub fn release(&self, id: JobId) -> bool` |
-| fn | `JobRunner::set_priority` | `jobs.rs:497` | `pub fn set_priority(&self, id: JobId, priority: u8) -> bool` —  Changes the priority of a queued job. False when it is not queued. |
-| fn | `JobRunner::pause` | `jobs.rs:513` | `pub fn pause(&self)` —  Stops the queue from starting anything new; what runs finishes. |
-| fn | `JobRunner::resume` | `jobs.rs:517` | `pub fn resume(&self)` |
-| fn | `JobRunner::paused` | `jobs.rs:522` | `pub fn paused(&self) -> bool` |
-| fn | `JobRunner::set_limit` | `jobs.rs:527` | `pub fn set_limit(&self, lane: Lane, n: usize)` —  How many jobs a lane runs at once (heavy 1, light 2 by default). |
-| fn | `JobRunner::set_age` | `jobs.rs:540` | `pub fn set_age(&self, age: Duration)` —  After this long in the queue a job competes one priority level higher. |
-| fn | `JobRunner::log` | `jobs.rs:545` | `pub fn log(&self, id: JobId) -> Vec<String>` —  The stage log of the job so far. |
-| fn | `JobRunner::try_take` | `jobs.rs:550` | `pub fn try_take(&self, id: JobId) -> Option<Result<JobOutput, Error>>` —  The outcome if the job has finished and it has not been taken; `None` while queued or running, or after it was taken. |
-| fn | `JobRunner::blocked` | `jobs.rs:556` | `pub fn blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for: it is held, or the queue is paused. `None` for a job that is running or will |
-| fn | `JobRunner::wait` | `jobs.rs:572` | `pub fn wait(&self, id: JobId) -> Result<JobOutput, Error>` —  Blocks until the job has finished and takes its outcome. |
-| fn | `JobRunner::wait_timeout` | `jobs.rs:582` | `pub fn wait_timeout(&self, id: JobId, timeout: Duration) -> Option<Result<JobOutput, Error>>` —  Like `wait`, but gives up after `timeout`: `None` when the job is still queued or running then (it keeps going and can be waited for again). |
+| struct | `Opened` | `jobs.rs:62` | fields: `project`, `model`, `results`, `path`, `checks` —  What opening a results file gives the engine to apply. |
+| enum | `JobState` | `jobs.rs:74` | variants: `Queued`, `Running`, `Done`, `Cancelled`, `Failed` |
+| enum | `Lane` | `jobs.rs:93` | variants: `Heavy`, `Light`, `Shared` —  The resource class of a job. The heavy lane runs one job at a time; the light lane (I/O) runs beside it. |
+| struct | `Submit` | `jobs.rs:103` | fields: `label`, `lane`, `owner`, `priority`, `key`, `supersede`, `hold` —  How a job is submitted: its name, lane, owner and priority. |
+| struct | `JobInfo` | `jobs.rs:126` | fields: `id`, `label`, `state`, `lane`, `owner`, `priority`, `held`, `position`, `queued_seconds`, `stage`, `stage_seconds`, `fraction`, ... |
+| struct | `JobRunner` | `jobs.rs:195` |  |
+| fn | `JobState::is_open` | `jobs.rs:85` | `pub fn is_open(&self) -> bool` —  Queued or running: the job has not finished. |
+| fn | `Submit::new` | `jobs.rs:120` | `pub fn new(label: &str, lane: Lane) -> Submit` |
+| fn | `JobRunner::new` | `jobs.rs:306` | `pub fn new() -> JobRunner` |
+| fn | `JobRunner::start` | `jobs.rs:325` | `pub fn start<F>(&self, label: &str, work: F) -> JobId` —  Submits `work` to the heavy lane with the default owner and priority. |
+| fn | `JobRunner::submit` | `jobs.rs:334` | `pub fn submit<F>(&self, spec: Submit, work: F) -> JobId` —  Submits `work`. It starts at once when its lane is free, otherwise it waits in the queue. The closure gets the job's `Progress`; a panic in |
+| fn | `JobRunner::info` | `jobs.rs:381` | `pub fn info(&self, id: JobId) -> Option<JobInfo>` |
+| fn | `JobRunner::progress` | `jobs.rs:421` | `pub fn progress(&self, id: JobId) -> Option<Arc<Progress>>` —  The progress handle of a job: the stage it is in, the log so far, the cancel flag. A front-end that shows a bar reads it. |
+| fn | `JobRunner::list` | `jobs.rs:426` | `pub fn list(&self) -> Vec<JobInfo>` —  All jobs, oldest first. |
+| fn | `JobRunner::running` | `jobs.rs:432` | `pub fn running(&self) -> Vec<JobId>` —  The jobs that have not finished (queued or running). |
+| fn | `JobRunner::cancel` | `jobs.rs:454` | `pub fn cancel(&self, id: JobId) -> bool` —  Asks the job to stop. A queued job stops at once and never runs; a running one notices at its next check (a factorisation finishes first). |
+| fn | `JobRunner::hold` | `jobs.rs:467` | `pub fn hold(&self, id: JobId) -> bool` —  Keeps a queued job from starting until `release`. False when it is not queued. |
+| fn | `JobRunner::release` | `jobs.rs:482` | `pub fn release(&self, id: JobId) -> bool` |
+| fn | `JobRunner::set_priority` | `jobs.rs:499` | `pub fn set_priority(&self, id: JobId, priority: u8) -> bool` —  Changes the priority of a queued job. False when it is not queued. |
+| fn | `JobRunner::pause` | `jobs.rs:515` | `pub fn pause(&self)` —  Stops the queue from starting anything new; what runs finishes. |
+| fn | `JobRunner::resume` | `jobs.rs:519` | `pub fn resume(&self)` |
+| fn | `JobRunner::paused` | `jobs.rs:524` | `pub fn paused(&self) -> bool` |
+| fn | `JobRunner::set_limit` | `jobs.rs:529` | `pub fn set_limit(&self, lane: Lane, n: usize)` —  How many jobs a lane runs at once (heavy 1, light 2 by default). |
+| fn | `JobRunner::set_age` | `jobs.rs:542` | `pub fn set_age(&self, age: Duration)` —  After this long in the queue a job competes one priority level higher. |
+| fn | `JobRunner::log` | `jobs.rs:547` | `pub fn log(&self, id: JobId) -> Vec<String>` —  The stage log of the job so far. |
+| fn | `JobRunner::try_take` | `jobs.rs:552` | `pub fn try_take(&self, id: JobId) -> Option<Result<JobOutput, Error>>` —  The outcome if the job has finished and it has not been taken; `None` while queued or running, or after it was taken. |
+| fn | `JobRunner::blocked` | `jobs.rs:558` | `pub fn blocked(&self, id: JobId) -> Option<&'static str>` —  Why a queued job cannot start however long it is waited for: it is held, or the queue is paused. `None` for a job that is running or will |
+| fn | `JobRunner::wait` | `jobs.rs:574` | `pub fn wait(&self, id: JobId) -> Result<JobOutput, Error>` —  Blocks until the job has finished and takes its outcome. |
+| fn | `JobRunner::wait_timeout` | `jobs.rs:584` | `pub fn wait_timeout(&self, id: JobId, timeout: Duration) -> Option<Result<JobOutput, Error>>` —  Like `wait`, but gives up after `timeout`: `None` when the job is still queued or running then (it keeps going and can be waited for again). |
 | fn | `opt_out_of_power_throttling` | `process.rs:14` | `pub fn opt_out_of_power_throttling() -> bool` —  Asks Windows not to throttle this process. True when the request was accepted; false when it was refused (an older Windows) or on another |
 | fn | `peak_memory` | `process.rs:56` | `pub fn peak_memory() -> Option<(u64, u64)>` —  The most memory this process has used so far, in bytes: `(peak working set, peak commit)`. The working set is what was in RAM, the commit what |
 | fn | `system_memory` | `process.rs:95` | `pub fn system_memory() -> Option<(u64, u64)>` —  The physical memory of the machine and what is available now without paging, in bytes: `(total, available)`. Admission (`estimate.rs`) |
 | fn | `spawn_detached` | `process.rs:144` | `pub fn spawn_detached(program: &std::path::Path, args: &[std::ffi::OsString]) -> std::io::Result<()>` —  Starts `program args...` as a process that belongs to nobody: it outlives the program that started it, has no console and no standard |
-| struct | `QueueOpts` | `queue.rs:19` | fields: `priority`, `supersede`, `hold`, `isolate`, `force`, `shared`, `warm`, `save_fields`, `post_analyses`, `memory_wait_timeout_s` —  How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded and `save_fields: true`. |
-| const | `POST_ANALYSIS_CMDS` | `queue.rs:62` | `&[&str]` —  Read-only post-solve commands allowed inside `post_analyses`. |
-| fn | `validate_post_analyses` | `queue.rs:78` | `pub(crate) fn validate_post_analyses(entries: &[Value]) -> Result<(), Error>` —  Validates `post_analyses` entries upfront before any meshing or solving starts. |
-| fn | `save_fields_of` | `queue.rs:179` | `pub(crate) fn save_fields_of(args: &Value) -> Result<bool, Error>` |
-| fn | `post_analyses_of` | `queue.rs:186` | `pub(crate) fn post_analyses_of(args: &Value) -> Result<Vec<Value>, Error>` |
-| fn | `memory_wait_timeout_of` | `queue.rs:197` | `pub(crate) fn memory_wait_timeout_of(args: &Value) -> Result<Option<f64>, Error>` |
-| struct | `JobMeta` | `queue.rs:210` | fields: `kind`, `targets`, `stamp`, `estimate`, `shared_id` —  What the engine remembers of a job beyond the runner's own record. |
-| struct | `SolveSummary` | `queue.rs:223` | fields: `dofs`, `cells`, `numbers` —  What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's |
-| struct | `Stages` | `queue.rs:237` |  Recent stages, found by content. Small on purpose: a mesh of a large model is gigabytes. |
-| fn | `solve_key` | `queue.rs:281` | `pub(crate) fn solve_key(problem_key: &str, targets: &[String]) -> String` —  The cache key of a solve: the problem key of the physics and the chain it was solved in (the sorted targets of its job). |
-| fn | `SolveSummary::of` | `queue.rs:230` | `pub fn of(r: &SolveResult, cells: usize) -> SolveSummary` |
-| fn | `Stages::mesh` | `queue.rs:246` | `pub fn mesh(&self, key: &str) -> Option<Arc<MeshedModel>>` |
-| fn | `Stages::put_mesh` | `queue.rs:250` | `pub fn put_mesh(&self, key: &str, m: &Arc<MeshedModel>)` |
-| fn | `Stages::solve` | `queue.rs:260` | `pub fn solve(&self, key: &str) -> Option<Arc<SolveSummary>>` |
-| fn | `Stages::put_solve` | `queue.rs:264` | `pub fn put_solve(&self, key: &str, r: &Arc<SolveSummary>)` |
-| fn | `Stages::clear` | `queue.rs:274` | `pub fn clear(&self)` |
-| fn | `Engine::set_owner` | `queue.rs:304` | `pub fn set_owner(&mut self, owner: &str)` —  Names who this engine's requests are made for (`gui`, `ai`, `cli`): the queue serves owners in turn, and a person's requests run first. |
-| fn | `Engine::owner` | `queue.rs:308` | `pub fn owner(&self) -> &str` |
-| fn | `Engine::shared` | `queue.rs:313` | `pub(crate) fn shared(&self) -> Option<crate::shared_queue::SharedQueue>` —  The queue of the workspace, when the engine has a workspace. |
-| fn | `Engine::shared_of_job` | `queue.rs:318` | `pub(crate) fn shared_of_job(&self, id: JobId) -> Option<String>` —  The item id of a job of this engine that was handed to the workspace queue. |
-| fn | `Engine::submission` | `queue.rs:335` | `pub(crate) fn submission(&self, label: &str, lane: Lane, opts: &QueueOpts, key: &str) -> Submit` —  The submission of a job of this engine: owner, priority by owner unless given, and the key a newer request of the same kind replaces. |
-| fn | `Engine::queue_entry` | `queue.rs:346` | `pub fn queue_entry(&self, id: JobId) -> Option<Value>` —  A job as the queue commands show it: the runner's record plus what was asked and whether the project has changed since. |
-| fn | `Engine::queue_list` | `queue.rs:373` | `pub fn queue_list(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value>` —  The queue, oldest first, optionally of one owner or one state (`queued`, `running`, `done`, `cancelled`, `failed`). |
-| fn | `Engine::wait_timeout` | `queue.rs:414` | `pub fn wait_timeout(&mut self, id: JobId, timeout: Duration) -> Result<Value, Error>` —  Waits for a job up to `timeout` and applies its outcome; at the timeout the job's entry comes back with `waiting: true` and the job goes on. |
-| fn | `Engine::queue_command` | `queue.rs:431` | `pub(crate) fn queue_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` —  The `queue_*` commands (see the catalog). |
-| fn | `Engine::note_shared` | `queue.rs:576` | `pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>)` —  Remembers that the job `id` was handed to the workspace queue, and under which item. |
-| fn | `Engine::note_job` | `queue.rs:582` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
-| fn | `Engine::note_job_estimate` | `queue.rs:587` | `pub(crate) fn note_job_estimate( &mut self, id: JobId, kind: &'static str, targets: Vec<String>, estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>, )` —  `note_job` for a job that fills in its own estimate (a solve, once its mesh is known). |
-| fn | `Engine::run_post_analyses` | `queue.rs:624` | `pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error>` —  Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results). |
+| struct | `QueueOpts` | `queue.rs:19` | fields: `priority`, `supersede`, `hold`, `isolate`, `force`, `shared`, `warm`, `save_fields`, `post_analyses`, `memory_wait_timeout_s`, `retain_amr_data` —  How a request is queued. The default is the engine's owner at its usual priority, with nothing superseded and `save_fields: true`. |
+| const | `POST_ANALYSIS_CMDS` | `queue.rs:65` | `&[&str]` —  Read-only post-solve commands allowed inside `post_analyses`. |
+| fn | `validate_post_analyses` | `queue.rs:81` | `pub(crate) fn validate_post_analyses(entries: &[Value]) -> Result<(), Error>` —  Validates `post_analyses` entries upfront before any meshing or solving starts. |
+| fn | `save_fields_of` | `queue.rs:182` | `pub(crate) fn save_fields_of(args: &Value) -> Result<bool, Error>` |
+| fn | `retain_amr_data_of` | `queue.rs:189` | `pub(crate) fn retain_amr_data_of(args: &Value) -> Result<bool, Error>` |
+| fn | `post_analyses_of` | `queue.rs:196` | `pub(crate) fn post_analyses_of(args: &Value) -> Result<Vec<Value>, Error>` |
+| fn | `memory_wait_timeout_of` | `queue.rs:207` | `pub(crate) fn memory_wait_timeout_of(args: &Value) -> Result<Option<f64>, Error>` |
+| struct | `JobMeta` | `queue.rs:220` | fields: `kind`, `targets`, `stamp`, `estimate`, `shared_id` —  What the engine remembers of a job beyond the runner's own record. |
+| struct | `SolveSummary` | `queue.rs:233` | fields: `dofs`, `cells`, `numbers` —  What a mesh convergence check needs of the coarse solve: the numbers that identify its solutions, the unknowns and the cells. A result's |
+| struct | `Stages` | `queue.rs:247` |  Recent stages, found by content. Small on purpose: a mesh of a large model is gigabytes. |
+| fn | `solve_key` | `queue.rs:291` | `pub(crate) fn solve_key(problem_key: &str, targets: &[String]) -> String` —  The cache key of a solve: the problem key of the physics and the chain it was solved in (the sorted targets of its job). |
+| fn | `SolveSummary::of` | `queue.rs:240` | `pub fn of(r: &SolveResult, cells: usize) -> SolveSummary` |
+| fn | `Stages::mesh` | `queue.rs:256` | `pub fn mesh(&self, key: &str) -> Option<Arc<MeshedModel>>` |
+| fn | `Stages::put_mesh` | `queue.rs:260` | `pub fn put_mesh(&self, key: &str, m: &Arc<MeshedModel>)` |
+| fn | `Stages::solve` | `queue.rs:270` | `pub fn solve(&self, key: &str) -> Option<Arc<SolveSummary>>` |
+| fn | `Stages::put_solve` | `queue.rs:274` | `pub fn put_solve(&self, key: &str, r: &Arc<SolveSummary>)` |
+| fn | `Stages::clear` | `queue.rs:284` | `pub fn clear(&self)` |
+| fn | `Engine::set_owner` | `queue.rs:314` | `pub fn set_owner(&mut self, owner: &str)` —  Names who this engine's requests are made for (`gui`, `ai`, `cli`): the queue serves owners in turn, and a person's requests run first. |
+| fn | `Engine::owner` | `queue.rs:318` | `pub fn owner(&self) -> &str` |
+| fn | `Engine::shared` | `queue.rs:323` | `pub(crate) fn shared(&self) -> Option<crate::shared_queue::SharedQueue>` —  The queue of the workspace, when the engine has a workspace. |
+| fn | `Engine::shared_of_job` | `queue.rs:328` | `pub(crate) fn shared_of_job(&self, id: JobId) -> Option<String>` —  The item id of a job of this engine that was handed to the workspace queue. |
+| fn | `Engine::submission` | `queue.rs:345` | `pub(crate) fn submission(&self, label: &str, lane: Lane, opts: &QueueOpts, key: &str) -> Submit` —  The submission of a job of this engine: owner, priority by owner unless given, and the key a newer request of the same kind replaces. |
+| fn | `Engine::queue_entry` | `queue.rs:356` | `pub fn queue_entry(&self, id: JobId) -> Option<Value>` —  A job as the queue commands show it: the runner's record plus what was asked and whether the project has changed since. |
+| fn | `Engine::queue_list` | `queue.rs:383` | `pub fn queue_list(&self, owner: Option<&str>, state: Option<&str>) -> Vec<Value>` —  The queue, oldest first, optionally of one owner or one state (`queued`, `running`, `done`, `cancelled`, `failed`). |
+| fn | `Engine::wait_timeout` | `queue.rs:424` | `pub fn wait_timeout(&mut self, id: JobId, timeout: Duration) -> Result<Value, Error>` —  Waits for a job up to `timeout` and applies its outcome; at the timeout the job's entry comes back with `waiting: true` and the job goes on. |
+| fn | `Engine::queue_command` | `queue.rs:441` | `pub(crate) fn queue_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` —  The `queue_*` commands (see the catalog). |
+| fn | `Engine::note_shared` | `queue.rs:591` | `pub(crate) fn note_shared(&mut self, id: JobId, item: Option<Arc<Mutex<Option<String>>>>)` —  Remembers that the job `id` was handed to the workspace queue, and under which item. |
+| fn | `Engine::note_job` | `queue.rs:597` | `pub(crate) fn note_job(&mut self, id: JobId, kind: &'static str, targets: Vec<String>)` |
+| fn | `Engine::note_job_estimate` | `queue.rs:602` | `pub(crate) fn note_job_estimate( &mut self, id: JobId, kind: &'static str, targets: Vec<String>, estimate: Arc<Mutex<Option<crate::estimate::Estimate>>>, )` —  `note_job` for a job that fills in its own estimate (a solve, once its mesh is known). |
+| fn | `Engine::run_post_analyses` | `queue.rs:639` | `pub(crate) fn run_post_analyses(&mut self, entries: &[Value], targets: &[String]) -> Result<Vec<Value>, Error>` —  Runs validated read-only `post_analyses` on `self` (which holds the full in-memory mesh and results). |
 | struct | `WarmDone` | `reuse.rs:25` | fields: `bytes`, `calls` —  What a finished point leaves for the next: the modes as bytes (none when it failed, or its eigensolves left none) and what its eigensolves did. |
 | struct | `WarmCell` | `reuse.rs:32` |  Where a point leaves its modes. Empty until the point's job has ended. |
 | enum | `WarmSource` | `reuse.rs:54` | variants: `Cold`, `Bytes`, `Cell` —  Where a point's start block comes from. |
@@ -671,10 +694,14 @@ classDiagram
 | fn | `SharedQueue::runner_alive` | `shared_queue.rs:418` | `pub fn runner_alive(&self) -> bool` —  Whether a queue worker holds the lease now. |
 | fn | `SharedQueue::ensure_runner` | `shared_queue.rs:425` | `pub fn ensure_runner(&self, program: &Path) -> Result<(), Error>` —  Starts a queue worker (`program --worker <workspace>`) unless one holds the lease. The program runs on its own (`process::spawn_detached`: |
 | fn | `RunnerOptions::standard` | `shared_queue.rs:453` | `pub fn standard(workspace: &Path) -> RunnerOptions` —  The settings of a real queue worker: the program itself as the solver, the machine's memory, an end after 30 s idle (`NYX_QUEUE_IDLE_SECS`). |
+| fn | `name_domains` | `solve.rs:23` | `pub(crate) fn name_domains(result: &mut SolveResult, model: &MeshedModel)` —  A kernel knows the regions by number and names a scalar of one region `... domain <number> ...` (`share in domain 3 1`); the model knows |
 | fn | `run_chain` | `solve.rs:41` | `pub fn run_chain( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> Result<Vec<SolveResult>, Error>` —  Solves `targets` (and nothing else) in coupling order. The result of each is returned in the order it was solved. |
 | fn | `run_chain_partial` | `solve.rs:57` | `pub fn run_chain_partial( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> (Vec<SolveResult>, Option<Error>)` —  Like `run_chain`, but when a physics fails the physics solved before it are returned with the error: a failed `sms` keeps the `ems` result |
-| fn | `run_chain_partial_amr` | `solve.rs:89` | `pub fn run_chain_partial_amr( registry: &Registry, project: &Project, mut model: Arc<MeshedModel>, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>)` —  Like [`run_chain_partial`], and runs multi-pass electrostatic AMR (`AF-1`) when `project` and `targets` request `adapt_passes > 1`, |
-| fn | `solve_one_single` | `solve.rs:129` | `pub(crate) fn solve_one_single( registry: &Registry, project: &Project, model: &MeshedModel, id: &str, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<SolveResult, Error>` —  One physics of a chain, with the fields of the physics solved before it. |
+| fn | `run_chain_partial_with` | `solve.rs:68` | `pub(crate) fn run_chain_partial_with( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, retain_amr_data: bool, ) -> (Vec<SolveResult>, Option<Error>)` |
+| fn | `run_chain_partial_amr` | `solve.rs:103` | `pub fn run_chain_partial_amr( registry: &Registry, project: &Project, model: Arc<MeshedModel>, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>)` —  Like [`run_chain_partial`], and runs multi-pass AMR (`dfs`, `ems::cavity`, or `sms`) when configured, |
+| fn | `run_chain_partial_amr_with` | `solve.rs:114` | `pub(crate) fn run_chain_partial_amr_with( registry: &Registry, project: &Project, mut model: Arc<MeshedModel>, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, retain_amr_data: bool, ) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>)` |
+| fn | `build_solve_ctx` | `solve.rs:171` | `pub(crate) fn build_solve_ctx<'a>( registry: &Registry, model: &'a MeshedModel, p: &dyn nyx_physics::Physics, spec: &nyx_physics::ProblemSpec, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Ctx<'a>` —  Builds a [`Ctx`] with imported fields from previously solved physics in `done`. |
+| fn | `solve_one_single` | `solve.rs:194` | `pub(crate) fn solve_one_single( registry: &Registry, project: &Project, model: &MeshedModel, id: &str, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<SolveResult, Error>` —  One physics of a chain, with the fields of the physics solved before it. |
 | const | `MAX_POINTS` | `sweep.rs:20` | `usize` —  The most points one request may make: a sweep is a queue of jobs, not a way to start ten thousand. |
 | struct | `Point` | `sweep.rs:22` | fields: `label`, `edits`, `job`, `row` |
 | struct | `Sweep` | `sweep.rs:30` | fields: `name`, `targets`, `points` |
@@ -682,20 +709,20 @@ classDiagram
 | fn | `Engine::scratch` | `sweep.rs:110` | `pub(crate) fn scratch(&self) -> Engine` —  A copy of this engine for editing: the project is a copy, the mesher, the registry and the material library are shared. Nothing it does |
 | fn | `Engine::sweep_command` | `sweep.rs:153` | `pub(crate) fn sweep_command(&mut self, name: &str, args: &Value) -> Result<Value, Error>` |
 | fn | `Engine::sweep_prepare` | `sweep.rs:169` | `pub(crate) fn sweep_prepare(&self, args: &Value) -> Result<Prepared, Error>` —  Reads and checks a sweep request without submitting anything: the points, what they solve, how they queue, and the engine of every point |
-| fn | `Engine::apply_point` | `sweep.rs:348` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
+| fn | `Engine::apply_point` | `sweep.rs:349` | `pub(crate) fn apply_point( &mut self, id: JobId, sweep: u64, index: usize, project: crate::project::Project, outcome: Result<JobOutput, Error>, ) -> Result<Value, Error>` —  Applies a finished point: records its run, keeps its numbers in the table and drops its result. The engine's own results and mesh are |
 | const | `PREFIX` | `worker.rs:28` | `&str` —  Every line of the worker's standard output that is a message starts with this. |
-| struct | `RemoteSpec` | `worker.rs:32` | fields: `worker`, `project_json`, `materials`, `targets`, `warm`, `save_fields`, `post_analyses` —  What a worker is asked to solve. |
-| struct | `WarmIo` | `worker.rs:48` | fields: `input` —  The modes handed to a worker for a warm start (none for the first point, which only records). |
-| struct | `RemoteDone` | `worker.rs:53` | fields: `results`, `mesh`, `failed`, `run`, `warm_out`, `warm_calls`, `fields_saved`, `post_analyses` —  What a worker handed back. |
-| fn | `material_texts` | `worker.rs:70` | `pub fn material_texts(lib: &femcore::material::Library) -> BTreeMap<String, String>` —  The materials of a library as TOML by name, what a worker rebuilds the library from. |
-| fn | `serve` | `worker.rs:89` | `pub fn serve(args: &[String]) -> i32` —  The worker program: `nyx-worker --job FOLDER` solves one job; `nyx-worker --worker WORKSPACE` is the queue worker of a workspace (Q3, |
-| struct | `ChildEnd` | `worker.rs:313` | fields: `done`, `status`, `stderr` —  What a worker child left when it ended: its last `done` message (none when it stopped without one), how it ended and what it wrote to stderr. |
-| fn | `write_job_files` | `worker.rs:321` | `pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error>` —  Writes what a worker is given into `dir`: the frozen project and the job's description. |
-| fn | `run_child` | `worker.rs:346` | `pub(crate) fn run_child( worker: &Path, dir: &Path, on_status: &mut dyn FnMut(&Value), on_spawn: &mut dyn FnMut(u32), cancelled: &dyn Fn() -> bool, ) -> Result<ChildEnd, Error>` —  Runs `worker --job dir` as a child and waits for it. Every `status` message goes to `on_status`; `on_spawn` gets the child's process id once |
-| fn | `stopped_words` | `worker.rs:412` | `pub(crate) fn stopped_words(status: &std::process::ExitStatus, stderr: &str) -> String` —  The words for a worker that ended without a `done` message. |
-| fn | `read_done` | `worker.rs:421` | `pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>) -> Result<RemoteDone, Error>` —  Reads what a finished worker handed back: the error it reports, the results file in `dir` and what the process cost. |
-| fn | `run_remote` | `worker.rs:456` | `pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error>` —  Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once. |
-| fn | `run_remote` | `worker.rs:490` | `pub(crate) fn run_remote(_spec: &RemoteSpec, _progress: &Arc<Progress>) -> Result<RemoteDone, Error>` |
-| fn | `same_mesh` | `worker.rs:499` | `pub(crate) fn same_mesh(a: &femcore::mesh::SimplexMesh, b: &femcore::mesh::SimplexMesh) -> bool` —  True when the mesh a worker stored is the mesh the parent holds (meshing is deterministic, ADR 55): the check that parent and worker solved |
+| struct | `RemoteSpec` | `worker.rs:32` | fields: `worker`, `project_json`, `materials`, `targets`, `warm`, `save_fields`, `post_analyses`, `retain_amr_data` —  What a worker is asked to solve. |
+| struct | `WarmIo` | `worker.rs:50` | fields: `input` —  The modes handed to a worker for a warm start (none for the first point, which only records). |
+| struct | `RemoteDone` | `worker.rs:55` | fields: `results`, `mesh`, `failed`, `run`, `warm_out`, `warm_calls`, `fields_saved`, `post_analyses` —  What a worker handed back. |
+| fn | `material_texts` | `worker.rs:72` | `pub fn material_texts(lib: &femcore::material::Library) -> BTreeMap<String, String>` —  The materials of a library as TOML by name, what a worker rebuilds the library from. |
+| fn | `serve` | `worker.rs:91` | `pub fn serve(args: &[String]) -> i32` —  The worker program: `nyx-worker --job FOLDER` solves one job; `nyx-worker --worker WORKSPACE` is the queue worker of a workspace (Q3, |
+| struct | `ChildEnd` | `worker.rs:317` | fields: `done`, `status`, `stderr` —  What a worker child left when it ended: its last `done` message (none when it stopped without one), how it ended and what it wrote to stderr. |
+| fn | `write_job_files` | `worker.rs:325` | `pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error>` —  Writes what a worker is given into `dir`: the frozen project and the job's description. |
+| fn | `run_child` | `worker.rs:351` | `pub(crate) fn run_child( worker: &Path, dir: &Path, on_status: &mut dyn FnMut(&Value), on_spawn: &mut dyn FnMut(u32), cancelled: &dyn Fn() -> bool, ) -> Result<ChildEnd, Error>` —  Runs `worker --job dir` as a child and waits for it. Every `status` message goes to `on_status`; `on_spawn` gets the child's process id once |
+| fn | `stopped_words` | `worker.rs:417` | `pub(crate) fn stopped_words(status: &std::process::ExitStatus, stderr: &str) -> String` —  The words for a worker that ended without a `done` message. |
+| fn | `read_done` | `worker.rs:426` | `pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>) -> Result<RemoteDone, Error>` —  Reads what a finished worker handed back: the error it reports, the results file in `dir` and what the process cost. |
+| fn | `run_remote` | `worker.rs:461` | `pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error>` —  Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once. |
+| fn | `run_remote` | `worker.rs:495` | `pub(crate) fn run_remote(_spec: &RemoteSpec, _progress: &Arc<Progress>) -> Result<RemoteDone, Error>` |
+| fn | `same_mesh` | `worker.rs:504` | `pub(crate) fn same_mesh(a: &femcore::mesh::SimplexMesh, b: &femcore::mesh::SimplexMesh) -> bool` —  True when the mesh a worker stored is the mesh the parent holds (meshing is deterministic, ADR 55): the check that parent and worker solved |
 
 Trait implementations in this component: `Limits: Default`, `History: Drop`, `JobRunner: Default`, `QueueOpts: Default`, `WarmLink: Debug`, `CellGuard: Drop`, `JobDir: Drop`

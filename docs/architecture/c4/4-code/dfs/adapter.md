@@ -2,16 +2,16 @@
 
 C4 level 4 (code) of the component **Physics adapter** (`dfs.adapter`) in the container **nyx-dfs** (crate `nyx_dfs`). [Component view of the container](../../3-components/dfs.md) · [All code pages](../README.md)
 
-> The Physics implementation of dfs: descriptors, validation, solve entry.
+> The Physics implementation of dfs: descriptors, validation, R32 curved guards, solve entry.
 
-**Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md)  
-**Size:** 1 file, 652 lines.
+**Decisions:** [ADR 41](../../../adr/0041-physics-crate-pattern-and-the-legacy-bridge.md), [ADR 25](../../../adr/0025-physics-trait-registry-and-problem-envelope.md), [ADR 103](../../../adr/0103-multi-rhs-capacitance-and-gauge-stabilized-magnetostatics.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 1 file, 653 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-dfs/src/lib.rs` | 652 |  |
+| `crates/nyx-dfs/src/lib.rs` | 653 |  |
 
 ## What it uses
 
@@ -50,7 +50,7 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `Dfs` | `lib.rs:33` |  |
-| fn | `run` | `lib.rs:535` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
+| struct | `Dfs` | `lib.rs:34` |  |
+| fn | `run` | `lib.rs:536` | `pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<SolveResult, Error>` —  Solves a typed problem: checks the numbers, runs the kernel of the study under `progress` (stage log, cancellation) and appends the |
 
 Trait implementations in this component: `Dfs: Physics`

@@ -31,7 +31,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | par | map_chunks, threads_up_to |
 | [analysis: Mode figures](../analysis/figures.md) | par | map_chunks |
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
-| [dfs: Shared helpers](../dfs/common.md) | vvuq | SourceField |
+| [dfs: Shared helpers](../dfs/common.md) | progress, vvuq | SourceField, check |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | par, vvuq | SourceField, UniformSource, threads |
 | [dfs: Heat kernel](../dfs/heat.md) | vvuq | SourceField, UniformSource |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | vvuq | SourceField, UniformSource |
@@ -44,8 +44,8 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
 | [ems: Typed problem](../ems/problem.md) | validate | non_finite_token |
 | [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
-| [engine: Job runner and queue](../engine/jobs.md) | progress, warm | Call, Progress, Warm, from_bytes, install, stage, to_bytes |
-| [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, Progress, stage |
+| [engine: Job runner and queue](../engine/jobs.md) | progress, vvuq, warm | Call, Progress, RoacheGciRegime, RoacheGciReport, Warm, from_bytes, install, roache_gci +2 |
+| [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, Progress, install, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |
 | [engine: Results files](../engine/resultsIO.md) | progress | Progress, install, stage |
 | [Adaptation drivers](./adaptdrive.md) | progress | check |

@@ -36,7 +36,7 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 
 | Component | Modules | Items |
 |---|---|---|
-| [engine: Meshing seam](../engine/meshing.md) | meshing::geomdrive3, meshing::sheet3d | Sizes3, build_sized_overlay_mesh_2d, extrude_overlay_2d_with_plan |
+| [engine: Meshing seam](../engine/meshing.md) | meshing::adapt3d, meshing::geomdrive3, meshing::sheet3d | Sizes3, adapt_to_metrics3, build_sized_overlay_mesh_2d, extrude_overlay_2d_with_plan, geometry_floor3 |
 | [Meshing facade](./meshing.md) | meshing::adapt3d, meshing::curve3, meshing::geomdrive3, meshing::mesher3d, meshing::sheet3d | CurveReport, Domain3, EdgeNodes, GeomDomain3, Sizes3, adapt_to_metrics3, apply_sheet_post_enrichment, build_sized_overlay_mesh_2d +9 |
 | [Structured absorbing layers](./structpml.md) | meshing::adapt3d, meshing::curve3 | FaceTable, MIN_SCALED_JACOBIAN |
 

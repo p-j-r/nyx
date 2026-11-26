@@ -348,11 +348,13 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
     let _stage = progress::stage(format!("shift-and-invert Krylov-Schur eigensolver ({nev} modes, {n} unknowns)"));
     let mut fac = ShiftedFactorization::new(a, Some(b), definiteness).map_err(|e| format!("sparse factorisation failed: {e}"))?;
     fac.ordering = fill_ordering(n);
+    fac.accept_perturbed_shift = true;
     {
         let kind = if T::IS_COMPLEX { "complex " } else { "" };
         let _f = progress::stage(format!("factorising the {kind}shifted matrix ({n} unknowns); this cannot be interrupted"));
         crate::par::on_factor_pool(|| fac.set_shift(sigma)).map_err(|e| format!("sparse factorisation failed (singular matrix at the search shift?): {e}"))?;
     }
+    let effective_sigma = fac.factor_sigma();
     progress::check()?;
     let block = if opts.block > 0 { opts.block } else { nev.min(8) };
     // a warm start (P5b): the modes of the previous solve of a sweep are the start block, all of them, so the block holds at least `nev` columns
@@ -369,7 +371,7 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
         block_size: block,
         ncv: if opts.ncv > 0 { Some(opts.ncv) } else { None },
         nev,
-        original_shift: Some(sigma.to_c64()),
+        original_shift: Some(effective_sigma.to_c64()),
         ..match kind {
             Kind::Hermitian => EpsOptions::hermitian(nev),
             Kind::General => EpsOptions::general(nev),
@@ -387,7 +389,7 @@ pub fn eigs_near<T: FaerScalar>(a: &Csr<T>, b: &Csr<T>, sigma: T, nev: usize, sy
             t.finish((0..res.values.len()).map(|i| res.vectors.col(i)), res.iterations);
         }
     }
-    let s = sigma.to_c64();
+    let s = effective_sigma.to_c64();
     let th_max = res.values.iter().map(|v| v.norm()).fold(0.0_f64, f64::max);
     let th_cutoff = 1e-15 * th_max;
     let (mut ax, mut bx) = (vec![T::ZERO; n], vec![T::ZERO; n]);
@@ -1548,5 +1550,24 @@ mod tests {
         let mut rhs = crate::linalg::rng::random_vector::<f64>(n, 7);
         let err = solver.solve_block_in_place(&mut rhs, 1).unwrap_err();
         assert_eq!(err, crate::linalg::direct::SolverError::Singular);
+    }
+
+    #[test]
+    fn eigs_near_exact_eigenvalue_shift_unshifts_with_effective_factor_sigma() {
+        // Construct a general complex system whose exact eigenvalue is 1.0 + 0.0i:
+        // passing sigma = 1.0 forces ShiftedFactorization shift-perturbation recovery (sigma + delta),
+        // and `eigs_near` must unshift using `factor_sigma` so zero `-delta` bias enters `lambda`.
+        let n = 12usize;
+        let a = crate::linalg::csr::laplacian_1d(n);
+        let ac = a.to_complex();
+        // Eigenvalue of laplacian_1d(12) for k=1 is 2 - 2*cos(pi/13); make exact integer shift lambda = 2.0
+        // at index k when n=12? For 1D Laplacian, 2 - 2*cos(k*pi/(n+1)) == 2.0 when k/(n+1) = 1/2 -> n = 13, k = 7!
+        let _ = (n, ac);
+        let a13 = crate::linalg::csr::laplacian_1d(13).to_complex();
+        let b13 = CCsr::identity(13);
+        let p = eigs_near(&a13, &b13, C64::new(2.0, 0.0), 1, Symmetry::General, Definiteness::General, &EigenOptions::default(), None).unwrap();
+        assert!(p.converged);
+        assert!((p.values[0] - C64::new(2.0, 0.0)).norm() < 1e-11, "exact eigenvalue biased by shift perturbation: {:?}", p.values[0]);
+        assert!(p.residuals[0] < 1e-11, "residual={:?}", p.residuals[0]);
     }
 }

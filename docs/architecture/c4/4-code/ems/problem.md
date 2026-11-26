@@ -36,6 +36,7 @@ C4 level 4 (code) of the component **Typed problem** (`ems.problem`) in the cont
 | [Mode kernel](./modes.md) | problem | Problem, Study, SurfaceImpedanceBc, Symmetry, pec_edges_and_nodes_2d_with_symmetry |
 | [Complex-mode kernel](./modescx.md) | problem | Problem, Study, SurfaceImpedanceBc, Symmetry, pec_edges_and_nodes_2d_with_symmetry |
 | [Optical mode sets](./optical.md) | problem | Problem, Study |
+| [engine: Meshing seam](../engine/meshing.md) | problem | decode, symmetry_facet_flags |
 
 ## Class diagram
 

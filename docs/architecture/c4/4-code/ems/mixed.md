@@ -5,20 +5,20 @@ C4 level 4 (code) of the component **Native mixed-cell EM** (`ems.mixed`) in the
 > Native mixed-cell Maxwell assemblers, Gauss-point curvilinear PML pullbacks, mixed ports/IBC/ROM, and Ams/AmsP2 curl-curl drivers.
 
 **Decisions:** [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md), [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 1 file, 2139 lines.
+**Size:** 1 file, 2182 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/mixed_ops.rs` | 2139 |  |
+| `crates/nyx-ems/src/mixed_ops.rs` | 2182 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | edge, edge_mixed, fem, fem_mixed, linalg::ams, linalg::csr, linalg::csr::assembly, linalg::driver +12 | Ams, AmsOptions, C, CCsr, CEigPairs, CellData, CellType, Coo, FacetType, Geometry +56 |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root | Discretisation |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | DiagnosticSeverity, DiagnosticWarning, Discretisation |
 | [3D cavity kernel](./cavity.md) | cavity | CURVED_QUAD_DEGREE, assemble_complex |
 | [Driven frequency-domain and PROM](./driven.md) | ports | AssembledLumpedPort, AssembledWavePort |
 | [Thin-film IBC and Josephson ROM](./ibc.md) | ibc | AssembledJjPort, ETA0, IbcJjAssembly3D, MU0, PerturbativeIbcTri, SheetCellKind, ibc_parallel_params, jj_inv_l_tot, sorted3 |
@@ -127,10 +127,10 @@ classDiagram
 | fn | `assemble_ibc_and_jj_3d_mixed_cavity` | `mixed_ops.rs:1093` | `pub fn assemble_ibc_and_jj_3d_mixed_cavity( mesh: &MixedDiscretisation, ned: &NedMixed, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], jj_bcs: &[LumpedJjBc], f_ref: f64, ) -> Result<(IbcJjAssembly3D, Vec<usize>, Vec<usize>, Vec<Vec<usize>>), String>` —  Like [`assemble_ibc_and_jj_3d_mixed`], supporting `ibc_mode` (`"direct" \| "perturbative" \| "auto"`) for `cavity`. |
 | fn | `assemble_lumped_ports_3d_mixed` | `mixed_ops.rs:1387` | `pub fn assemble_lumped_ports_3d_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, pec_labels: &[i32], lumped_ports: &[LumpedPortBc], ) -> Result<(Vec<AssembledLumpedPort>, Vec<Vec<usize>>), String>` —  Assembles `lumped_port` conditions on a 3D `MixedDiscretisation`. |
 | fn | `assemble_waveports_3d_mixed` | `mixed_ops.rs:1502` | `pub fn assemble_waveports_3d_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, f_min: f64, f_max: f64, ) -> Result<(Vec<AssembledWavePort>, Vec<Vec<usize>>), String>` —  Assembles 2D boundary-mode `waveport` conditions on a 3D `MixedDiscretisation` (supporting both `Tri3` and `Quad4` port facets). |
-| fn | `solve_mixed_curl_curl_iterative` | `mixed_ops.rs:2013` | `pub fn solve_mixed_curl_curl_iterative( mesh: &MixedDiscretisation, ned: &NedMixed, fixed_dofs: &[bool], fixed_edges: &[bool], fixed_verts: &[bool], fixed_quad_faces: &[bool], a: &CCsr, pc_matrix: Option<&CCsr>, rhs: &[C], opts: &IterativeCurlCurlOptions, ) -> Result<IterativeSolveReport<C>, String>` —  Solves a 3D mixed-cell curl-curl linear system `A x = rhs` on free DOFs (order 1 `Ams` or order 2 `AmsP2`) |
-| fn | `eigs_mixed_curl_curl_ams` | `mixed_ops.rs:2066` | `pub fn eigs_mixed_curl_curl_ams( mesh: &MixedDiscretisation, ned: &NedMixed, fixed_dofs: &[bool], fixed_edges: &[bool], fixed_verts: &[bool], fixed_quad_faces: &[bool], k: &CCsr, m: &CCsr, target: C, nev: usize, tol: f64, max_it: usize, ) -> Result<CEigPairs, String>` —  Computes `nev` interior eigenpairs of a 3D mixed-cell `Tet + Prism + Hex` cavity `K x = lambda M x` near `target` |
-| fn | `gradient_mixed_full` | `mixed_ops.rs:2107` | `pub fn gradient_mixed_full(mesh: &MixedDiscretisation, ned: &NedMixed) -> RCsr` —  Used by `MixedLagrange` scalar nullspace reduction on `MixedDiscretisation`. |
-| fn | `scalar_nullspace_count_mixed` | `mixed_ops.rs:2115` | `pub fn scalar_nullspace_count_mixed(mesh: &MixedDiscretisation, order: usize) -> usize` |
+| fn | `solve_mixed_curl_curl_iterative` | `mixed_ops.rs:2048` | `pub fn solve_mixed_curl_curl_iterative( mesh: &MixedDiscretisation, ned: &NedMixed, fixed_dofs: &[bool], fixed_edges: &[bool], fixed_verts: &[bool], fixed_quad_faces: &[bool], a: &CCsr, pc_matrix: Option<&CCsr>, rhs: &[C], opts: &IterativeCurlCurlOptions, ) -> Result<IterativeSolveReport<C>, String>` —  Solves a 3D mixed-cell curl-curl linear system `A x = rhs` on free DOFs (order 1 `Ams` or order 2 `AmsP2`) |
+| fn | `eigs_mixed_curl_curl_ams` | `mixed_ops.rs:2101` | `pub fn eigs_mixed_curl_curl_ams( mesh: &MixedDiscretisation, ned: &NedMixed, fixed_dofs: &[bool], fixed_edges: &[bool], fixed_verts: &[bool], fixed_quad_faces: &[bool], k: &CCsr, m: &CCsr, target: C, nev: usize, tol: f64, max_it: usize, ) -> Result<CEigPairs, String>` —  Computes `nev` interior eigenpairs of a 3D mixed-cell `Tet + Prism + Hex` cavity `K x = lambda M x` near `target` |
+| fn | `gradient_mixed_full` | `mixed_ops.rs:2150` | `pub fn gradient_mixed_full(mesh: &MixedDiscretisation, ned: &NedMixed) -> RCsr` —  Used by `MixedLagrange` scalar nullspace reduction on `MixedDiscretisation`. |
+| fn | `scalar_nullspace_count_mixed` | `mixed_ops.rs:2158` | `pub fn scalar_nullspace_count_mixed(mesh: &MixedDiscretisation, order: usize) -> usize` |
 | fn | `EmPmlTable::from_simplex` | `mixed_ops.rs:99` | `pub fn from_simplex( mesh: &Discretisation, materials: &Materials, f_ref: f64, is_eigen: bool, is_iterative: bool, ) -> Self` —  Builds a resolved PML table for a `SimplexMesh` (`Discretisation`). |
 | fn | `EmPmlTable::from_mixed` | `mixed_ops.rs:129` | `pub fn from_mixed( mesh: &MixedDiscretisation, materials: &Materials, f_ref: f64, is_eigen: bool, is_iterative: bool, ) -> Self` —  Builds a resolved PML table for a `MixedDiscretisation`. |
 | fn | `EmPmlTable::has_any` | `mixed_ops.rs:294` | `pub fn has_any(&self) -> bool` |

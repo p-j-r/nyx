@@ -14,8 +14,14 @@ use crate::meshing::MeshedModel;
 use crate::project::Project;
 use crate::queue::{SolveSummary, Stages};
 use femcore::progress::Progress;
-use nyx_physics::{CapacitanceMatrixData, Error, Scalar, SolveResult, CAPACITANCE_KEY};
+use femcore::vvuq::{roache_gci, RoacheGciRegime, RoacheGciReport};
+use nyx_physics::{
+    CapacitanceMatrixData, DiagnosticSeverity, DiagnosticWarning, Error, Scalar, SolveResult, SpatialErrorEstimate,
+    CAPACITANCE_KEY,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 const E_CHARGE: f64 = 1.602_176_634e-19;
@@ -31,14 +37,18 @@ fn check_factor(factor: f64) -> Result<(), Error> {
 }
 
 fn project_has_multi_pass_amr(p: &Project) -> bool {
-    p.physics.iter().any(|s| {
-        s.physics == "dfs"
-            && s.study.kind == "electrostatic"
-            && s.study.params.get("adapt_passes").and_then(Value::as_i64).unwrap_or(1) > 1
-    })
+    p.mesh.adapt_passes.is_some_and(|n| n > 1)
+        || p.physics.iter().any(|s| {
+            s.physics == "dfs"
+                && s.study.kind == "electrostatic"
+                && s.study.params.get("adapt_passes").and_then(Value::as_i64).unwrap_or(1) > 1
+        })
 }
 
 fn force_single_adapt_pass(p: &mut Project) {
+    if p.mesh.adapt_passes.is_some_and(|n| n > 1) {
+        p.mesh.adapt_passes = Some(1);
+    }
     for s in &mut p.physics {
         if s.physics == "dfs" && s.study.kind == "electrostatic" {
             if let Some(obj) = s.study.params.as_object_mut() {
@@ -342,24 +352,37 @@ impl TrackFilter {
         parts.join(", ")
     }
 
-    fn matches_mode(&self, r: &SolveResult, i: usize) -> bool {
+    fn matches_mode(&self, r: &SolveResult, meta: &[ModeScalarMeta], i: usize) -> bool {
         if key(r, i).is_none() {
             return false;
         }
         let n = i + 1;
+        let find_meta_or = |base_prefix: &str, legacy_name: String| -> Option<f64> {
+            if let Some(entry) = meta
+                .iter()
+                .find(|m| m.mode_index == Some(i) && (m.base.trim_end() == base_prefix || m.base == base_prefix))
+            {
+                if let Some(v) = scalar_num(r, &entry.name) {
+                    return Some(v);
+                }
+            }
+            scalar_num(r, &legacy_name)
+        };
         if let (Some(region), Some(min_share)) = (&self.region, self.min_share) {
-            if !scalar_num(r, &format!("share in {region} {n}")).is_some_and(|v| v >= min_share) {
+            let base = format!("share in {region}");
+            if !find_meta_or(&base, format!("{base} {n}")).is_some_and(|v| v >= min_share) {
                 return false;
             }
         }
         if let (Some(comp), Some(min_comp)) = (&self.component, self.min_component) {
-            let base = comp.strip_suffix(" share").unwrap_or(comp.as_str());
-            if !scalar_num(r, &format!("{base} share {n}")).is_some_and(|v| v >= min_comp) {
+            let b = comp.strip_suffix(" share").unwrap_or(comp.as_str());
+            let base = format!("{b} share");
+            if !find_meta_or(&base, format!("{base} {n}")).is_some_and(|v| v >= min_comp) {
                 return false;
             }
         }
         if let Some(max_lf) = self.max_layer_fraction {
-            if !scalar_num(r, &format!("layer fraction {n}")).is_some_and(|v| v <= max_lf) {
+            if !find_meta_or("layer fraction", format!("layer fraction {n}")).is_some_and(|v| v <= max_lf) {
                 return false;
             }
         }
@@ -370,13 +393,14 @@ impl TrackFilter {
         if !self.has_signature() {
             return Ok((0..r.solutions.len()).collect());
         }
-        let out: Vec<usize> = (0..r.solutions.len()).filter(|&i| self.matches_mode(r, i)).collect();
+        let meta = decode_mode_scalar_meta(r);
+        let out: Vec<usize> = (0..r.solutions.len()).filter(|&i| self.matches_mode(r, &meta, i)).collect();
         if out.is_empty() {
             let available: Vec<&str> = r
                 .scalars
                 .iter()
                 .filter_map(|(name, sc)| match sc {
-                    Scalar::Num(_) if mode_scalar(name, r.solutions.len()).is_some_and(|(_, _, m)| m == 0) => {
+                    Scalar::Num(_) if mode_scalar_of(r, &meta, name).is_some_and(|(_, _, m)| m == 0) => {
                         Some(name.as_str())
                     }
                     _ => None,
@@ -395,6 +419,45 @@ impl TrackFilter {
         }
         Ok(out)
     }
+}
+
+/// Optional scalar key storing `Vec<ModeScalarMeta>` (`R11a`) so solvers can attach explicit `mode_index` metadata to per-mode scalars.
+pub const MODE_SCALAR_META_KEY: &str = "mode scalar metadata";
+
+/// Structured per-mode scalar metadata (`R11a`), replacing brittle trailing-digit string heuristics when present while preserving legacy fallback.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModeScalarMeta {
+    pub name: String,
+    pub base: String,
+    #[serde(default)]
+    pub unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_index: Option<usize>,
+}
+
+/// Encodes `entries` as a `Scalar::Text` entry under [`MODE_SCALAR_META_KEY`].
+pub fn encode_mode_scalar_meta(entries: &[ModeScalarMeta]) -> (String, Scalar) {
+    (MODE_SCALAR_META_KEY.to_string(), Scalar::Text(serde_json::to_string(entries).unwrap_or_else(|_| "[]".into())))
+}
+
+/// Decodes optional [`ModeScalarMeta`] entries attached to `r`.
+pub fn decode_mode_scalar_meta(r: &SolveResult) -> Vec<ModeScalarMeta> {
+    r.scalars
+        .iter()
+        .find(|(k, _)| k == MODE_SCALAR_META_KEY)
+        .and_then(|(_, sc)| match sc {
+            Scalar::Text(t) => serde_json::from_str::<Vec<ModeScalarMeta>>(t).ok(),
+            Scalar::Num(_) => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Resolves `(base_name, unit, zero_based_mode_index)` using optional structured [`ModeScalarMeta`] (`R11a`) first, then legacy string parsing.
+pub fn mode_scalar_of(r: &SolveResult, meta: &[ModeScalarMeta], name: &str) -> Option<(String, String, usize)> {
+    if let Some(m) = meta.iter().find(|m| m.name == name) {
+        return m.mode_index.filter(|&idx| idx < r.solutions.len()).map(|idx| (m.base.clone(), m.unit.clone(), idx));
+    }
+    mode_scalar(name, r.solutions.len())
 }
 
 /// How the solutions of the two meshes are paired.
@@ -457,8 +520,7 @@ fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
     }
 }
 
-/// A scalar that belongs to one mode carries the one-based number of the mode at its end, before a unit in brackets if it has one
-/// (`Q3`, `layer fraction 3`, `f re 3 (Hz)`): the name before the number, the unit, and the zero-based mode. `None` for any other scalar.
+/// Legacy string heuristic: a scalar belonging to one mode carries the one-based mode number before an optional unit in brackets.
 fn mode_scalar(name: &str, n_solutions: usize) -> Option<(String, String, usize)> {
     let (body, unit) = match name.rfind(" (") {
         Some(k) if name.ends_with(')') => (&name[..k], &name[k..]),
@@ -485,8 +547,9 @@ fn numbers_of(r: &SolveResult, i: usize, as_index: usize) -> Vec<(String, f64)> 
     if let Some(v) = s.value {
         out.push((format!("value[{as_index}]"), v));
     }
+    let meta = decode_mode_scalar_meta(r);
     for (name, sc) in &r.scalars {
-        if let (Scalar::Num(x), Some((head, unit, mode))) = (sc, mode_scalar(name, r.solutions.len())) {
+        if let (Scalar::Num(x), Some((head, unit, mode))) = (sc, mode_scalar_of(r, &meta, name)) {
             if mode == i && x.is_finite() {
                 out.push((format!("scalar {head}{}{unit}", as_index + 1), *x));
             }
@@ -610,12 +673,25 @@ pub struct ConvergenceJob {
     history: Arc<crate::estimate::History>,
     /// cost caps, local size scaling, and Richardson extrapolation options (L3, FR-6, QFR-3)
     pub limits: Limits,
+    /// optional worker executable (`Engine::set_worker`) for isolated sub-solves
+    pub(crate) worker: Option<PathBuf>,
+    /// whether isolated execution in worker processes is enabled by default (`Engine::isolate_default`)
+    pub(crate) isolate_default: bool,
+    /// whether this engine uses built-in registry/mesher so workers can reconstruct it
+    pub(crate) isolable: bool,
+    /// machine RAM probe used for admission checks (`estimate::admit`)
+    pub(crate) memory_probe: crate::estimate::MemoryProbe,
+    /// timeout when waiting for memory headroom during admission
+    pub(crate) memory_wait_timeout: Option<f64>,
+    /// cached algebraic residual of the present solve (used when present grid solve is reused)
+    pub(crate) present_residual: Option<f64>,
 }
 
 /// What a convergence check may cost and how it refines and extrapolates: it is refused, before any solve, when the comparison mesh has more cells
 /// than `max_cells` or when its solve is estimated to take longer than `max_seconds`. `scale_sizes` (default `true`) scales non-suppressed `add_size`
-/// features proportionally on the scratch copy; `extrapolate` optionally runs two-grid Richardson extrapolation (`"richardson_log_spd"` or
-/// `"richardson_linear"`); `quantities` optionally restricts the verdict to matching row names.
+/// features proportionally on the scratch copy; `grids` selects 2-grid comparison (default) or 3-grid Roache GCI (`grids: 3`); `coarsen` or
+/// `coarsen_factors` enables coarsening ladders relative to the present mesh; `extrapolate` optionally runs two-grid Richardson extrapolation
+/// (`"richardson_log_spd"` or `"richardson_linear"`); `quantities` optionally restricts the verdict to matching row names.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Limits {
     pub max_cells: Option<u64>,
@@ -625,6 +701,11 @@ pub struct Limits {
     pub extrapolate_order: Option<f64>,
     pub apply_extrapolated: bool,
     pub quantities: Option<Vec<String>>,
+    pub grids: usize,
+    pub coarsen: bool,
+    pub coarsen_factors: Option<Vec<f64>>,
+    pub force: bool,
+    pub isolate: Option<bool>,
 }
 
 impl Default for Limits {
@@ -637,6 +718,11 @@ impl Default for Limits {
             extrapolate_order: None,
             apply_extrapolated: false,
             quantities: None,
+            grids: 2,
+            coarsen: false,
+            coarsen_factors: None,
+            force: false,
+            isolate: None,
         }
     }
 }
@@ -644,6 +730,24 @@ impl Default for Limits {
 impl Limits {
     /// Validates `Limits` invariants whether parsed from JSON or constructed in Rust.
     pub fn validate(&self) -> Result<(), Error> {
+        if !matches!(self.grids, 2 | 3) {
+            return Err(Error::invalid("`grids` must be 2 or 3"));
+        }
+        if let Some(cf) = &self.coarsen_factors {
+            let expected = self.grids - 1;
+            if cf.len() != expected {
+                return Err(Error::invalid(format!(
+                    "`coarsen_factors` must contain {expected} multiplier(s) (> 1.0) for `grids = {}`",
+                    self.grids
+                )));
+            }
+            if cf.iter().any(|&f| !f.is_finite() || f <= 1.0) {
+                return Err(Error::invalid("every entry in `coarsen_factors` must be a finite number strictly > 1.0"));
+            }
+            if cf.len() == 2 && (cf[0] - cf[1]).abs() <= 1e-12 {
+                return Err(Error::invalid("entries in `coarsen_factors` must be distinct"));
+            }
+        }
         if let Some(m) = self.max_cells {
             if m == 0 {
                 return Err(Error::invalid("`max_cells` is a number of cells, above zero"));
@@ -675,7 +779,8 @@ impl Limits {
         Ok(())
     }
 
-    /// `max_cells`, `max_seconds`, `scale_sizes`, `extrapolate`, `extrapolate_order`, `apply_extrapolated` and `quantities` of the command arguments.
+    /// `max_cells`, `max_seconds`, `scale_sizes`, `grids`, `coarsen`, `coarsen_factors`, `extrapolate`, `extrapolate_order`,
+    /// `apply_extrapolated`, `quantities`, `force`, and `isolate` of the command arguments.
     pub fn from_args(args: &Value) -> Result<Limits, Error> {
         let max_cells = match args.get("max_cells").filter(|v| !v.is_null()) {
             None => None,
@@ -744,6 +849,52 @@ impl Limits {
                 Some(out)
             }
         };
+        let mut coarsen_factors = match args.get("coarsen_factors").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => {
+                let arr = v
+                    .as_array()
+                    .ok_or_else(|| Error::invalid("`coarsen_factors` must be a list of multipliers > 1.0"))?;
+                let mut out = Vec::with_capacity(arr.len());
+                for item in arr {
+                    let f = item.as_f64().filter(|x| x.is_finite() && *x > 1.0).ok_or_else(|| {
+                        Error::invalid("every entry in `coarsen_factors` must be a finite number > 1.0")
+                    })?;
+                    out.push(f);
+                }
+                out.sort_by(|a, b| a.total_cmp(b));
+                Some(out)
+            }
+        };
+        let explicit_grids = match args.get("grids").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => Some(
+                v.as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .filter(|&n| matches!(n, 2 | 3))
+                    .ok_or_else(|| Error::invalid("`grids` must be 2 or 3"))?,
+            ),
+        };
+        let grids = match (explicit_grids, coarsen_factors.as_ref().map(|cf| cf.len())) {
+            (Some(g), _) => g,
+            (None, Some(2)) => 3,
+            _ => 2,
+        };
+        if let Some(cf) = &mut coarsen_factors {
+            cf.sort_by(|a, b| a.total_cmp(b));
+        }
+        let coarsen = match args.get("coarsen").filter(|v| !v.is_null()) {
+            None => false,
+            Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`coarsen` is true or false"))?,
+        };
+        let force = match args.get("force").filter(|v| !v.is_null()) {
+            None => false,
+            Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`force` is true or false"))?,
+        };
+        let isolate = match args.get("isolate").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => Some(v.as_bool().ok_or_else(|| Error::invalid("`isolate` is true or false"))?),
+        };
         let limits = Limits {
             max_cells,
             max_seconds,
@@ -752,6 +903,11 @@ impl Limits {
             extrapolate_order,
             apply_extrapolated,
             quantities,
+            grids,
+            coarsen,
+            coarsen_factors,
+            force,
+            isolate,
         };
         limits.validate()?;
         Ok(limits)
@@ -976,6 +1132,15 @@ pub fn should_apply_extrapolated(answer: &Value) -> bool {
     answer.get("extrapolated").and_then(|e| e.get("apply_extrapolated")).and_then(Value::as_bool).unwrap_or(false)
 }
 
+/// Extracts the [`SpatialErrorEstimate`] emitted by a finished `convergence_check` JSON reply, if present.
+pub fn spatial_error_estimate(answer: &Value) -> Option<SpatialErrorEstimate> {
+    let v = answer.get("spatial_error_estimate")?;
+    if v.is_null() {
+        return None;
+    }
+    serde_json::from_value(v.clone()).ok()
+}
+
 fn default_extrapolate_order(fine_model: &MeshedModel, fine_result: &SolveResult) -> f64 {
     let has_cap = CapacitanceMatrixData::of(fine_result).is_some();
     let has_sheets = nyx_physics::TlsMeta::of(fine_result).is_some_and(|t| !t.sheet_labels.is_empty())
@@ -1006,7 +1171,7 @@ impl ConvergenceJob {
         e
     }
 
-    /// Runs the check (see `Engine::convergence_check`); blocks until both solves are done.
+    /// Runs the check (see `Engine::convergence_check`); blocks until solves finish.
     pub fn run(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
         self.run_with(&Progress::new(), physics, factor, tolerance, &Matching::Index)
     }
@@ -1022,7 +1187,7 @@ impl ConvergenceJob {
         self.run_with(&Progress::new(), physics, factor, tolerance, matching)
     }
 
-    /// Runs the check on the calling thread under `progress`: its two solves are two stages of it, and its cancel flag stops either.
+    /// Runs the check on the calling thread under `progress`: each solve is a stage of it, and cancel stops it.
     pub fn run_with(
         &self,
         progress: &Arc<Progress>,
@@ -1035,12 +1200,110 @@ impl ConvergenceJob {
         check(self, progress, physics, factor, tolerance, matching)
     }
 
+    /// Returns `(scale_from_present, is_present)` ordered from finest (`0`) to coarsest (`grids - 1`).
+    fn ladder(&self, factor: f64) -> Result<Vec<(f64, bool)>, Error> {
+        if self.limits.grids == 2 {
+            if let Some(cf) = &self.limits.coarsen_factors {
+                return Ok(vec![(1.0, true), (cf[0], false)]);
+            }
+            let eff = if self.limits.coarsen && factor < 1.0 { 1.0 / factor } else { factor };
+            return Ok(if eff < 1.0 { vec![(eff, false), (1.0, true)] } else { vec![(1.0, true), (eff, false)] });
+        }
+        if let Some(cf) = &self.limits.coarsen_factors {
+            return Ok(vec![(1.0, true), (cf[0], false), (cf[1], false)]);
+        }
+        if self.limits.coarsen || factor > 1.0 {
+            let s = if factor > 1.0 { factor } else { 1.0 / factor };
+            Ok(vec![(1.0, true), (s, false), (s * s, false)])
+        } else {
+            Ok(vec![(factor * factor, false), (factor, false), (1.0, true)])
+        }
+    }
+
     /// Meshes `project` on the calling thread.
     fn mesh_inline(&self, project: &Project) -> Result<Arc<MeshedModel>, Error> {
         let scratch = self.scratch(project.clone());
         project.check(&self.registry)?;
         let sizing = scratch.sizing();
         Ok(Arc::new(self.mesher.mesh(&project.geometry, &project.mesh, sizing.as_ref())?))
+    }
+
+    /// Solves `targets` of `project` on `model`, dispatching via worker + admission when enabled, else falling back locally.
+    fn solve_grid(
+        &self,
+        project: Project,
+        model: &Arc<MeshedModel>,
+        targets: &[String],
+        physics: &str,
+        progress: &Arc<Progress>,
+    ) -> Result<(Arc<SolveResult>, bool), Error> {
+        let dim = model.mesh().dim() as u8;
+        let cells = model.mesh().n_cells() as u64;
+        let chain_key = crate::estimate::chain_key_for_project(&project, targets);
+        if let Some(est) = self.history.estimate(&chain_key, dim, cells) {
+            crate::estimate::admit(&est, self.limits.force, &self.memory_probe, progress, self.memory_wait_timeout)?;
+        }
+
+        let want_remote = self.limits.isolate.unwrap_or(self.isolate_default);
+        if want_remote {
+            let why_not = if self.worker.is_none() {
+                Some("this engine has no worker program (`Engine::set_worker`: nyx and nyx-mcp use themselves)")
+            } else if !self.isolable {
+                Some("this engine has a registry or mesher of its own, which a worker process cannot rebuild")
+            } else if cfg!(not(feature = "hdf5")) {
+                Some("this build has no HDF5 support, which the worker needs to hand its results back")
+            } else {
+                None
+            };
+            if let Some(why) = why_not {
+                if self.limits.isolate == Some(true) {
+                    return Err(Error::invalid(format!("`isolate` is not possible: {why}")));
+                }
+            } else if let Some(worker) = &self.worker {
+                #[cfg(feature = "hdf5")]
+                {
+                    let scratch = self.scratch(project.clone());
+                    let library = scratch.library()?;
+                    let spec = crate::worker::RemoteSpec {
+                        worker: worker.clone(),
+                        project_json: project.to_json(),
+                        materials: crate::worker::material_texts(&library),
+                        targets: targets.to_vec(),
+                        warm: None,
+                        save_fields: true,
+                        post_analyses: Vec::new(),
+                        retain_amr_data: false,
+                    };
+                    let done = crate::worker::run_remote(&spec, progress)?;
+                    if let Some(err) = done.failed {
+                        return Err(err);
+                    }
+                    let result = done
+                        .results
+                        .into_iter()
+                        .find(|(code, _)| code == physics)
+                        .map(|(_, r)| r)
+                        .ok_or_else(|| Error::invalid("the worker solve gave no result"))?;
+                    if let (Some(peak_working_set), Some(peak_commit)) =
+                        (done.run.peak_working_set, done.run.peak_commit)
+                    {
+                        self.history.add(crate::estimate::Row {
+                            chain: chain_key,
+                            dim,
+                            cells,
+                            dofs: result.dofs as u64,
+                            peak_working_set,
+                            peak_commit,
+                            seconds: result.seconds,
+                        });
+                    }
+                    return Ok((Arc::new(result), true));
+                }
+            }
+        }
+
+        let result = self.solve_on(project, model, targets, physics, progress)?;
+        Ok((result, false))
     }
 
     /// Solves `targets` of `project` on `model`, on the calling thread, under `progress`; returns the result of `physics`.
@@ -1062,23 +1325,8 @@ impl ConvergenceJob {
         Ok(Arc::new(result))
     }
 
-    /// Meshes `project` and solves `targets` on the calling thread, under `progress`; returns the mesh and the result of `physics`.
-    fn solve_inline(
-        &self,
-        project: Project,
-        targets: &[String],
-        physics: &str,
-        progress: &Arc<Progress>,
-    ) -> Result<(Arc<MeshedModel>, Arc<SolveResult>), Error> {
-        let model = self.mesh_inline(&project)?;
-        let result = self.solve_on(project, &model, targets, physics, progress)?;
-        Ok((model, result))
-    }
-
-    /// What the check would cost, without solving anything: the present mesh and the finer one are built (milliseconds against a solve), and the
-    /// answer gives their cells, what a solve of each is expected to cost from the solves this machine has run (`null` while there are too few: no
-    /// number is invented) and the factor between the cells. A script that is unsure of a mesh asks this before `convergence_check` (L3): an
-    /// adaptive 2D mesh gets 6 to 8 times as many cells at factor 0.6, not 2.8 times.
+    /// What the check would cost, without solving anything: the present mesh and comparison mesh(es) are built, and the answer gives
+    /// their cells, expected costs, and ratios.
     pub fn plan(&self, physics: &str, factor: f64) -> Result<Value, Error> {
         self.plan_with(physics, factor, self.limits.scale_sizes)
     }
@@ -1086,6 +1334,7 @@ impl ConvergenceJob {
     /// `plan` with an explicit `scale_sizes` toggle controlling whether local `add_size` features scale proportionally with `factor`.
     pub fn plan_with(&self, physics: &str, factor: f64, scale_sizes: bool) -> Result<Value, Error> {
         check_factor(factor)?;
+        self.limits.validate()?;
         self.project
             .spec(physics)
             .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
@@ -1093,28 +1342,51 @@ impl ConvergenceJob {
         let sizing_order = self.scratch(self.project.clone()).sizing().map(|s| s.order);
         let mut base = self.project.clone();
         force_single_adapt_pass(&mut base);
-        let other_proj = refined(&base, factor, scale_sizes, sizing_order);
-        let present = self.mesh_inline(&base)?;
-        let other = self.mesh_inline(&other_proj)?;
-        let (coarse_m, fine_m) = if factor < 1.0 { (&present, &other) } else { (&other, &present) };
-        let (c, f) = (coarse_m.mesh().n_cells() as u64, fine_m.mesh().n_cells() as u64);
-        let (dc, df) = (coarse_m.mesh().dim() as u8, fine_m.mesh().dim() as u8);
-        let (cost_c, cost_f) = (
-            crate::preview::cost_of_project(&self.history, &base, &targets, dc, c),
-            crate::preview::cost_of_project(&self.history, &other_proj, &targets, df, f),
-        );
+        let ladder = self.ladder(factor)?;
+        let order = build_order(&ladder);
+        let mut built_slots: Vec<Option<(f64, bool, u64, Value)>> = vec![None; ladder.len()];
+        let mut present_cells = 0u64;
+        for &idx in &order {
+            let (scale, is_present) = ladder[idx];
+            let proj = if is_present { base.clone() } else { refined(&base, scale, scale_sizes, sizing_order) };
+            let m = self.mesh_inline(&proj)?;
+            let cells = m.mesh().n_cells() as u64;
+            let dim = m.mesh().dim() as u8;
+            if is_present {
+                present_cells = cells;
+            }
+            let cost = crate::preview::cost_of_project(&self.history, &proj, &targets, dim, cells);
+            built_slots[idx] = Some((scale, is_present, cells, cost));
+        }
+        let built: Vec<(f64, bool, u64, Value)> = built_slots.into_iter().flatten().collect();
         let secs = |v: &Value| v["solve"]["seconds"].as_f64();
-        let total = secs(&cost_c).zip(secs(&cost_f)).map(|(a, b)| a + b);
-        let p_cells = present.mesh().n_cells() as u64;
-        let o_cells = other.mesh().n_cells() as u64;
-        Ok(json!({
-            "physics": physics, "factor": factor, "scale_sizes": scale_sizes, "dry_run": true,
-            "cells": { "coarse": c, "refined": f },
-            "refined_over_present": o_cells as f64 / p_cells.max(1) as f64,
-            "cost": { "coarse": cost_c, "refined": cost_f },
+        let fine = &built[0];
+        let coarse = built.last().expect("ladder has >= 2 levels");
+        let cmp_cells = built.iter().find(|x| !x.1).map_or(fine.2, |x| x.2);
+        let total = if built.iter().all(|x| secs(&x.3).is_some()) {
+            Some(built.iter().map(|x| secs(&x.3).unwrap_or(0.0)).sum::<f64>())
+        } else {
+            None
+        };
+        let mut cells_obj = json!({ "coarse": coarse.2, "refined": fine.2 });
+        let mut cost_obj = json!({ "coarse": coarse.3, "refined": fine.3 });
+        if built.len() == 3 {
+            cells_obj["medium"] = json!(built[1].2);
+            cost_obj["medium"] = built[1].3.clone();
+        }
+        let mut out = json!({
+            "physics": physics, "factor": factor, "grids": self.limits.grids,
+            "scale_sizes": scale_sizes, "dry_run": true,
+            "cells": cells_obj,
+            "refined_over_present": cmp_cells as f64 / present_cells.max(1) as f64,
+            "cost": cost_obj,
             "seconds_estimate": total,
-            "note": "nothing was solved; the check solves both meshes (the present one is skipped when it was solved alone already). Run it with max_cells or max_seconds to have it refused when it is larger than you want",
-        }))
+            "note": "nothing was solved; the check solves the listed meshes (the present one is skipped when it was solved alone already). Run it with max_cells or max_seconds to have it refused when it is larger than you want",
+        });
+        if built.len() == 3 {
+            out["scales"] = json!(built.iter().map(|x| x.0).collect::<Vec<_>>());
+        }
+        Ok(out)
     }
 }
 
@@ -1129,13 +1401,17 @@ impl Engine {
             reuse: None,
             history: self.history.clone(),
             limits: Limits::default(),
+            worker: self.worker.clone(),
+            isolate_default: self.isolate_default,
+            isolable: self.isolable,
+            memory_probe: self.memory_probe.clone(),
+            memory_wait_timeout: self.memory_wait_timeout,
+            present_residual: None,
         }
     }
 
     /// Solves `physics` on the current mesh and on one made finer by `factor`, and compares the numbers of the two results, on the calling thread
-    /// and outside the queue (the `convergence_check` command goes through `start_convergence`). `tolerance`,
-    /// when given, is the largest relative difference accepted (the difference of a quantity over the larger of the two values, or the absolute
-    /// difference for unit-fraction mode shares); every row then says whether it passed and `converged` is true when all did.
+    /// and outside the queue (the `convergence_check` command goes through `start_convergence`).
     pub fn convergence_check(&self, physics: &str, factor: f64, tolerance: Option<f64>) -> Result<Value, Error> {
         self.convergence_job().run(physics, factor, tolerance)
     }
@@ -1179,6 +1455,78 @@ fn quantity_matches(row_name: &str, filter: &str) -> bool {
     wildcard_match(row_name, f) || row_name.strip_prefix("scalar ").is_some_and(|raw| wildcard_match(raw, f))
 }
 
+type PairedModes = (Vec<Pair>, Vec<usize>, Vec<usize>);
+
+fn pair_modes(
+    coarse_r: &SolveResult,
+    fine: &SolveResult,
+    matching: &Matching,
+    coarse_label: &str,
+    fine_label: &str,
+) -> Result<PairedModes, Error> {
+    match matching {
+        Matching::Track(filter) => {
+            filter.validate()?;
+            let coarse_cands = filter.candidates(coarse_r, coarse_label)?;
+            let fine_cands = filter.candidates(fine, fine_label)?;
+            if let Some(f) = filter.target {
+                let i = coarse_cands
+                    .iter()
+                    .copied()
+                    .filter_map(|i| key(coarse_r, i).map(|k| (i, (k[0] - f).abs())))
+                    .min_by(|x, y| x.1.total_cmp(&y.1))
+                    .map(|(i, _)| i)
+                    .ok_or_else(|| Error::invalid("the result has no eigenvalue or value to track"))?;
+                let a = key(coarse_r, i).expect("chosen by its key");
+                let (j, d) = fine_cands
+                    .iter()
+                    .copied()
+                    .filter_map(|j| key(fine, j).map(|b| (j, distance(a, b))))
+                    .min_by(|x, y| x.1.total_cmp(&y.1))
+                    .ok_or_else(|| Error::invalid("the refined result has no eigenvalue or value to track"))?;
+                Ok((vec![(i, j, d)], vec![], vec![]))
+            } else {
+                Ok(pair_nearest_in(coarse_r, &coarse_cands, fine, &fine_cands))
+            }
+        }
+        Matching::Nearest => Ok(pair_nearest(coarse_r, fine)),
+        Matching::Index => unreachable!("Index does not pair modes"),
+    }
+}
+
+fn is_unit_fraction_name(name: &str) -> bool {
+    name.strip_prefix("scalar ").and_then(|rest| mode_scalar(rest, usize::MAX)).is_some_and(|(head, _, _)| {
+        let h = head.trim();
+        h.ends_with("share") || h.starts_with("share in ") || h == "layer fraction"
+    })
+}
+
+fn gci_regime_str(r: RoacheGciRegime) -> &'static str {
+    match r {
+        RoacheGciRegime::Monotonic => "monotonic",
+        RoacheGciRegime::Oscillatory => "oscillatory",
+        RoacheGciRegime::NonConvergent => "non_convergent",
+    }
+}
+
+/// Orders `ladder` indices for building and solving: present grid first, then comparison grids by distance from `1.0`.
+fn build_order(ladder: &[(f64, bool)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..ladder.len()).collect();
+    order.sort_by(|&a, &b| {
+        ladder[b].1.cmp(&ladder[a].1).then_with(|| (ladder[a].0 - 1.0).abs().total_cmp(&(ladder[b].0 - 1.0).abs()))
+    });
+    order
+}
+
+struct GridLevel {
+    summary: Arc<SolveSummary>,
+    pair: Option<(Arc<MeshedModel>, Arc<SolveResult>)>,
+    reused: bool,
+    worker_isolated: bool,
+    max_alg_res: f64,
+}
+
+#[allow(clippy::too_many_lines)]
 fn check(
     job: &ConvergenceJob,
     progress: &Arc<Progress>,
@@ -1187,287 +1535,598 @@ fn check(
     tolerance: Option<f64>,
     matching: &Matching,
 ) -> Result<Value, Error> {
-    {
-        let this = job;
-        check_factor(factor)?;
-        this.limits.validate()?;
-        this.project
-            .spec(physics)
-            .ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
-        let targets = vec![physics.to_string()];
-        let t0 = std::time::Instant::now();
-        // L3: the comparison mesh is built first (milliseconds against a solve), so a check larger than the caller accepts is refused before
-        // any solve, and the answer to a refusal says what the check would have cost
-        let scale_sizes = this.limits.scale_sizes;
-        let sizing_order = this.scratch(this.project.clone()).sizing().map(|s| s.order);
-        let had_amr = project_has_multi_pass_amr(&this.project);
-        let mut base_project = this.project.clone();
-        force_single_adapt_pass(&mut base_project);
-        let other_label = if factor < 1.0 { "finer" } else { "coarser" };
-        let other_project = refined(&base_project, factor, scale_sizes, sizing_order);
-        let other_model = {
-            let _stage = femcore::progress::stage(format!(
-                "convergence check: the {other_label} mesh (element size times {factor})"
-            ));
-            this.mesh_inline(&other_project)?
-        };
-        let (other_cells, other_dim) = (other_model.mesh().n_cells() as u64, other_model.mesh().dim() as u8);
-        if let Some(max) = this.limits.max_cells.filter(|m| other_cells > *m) {
-            return Err(Error::invalid(format!(
-                "the {other_label} mesh would have {other_cells} cells, more than max_cells {max}: the check was not started. Coarsen the present mesh first (a larger h or adapt_scale), use a factor nearer 1 (now {factor}), or raise max_cells"
-            )));
+    let this = job;
+    check_factor(factor)?;
+    this.limits.validate()?;
+    this.project.spec(physics).ok_or_else(|| Error::invalid(format!("the project has no problem for '{physics}'")))?;
+    let targets = vec![physics.to_string()];
+    let t0 = std::time::Instant::now();
+    let scale_sizes = this.limits.scale_sizes;
+    let sizing_order = this.scratch(this.project.clone()).sizing().map(|s| s.order);
+    let had_amr = project_has_multi_pass_amr(&this.project);
+    let mut base_project = this.project.clone();
+    force_single_adapt_pass(&mut base_project);
+
+    let mut warnings: Vec<DiagnosticWarning> = Vec::new();
+    if had_amr {
+        warnings.push(DiagnosticWarning {
+            code: "adapt_passes_downgraded".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: "convergence_check forced adapt_passes = 1 on scratch copies because single-solve scaling cannot preserve multi-pass adaptive mesh topology".into(),
+        });
+    }
+    if let Some(tol) = tolerance {
+        if tol > 0.05 {
+            warnings.push(DiagnosticWarning {
+                code: "loose_tolerance".into(),
+                severity: DiagnosticSeverity::Warning,
+                message: format!(
+                    "convergence tolerance {tol:.3e} exceeds 0.05 (5%); checked status rests on a loose threshold"
+                ),
+            });
         }
-        if let Some(max) = this.limits.max_seconds {
-            let cost = crate::preview::cost_of_project(&this.history, &other_project, &targets, other_dim, other_cells);
-            if let Some(s) = cost["solve"]["seconds"].as_f64().filter(|s| *s > max) {
+    }
+
+    let ladder = this.ladder(factor)?;
+    let order = build_order(&ladder);
+    let need_full_present =
+        had_amr || !matches!(matching, Matching::Index) || this.limits.extrapolate.is_some() || this.limits.grids >= 3;
+    let present_reusable =
+        if !need_full_present { this.reuse.as_ref().and_then(|(stages, key)| stages.solve(key)) } else { None };
+
+    // Build all non-reused meshes up front (present first, then comparison meshes) and enforce max_cells / max_seconds before solving anything.
+    struct BuiltPlan {
+        scale: f64,
+        is_present: bool,
+        project: Project,
+        model: Option<Arc<MeshedModel>>,
+        reused: Option<Arc<SolveSummary>>,
+    }
+    let mut planned_slots: Vec<Option<BuiltPlan>> = std::iter::repeat_with(|| None).take(ladder.len()).collect();
+    for &idx in &order {
+        let (scale, is_present) = ladder[idx];
+        if is_present {
+            if let Some(sum) = &present_reusable {
+                planned_slots[idx] = Some(BuiltPlan {
+                    scale,
+                    is_present: true,
+                    project: base_project.clone(),
+                    model: None,
+                    reused: Some(sum.clone()),
+                });
+                continue;
+            }
+            let model = {
+                let _stage = femcore::progress::stage("convergence check: building the present mesh");
+                this.mesh_inline(&base_project)?
+            };
+            planned_slots[idx] = Some(BuiltPlan {
+                scale,
+                is_present: true,
+                project: base_project.clone(),
+                model: Some(model),
+                reused: None,
+            });
+        } else {
+            let label = if scale < 1.0 { "finer" } else { "coarser" };
+            let other_project = refined(&base_project, scale, scale_sizes, sizing_order);
+            let other_model = {
+                let _stage = femcore::progress::stage(format!(
+                    "convergence check: the {label} mesh (element size times {scale})"
+                ));
+                this.mesh_inline(&other_project)?
+            };
+            let (other_cells, other_dim) = (other_model.mesh().n_cells() as u64, other_model.mesh().dim() as u8);
+            if let Some(max) = this.limits.max_cells.filter(|m| other_cells > *m) {
                 return Err(Error::invalid(format!(
-                    "the solve on the {other_label} mesh ({other_cells} cells) is expected to take about {s:.0} s from the solves this machine has run, more than max_seconds {max}: the check was not started. Coarsen the mesh, use a factor nearer 1 (now {factor}), or raise max_seconds"
+                    "the {label} mesh would have {other_cells} cells, more than max_cells {max}: the check was not started. Coarsen the present mesh first (a larger h or adapt_scale), use a factor nearer 1 (now {scale}), or raise max_cells"
                 )));
             }
+            if let Some(max) = this.limits.max_seconds {
+                let cost =
+                    crate::preview::cost_of_project(&this.history, &other_project, &targets, other_dim, other_cells);
+                if let Some(s) = cost["solve"]["seconds"].as_f64().filter(|s| *s > max) {
+                    return Err(Error::invalid(format!(
+                        "the solve on the {label} mesh ({other_cells} cells) is expected to take about {s:.0} s from the solves this machine has run, more than max_seconds {max}: the check was not started. Coarsen the mesh, use a factor nearer 1 (now {scale}), or raise max_seconds"
+                    )));
+                }
+            }
+            planned_slots[idx] = Some(BuiltPlan {
+                scale,
+                is_present: false,
+                project: other_project,
+                model: Some(other_model),
+                reused: None,
+            });
         }
-        // the two solves are stages of the one job, run here under its progress, so the check can be watched and cancelled; the first is skipped
-        // when an earlier request solved this physics alone on this mesh (found by content, so the numbers are the ones this solve would give).
-        // Mode pairing, Richardson extrapolation, and multi-pass AMR projects need fresh single-pass `SolveResult` payloads.
-        let need_full_present = had_amr || !matches!(matching, Matching::Index) || this.limits.extrapolate.is_some();
-        let reusable =
-            if !need_full_present { this.reuse.as_ref().and_then(|(stages, key)| stages.solve(key)) } else { None };
-        let (present_summary, self_reused, present_solved) = match reusable {
-            Some(s) => {
-                let _stage = femcore::progress::stage(
-                    "convergence check: the solve on the present mesh (reused from an earlier solve)",
-                );
-                (s, true, None)
-            }
-            None => {
-                let _stage = femcore::progress::stage("convergence check: the solve on the present mesh");
-                let (model, r) = this.solve_inline(base_project, &targets, physics, progress)?;
-                (Arc::new(SolveSummary::of(&r, model.mesh().n_cells())), false, Some((model, r)))
-            }
-        };
-        let other_result = {
-            let _stage = femcore::progress::stage(format!(
-                "convergence check: the solve on the {other_label} mesh (element size times {factor})"
-            ));
-            this.solve_on(other_project, &other_model, &targets, physics, progress)?
-        };
-        let other_summary = Arc::new(SolveSummary::of(&other_result, other_model.mesh().n_cells()));
+    }
 
-        // Identify `(coarse, fine)` regardless of whether `factor < 1` (refining) or `factor > 1` (coarsening)
-        let (coarse_sum, fine_sum, coarse_pair, fine_pair) = if factor < 1.0 {
-            (present_summary, other_summary, present_solved, Some((other_model, other_result)))
+    // Solve every non-reused mesh level in build order, then index them fine -> medium -> coarse.
+    let mut level_slots: Vec<Option<GridLevel>> = std::iter::repeat_with(|| None).take(ladder.len()).collect();
+    for &idx in &order {
+        let item = planned_slots[idx].take().expect("every ladder slot is planned");
+        if let Some(sum) = item.reused {
+            let _stage = femcore::progress::stage(
+                "convergence check: the solve on the present mesh (reused from an earlier solve)",
+            );
+            level_slots[idx] = Some(GridLevel {
+                summary: sum,
+                pair: None,
+                reused: true,
+                worker_isolated: false,
+                max_alg_res: this.present_residual.unwrap_or(0.0),
+            });
         } else {
-            (other_summary, present_summary, Some((other_model, other_result)), present_solved)
-        };
-        let cells_coarse = Some(coarse_sum.cells);
-        let cells_fine = Some(fine_sum.cells);
+            let model = item.model.expect("non-reused grid has a built mesh");
+            let label = if item.is_present {
+                "present".to_string()
+            } else if item.scale < 1.0 {
+                format!("finer (element size times {})", item.scale)
+            } else {
+                format!("coarser (element size times {})", item.scale)
+            };
+            let _stage = femcore::progress::stage(format!("convergence check: solving the {label} mesh"));
+            let (r, used_worker) = this.solve_grid(item.project, &model, &targets, physics, progress)?;
+            let summary = Arc::new(SolveSummary::of(&r, model.mesh().n_cells()));
+            let max_alg_res = r.diagnostics.as_ref().map(|d| d.max_algebraic_residual).unwrap_or(0.0);
+            level_slots[idx] = Some(GridLevel {
+                summary,
+                pair: Some((model, r)),
+                reused: false,
+                worker_isolated: used_worker,
+                max_alg_res,
+            });
+        }
+    }
+    let levels: Vec<GridLevel> = level_slots.into_iter().flatten().collect();
 
-        // the rows to compare: (name, coarse, refined) and, when the modes are paired, which solutions were paired
-        let mut compared: Vec<(String, f64, f64)> = vec![];
-        let mut matched = None;
-        let mut common = |a: Vec<(String, f64)>, b: Vec<(String, f64)>| {
-            for (name, x) in a {
-                if let Some((_, y)) = b.iter().find(|(n, _)| *n == name) {
-                    compared.push((name, x, *y));
+    let dim_val = levels
+        .iter()
+        .find_map(|l| l.pair.as_ref().map(|(m, _)| m.mesh().dim() as f64))
+        .unwrap_or_else(|| this.project.mesh.sweep.as_ref().map_or(this.project.geometry.dim as f64, |_| 3.0));
+    let fine_lvl = &levels[0];
+    let coarse_lvl = levels.last().expect("ladder has >= 2 levels");
+    let med_lvl_opt = (levels.len() == 3).then(|| &levels[1]);
+    let self_reused = levels.iter().any(|l| l.reused);
+    let any_worker = levels.iter().any(|l| l.worker_isolated);
+    let max_alg_res = levels.iter().map(|l| l.max_alg_res).fold(0.0_f64, f64::max);
+
+    let cells_fine = fine_lvl.summary.cells as u64;
+    let cells_coarse = coarse_lvl.summary.cells as u64;
+    let cells_med = med_lvl_opt.map(|m| m.summary.cells as u64);
+
+    let (r21, r32, r_eff) = if let Some(med_lvl) = med_lvl_opt {
+        let r21 = (cells_fine as f64 / (med_lvl.summary.cells.max(1) as f64)).powf(1.0 / dim_val);
+        let r32 = (med_lvl.summary.cells as f64 / (coarse_lvl.summary.cells.max(1) as f64)).powf(1.0 / dim_val);
+        (r21, Some(r32), r21.min(r32))
+    } else {
+        let r21 = (cells_fine as f64 / (cells_coarse.max(1) as f64)).powf(1.0 / dim_val);
+        (r21, None, r21)
+    };
+    let low_r = r_eff < 1.3;
+    if low_r {
+        warnings.push(DiagnosticWarning {
+            code: "low_refinement_ratio".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "effective grid refinement ratio r_eff = {r_eff:.3} < 1.3; falling back to conservative bracket and withholding mesh-checked certification"
+            ),
+        });
+    }
+
+    // Build `(name, coarse, refined)` and optional 3-grid `[phi1, phi2, phi3]` ordered fine-to-coarse.
+    struct QuadRow {
+        name: String,
+        coarse: f64,
+        medium: Option<f64>,
+        refined: f64,
+    }
+    let mut compared_quad: Vec<QuadRow> = vec![];
+    let mut matched = None;
+    let push_2grid = |out: &mut Vec<QuadRow>, a: &[(String, f64)], b: &[(String, f64)]| {
+        for (name, xc) in a {
+            if let Some((_, xf)) = b.iter().find(|(n, _)| n == name) {
+                out.push(QuadRow { name: name.clone(), coarse: *xc, medium: None, refined: *xf });
+            }
+        }
+    };
+    let push_3grid =
+        |out: &mut Vec<QuadRow>, c_vals: &[(String, f64)], m_vals: &[(String, f64)], f_vals: &[(String, f64)]| {
+            for (name, xf) in f_vals {
+                if let (Some((_, xm)), Some((_, xc))) =
+                    (m_vals.iter().find(|(n, _)| n == name), c_vals.iter().find(|(n, _)| n == name))
+                {
+                    out.push(QuadRow { name: name.clone(), coarse: *xc, medium: Some(*xm), refined: *xf });
                 }
             }
         };
-        match matching {
-            Matching::Index => common(coarse_sum.numbers.clone(), fine_sum.numbers.clone()),
-            Matching::Nearest | Matching::Track(_) => {
-                let (_, coarse_r) =
-                    coarse_pair.as_ref().expect("a check that pairs modes solves both meshes with full results");
-                let (_, fine) =
-                    fine_pair.as_ref().expect("a check that pairs modes solves both meshes with full results");
-                let (pairs, lone_coarse, lone_fine) = match matching {
-                    Matching::Track(filter) => {
-                        filter.validate()?;
-                        let coarse_cands = filter.candidates(coarse_r, "present")?;
-                        let fine_cands = filter.candidates(fine, "refined")?;
-                        if let Some(f) = filter.target {
-                            let i = coarse_cands
-                                .iter()
-                                .copied()
-                                .filter_map(|i| key(coarse_r, i).map(|k| (i, (k[0] - f).abs())))
-                                .min_by(|x, y| x.1.total_cmp(&y.1))
-                                .map(|(i, _)| i)
-                                .ok_or_else(|| Error::invalid("the result has no eigenvalue or value to track"))?;
-                            let a = key(coarse_r, i).expect("chosen by its key");
-                            let (j, d) = fine_cands
-                                .iter()
-                                .copied()
-                                .filter_map(|j| key(fine, j).map(|b| (j, distance(a, b))))
-                                .min_by(|x, y| x.1.total_cmp(&y.1))
-                                .ok_or_else(|| {
-                                    Error::invalid("the refined result has no eigenvalue or value to track")
-                                })?;
-                            (vec![(i, j, d)], vec![], vec![])
-                        } else {
-                            pair_nearest_in(coarse_r, &coarse_cands, fine, &fine_cands)
-                        }
+
+    match matching {
+        Matching::Index => {
+            if let Some(med_lvl) = med_lvl_opt {
+                push_3grid(
+                    &mut compared_quad,
+                    &coarse_lvl.summary.numbers,
+                    &med_lvl.summary.numbers,
+                    &fine_lvl.summary.numbers,
+                );
+            } else {
+                push_2grid(&mut compared_quad, &coarse_lvl.summary.numbers, &fine_lvl.summary.numbers);
+            }
+        }
+        Matching::Nearest | Matching::Track(_) => {
+            let (_, fine_r) =
+                fine_lvl.pair.as_ref().expect("a check that pairs modes solves every mesh with full results");
+            let (_, coarse_r) =
+                coarse_lvl.pair.as_ref().expect("a check that pairs modes solves every mesh with full results");
+            if let Some(med_lvl) = med_lvl_opt {
+                let (_, med_r) =
+                    med_lvl.pair.as_ref().expect("a check that pairs modes solves every mesh with full results");
+                let (pairs_mf, lone_med, lone_fine) = pair_modes(med_r, fine_r, matching, "medium", "refined")?;
+                let (pairs_cf, _, _) = pair_modes(coarse_r, fine_r, matching, "coarse", "refined")?;
+                for &(im, jf, _) in &pairs_mf {
+                    if let Some(&(ic, _, _)) = pairs_cf.iter().find(|p| p.1 == jf) {
+                        push_3grid(
+                            &mut compared_quad,
+                            &numbers_of(coarse_r, ic, ic),
+                            &numbers_of(med_r, im, ic),
+                            &numbers_of(fine_r, jf, ic),
+                        );
                     }
-                    _ => pair_nearest(coarse_r, fine),
-                };
+                }
+                matched = Some((pairs_mf, lone_med, lone_fine));
+            } else {
+                let (pairs, lone_coarse, lone_fine) = pair_modes(coarse_r, fine_r, matching, "present", "refined")?;
                 for &(i, j, _) in &pairs {
-                    common(numbers_of(coarse_r, i, i), numbers_of(fine, j, i));
+                    push_2grid(&mut compared_quad, &numbers_of(coarse_r, i, i), &numbers_of(fine_r, j, i));
                 }
                 matched = Some((pairs, lone_coarse, lone_fine));
             }
         }
-        // L2: a mode whose imaginary part is zero up to rounding (a lossless guide solved by the complex solver, because a crystal axis is tilted)
-        // has `im` of 1e-10 or so that differs between two meshes by 100 percent, and a quality factor of 1e10 made of it. Such a mode is not a
-        // failure of the mesh: its `im` and its quality factors are listed but not counted. The floor is what the eigensolver resolves: an `im`
-        // below it times the real part on both meshes (a Q above 5e7) is not told from rounding.
-        let noise = noise_modes(&compared);
-        let active_compared: Vec<&(String, f64, f64)> = match &this.limits.quantities {
-            None => compared.iter().collect(),
-            Some(qs) => {
-                let matched_rows: Vec<&(String, f64, f64)> =
-                    compared.iter().filter(|(name, _, _)| qs.iter().any(|q| quantity_matches(name, q))).collect();
-                if matched_rows.is_empty() {
-                    let available: Vec<&str> = compared.iter().map(|(n, _, _)| n.as_str()).collect();
-                    return Err(Error::invalid(format!(
-                        "no quantity matched `quantities` {:?} (available quantities: {})",
-                        qs,
-                        if available.is_empty() { "none".to_string() } else { available.join(", ") }
-                    )));
-                }
-                matched_rows
+    }
+
+    let simple_pairs: Vec<(String, f64, f64)> =
+        compared_quad.iter().map(|q| (q.name.clone(), q.medium.unwrap_or(q.coarse), q.refined)).collect();
+    let noise = noise_modes(&simple_pairs);
+    let active_quad: Vec<&QuadRow> = match &this.limits.quantities {
+        None => compared_quad.iter().collect(),
+        Some(qs) => {
+            let matched_rows: Vec<&QuadRow> =
+                compared_quad.iter().filter(|q| qs.iter().any(|f| quantity_matches(&q.name, f))).collect();
+            if matched_rows.is_empty() {
+                let available: Vec<&str> = compared_quad.iter().map(|q| q.name.as_str()).collect();
+                return Err(Error::invalid(format!(
+                    "no quantity matched `quantities` {:?} (available quantities: {})",
+                    qs,
+                    if available.is_empty() { "none".to_string() } else { available.join(", ") }
+                )));
             }
+            matched_rows
+        }
+    };
+
+    let p_th = this.limits.extrapolate_order.unwrap_or_else(|| {
+        if let Some((fm, fr)) = &fine_lvl.pair {
+            default_extrapolate_order(fm, fr)
+        } else {
+            let order = this.project.spec(physics).map_or(2, |s| s.order.max(1));
+            (2 * order as usize) as f64
+        }
+    });
+
+    let mut rows = vec![];
+    let mut worst = 0.0f64;
+    let mut worst_name = String::new();
+    let mut all = true;
+    let mut worst_gci = 0.0_f64;
+    let mut worst_gci_report: Option<RoacheGciReport> = None;
+    let mut any_non_convergent = false;
+    let mut any_oscillatory = false;
+
+    for q in &active_quad {
+        let x_prev = q.medium.unwrap_or(q.coarse);
+        let y = q.refined;
+        let is_unit_fraction = is_unit_fraction_name(&q.name);
+        let scale = x_prev.abs().max(y.abs());
+        let rel = if is_unit_fraction {
+            (x_prev - y).abs()
+        } else if scale <= 1e-30 {
+            0.0
+        } else {
+            (x_prev - y).abs() / scale
         };
-        let mut rows = vec![];
-        let mut worst = 0.0f64;
-        let mut worst_name = String::new();
-        let mut all = true;
-        for &(ref name, x, y) in &active_compared {
-            let is_unit_fraction = name
-                .strip_prefix("scalar ")
-                .and_then(|rest| mode_scalar(rest, usize::MAX))
-                .is_some_and(|(head, _, _)| {
-                    let h = head.trim();
-                    h.ends_with("share") || h.starts_with("share in ") || h == "layer fraction"
-                });
-            let scale = x.abs().max(y.abs());
-            let rel = if is_unit_fraction {
-                (x - y).abs()
-            } else if scale <= 1e-30 {
-                0.0
+        if is_noise(&q.name, &noise) {
+            let mut row = json!({
+                "quantity": q.name, "coarse": q.coarse, "refined": y,
+                "difference": y - x_prev, "relative": rel, "converged": tolerance.map(|_| true), "noise": true,
+            });
+            if let Some(m) = q.medium {
+                row["medium"] = json!(m);
+            }
+            row["why"] = json!("imaginary part at the rounding level of this mode: not counted");
+            rows.push(row);
+            continue;
+        }
+        if matches!(q.name.as_str(), "scalar max |E| (V/m)" | "scalar max |B| (T)") {
+            let mut row = json!({
+                "quantity": q.name, "coarse": q.coarse, "refined": y,
+                "difference": y - x_prev, "relative": rel, "converged": tolerance.map(|_| true), "noise": true,
+            });
+            if let Some(m) = q.medium {
+                row["medium"] = json!(m);
+            }
+            row["why"] =
+                json!("pointwise field peak at conductor edges/corners is singular under refinement: not counted");
+            rows.push(row);
+            continue;
+        }
+
+        if let Some(xm) = q.medium {
+            let r32_v = r32.expect("3-grid sets r32");
+            let phi = [y, xm, q.coarse];
+            let max_mag = phi.iter().map(|v| v.abs()).fold(0.0_f64, f64::max).max(1e-30);
+            let max_step = (phi[0] - phi[1]).abs().max((phi[1] - phi[2]).abs());
+            if low_r {
+                let p_min = phi[0].min(phi[1]).min(phi[2]);
+                let p_max = phi[0].max(phi[1]).max(phi[2]);
+                let denom = if is_unit_fraction { 1.0 } else { max_mag };
+                let bracket = ((p_max - p_min).max(3.0 * (phi[0] - phi[1]).abs())) / denom;
+                if bracket > worst_gci || worst_name.is_empty() {
+                    worst_gci = bracket;
+                }
+                if rel > worst || worst_name.is_empty() {
+                    worst_name = q.name.clone();
+                }
+                worst = worst.max(rel);
+                let pass = tolerance.map(|t| bracket <= t);
+                all &= pass.unwrap_or(true);
+                rows.push(json!({
+                    "quantity": q.name, "coarse": q.coarse, "medium": xm, "refined": y,
+                    "difference": y - xm, "relative": rel, "gci_21": bracket, "regime": "low_refinement_ratio",
+                    "converged": pass,
+                }));
             } else {
-                (x - y).abs() / scale
-            };
-            if is_noise(name, &noise) {
-                let mut row = json!({ "quantity": name, "coarse": x, "refined": y, "difference": y - x, "relative": rel, "converged": tolerance.map(|_| true), "noise": true });
-                row["why"] = json!("imaginary part at the rounding level of this mode: not counted");
-                rows.push(row);
-                continue;
+                let report = if max_step <= 1e-12 * max_mag {
+                    RoacheGciReport {
+                        regime: RoacheGciRegime::Monotonic,
+                        convergence_ratio: 0.0,
+                        r21,
+                        r32: r32_v,
+                        observed_order: Some(p_th),
+                        gci_21: 0.0,
+                        gci_32: Some(0.0),
+                        safety_factor: 1.25,
+                        in_asymptotic_range: true,
+                        extrapolated_value: Some(phi[0]),
+                    }
+                } else {
+                    roache_gci(phi, r21, r32_v, p_th).map_err(Error::invalid)?
+                };
+                match report.regime {
+                    RoacheGciRegime::NonConvergent => any_non_convergent = true,
+                    RoacheGciRegime::Oscillatory => any_oscillatory = true,
+                    RoacheGciRegime::Monotonic => {}
+                }
+                let eff_err = if is_unit_fraction {
+                    let denom = phi[0].abs().max(1e-30);
+                    (report.gci_21 * denom).max(rel)
+                } else {
+                    report.gci_21
+                };
+                if eff_err >= worst_gci || worst_gci_report.is_none() {
+                    worst_gci = eff_err;
+                    worst_gci_report = Some(report.clone());
+                }
+                if eff_err > worst || worst_name.is_empty() {
+                    worst_name = q.name.clone();
+                }
+                worst = worst.max(eff_err);
+                let row_ok = tolerance.map(|t| eff_err <= t && report.regime != RoacheGciRegime::NonConvergent);
+                all &= row_ok.unwrap_or(report.regime != RoacheGciRegime::NonConvergent);
+                rows.push(json!({
+                    "quantity": q.name, "coarse": q.coarse, "medium": xm, "refined": y,
+                    "difference": y - xm, "relative": rel, "gci_21": eff_err, "gci_32": report.gci_32,
+                    "observed_order": report.observed_order, "safety_factor": report.safety_factor,
+                    "in_asymptotic_range": report.in_asymptotic_range,
+                    "regime": gci_regime_str(report.regime),
+                    "converged": row_ok,
+                }));
             }
-            if matches!(name.as_str(), "scalar max |E| (V/m)" | "scalar max |B| (T)") {
-                let mut row = json!({ "quantity": name, "coarse": x, "refined": y, "difference": y - x, "relative": rel, "converged": tolerance.map(|_| true), "noise": true });
-                row["why"] =
-                    json!("pointwise field peak at conductor edges/corners is singular under refinement: not counted");
-                rows.push(row);
-                continue;
-            }
+        } else {
             if rel > worst || worst_name.is_empty() {
-                worst_name = name.clone();
+                worst_name = q.name.clone();
             }
             worst = worst.max(rel);
             let pass = tolerance.map(|t| rel <= t);
             all &= pass.unwrap_or(true);
-            rows.push(json!({ "quantity": name, "coarse": x, "refined": y, "difference": y - x, "relative": rel, "converged": pass }));
-        }
-        if rows.is_empty() {
-            return Err(Error::invalid(match matching {
-                Matching::Index => "the result has no eigenvalue, value or numeric scalar to compare",
-                _ => "no mode of the present mesh could be paired with a mode of the finer mesh",
+            rows.push(json!({
+                "quantity": q.name, "coarse": q.coarse, "refined": y,
+                "difference": y - q.coarse, "relative": rel, "converged": pass,
             }));
         }
-        let mut out = json!({
-            "physics": physics, "factor": factor, "scale_sizes": scale_sizes, "tolerance": tolerance,
-            "cells": { "coarse": cells_coarse, "refined": cells_fine },
-            "unknowns": { "coarse": coarse_sum.dofs, "refined": fine_sum.dofs },
-            "coarse_reused": self_reused,
-            "seconds": t0.elapsed().as_secs_f64(),
-            "worst_relative": worst,
-            "worst_quantity": worst_name,
-            "quantities": rows.len(),
-            "noise_modes": noise,
-            "matching": "index",
-            "converged": tolerance.map(|_| all),
-            "rows": rows,
-            "note": "the project was not changed; compare with a smaller factor if the difference is still falling",
-        });
-        if let Some(qs) = &this.limits.quantities {
-            out["quantities_filter"] = json!(qs);
-        }
-        if let Some((pairs, lone_coarse, lone_fine)) = matched {
-            let mode = if matches!(matching, Matching::Track(_)) { "track" } else { "nearest" };
-            out["matching"] = json!(mode);
-            out["match"] = json!(mode);
-            if let Matching::Track(filter) = matching {
-                out["track"] = filter.to_json();
-            }
-            out["pairs"] = pairs.iter().map(|(i, j, d)| json!({ "coarse": i, "refined": j, "distance": d })).collect();
-            out["unpaired"] = json!({ "coarse": lone_coarse, "refined": lone_fine });
-            out["note"] = json!("the project was not changed; modes are paired by their eigenvalues: a quantity carries the index of the mode on the present mesh and `pairs` gives its index on the finer one; rows, worst_relative and converged cover the paired modes only");
-        }
-        if let Some(method) = &this.limits.extrapolate {
-            let (_, coarse_r) =
-                coarse_pair.as_ref().expect("Richardson extrapolation solves both meshes with full results");
-            let (fine_m, fine_r) =
-                fine_pair.as_ref().expect("Richardson extrapolation solves both meshes with full results");
-            let r = if factor < 1.0 { 1.0 / factor } else { factor };
-            let order = this.limits.extrapolate_order.unwrap_or_else(|| default_extrapolate_order(fine_m, fine_r));
-            let rp = r.powf(order);
-            let w1 = rp / (rp - 1.0);
-            let w0 = w1 - 1.0;
-
-            let (cap_json, per_entry_rel, max_entry_rel) = match (
-                CapacitanceMatrixData::of(coarse_r),
-                CapacitanceMatrixData::of(fine_r),
-            ) {
-                (Some(cc), Some(cf)) => {
-                    let (cap_r, per_rel, max_rel) = extrapolate_capacitance(&cc, &cf, method, r, order)?;
-                    (serde_json::to_value(&cap_r).unwrap_or(Value::Null), json!(per_rel), json!(max_rel))
-                }
-                _ if method == "richardson_log_spd" => {
-                    return Err(Error::invalid(
-                            "`extrapolate: \"richardson_log_spd\"` requires a multi-terminal capacitance matrix (`dfs` electrostatic study with `terminal` conditions)",
-                        ));
-                }
-                _ => (Value::Null, Value::Null, Value::Null),
-            };
-
-            let mut ext_scalars = serde_json::Map::new();
-            for (name, x_c, x_f) in &compared {
-                if is_noise(name, &noise) || matches!(name.as_str(), "scalar max |E| (V/m)" | "scalar max |B| (T)") {
-                    continue;
-                }
-                let val = if method == "richardson_log_spd" && *x_f > 1e-30 && *x_c > 1e-30 {
-                    (w1 * x_f.ln() - w0 * x_c.ln()).exp()
-                } else if method == "richardson_log_spd" && *x_f < -1e-30 && *x_c < -1e-30 {
-                    -(w1 * x_f.abs().ln() - w0 * x_c.abs().ln()).exp()
-                } else {
-                    w1 * x_f - w0 * x_c
-                };
-                if val.is_finite() {
-                    ext_scalars.insert(name.clone(), json!(val));
-                }
-            }
-
-            out["extrapolated"] = json!({
-                "method": method,
-                "order": order,
-                "r": r,
-                "weight_fine": w1,
-                "apply_extrapolated": this.limits.apply_extrapolated,
-                "capacitance_matrix": cap_json,
-                "per_entry_rel_error": per_entry_rel,
-                "max_entry_rel_error": max_entry_rel,
-                "scalars": ext_scalars,
-            });
-        }
-        Ok(out)
     }
+    if rows.is_empty() {
+        return Err(Error::invalid(match matching {
+            Matching::Index => "the result has no eigenvalue, value or numeric scalar to compare",
+            _ => "no mode of the present mesh could be paired with a mode of the finer mesh",
+        }));
+    }
+
+    let overall_regime = if low_r {
+        Some("low_refinement_ratio")
+    } else if this.limits.grids >= 3 {
+        if any_non_convergent {
+            Some("non_convergent")
+        } else if any_oscillatory {
+            Some("oscillatory")
+        } else {
+            Some("monotonic")
+        }
+    } else {
+        None
+    };
+
+    let converged_val = if this.limits.grids >= 3 {
+        if any_non_convergent {
+            tolerance.map(|_| false).or(Some(false))
+        } else {
+            tolerance.map(|_| all)
+        }
+    } else {
+        tolerance.map(|_| all)
+    };
+
+    let mut cells_json = json!({ "coarse": cells_coarse, "refined": cells_fine });
+    let mut unknowns_json = json!({ "coarse": coarse_lvl.summary.dofs, "refined": fine_lvl.summary.dofs });
+    if let (Some(cm), Some(ml)) = (cells_med, med_lvl_opt) {
+        cells_json["medium"] = json!(cm);
+        unknowns_json["medium"] = json!(ml.summary.dofs);
+    }
+
+    let spatial_estimate = if this.limits.grids >= 3 && !low_r {
+        SpatialErrorEstimate {
+            method: "roache_gci_3grid".into(),
+            rel_bound: worst_gci,
+            is_epistemic_bound: false,
+            observed_order: worst_gci_report.as_ref().and_then(|r| r.observed_order),
+            refinement_ratio: Some(r_eff),
+            safety_factor: worst_gci_report.as_ref().map(|r| r.safety_factor),
+            extrapolated_scalars_only: this.limits.apply_extrapolated.then_some(true),
+        }
+    } else if low_r {
+        SpatialErrorEstimate {
+            method: "conservative_bracket".into(),
+            rel_bound: if this.limits.grids >= 3 { worst_gci } else { worst },
+            is_epistemic_bound: false,
+            observed_order: None,
+            refinement_ratio: Some(r_eff),
+            safety_factor: Some(3.0),
+            extrapolated_scalars_only: this.limits.apply_extrapolated.then_some(true),
+        }
+    } else {
+        SpatialErrorEstimate {
+            method: "two_grid_delta".into(),
+            rel_bound: worst,
+            is_epistemic_bound: false,
+            observed_order: None,
+            refinement_ratio: Some(r_eff),
+            safety_factor: None,
+            extrapolated_scalars_only: this.limits.apply_extrapolated.then_some(true),
+        }
+    };
+
+    let mut out = json!({
+        "physics": physics, "factor": factor, "grids": this.limits.grids,
+        "scale_sizes": scale_sizes, "tolerance": tolerance,
+        "r_eff": r_eff,
+        "max_algebraic_residual": max_alg_res,
+        "worker_isolated": any_worker,
+        "cells": cells_json,
+        "unknowns": unknowns_json,
+        "coarse_reused": self_reused,
+        "seconds": t0.elapsed().as_secs_f64(),
+        "worst_relative": worst,
+        "worst_quantity": worst_name,
+        "quantities": rows.len(),
+        "noise_modes": noise,
+        "matching": "index",
+        "converged": converged_val,
+        "warnings": warnings,
+        "spatial_error_estimate": spatial_estimate,
+        "rows": rows,
+        "note": "the project was not changed; compare with a smaller factor if the difference is still falling",
+    });
+
+    if this.limits.grids >= 3 {
+        out["gci"] = json!({
+            "grids": 3,
+            "r21": r21,
+            "r32": r32,
+            "r_eff": r_eff,
+            "theoretical_order": p_th,
+            "observed_order": worst_gci_report.as_ref().and_then(|r| r.observed_order),
+            "gci_21": worst_gci,
+            "gci_32": worst_gci_report.as_ref().and_then(|r| r.gci_32),
+            "safety_factor": worst_gci_report.as_ref().map_or(3.0, |r| r.safety_factor),
+            "in_asymptotic_range": worst_gci_report.as_ref().is_some_and(|r| r.in_asymptotic_range),
+            "oscillatory": any_oscillatory,
+            "low_refinement_fallback": low_r,
+            "regime": overall_regime.unwrap_or("monotonic"),
+        });
+    }
+
+    if let Some(qs) = &this.limits.quantities {
+        out["quantities_filter"] = json!(qs);
+    }
+    if let Some((pairs, lone_coarse, lone_fine)) = matched {
+        let mode = if matches!(matching, Matching::Track(_)) { "track" } else { "nearest" };
+        out["matching"] = json!(mode);
+        out["match"] = json!(mode);
+        if let Matching::Track(filter) = matching {
+            out["track"] = filter.to_json();
+        }
+        out["pairs"] = pairs.iter().map(|(i, j, d)| json!({ "coarse": i, "refined": j, "distance": d })).collect();
+        out["unpaired"] = json!({ "coarse": lone_coarse, "refined": lone_fine });
+        out["note"] = json!("the project was not changed; modes are paired by their eigenvalues: a quantity carries the index of the mode on the present mesh and `pairs` gives its index on the finer one; rows, worst_relative and converged cover the paired modes only");
+    }
+    if let Some(method) = &this.limits.extrapolate {
+        let next_lvl = med_lvl_opt.unwrap_or(coarse_lvl);
+        let (_, coarse_r) =
+            next_lvl.pair.as_ref().expect("Richardson extrapolation solves both meshes with full results");
+        let (fine_m, fine_r) =
+            fine_lvl.pair.as_ref().expect("Richardson extrapolation solves both meshes with full results");
+        let r = if factor < 1.0 { 1.0 / factor } else { factor };
+        let order = this.limits.extrapolate_order.unwrap_or_else(|| default_extrapolate_order(fine_m, fine_r));
+        let rp = r.powf(order);
+        let w1 = rp / (rp - 1.0);
+        let w0 = w1 - 1.0;
+
+        let (cap_json, per_entry_rel, max_entry_rel) = match (
+            CapacitanceMatrixData::of(coarse_r),
+            CapacitanceMatrixData::of(fine_r),
+        ) {
+            (Some(cc), Some(cf)) => {
+                let (cap_r, per_rel, max_rel) = extrapolate_capacitance(&cc, &cf, method, r, order)?;
+                (serde_json::to_value(&cap_r).unwrap_or(Value::Null), json!(per_rel), json!(max_rel))
+            }
+            _ if method == "richardson_log_spd" => {
+                return Err(Error::invalid(
+                    "`extrapolate: \"richardson_log_spd\"` requires a multi-terminal capacitance matrix (`dfs` electrostatic study with `terminal` conditions)",
+                ));
+            }
+            _ => (Value::Null, Value::Null, Value::Null),
+        };
+
+        let mut ext_scalars = serde_json::Map::new();
+        for (name, x_c, x_f) in &simple_pairs {
+            if is_noise(name, &noise) || matches!(name.as_str(), "scalar max |E| (V/m)" | "scalar max |B| (T)") {
+                continue;
+            }
+            let val = if method == "richardson_log_spd" && *x_f > 1e-30 && *x_c > 1e-30 {
+                (w1 * x_f.ln() - w0 * x_c.ln()).exp()
+            } else if method == "richardson_log_spd" && *x_f < -1e-30 && *x_c < -1e-30 {
+                -(w1 * x_f.abs().ln() - w0 * x_c.abs().ln()).exp()
+            } else {
+                w1 * x_f - w0 * x_c
+            };
+            if val.is_finite() {
+                ext_scalars.insert(name.clone(), json!(val));
+            }
+        }
+
+        out["extrapolated"] = json!({
+            "method": method,
+            "order": order,
+            "r": r,
+            "weight_fine": w1,
+            "apply_extrapolated": this.limits.apply_extrapolated,
+            "capacitance_matrix": cap_json,
+            "per_entry_rel_error": per_entry_rel,
+            "max_entry_rel_error": max_entry_rel,
+            "scalars": ext_scalars,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

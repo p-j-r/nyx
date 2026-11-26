@@ -2,7 +2,7 @@
 
 **Describe an HDF5 results file** · access `read`: reads the project or the results
 
-The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.
+The project title, the mesh size and for each physics the study, size, time, number of solutions, scalars, solver diagnostics and numerical error budget of a results file.
 
 ## Arguments
 

@@ -34,6 +34,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 
 | Component | Modules | Items |
 |---|---|---|
+| [dfs: Shared helpers](../dfs/common.md) | linalg::amg_elastic | AmgOptions |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | linalg::amg_elastic | AmgOptions |
 | [ems: 3D cavity kernel](../ems/cavity.md) | linalg::amg_elastic | spmm |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::amg_elastic, linalg::ams | AmsFgmresOptions, AmsFgmresSolver, AmsP2Topology, assemble_shifted_curl_curl, spmm |

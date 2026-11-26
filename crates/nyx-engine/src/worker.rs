@@ -41,6 +41,8 @@ pub(crate) struct RemoteSpec {
     pub save_fields: bool,
     /// read-only post-solve analyses to run in-memory before fields are dropped
     pub post_analyses: Vec<Value>,
+    /// keep transient cellwise `ElectroAmrData` indicators on `SolveResult`
+    pub retain_amr_data: bool,
 }
 
 /// The modes handed to a worker for a warm start (none for the first point, which only records).
@@ -179,9 +181,10 @@ fn serve_job(dir: &Path) -> Result<(), String> {
     // a point of a warm sweep (P5b): start from the modes in `warm_in.bin` when there are some, and leave this solve's in `warm_out.bin`
     let warm_on = job["warm"].as_bool() == Some(true);
     let save_fields = job.get("save_fields").and_then(Value::as_bool).unwrap_or(true);
+    let retain_amr_data = job.get("retain_amr_data").and_then(Value::as_bool).unwrap_or(false);
     let post_analyses: Vec<Value> = job.get("post_analyses").and_then(Value::as_array).cloned().unwrap_or_default();
     let warm_cell = crate::reuse::WarmCell::new();
-    let mut opts = crate::queue::QueueOpts::default();
+    let mut opts = crate::queue::QueueOpts { retain_amr_data, ..Default::default() };
     if warm_on {
         let input = std::fs::read(dir.join("warm_in.bin")).ok().map(Arc::new);
         opts.warm = Some(crate::reuse::WarmLink::for_worker(input, warm_cell.clone()));
@@ -225,13 +228,14 @@ fn serve_job(dir: &Path) -> Result<(), String> {
     let has_results = match e.results_snapshot() {
         Ok(s) => {
             let refs: Vec<(String, &SolveResult)> = s.results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
-            crate::h5io::write_results_with_options(
+            crate::h5io::write_results_with_provenance(
                 &dir.join("results.h5"),
                 &s.project,
                 &s.model.solver_mesh(),
                 &refs,
                 crate::h5io::FieldStorageLayout::L2ShuffleLzfPacked,
                 save_fields,
+                Some(&s.checks),
             )?;
             true
         }
@@ -328,6 +332,7 @@ pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error
             "materials": spec.materials,
             "warm": spec.warm.is_some(),
             "save_fields": spec.save_fields,
+            "retain_amr_data": spec.retain_amr_data,
             "post_analyses": spec.post_analyses,
         })
         .to_string(),

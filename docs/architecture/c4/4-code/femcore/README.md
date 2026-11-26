@@ -14,14 +14,14 @@ One page per component, C4 level 4. [Component view](../../3-components/femcore.
 | [Metric fields](./metric.md) | 6 | 1855 | 72 | 9 |
 | [Adaptation operators](./adaptops.md) | 4 | 2526 | 53 | 14 |
 | [Adaptation drivers](./adaptdrive.md) | 4 | 721 | 22 | 9 |
-| [Error estimators](./estimators.md) | 4 | 2653 | 44 | 18 |
+| [Error estimators](./estimators.md) | 4 | 3730 | 50 | 21 |
 | [Matrices and vectors](./lacore.md) | 18 | 5111 | 213 | 30 |
-| [Linear algebra driver](./ladriver.md) | 3 | 1454 | 44 | 19 |
-| [Direct solvers](./ladirect.md) | 6 | 6115 | 107 | 36 (+5 not shown) |
+| [Linear algebra driver](./ladriver.md) | 3 | 1810 | 53 | 20 |
+| [Direct solvers](./ladirect.md) | 6 | 6397 | 112 | 36 (+5 not shown) |
 | [Krylov solvers](./laksp.md) | 9 | 2131 | 53 | 25 |
-| [Eigensolvers](./laeigen.md) | 12 | 4694 | 95 | 36 (+11 not shown) |
+| [Eigensolvers](./laeigen.md) | 12 | 4731 | 95 | 36 (+11 not shown) |
 | [Preconditioners](./laprecond.md) | 8 | 4112 | 86 | 27 |
-| [Time, nonlinear, sweeps](./laother.md) | 11 | 4859 | 110 | 33 |
+| [Time, nonlinear, sweeps](./laother.md) | 11 | 5102 | 115 | 34 |
 | [Finite-element basics](./fem.md) | 10 | 10398 | 236 | 36 |
 | [Material specification](./material.md) | 13 | 10179 | 251 | 36 (+8 not shown) |
 | [Optical mode sets](./optical.md) | 1 | 253 | 13 | 4 |

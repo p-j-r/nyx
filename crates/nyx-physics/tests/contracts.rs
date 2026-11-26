@@ -110,12 +110,44 @@ fn solve_result_v2_exemplar_is_stable() {
         }],
         scalars: vec![("neff 1".into(), Scalar::Num(2.4)), ("polarization 1".into(), Scalar::Text("TE".into()))],
         log: vec!["solving ems on a 2D mesh".into()],
-        diagnostics: None,
-        error_budget: None,
+        diagnostics: Some(nyx_physics::SolverDiagnostics {
+            solver_kind: "shift_invert_complex".into(),
+            converged: true,
+            iterations: Some(12),
+            restarts: Some(1),
+            max_algebraic_residual: 1e-12,
+            per_mode_residuals: vec![1e-12],
+            rcond_estimate: None,
+            cholesky_fallbacks: 0,
+            warnings: vec![],
+        }),
+        error_budget: Some(nyx_physics::NumericalErrorBudget {
+            algebraic_rel: 1e-12,
+            spatial_discretization: Some(nyx_physics::SpatialErrorEstimate {
+                method: "two_grid_delta".into(),
+                rel_bound: 1e-4,
+                is_epistemic_bound: false,
+                observed_order: None,
+                refinement_ratio: Some(1.6),
+                safety_factor: None,
+                extrapolated_scalars_only: None,
+            }),
+            temporal_rel: None,
+            model_truncation_rel: None,
+            combined_num_uncertainty_rel: Some(1e-4),
+            alg_below_disc_ratio: Some(1e-8),
+        }),
     };
     check_exemplar("solve_result.v2.json", &serde_json::to_value(&r).unwrap());
     let back: SolveResult = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
     assert_eq!(back, r);
+    // Legacy v2.0 JSON omitting diagnostics & error_budget still deserializes cleanly
+    let mut legacy = serde_json::to_value(&r).unwrap();
+    let obj = legacy.as_object_mut().unwrap();
+    obj.remove("diagnostics");
+    obj.remove("error_budget");
+    let legacy_res: SolveResult = serde_json::from_value(legacy).unwrap();
+    assert!(legacy_res.diagnostics.is_none() && legacy_res.error_budget.is_none());
     assert_eq!(r.scalar("neff"), Some(2.4));
     assert_eq!(r.scalar("polarization"), None);
     assert!(r.solutions[0].field("E").is_some());

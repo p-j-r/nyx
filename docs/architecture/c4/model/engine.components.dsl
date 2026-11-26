@@ -3,7 +3,7 @@ commands = component "Commands" "The Engine and its catalog: every action by nam
     properties {
         "adr" "57, 38, 15, 90, 91, 93, 94, 102"
         "code" "crates/nyx-engine/src: commands.rs, engine.rs, guide.rs, path_guard.rs, reduce.rs, scriptout.rs, validated.rs"
-        "lines" "6581"
+        "lines" "7282"
         "codeDiagram" "4-code/engine/commands.md"
     }
 }
@@ -11,7 +11,7 @@ project = component "Project" "The saved state: feature list, mesh settings, one
     properties {
         "adr" "63"
         "code" "crates/nyx-engine/src: project.rs"
-        "lines" "318"
+        "lines" "338"
         "codeDiagram" "4-code/engine/project.md"
     }
 }
@@ -27,7 +27,7 @@ jobs = component "Job runner and queue" "Mesh, solve, convergence and file jobs 
     properties {
         "adr" "61, 80, 85, 87, 86, 11, 95, 96"
         "code" "crates/nyx-engine/src: bin/nyx-worker.rs, convergence.rs, estimate.rs, jobs.rs, process.rs, queue.rs, ... (11 files)"
-        "lines" "6070"
+        "lines" "6808"
         "codeDiagram" "4-code/engine/jobs.md"
     }
 }
@@ -51,7 +51,7 @@ meshing = component "Meshing seam" "MeshRequest to MeshedModel (mesh, names, lab
     properties {
         "adr" "54, 50, 92"
         "code" "crates/nyx-engine/src: amr.rs, meshing.rs, pml.rs, preview.rs"
-        "lines" "1616"
+        "lines" "2029"
         "codeDiagram" "4-code/engine/meshing.md"
     }
 }
@@ -75,7 +75,7 @@ resultsIO = component "Results files" "HDF5 results via pure-Rust hdf5-pure and 
     properties {
         "adr" "62, 63, 99, 107, 132"
         "code" "crates/nyx-engine/src: h5io.rs, results_file.rs, xdmf.rs"
-        "lines" "1745"
+        "lines" "1844"
         "codeDiagram" "4-code/engine/resultsIO.md"
     }
 }

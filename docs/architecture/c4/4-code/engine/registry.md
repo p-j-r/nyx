@@ -35,7 +35,7 @@ C4 level 4 (code) of the component **Registry and facade** (`engine.registry`) i
 | Component | Modules | Items |
 |---|---|---|
 | [app: Scripts and batch](../app/headless.md) | crate root | Done, Scalar |
-| [app: Inspector tabs](../app/inspector.md) | crate root | Applies, BcSpec, Both, Env, Evaluated, Expr, FeatureList, LabelMap +24 |
+| [app: Inspector tabs](../app/inspector.md) | crate root | Applies, BcSpec, Both, Env, Error, Evaluated, Expr, FeatureList +27 |
 | [app: Shell and dashboard](../app/shell.md) | crate root | Active, Artifact, Done, Entry, ExportOptions, FeatureList, Filter, Inspection +35 |
 | [app: Viewport](../app/viewport.md) | crate root | Display, ViewMesh |
 | [app: Window](../app/window.md) | crate root | Cancelled, Display, Domain, Failed, FeatureList, LabelResolver, MaterialAssign, ModeAnalysis +10 |

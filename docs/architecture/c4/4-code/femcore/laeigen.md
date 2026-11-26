@@ -5,16 +5,16 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 > Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md)  
-**Size:** 12 files, 4694 lines.
+**Size:** 12 files, 4731 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/linalg/arnoldi_real.rs` | 389 | Real block Arnoldi with shift-and-invert for the real, non-symmetric pencil of the 2D waveguide modes (`ems`): the eigenvalues of `A x = lambda B x` nearest a real shift, real vectors, complex Ritz values skipped. The library's Krylov-Sc... |
+| `crates/femcore/src/linalg/arnoldi_real.rs` | 423 | Real block Arnoldi with shift-and-invert for the real, non-symmetric pencil of the 2D waveguide modes (`ems`): the eigenvalues of `A x = lambda B x` nearest a real shift, real vectors, complex Ritz values skipped. The library's Krylov-Sc... |
 | `crates/femcore/src/linalg/chebfsi.rs` | 298 | Chebyshev-filtered subspace iteration for many lowest eigenpairs (port item E5; the idea of ChASE, Winkelmann et al. 2019): for `nev` in the tens to hundreds (photonic-crystal band structures) where a polynomial filter beats Krylov metho... |
 | `crates/femcore/src/linalg/contour.rs` | 379 | Contour-integral eigensolver (port item E3): *all* eigenvalues of `A x = λ B x` inside an elliptical region of the complex plane, by block Sakurai–Sugiura moments with Rayleigh–Ritz extraction (the CIRR variant; SLEPc's `EPSCISS` is... |
-| `crates/femcore/src/linalg/eps/krylov_schur.rs` | 415 |  |
+| `crates/femcore/src/linalg/eps/krylov_schur.rs` | 418 |  |
 | `crates/femcore/src/linalg/eps/mod.rs` | 236 | Eigenvalue solvers (the role of SLEPc `EPS`). |
 | `crates/femcore/src/linalg/eps/orth.rs` | 259 | Block Gram–Schmidt for the Krylov bases, with an optional `B`-weighted inner product `⟨x, y⟩ = xᴴ B y` (generalised Hermitian problems). |
 | `crates/femcore/src/linalg/jd.rs` | 690 | Jacobi–Davidson interior eigensolver (port item E2; SLEPc's `EPSJD`/`EPSGD` are the nearest references): eigenpairs near a *target* without factorising `A − τB`. |
@@ -43,6 +43,7 @@ C4 level 4 (code) of the component **Eigensolvers** (`femcore.laeigen`) in the c
 | [ems: Mode kernel](../ems/modes.md) | linalg::arnoldi_real | EigOpts |
 | [Linear algebra driver](./ladriver.md) | linalg::arnoldi_real, linalg::eps, linalg::jd, linalg::lobpcg | EigOpts, EigPairs, EpsError, EpsOptions, EpsReason, HistoryEntry, JdOptions, Kind +7 |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::nep | NepError, NonlinearEigenProblem |
+| [sms: Physics adapter](../sms/adapter.md) | linalg::arnoldi_real | EigPairs |
 | [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::eps | EpsOptions, EpsReason, Which |
 | [sms: Solid kernel](../sms/solid.md) | linalg::arnoldi_real | EigOpts, EigPairs |
 
@@ -63,7 +64,10 @@ classDiagram
         <<struct>>
         +values Vec~f64~
         +vectors Vec
+        +residuals Vec~f64~
         +dim usize
+        +restarts usize
+        +matvecs usize
         +converged bool
         +complex_found bool
     }
@@ -445,8 +449,8 @@ classDiagram
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
 | struct | `EigOpts` | `linalg/arnoldi_real.rs:47` | fields: `tol`, `max_dim`, `block` |
-| struct | `EigPairs` | `linalg/arnoldi_real.rs:63` | fields: `values`, `vectors`, `dim`, `converged`, `complex_found` |
-| fn | `eigs_general` | `linalg/arnoldi_real.rs:145` | `pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) -> Result<EigPairs, String>` —  General real pencil `A x = lambda B x` with real eigenvalues wanted (A - sigma B must be |
+| struct | `EigPairs` | `linalg/arnoldi_real.rs:63` | fields: `values`, `vectors`, `residuals`, `dim`, `restarts`, `matvecs`, `converged`, `complex_found` |
+| fn | `eigs_general` | `linalg/arnoldi_real.rs:151` | `pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) -> Result<EigPairs, String>` —  General real pencil `A x = lambda B x` with real eigenvalues wanted (A - sigma B must be |
 | struct | `ChebOptions` | `linalg/chebfsi.rs:21` | fields: `nev`, `nex`, `degree`, `tol`, `max_it`, `lanczos_steps`, `seed` |
 | struct | `ChebResult` | `linalg/chebfsi.rs:41` | fields: `values`, `vectors`, `residuals`, `iterations`, `matvecs`, `converged`, `locked_history` |
 | enum | `ChebError` | `linalg/chebfsi.rs:54` | variants: `InvalidArgument`, `Dense` |

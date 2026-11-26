@@ -42,7 +42,7 @@ C4 level 4 (code) of the component **Meshing facade** (`femcore.meshing`) in the
 |---|---|---|
 | [dfs: Electrostatics kernel](../dfs/electro.md) | meshing::singularity | DEFAULT_QUARTER_POINT_XI, apply_quarter_point_nodes, sheet_rim_vertices |
 | [ems: Physics adapter](../ems/adapter.md) | meshing::physics_size | optical_wavelength, speed_of_light |
-| [engine: Meshing seam](../engine/meshing.md) | meshing, meshing::geomdrive, meshing::mesher, meshing::physics_size, meshing::request, meshing::sheet3d_amr | Adaptive, Layer, MeshReport, MeshRequest, MeshedGeom, MesherRequest, PhysicsSizing, RemappedLayer +13 |
+| [engine: Meshing seam](../engine/meshing.md) | meshing, meshing::geomdrive, meshing::mesher, meshing::physics_size, meshing::request, meshing::sheet3d_amr | Adaptive, GeomMeshOpts, Layer, MeshReport, MeshRequest, MeshedGeom, MesherRequest, PhysicsSizing +14 |
 | [engine: Project](../engine/project.md) | meshing::request | PmlModeRequest |
 | [engine: Registry and facade](../engine/registry.md) | meshing::geomdrive, meshing::request | PmlModeRequest |
 | [Error estimators](./estimators.md) | meshing, meshing::geomdrive | Adaptive, GeomMeshOpts, MeshedGeom, adapt_to_field, adapt_to_metrics, evaluate, geometry_floor, mesh_geom_2d |

@@ -5,23 +5,24 @@ C4 level 4 (code) of the component **Piezoelectric kernel** (`sms.piezo`) in the
 > Coupled piezoelectric `(u, phi)` constitutive condensation, simplex/mixed assembly, equilibrated direct / Schur Krylov-Schur / QEP / Schur-AMG Right-FGMRES static/eigen solvers, and driven multi-port `Y`/`Z`/`S` PROM sweep on `SimplexMesh` and `MixedDiscretisation`.
 
 **Decisions:** [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md), [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md), [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 4 files, 6052 lines.
+**Size:** 4 files, 6212 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/piezo.rs` | 2032 |  |
+| `crates/nyx-sms/src/piezo.rs` | 2100 |  |
 | `crates/nyx-sms/src/piezo_asm.rs` | 2778 |  |
-| `crates/nyx-sms/src/piezo_driven.rs` | 680 |  |
+| `crates/nyx-sms/src/piezo_driven.rs` | 772 |  |
 | `crates/nyx-sms/src/piezo_mat.rs` | 562 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::metric, crate root, fem, fem_mixed, fields, linalg::amg_elastic, linalg::csr, linalg::csr::assembly +20 | AmgOptions, AmgSystem, C, C64, CANCELLED, CCoo, CCsr, CellFields, Coo, Csr +82 |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, frame, result | CellField, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult +1 |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::metric, crate root, fem, fem_mixed, fields, linalg::amg_elastic, linalg::csr, linalg::csr::assembly +20 | AmgOptions, AmgSystem, C, C64, CANCELLED, CCoo, CCsr, CellFields, Coo, Csr +84 |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, frame, result | CellField, DiagnosticSeverity, DiagnosticWarning, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar +3 |
+| [Physics adapter](./adapter.md) | diag | SmsDiag |
 | [Floquet kernel](./floquet.md) | floquet | mixed_nodal_relations |
 | [Low-reflecting boundary](./lrb.md) | lrb | AMPLIFYING_IM_TOL, damping_matrix, damping_matrix_mixed |
 | [Absorbing-layer kernel](./pml.md) | pml | ResolvedPmlDomains, b_matrix_c, outer_clamped_dofs_mixed, outer_clamped_dofs_simplex, push_pml_mode_scalars_and_label, real_quad_norm, simplex_barycentric |
@@ -76,6 +77,9 @@ classDiagram
         <<struct>>
         +freqs Vec~C~
         +reduced_vecs Vec
+        +residuals Vec~f64~
+        +restarts usize
+        +solver_kind str
         +dim usize
         +converged bool
         +backend FactorBackend
@@ -84,6 +88,9 @@ classDiagram
         <<struct>>
         +freqs Vec~C~
         +full_vecs Vec
+        +residuals Vec~f64~
+        +restarts usize
+        +solver_kind str
         +dim usize
         +converged bool
         +backend FactorBackend
@@ -258,13 +265,13 @@ classDiagram
 | struct | `SchurQepShiftInvertOp` | `piezo.rs:116` | fields: `n_u`, `n_tot`, `a2_uu`, `p_prime_uu`, `fac`, `d_scale` —  Companion shift-and-invert operator in **dimensionless** `s = omega / omega_0` on `C^{2 n_u}` for |
 | fn | `recover_phi_complex` | `piezo.rs:213` | `pub(crate) fn recover_phi_complex(k_pp: &CCsr, k_pu: &CCsr, u_vecs: &[Vec<C64>]) -> Result<Vec<Vec<C64>>, String>` |
 | struct | `PiezoComplexEigenInput` | `piezo.rs:232` | fields: `n_u`, `n_tot`, `n_modes`, `f_search`, `is_hermitian`, `has_pml`, `has_dielectric_loss`, `n_pairs`, `k_red`, `m_uu_red`, `c_uu_red`, `k_pp_red`, ... |
-| struct | `PiezoComplexEigenSolved` | `piezo.rs:248` | fields: `freqs`, `reduced_vecs`, `dim`, `converged`, `backend` |
-| fn | `solve_piezo_complex_schur` | `piezo.rs:256` | `pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> Result<PiezoComplexEigenSolved, String>` |
-| struct | `PiezoModeSolved` | `piezo.rs:495` | fields: `freqs`, `full_vecs`, `dim`, `converged`, `backend` |
-| fn | `push_eigen_mode_fields_simplex` | `piezo.rs:1129` | `pub(crate) fn push_eigen_mode_fields_simplex( mesh: &SimplexMesh, order: usize, d: usize, n1: usize, u_full: &[C], phi_full: &[C], complex_mode: bool, ) -> (Vec<Field>, CellFields)` |
-| fn | `push_eigen_mode_fields_mixed` | `piezo.rs:1197` | `pub(crate) fn push_eigen_mode_fields_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, proj: &MixedToSimplexProjector, order: usize, d: usize, n1: usize, u_full: &[C], phi_full: &[C], complex_mode: bool, ) -> (Vec<Field>, Vec<CellField>)` |
-| fn | `solve_piezo` | `piezo.rs:1768` | `pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric static or eigenfrequency problem on [`SimplexMesh`] (`Discretisation`). |
-| fn | `solve_piezo_mixed` | `piezo.rs:1852` | `pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric static or eigenfrequency problem natively on [`MixedDiscretisation`]. |
+| struct | `PiezoComplexEigenSolved` | `piezo.rs:248` | fields: `freqs`, `reduced_vecs`, `residuals`, `restarts`, `solver_kind`, `dim`, `converged`, `backend` |
+| fn | `solve_piezo_complex_schur` | `piezo.rs:259` | `pub(crate) fn solve_piezo_complex_schur(input: &PiezoComplexEigenInput<'_>) -> Result<PiezoComplexEigenSolved, String>` |
+| struct | `PiezoModeSolved` | `piezo.rs:501` | fields: `freqs`, `full_vecs`, `residuals`, `restarts`, `solver_kind`, `dim`, `converged`, `backend` |
+| fn | `push_eigen_mode_fields_simplex` | `piezo.rs:1158` | `pub(crate) fn push_eigen_mode_fields_simplex( mesh: &SimplexMesh, order: usize, d: usize, n1: usize, u_full: &[C], phi_full: &[C], complex_mode: bool, ) -> (Vec<Field>, CellFields)` |
+| fn | `push_eigen_mode_fields_mixed` | `piezo.rs:1226` | `pub(crate) fn push_eigen_mode_fields_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, proj: &MixedToSimplexProjector, order: usize, d: usize, n1: usize, u_full: &[C], phi_full: &[C], complex_mode: bool, ) -> (Vec<Field>, Vec<CellField>)` |
+| fn | `solve_piezo` | `piezo.rs:1825` | `pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric static or eigenfrequency problem on [`SimplexMesh`] (`Discretisation`). |
+| fn | `solve_piezo_mixed` | `piezo.rs:1912` | `pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric static or eigenfrequency problem natively on [`MixedDiscretisation`]. |
 | struct | `ElectrodeInfo` | `piezo_asm.rs:42` | fields: `label`, `bc_index`, `dofs`, `fixed_voltage`, `prescribed_charge`, `is_floating`, `root_dof` —  One electrical electrode group (fixed potential, ground, floating boundary, or conductor domain) |
 | struct | `PiezoTerminal` | `piezo_asm.rs:54` | fields: `name`, `z0_ohm`, `dofs` —  Driven multi-port terminal electrode (`BcKind::Terminal` or `ConductorRole::Terminal`). |
 | struct | `PiezoConstraints` | `piezo_asm.rs:62` | fields: `d`, `n1`, `n_mech`, `n_tot`, `red_all`, `red_u`, `g_all`, `n_u_red`, `n_phi_red`, `fixed_phi_vals`, `gauge_pins`, `electrodes`, ... —  Complete reduced constraints, block sizes, and electrode metadata for a coupled solve. |
@@ -280,9 +287,9 @@ classDiagram
 | struct | `PiezoDrivenFull` | `piezo_asm.rs:2513` | fields: `constraints`, `k_full`, `m_uu_full`, `c_uu_full`, `resolved_pml`, `m1_phys_all`, `m1_phys_pml`, `is_complex`, `has_pml`, `has_damping`, `has_interior`, `diagnostics` —  Unreduced full complex operators for Stage 1 of the coupled piezoelectric driven frequency solver. |
 | fn | `assemble_piezo_driven_simplex` | `piezo_asm.rs:2529` | `pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoDrivenFull, String>` —  Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` on [`SimplexMesh`]. |
 | fn | `assemble_piezo_driven_mixed` | `piezo_asm.rs:2649` | `pub(crate) fn assemble_piezo_driven_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoDrivenFull, String>` —  Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` natively on [`MixedDiscretisation`]. |
-| struct | `PiezoDrivenAssembly` | `piezo_driven.rs:78` | fields: `constraints`, `nred`, `f_min`, `f_max`, `n_points`, `freqs_hz`, `prom_tol`, `max_hdm_solves`, `strict_prom_tol`, `seed_freqs_hz`, `solver`, `blr_tol`, ... —  Reduced equilibrated affine piezoelectric frequency-domain problem ready for PROM or HDM sweeps. |
-| fn | `solve_piezo_driven` | `piezo_driven.rs:621` | `pub fn solve_piezo_driven(mesh: &SimplexMesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric `Study::Driven` frequency sweep on [`SimplexMesh`]. |
-| fn | `solve_piezo_driven_mixed` | `piezo_driven.rs:651` | `pub fn solve_piezo_driven_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, ) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric `Study::Driven` frequency sweep natively on [`MixedDiscretisation`]. |
+| struct | `PiezoDrivenAssembly` | `piezo_driven.rs:80` | fields: `constraints`, `nred`, `f_min`, `f_max`, `n_points`, `freqs_hz`, `prom_tol`, `max_hdm_solves`, `strict_prom_tol`, `seed_freqs_hz`, `solver`, `blr_tol`, ... —  Reduced equilibrated affine piezoelectric frequency-domain problem ready for PROM or HDM sweeps. |
+| fn | `solve_piezo_driven` | `piezo_driven.rs:713` | `pub fn solve_piezo_driven(mesh: &SimplexMesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric `Study::Driven` frequency sweep on [`SimplexMesh`]. |
+| fn | `solve_piezo_driven_mixed` | `piezo_driven.rs:743` | `pub fn solve_piezo_driven_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, ) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric `Study::Driven` frequency sweep natively on [`MixedDiscretisation`]. |
 | const | `EPSILON_0` | `piezo_mat.rs:22` | `f64` —  Vacuum permittivity `epsilon_0` (F/m), shared from `femcore::material::coupled`. |
 | const | `INPLANE_2D` | `piezo_mat.rs:25` | `[usize` —  In-plane Voigt indices `[xx, zz, xz]` inside 2D cross-section order `(xx, zz, yy, xz, zy, xy)`. |
 | struct | `PiezoCellMat` | `piezo_mat.rs:29` | fields: `c6`, `e`, `eps_re`, `eps_im`, `eta`, `rho`, `mech_active`, `elec_active` —  Resolved global/cross-section constitutive properties on a single cell/domain. |

@@ -75,6 +75,37 @@ pub fn project_has_electro_amr(project: &Project) -> bool {
     project.mesh.sweep.is_none() && project.spec("dfs").and_then(parse_electro_amr_params).is_some()
 }
 
+/// True when `project` and `targets` request multi-pass Maxwell residual AMR on `ems::cavity`.
+pub fn project_uses_ems_cavity_amr(project: &Project, targets: &[String]) -> bool {
+    cfg!(feature = "ems")
+        && project.mesh.sweep.is_none()
+        && project.mesh.adapt_passes.unwrap_or(1) > 1
+        && targets.iter().any(|t| t == "ems")
+        && project.spec("ems").is_some_and(|s| s.study.kind == "cavity")
+}
+
+/// True when `project` and `targets` request multi-pass recovered-Hessian AMR on `sms`.
+pub fn project_uses_sms_amr(project: &Project, targets: &[String]) -> bool {
+    cfg!(feature = "sms")
+        && project.mesh.sweep.is_none()
+        && project.mesh.adapt_passes.unwrap_or(1) > 1
+        && targets.iter().any(|t| t == "sms")
+        && project.spec("sms").is_some()
+}
+
+/// True when `project` and `targets` activate multi-pass AMR for any compiled physics.
+pub fn project_uses_amr(project: &Project, targets: &[String]) -> bool {
+    project_uses_electro_amr(project, targets)
+        || project_uses_ems_cavity_amr(project, targets)
+        || project_uses_sms_amr(project, targets)
+}
+
+/// True when `project` carries any physics configured for multi-pass AMR on an unswept mesh.
+pub fn project_has_amr(project: &Project) -> bool {
+    let all: Vec<String> = project.physics.iter().map(|s| s.physics.clone()).collect();
+    project_uses_amr(project, &all)
+}
+
 fn max_rel_capacitance_delta(prev: &SolveResult, curr: &SolveResult) -> Option<f64> {
     if let (Some(cp), Some(cc)) = (CapacitanceMatrixData::of(prev), CapacitanceMatrixData::of(curr)) {
         let n = cc.maxwell_matrix_f.len();
@@ -129,6 +160,7 @@ fn write_adapt_history(result: &mut SolveResult, history: &[AdaptPassRecord]) {
 }
 
 /// Runs the multi-pass goal-oriented AMR loop for `dfs` `electrostatic` and returns `(final_model, final_result)`.
+#[allow(dead_code)]
 pub(crate) fn solve_dfs_with_amr(
     registry: &Registry,
     project: &Project,
@@ -137,12 +169,26 @@ pub(crate) fn solve_dfs_with_amr(
     progress: &Arc<Progress>,
     done: &[(String, SolveResult)],
 ) -> Result<(Arc<MeshedModel>, SolveResult), Error> {
+    solve_dfs_with_amr_opts(registry, project, initial_model, library, progress, done, project.mesh.retain_amr_data)
+}
+
+pub(crate) fn solve_dfs_with_amr_opts(
+    registry: &Registry,
+    project: &Project,
+    initial_model: Arc<MeshedModel>,
+    library: &Arc<femcore::material::Library>,
+    progress: &Arc<Progress>,
+    done: &[(String, SolveResult)],
+    retain_amr_data: bool,
+) -> Result<(Arc<MeshedModel>, SolveResult), Error> {
     let spec = project
         .spec("dfs")
         .ok_or_else(|| Error::invalid("the project has no problem for 'dfs'; add the physics first"))?;
     let Some(amr) = parse_electro_amr_params(spec) else {
         let mut r = crate::solve::solve_one_single(registry, project, &initial_model, "dfs", library, progress, done)?;
-        ElectroAmrData::strip_from(&mut r);
+        if !retain_amr_data {
+            ElectroAmrData::strip_from(&mut r);
+        }
         return Ok((initial_model, r));
     };
 
@@ -214,7 +260,9 @@ pub(crate) fn solve_dfs_with_amr(
             crate::solve::solve_one_single(registry, project, &current_model, "dfs", library, progress, done)?
         };
         let amr_ind = ElectroAmrData::of(&result);
-        ElectroAmrData::strip_from(&mut result);
+        if !retain_amr_data {
+            ElectroAmrData::strip_from(&mut result);
+        }
 
         // If `formulation == "auto"` selected `planar_bem` or returned no volumetric indicators, return single-pass result cleanly.
         let Some(ind) = amr_ind else {
@@ -331,4 +379,369 @@ pub(crate) fn solve_dfs_with_amr(
     }
 
     unreachable!("AMR loop returns on final pass")
+}
+
+fn geom_mesh_opts(project: &Project) -> femcore::meshing::geomdrive::GeomMeshOpts {
+    let mut opts = femcore::meshing::geomdrive::GeomMeshOpts::new(project.mesh.h);
+    opts.max_dev = project.mesh.max_dev;
+    opts.curved = project.mesh.curved;
+    opts.gap_cells = project.mesh.gap_cells;
+    opts.z_coarsen = project.mesh.z_coarsen;
+    opts.max_cells = project.mesh.max_cells;
+    opts.dz_min = project.mesh.dz_min;
+    opts.max_z_slabs = project.mesh.max_z_slabs;
+    opts.z_growth_ratio = project.mesh.z_growth_ratio;
+    opts.max_steiner_multiplier = project.mesh.max_steiner_multiplier;
+    opts.strict_mesh = project.mesh.strict_mesh;
+    opts.singular_edges = project.mesh.singular_edges.clone();
+    opts.quarter_point_xi = project.mesh.quarter_point_xi;
+    opts.corner_grading = project.mesh.corner_grading;
+    opts
+}
+
+fn max_cells_cap(project: &Project) -> usize {
+    match (project.mesh.max_cells, project.mesh.adapt_max_cells) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => 2_000_000,
+    }
+}
+
+fn max_rel_result_delta(prev: &SolveResult, curr: &SolveResult) -> Option<f64> {
+    let mut worst: Option<f64> = None;
+    let consider = |worst: &mut Option<f64>, a: f64, b: f64| {
+        if a.is_finite() && b.is_finite() {
+            let scale = a.abs().max(b.abs());
+            if scale > 1.0e-30 {
+                let d = (b - a).abs() / scale;
+                *worst = Some(worst.map_or(d, |w| w.max(d)));
+            }
+        }
+    };
+    for (sp, sc) in prev.solutions.iter().zip(&curr.solutions) {
+        if let (Some(a), Some(b)) = (sp.value, sc.value) {
+            consider(&mut worst, a, b);
+        }
+        if let (Some([ar, ai]), Some([br, bi])) = (sp.eigenvalue, sc.eigenvalue) {
+            let mag = (ar * ar + ai * ai).sqrt().max((br * br + bi * bi).sqrt());
+            if mag > 1.0e-30 {
+                let diff = ((br - ar).powi(2) + (bi - ai).powi(2)).sqrt() / mag;
+                worst = Some(worst.map_or(diff, |w| w.max(diff)));
+            }
+        }
+    }
+    if worst.is_none() {
+        for (name, v) in &prev.scalars {
+            if let Scalar::Num(a) = v {
+                if let Some((_, Scalar::Num(b))) = curr.scalars.iter().find(|(n, _)| n == name) {
+                    consider(&mut worst, *a, *b);
+                }
+            }
+        }
+    }
+    worst
+}
+
+#[cfg(feature = "ems")]
+struct CavityCurlMode<'a> {
+    mesh: &'a femcore::mesh::SimplexMesh,
+    ned: &'a nyx_ems::cavity::Ned3,
+    x: Vec<femcore::linalg::csr::C>,
+    order: usize,
+}
+
+#[cfg(feature = "ems")]
+impl femcore::adapt::maxwell::CurlField for CavityCurlMode<'_> {
+    fn sample(&self, cell: usize, lam: [f64; 4]) -> ([femcore::linalg::csr::C; 3], [femcore::linalg::csr::C; 3]) {
+        use femcore::linalg::csr::C;
+        use nyx_ems::cavity::basis3_keyed;
+        let v = self.mesh.cell(cell);
+        let p: [[f64; 3]; 4] = std::array::from_fn(|i| {
+            let q = self.mesh.point(v[i] as usize);
+            [q[0], q[1], q[2]]
+        });
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let cross = |a: [f64; 3], b: [f64; 3]| {
+            [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        };
+        let (e1, e2, e3) = (sub(p[1], p[0]), sub(p[2], p[0]), sub(p[3], p[0]));
+        let c23 = cross(e2, e3);
+        let six_v = e1[0] * c23[0] + e1[1] * c23[1] + e1[2] * c23[2];
+        let g1 = c23.map(|x| x / six_v);
+        let g2 = cross(e3, e1).map(|x| x / six_v);
+        let g3 = cross(e1, e2).map(|x| x / six_v);
+        let g0 = [-(g1[0] + g2[0] + g3[0]), -(g1[1] + g2[1] + g3[1]), -(g1[2] + g2[2] + g3[2])];
+        let gid = self.ned.key_pairs(self.mesh, cell);
+        let (mut w, mut cu) = (vec![], vec![]);
+        basis3_keyed(self.order, &lam, &[g0, g1, g2, g3], &gid, &mut w, &mut cu);
+        let mut e = [C::new(0.0, 0.0); 3];
+        let mut c = [C::new(0.0, 0.0); 3];
+        for (s, &dof) in self.ned.cell_dofs[cell].iter().enumerate() {
+            let coef = self.x[dof];
+            for k in 0..3 {
+                e[k] += coef * w[s][k];
+                c[k] += coef * cu[s][k];
+            }
+        }
+        (e, c)
+    }
+}
+
+/// Runs multi-pass goal-oriented Maxwell residual AMR (`femcore::adapt::maxwell`) on 3D `ems::cavity` studies.
+#[cfg(feature = "ems")]
+pub(crate) fn solve_ems_cavity_with_amr(
+    registry: &Registry,
+    project: &Project,
+    initial_model: Arc<MeshedModel>,
+    library: &Arc<femcore::material::Library>,
+    progress: &Arc<Progress>,
+    done: &[(String, SolveResult)],
+) -> Result<(Arc<MeshedModel>, SolveResult), Error> {
+    use femcore::adapt::maxwell::{indicator_metrics, maxwell_indicators, EquidistributeOptions, MaxwellOptions};
+    use femcore::meshing::adapt3d::{adapt_to_metrics3, geometry_floor3};
+    use std::collections::HashSet;
+    use std::f64::consts::PI;
+
+    let passes = project.mesh.adapt_passes.unwrap_or(1);
+    if passes <= 1
+        || project.mesh.sweep.is_some()
+        || !initial_model.mesh().is_pure_simplex()
+        || initial_model.mesh().dim() != 3
+    {
+        let r = crate::solve::solve_one_single(registry, project, &initial_model, "ems", library, progress, done)?;
+        return Ok((initial_model, r));
+    }
+
+    let p = crate::physics_for(registry, "ems")?;
+    let spec = project
+        .spec("ems")
+        .ok_or_else(|| Error::invalid("the project has no problem for 'ems'; add the physics first"))?;
+    nyx_physics::validate_spec(p, spec)?;
+
+    let rel_tol = project.mesh.adapt_rel_tol.unwrap_or(1.0e-3);
+    let growth = project.mesh.adapt_growth.unwrap_or(1.5).max(1.05);
+    let grade = project.mesh.adapt_grade.unwrap_or(0.4);
+    let max_cells_3d = max_cells_cap(project);
+    let h_max = project.mesh.h;
+    let geom_opts = geom_mesh_opts(project);
+
+    let mut current_model = initial_model;
+    let mut prev_result: Option<SolveResult> = None;
+
+    for pass_idx in 1..=passes {
+        if progress.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        p.validate(spec, current_model.mesh())?;
+        let ctx = crate::solve::build_solve_ctx(registry, &current_model, p, spec, library, progress, done);
+        let problem = nyx_ems::decode(spec, &ctx)?;
+        let sm_cur = current_model.solver_mesh();
+        let n_cells = sm_cur.n_cells();
+
+        let _installed = femcore::progress::install(progress);
+        let first_line = progress.log().len();
+        let _s = femcore::progress::stage(format!(
+            "Maxwell cavity AMR pass {pass_idx}/{passes}: solving on {n_cells} tetrahedra"
+        ));
+        let asm = nyx_ems::assemble_emw_eigen(&sm_cur, &problem).map_err(Error::from_kernel)?;
+        let solved = nyx_ems::solve_emw_modes(&asm).map_err(Error::from_kernel)?;
+        let mut result = nyx_ems::emw_eigen_fields(&sm_cur, &problem, &asm, &solved).map_err(Error::from_kernel)?;
+        nyx_physics::check_result_finite(&result)?;
+        result.log.extend(progress.log().into_iter().skip(first_line));
+        crate::solve::name_domains(&mut result, &current_model);
+
+        let max_rel_delta = prev_result.as_ref().and_then(|prev| max_rel_result_delta(prev, &result));
+        let eps_r: Vec<f64> =
+            asm.eps_phys_re.iter().map(|t| ((t[0][0] + t[1][1] + t[2][2]) / 3.0).max(1.0e-12)).collect();
+        let mut pml_doms: HashSet<i32> = problem.materials.pml.keys().copied().collect();
+        for (c, &is_pml) in asm.pml_cells.iter().enumerate() {
+            if is_pml {
+                pml_doms.insert(sm_cur.cell_labels[c]);
+            }
+        }
+        let mut natural_labels: HashSet<i32> = problem.pmc.iter().copied().collect();
+        if let Ok((_, sym_pmc)) = nyx_ems::symmetry_facet_flags(&sm_cur, problem.symmetry) {
+            for (f, &is_pmc) in sym_pmc.iter().enumerate() {
+                if is_pmc {
+                    natural_labels.insert(sm_cur.facet_labels[f]);
+                }
+            }
+        }
+
+        let mut combined_eta2 = vec![0.0_f64; n_cells];
+        let mut primary_total = 0.0_f64;
+        for (m_pos, &(freq, vec_idx)) in solved.freqs.iter().take(4).enumerate() {
+            let k0 = 2.0 * PI * freq.re.abs() / nyx_ems::C0;
+            if !(k0 > 0.0 && k0.is_finite()) {
+                continue;
+            }
+            let mode = CavityCurlMode {
+                mesh: &sm_cur,
+                ned: &asm.ned,
+                x: asm.red.expand(&solved.vectors[vec_idx]),
+                order: asm.order,
+            };
+            let skip_fn = |dom: i32| pml_doms.contains(&dom);
+            let nat_fn = |lab: i32| natural_labels.contains(&lab);
+            let opt =
+                MaxwellOptions { k0_sq: k0 * k0, eps_r: &eps_r, mu_r: &asm.mur_phys, skip: &skip_fn, natural: &nat_fn };
+            if let Ok(ind) = maxwell_indicators(&sm_cur, &mode, &opt) {
+                if m_pos == 0 {
+                    primary_total = ind.total;
+                }
+                let denom = (ind.total * ind.total).max(1.0e-300);
+                for (acc, &e2) in combined_eta2.iter_mut().zip(&ind.eta2) {
+                    *acc += e2 / denom;
+                }
+            }
+        }
+
+        let delta_str = max_rel_delta.map_or(String::new(), |d| format!(", max_rel_delta = {d:.3e}"));
+        result.log.push(format!(
+            "Maxwell AMR pass {pass_idx}/{passes}: cells = {n_cells}, dofs = {}, total_eta = {primary_total:.3e}{delta_str}",
+            result.dofs
+        ));
+
+        let has_signal = combined_eta2.iter().any(|&v| v > 0.0 && v.is_finite());
+        if !has_signal || max_rel_delta.is_some_and(|d| d <= rel_tol) || pass_idx == passes {
+            return Ok((current_model, result));
+        }
+
+        let target_3d = ((n_cells as f64) * growth).min(max_cells_3d as f64).max((n_cells as f64) + 8.0);
+        let a3 = Adaptive { scale: 1.0, grade, max_cells: Some(max_cells_3d) };
+        let g_in = MeshedGeom {
+            mesh: (*sm_cur).clone(),
+            cells: None,
+            labels: current_model.labels().clone(),
+            eval: current_model.evaluated().clone(),
+            warnings: vec![],
+        };
+        let floor = geometry_floor3(&g_in, &geom_opts, &a3).map_err(Error::Invalid)?;
+        let eq_opt = EquidistributeOptions { order: asm.order, h_max, h_min_fraction: 1.0e-4, target_cells: target_3d };
+        let met3 = indicator_metrics(&sm_cur, &combined_eta2, &eq_opt, Some(&floor)).map_err(Error::Invalid)?;
+        let (g_next, _) = adapt_to_metrics3(g_in, &met3, &a3).map_err(Error::Invalid)?;
+        current_model = Arc::new(MeshedModel::new(g_next.mesh, g_next.eval, g_next.labels, false)?.with_amr_adapted());
+        prev_result = Some(result);
+    }
+
+    unreachable!("Maxwell AMR loop returns on final pass")
+}
+
+#[cfg(not(feature = "ems"))]
+pub(crate) fn solve_ems_cavity_with_amr(
+    registry: &Registry,
+    project: &Project,
+    initial_model: Arc<MeshedModel>,
+    library: &Arc<femcore::material::Library>,
+    progress: &Arc<Progress>,
+    done: &[(String, SolveResult)],
+) -> Result<(Arc<MeshedModel>, SolveResult), Error> {
+    let r = crate::solve::solve_one_single(registry, project, &initial_model, "ems", library, progress, done)?;
+    Ok((initial_model, r))
+}
+
+/// Runs multi-pass recovered-Hessian AMR (`femcore::adapt::{estimate, estimate3}`) over `PlotFields` for `sms` studies.
+pub(crate) fn solve_sms_with_amr(
+    registry: &Registry,
+    project: &Project,
+    initial_model: Arc<MeshedModel>,
+    library: &Arc<femcore::material::Library>,
+    progress: &Arc<Progress>,
+    done: &[(String, SolveResult)],
+) -> Result<(Arc<MeshedModel>, SolveResult), Error> {
+    use femcore::adapt::estimate::{estimator_metrics as estimator_metrics_2d, Estimator};
+    use femcore::adapt::estimate3::estimator_metrics as estimator_metrics_3d;
+    use femcore::meshing::adapt3d::{adapt_to_metrics3, geometry_floor3};
+
+    let passes = project.mesh.adapt_passes.unwrap_or(1);
+    let sms_phys = crate::physics_for(registry, "sms")?;
+    let has_upstream = !done.is_empty()
+        && sms_phys.imports().iter().any(|imp| {
+            done.iter().any(|(c, _)| registry.get(c).is_some_and(|q| q.exports().iter().any(|e| e.role == imp.role)))
+        });
+    if passes <= 1 || has_upstream || project.mesh.sweep.is_some() || !initial_model.mesh().is_pure_simplex() {
+        let r = crate::solve::solve_one_single(registry, project, &initial_model, "sms", library, progress, done)?;
+        return Ok((initial_model, r));
+    }
+
+    let rel_tol = project.mesh.adapt_rel_tol.unwrap_or(1.0e-3);
+    let growth = project.mesh.adapt_growth.unwrap_or(1.5).max(1.05);
+    let grade = project.mesh.adapt_grade.unwrap_or(0.4);
+    let max_cells_cap = max_cells_cap(project);
+    let h_max = project.mesh.h;
+    let geom_opts = geom_mesh_opts(project);
+
+    let mut current_model = initial_model;
+    let mut prev_result: Option<SolveResult> = None;
+
+    for pass_idx in 1..=passes {
+        if progress.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        let n_cells = current_model.mesh().n_cells();
+        let mut result = {
+            let _s = femcore::progress::stage(format!(
+                "structural mechanics AMR pass {pass_idx}/{passes}: solving on {n_cells} cells"
+            ));
+            crate::solve::solve_one_single(registry, project, &current_model, "sms", library, progress, done)?
+        };
+        let max_rel_delta = prev_result.as_ref().and_then(|prev| max_rel_result_delta(prev, &result));
+        let delta_str = max_rel_delta.map_or(String::new(), |d| format!(", max_rel_delta = {d:.3e}"));
+        result
+            .log
+            .push(format!("SMS AMR pass {pass_idx}/{passes}: cells = {n_cells}, dofs = {}{delta_str}", result.dofs));
+
+        if max_rel_delta.is_some_and(|d| d <= rel_tol) || pass_idx == passes {
+            return Ok((current_model, result));
+        }
+
+        let est = if let Some(sol) = result.solutions.last() {
+            let has_field = |n: &str| sol.fields.iter().any(|f| f.name == n);
+            if has_field("von Mises") {
+                Estimator { fields: vec!["von Mises".into()], ..Estimator::default() }
+            } else {
+                let comps: Vec<String> =
+                    ["ux", "uy", "uz"].into_iter().filter(|n| has_field(n)).map(String::from).collect();
+                if comps.len() >= 2 {
+                    Estimator { fields: comps, combine: true, ..Estimator::default() }
+                } else {
+                    Estimator::default()
+                }
+            }
+        } else {
+            Estimator::default()
+        };
+
+        let sm_cur = current_model.solver_mesh();
+        let g_in = MeshedGeom {
+            mesh: (*sm_cur).clone(),
+            cells: None,
+            labels: current_model.labels().clone(),
+            eval: current_model.evaluated().clone(),
+            warnings: vec![],
+        };
+        let target_cells = ((n_cells as f64) * growth).min(max_cells_cap as f64).max((n_cells as f64) + 8.0);
+        let adapt_cfg = Adaptive { scale: 1.0, grade, max_cells: Some(max_cells_cap) };
+
+        let next_geom = if sm_cur.dim == 2 {
+            let met2 = match estimator_metrics_2d(&g_in, &result, &est, &geom_opts, target_cells) {
+                Ok(m) => m,
+                Err(_) => return Ok((current_model, result)),
+            };
+            adapt_to_metrics(g_in, &met2, &adapt_cfg).map_err(Error::Invalid)?.0
+        } else {
+            let floor = geometry_floor3(&g_in, &geom_opts, &adapt_cfg).map_err(Error::Invalid)?;
+            let met3 = match estimator_metrics_3d(&sm_cur, &result, &est, h_max, target_cells, Some(&floor)) {
+                Ok(m) => m,
+                Err(_) => return Ok((current_model, result)),
+            };
+            adapt_to_metrics3(g_in, &met3, &adapt_cfg).map_err(Error::Invalid)?.0
+        };
+        current_model =
+            Arc::new(MeshedModel::new(next_geom.mesh, next_geom.eval, next_geom.labels, false)?.with_amr_adapted());
+        prev_result = Some(result);
+    }
+
+    unreachable!("SMS AMR loop returns on final pass")
 }

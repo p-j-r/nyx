@@ -1924,6 +1924,9 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     pub ordering: FillOrdering,
     /// Singular/OOM recovery strategy (R31); defaults to [`SingularRecovery::Auto`].
     pub recovery: SingularRecovery,
+    /// When `true` (e.g. shift-and-invert spectral transformations), accept shift-perturbed factorisations
+    /// directly as `(A - factor_sigma B)^{-1}` instead of defect-correcting back to the singular `sigma`.
+    pub accept_perturbed_shift: bool,
     /// Optional dimension threshold above which `set_shift` routes directly to preconditioned Krylov (`GMRES`).
     pub iterative_threshold: Option<usize>,
     stats: FactorStats,
@@ -1975,6 +1978,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             threads: ThreadPolicy::default(),
             ordering: FillOrdering::default(),
             recovery: SingularRecovery::Auto,
+            accept_perturbed_shift: false,
             iterative_threshold: None,
             stats: FactorStats {
                 analyse_secs: t0.elapsed().as_secs_f64(),
@@ -2006,6 +2010,12 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     /// Returns `true` when dynamic `rcond` probing is skipped (shift-and-invert pencils).
     pub fn is_shift_invert_pencil(&self) -> bool {
         self.skip_rcond
+    }
+
+    /// Returns the shift actually factored by the latest `set_shift` (`sigma + delta` if shift
+    /// perturbation recovery fired, else `sigma`).
+    pub fn factor_sigma(&self) -> T {
+        self.factor_sigma
     }
 
     /// Returns a snapshot of pivot, Sylvester inertia, and singular/Krylov recovery diagnostics (R31).
@@ -3081,7 +3091,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             return Ok(());
         }
 
-        if self.perturbed_active {
+        if self.perturbed_active && !self.accept_perturbed_shift {
             let op = ShiftedOpView { fac: self };
             let pc = PerturbedFactorPc { fac: self };
             let mut r_chk = vec![T::ZERO; n];
@@ -3127,11 +3137,12 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
     }
 
     fn compute_shifted_residual(&self, b: &[T], x: &[T], r: &mut [T]) {
+        let shift = if self.perturbed_active && self.accept_perturbed_shift { self.factor_sigma } else { self.sigma };
         if let Some(full) = &self.full {
-            csc_residual_shifted_full(full, self.sigma, b, x, r);
+            csc_residual_shifted_full(full, shift, b, x, r);
         } else if let Some(lower) = &self.lower {
             let herm = matches!(self.active, ActiveFactor::Cholesky | ActiveFactor::HermLblt);
-            csc_residual_shifted_lower(lower, self.sigma, herm, b, x, r);
+            csc_residual_shifted_lower(lower, shift, herm, b, x, r);
         } else {
             r.fill(T::ZERO);
         }
@@ -3215,7 +3226,12 @@ impl<T: FaerScalar> ShiftedSolver<T> for ShiftedFactorization<T> {
             return Err(SolverError::InvalidArgument("rhs slice shorter than dim * nrhs"));
         }
         self.solves.fetch_add(nrhs, Ordering::Relaxed);
-        if !self.refine_solves || self.perturbed_active || matches!(self.active, ActiveFactor::Krylov) || n == 0 || nrhs == 0 {
+        if !self.refine_solves
+            || (self.perturbed_active && !self.accept_perturbed_shift)
+            || matches!(self.active, ActiveFactor::Krylov)
+            || n == 0
+            || nrhs == 0
+        {
             return self.solve_raw_block_in_place(rhs, nrhs);
         }
 

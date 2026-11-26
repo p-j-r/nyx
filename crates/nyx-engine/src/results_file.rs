@@ -14,6 +14,7 @@ pub struct Snapshot {
     pub project: crate::project::Project,
     pub model: std::sync::Arc<crate::meshing::MeshedModel>,
     pub results: Vec<(String, std::sync::Arc<nyx_physics::SolveResult>)>,
+    pub checks: std::collections::BTreeMap<String, crate::validated::Check>,
 }
 
 /// Writes `snapshot` into the HDF5 file `path` and its XDMF description. With `atomic` the file is written under another name and renamed when it
@@ -29,8 +30,15 @@ pub fn write_snapshot(snapshot: &Snapshot, path: &str, parallel: bool, atomic: b
         let temporary = std::path::PathBuf::from(format!("{path}.partial"));
         let atomic = atomic && !parallel;
         let target = if atomic { temporary.as_path() } else { p };
-        let written =
-            crate::h5io::write_results_mode(target, mode, &snapshot.project, &mesh, &refs).map_err(Error::invalid);
+        let written = crate::h5io::write_results_mode_with_provenance(
+            target,
+            mode,
+            &snapshot.project,
+            &mesh,
+            &refs,
+            Some(&snapshot.checks),
+        )
+        .map_err(Error::invalid);
         let root = match written {
             Ok(r) => r,
             Err(e) => {
@@ -111,7 +119,7 @@ pub(crate) fn read_and_mesh(
                 || made.edge_node_list() != s.edge_node_list()
                 || made.qp_edge_list() != s.qp_edge_list()
             {
-                if s.n_cells() > 0 && crate::amr::project_has_electro_amr(&project) && made.dim == s.dim {
+                if s.n_cells() > 0 && crate::amr::project_has_amr(&project) && made.dim == s.dim {
                     std::sync::Arc::new(
                         crate::meshing::MeshedModel::new(
                             stored.mesh,
@@ -132,7 +140,13 @@ pub(crate) fn read_and_mesh(
                 model
             }
         };
-        Ok(crate::jobs::Opened { project, model, results: stored.results, path: path.to_string() })
+        Ok(crate::jobs::Opened {
+            project,
+            model,
+            results: stored.results,
+            path: path.to_string(),
+            checks: stored.validated_checks,
+        })
     }
     #[cfg(not(feature = "hdf5"))]
     {
@@ -156,7 +170,7 @@ impl Engine {
         if results.is_empty() {
             return Err(Error::invalid("there are no results yet; solve first"));
         }
-        Ok(Snapshot { project: self.project.clone(), model, results })
+        Ok(Snapshot { project: self.project.clone(), model, results, checks: self.checks.clone() })
     }
 
     /// Writes the project, the mesh and the latest result of every solved physics into an HDF5 file, and waits for it. With `parallel` the file
@@ -176,7 +190,7 @@ impl Engine {
         self.wait(id)
     }
 
-    /// What a results file holds: the project title, the mesh size and, per physics, the study, the solutions and the scalars.
+    /// What a results file holds: the project title, the mesh size and, per physics, the study, the solutions, the scalars, diagnostics and error budgets.
     pub fn results_file_info(&self, path: &str) -> Result<Value, Error> {
         #[cfg(feature = "hdf5")]
         {
@@ -189,6 +203,7 @@ impl Engine {
                 "title": title, "dim": s.dim, "cells": s.cells, "points": s.points,
                 "results": s.results.iter().map(|(c, r)| json!({
                     "physics": c, "study": r.study, "order": r.order, "dofs": r.dofs, "seconds": r.seconds,
+                    "diagnostics": r.diagnostics, "error_budget": r.error_budget,
                     "solutions": r.solutions, "scalars": r.scalars,
                 })).collect::<Vec<_>>(),
             }))

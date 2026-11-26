@@ -19,7 +19,7 @@ cqed = component "cQED quantization and TLS participation" "KICQ energy particip
     properties {
         "adr" "105, 118"
         "code" "crates/nyx-analysis/src: epr.rs, hamiltonian.rs, network.rs, tls.rs"
-        "lines" "7382"
+        "lines" "8316"
         "codeDiagram" "4-code/analysis/cqed.md"
     }
 }

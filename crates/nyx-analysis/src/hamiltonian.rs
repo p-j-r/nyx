@@ -37,6 +37,29 @@ use serde_json::{json, Value};
 use std::f64::consts::PI;
 use std::time::Instant;
 
+/// Maximum allowed Fock/basis boundary occupation `max_k |<N_max | psi_k>|^2` before emitting a truncation warning.
+pub const FOCK_BOUNDARY_WARN_THRESHOLD: f64 = 1.0e-4;
+
+/// Formats a truncation warning when `max_occ > FOCK_BOUNDARY_WARN_THRESHOLD` without triggering a re-solve.
+fn fock_truncation_warning_msg(max_occ: f64, subsystems: &[String], dims: &[usize], by_sub: &[f64]) -> Option<String> {
+    if max_occ.is_nan() || max_occ <= FOCK_BOUNDARY_WARN_THRESHOLD {
+        return None;
+    }
+    let worst = by_sub
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(idx, &occ)| {
+            let name = subsystems.get(idx).map_or("subsystem", String::as_str);
+            let dim = dims.get(idx).copied().unwrap_or(0);
+            format!("worst subsystem '{name}' at dim={dim} with occupation {occ:.3e}")
+        })
+        .unwrap_or_else(|| format!("max occupation {max_occ:.3e}"));
+    Some(format!(
+        "maximum Fock boundary occupation {max_occ:.3e} exceeds {FOCK_BOUNDARY_WARN_THRESHOLD:.1e} ({worst}); increase fock_trunc or port_trunc for converged levels"
+    ))
+}
+
 /// One point of a flux, DC-SQUID flux, or `E_J` sweep (`phi_ext_sweep`, `flux_sweep`, `squid_flux_sweep`, `ej_hz_sweep`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FluxSweepPoint {
@@ -50,6 +73,9 @@ pub struct FluxSweepPoint {
     pub chi_matrix_hz: Vec<Vec<f64>>,
     pub eigenvalues_hz: Vec<f64>,
     pub min_overlap: f64,
+    pub max_fock_boundary_occupation: f64,
+    pub fock_boundary_occupation_by_subsystem: Vec<f64>,
+    pub fock_truncation_warning: Option<String>,
 }
 
 impl FluxSweepPoint {
@@ -64,9 +90,15 @@ impl FluxSweepPoint {
             "chi_matrix_Hz": self.chi_matrix_hz,
             "eigenvalues_Hz": self.eigenvalues_hz,
             "min_overlap": self.min_overlap,
+            "max_fock_boundary_occupation": self.max_fock_boundary_occupation,
+            "fock_boundary_occupation_by_subsystem": self.fock_boundary_occupation_by_subsystem,
+            "fock_truncation_adequate": self.fock_truncation_warning.is_none(),
         });
         if let Some(ej) = self.e_j_hz {
             obj["e_j_Hz"] = json!(ej);
+        }
+        if let Some(ref w) = self.fock_truncation_warning {
+            obj["fock_truncation_warning"] = json!(w);
         }
         obj
     }
@@ -86,6 +118,9 @@ pub struct HamiltonianReport {
     pub chi_matrix_hz: Vec<Vec<f64>>,
     pub eigenvalues_hz: Vec<f64>,
     pub min_overlap: f64,
+    pub max_fock_boundary_occupation: f64,
+    pub fock_boundary_occupation_by_subsystem: Vec<f64>,
+    pub fock_truncation_warning: Option<String>,
     pub elapsed_s: f64,
     pub f_cav_hz: Vec<f64>,
     pub g_matrix_hz: Vec<Vec<f64>>,
@@ -109,12 +144,19 @@ impl HamiltonianReport {
             "chi_matrix_Hz": self.chi_matrix_hz,
             "eigenvalues_Hz": self.eigenvalues_hz,
             "min_overlap": self.min_overlap,
+            "max_fock_boundary_occupation": self.max_fock_boundary_occupation,
+            "fock_boundary_occupation_by_subsystem": self.fock_boundary_occupation_by_subsystem,
+            "fock_truncation_adequate": self.fock_truncation_warning.is_none(),
             "elapsed_s": self.elapsed_s,
             "f_cav_Hz": self.f_cav_hz,
             "g_matrix_Hz": self.g_matrix_hz,
             "kappa_cav_Hz": self.kappa_cav_hz,
             "t1_purcell_s": self.t1_purcell_s,
         });
+        if let Some(ref w) = self.fock_truncation_warning {
+            obj["fock_truncation_warning"] = json!(w);
+            obj["warning"] = json!(w);
+        }
         if let Some(ref sw) = self.sweep {
             obj["sweep"] = json!(sw.iter().map(|p| p.to_json()).collect::<Vec<_>>());
         }
@@ -188,6 +230,8 @@ struct LabeledSpectrum {
     chi_matrix_hz: Vec<Vec<f64>>,
     eigenvalues_hz: Vec<f64>,
     min_overlap: f64,
+    max_fock_boundary_occupation: f64,
+    fock_boundary_occupation_by_subsystem: Vec<f64>,
 }
 
 fn label_spectrum_bipartite<F>(dims: &[usize], evals: &[f64], overlap_sq: F) -> LabeledSpectrum
@@ -321,7 +365,42 @@ where
     let n_keep = d_tot.min(32);
     let eigenvalues_hz: Vec<f64> = evals.iter().take(n_keep).map(|&e| e - e0).collect();
 
-    LabeledSpectrum { f01_hz, f12_hz, f02_hz, alpha_hz, chi_matrix_hz, eigenvalues_hz, min_overlap: min_ov }
+    let mut fock_boundary_occupation_by_subsystem = vec![0.0_f64; n_sub];
+    if n_sub > 0 && d_tot > 0 {
+        let mut labeled_k: Vec<usize> = matched_eig.iter().flatten().map(|&(k, _)| k).collect();
+        labeled_k.sort_unstable();
+        labeled_k.dedup();
+        for &k in &labeled_k {
+            let mut sub_occ = vec![0.0_f64; n_sub];
+            for b_idx in 0..d_tot {
+                let p = overlap_sq(b_idx, k);
+                if p <= 0.0 {
+                    continue;
+                }
+                for m in 0..n_sub {
+                    if dims[m] > 0 && (b_idx / strides[m]) % dims[m] == dims[m] - 1 {
+                        sub_occ[m] += p;
+                    }
+                }
+            }
+            for m in 0..n_sub {
+                fock_boundary_occupation_by_subsystem[m] = fock_boundary_occupation_by_subsystem[m].max(sub_occ[m]);
+            }
+        }
+    }
+    let max_fock_boundary_occupation = fock_boundary_occupation_by_subsystem.iter().copied().fold(0.0_f64, f64::max);
+
+    LabeledSpectrum {
+        f01_hz,
+        f12_hz,
+        f02_hz,
+        alpha_hz,
+        chi_matrix_hz,
+        eigenvalues_hz,
+        min_overlap: min_ov,
+        max_fock_boundary_occupation,
+        fock_boundary_occupation_by_subsystem,
+    }
 }
 
 /// Parses `fock_trunc` from `params` for `n_modes` modes.
@@ -1358,6 +1437,14 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
         None,
     );
 
+    let subsystems: Vec<String> = (0..n_modes).map(|m| format!("mode_{}", m + 1)).collect();
+    let base_fock_warn = fock_truncation_warning_msg(
+        spec.max_fock_boundary_occupation,
+        &subsystems,
+        &dims,
+        &spec.fock_boundary_occupation_by_subsystem,
+    );
+
     let (sweep, sweep_elapsed_s) = if let Some(schedule) =
         parse_sweep_schedule(&nl_ports, &base_ej_sum_hz, sweep_port, params)?
     {
@@ -1377,6 +1464,12 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
                         SweepPointSpec::LoopPhase { phi_ext_rad, flux_phi0 } => {
                             phis[sweep_port] = phi_ext_rad;
                             let sp = prep_base.solve_at_biases(&dims, &strides, d_tot, &phis)?;
+                            let warn = fock_truncation_warning_msg(
+                                sp.max_fock_boundary_occupation,
+                                &subsystems,
+                                &dims,
+                                &sp.fock_boundary_occupation_by_subsystem,
+                            );
                             local.push(FluxSweepPoint {
                                 phi_ext_rad,
                                 flux_phi0,
@@ -1388,6 +1481,9 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
                                 chi_matrix_hz: sp.chi_matrix_hz,
                                 eigenvalues_hz: sp.eigenvalues_hz,
                                 min_overlap: sp.min_overlap,
+                                max_fock_boundary_occupation: sp.max_fock_boundary_occupation,
+                                fock_boundary_occupation_by_subsystem: sp.fock_boundary_occupation_by_subsystem,
+                                fock_truncation_warning: warn,
                             });
                         }
                         SweepPointSpec::EffectiveEj { phi_ext_rad, flux_phi0, e_j_hz } => {
@@ -1447,6 +1543,12 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
                                 phis[sweep_port] = if target_el <= 1.0e3 { 0.0 } else { phi_ext_rad };
                                 prep_pt.solve_at_biases(&dims, &strides, d_tot, &phis)?
                             };
+                            let warn = fock_truncation_warning_msg(
+                                sp.max_fock_boundary_occupation,
+                                &subsystems,
+                                &dims,
+                                &sp.fock_boundary_occupation_by_subsystem,
+                            );
                             local.push(FluxSweepPoint {
                                 phi_ext_rad,
                                 flux_phi0,
@@ -1458,6 +1560,9 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
                                 chi_matrix_hz: sp.chi_matrix_hz,
                                 eigenvalues_hz: sp.eigenvalues_hz,
                                 min_overlap: sp.min_overlap,
+                                max_fock_boundary_occupation: sp.max_fock_boundary_occupation,
+                                fock_boundary_occupation_by_subsystem: sp.fock_boundary_occupation_by_subsystem,
+                                fock_truncation_warning: warn,
                             });
                         }
                     }
@@ -1473,7 +1578,6 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
         (None, None)
     };
 
-    let subsystems = (0..n_modes).map(|m| format!("mode_{}", m + 1)).collect();
     Ok(HamiltonianReport {
         basis: "normal_fock".into(),
         hilbert_dim: d_tot,
@@ -1486,6 +1590,9 @@ fn run_normal_fock(result: &SolveResult, params: &Value) -> Result<HamiltonianRe
         chi_matrix_hz: spec.chi_matrix_hz,
         eigenvalues_hz: spec.eigenvalues_hz,
         min_overlap: spec.min_overlap,
+        max_fock_boundary_occupation: spec.max_fock_boundary_occupation,
+        fock_boundary_occupation_by_subsystem: spec.fock_boundary_occupation_by_subsystem,
+        fock_truncation_warning: base_fock_warn,
         elapsed_s,
         f_cav_hz,
         g_matrix_hz,
@@ -1691,6 +1798,8 @@ struct SolvedPort1D {
     n_cplx: Option<Dense<C64>>,
     /// Squared flux matrix element `|<0 | Phi | 1>|^2` (Wb^2) for Purcell `T_1`.
     flux_01_wb_sq: f64,
+    /// Maximum 1D basis boundary occupation across the lowest kept port eigenstates (`0..min(3, d_j)`).
+    port_basis_boundary_occ: f64,
 }
 
 impl PreparedPort1D {
@@ -1752,6 +1861,8 @@ impl PreparedPort1D {
                 }
                 let phi0_2pi = PHI0 / (2.0 * PI);
                 let flux_01_wb_sq = (phi0_2pi * phi_01).powi(2);
+                let port_basis_boundary_occ =
+                    if n > 0 { (0..d.min(3)).map(|a| evecs[a][n - 1].powi(2)).fold(0.0_f64, f64::max) } else { 0.0 };
 
                 Ok(SolvedPort1D {
                     evals_hz: evals.into_iter().take(d).collect(),
@@ -1759,6 +1870,7 @@ impl PreparedPort1D {
                     n_real: None,
                     n_cplx: None,
                     flux_01_wb_sq,
+                    port_basis_boundary_occ,
                 })
             }
             PreparedPort1D::ChargePeriodic { n_states, n_cut, e_c_hz, c_sigma_f, e_j_hz, n_g } => {
@@ -1819,6 +1931,13 @@ impl PreparedPort1D {
                     } else {
                         0.0
                     };
+                    let port_basis_boundary_occ = if n > 0 {
+                        (0..d.min(3))
+                            .map(|a| evecs[a][0].powi(2) + if n > 1 { evecs[a][n - 1].powi(2) } else { 0.0 })
+                            .fold(0.0_f64, f64::max)
+                    } else {
+                        0.0
+                    };
 
                     Ok(SolvedPort1D {
                         evals_hz: evals.into_iter().take(d).collect(),
@@ -1826,6 +1945,7 @@ impl PreparedPort1D {
                         n_real: Some(n_proj),
                         n_cplx: None,
                         flux_01_wb_sq,
+                        port_basis_boundary_occ,
                     })
                 } else {
                     let mut h_mat = Dense::<C64>::zeros(n, n);
@@ -1859,6 +1979,13 @@ impl PreparedPort1D {
                     } else {
                         0.0
                     };
+                    let port_basis_boundary_occ = if n > 0 {
+                        (0..d.min(3))
+                            .map(|a| evecs[(0, a)].norm_sqr() + if n > 1 { evecs[(n - 1, a)].norm_sqr() } else { 0.0 })
+                            .fold(0.0_f64, f64::max)
+                    } else {
+                        0.0
+                    };
 
                     Ok(SolvedPort1D {
                         evals_hz: evals.into_iter().take(d).collect(),
@@ -1866,6 +1993,7 @@ impl PreparedPort1D {
                         n_real: None,
                         n_cplx: Some(n_proj),
                         flux_01_wb_sq,
+                        port_basis_boundary_occ,
                     })
                 }
             }
@@ -1893,6 +2021,8 @@ fn run_craig_bampton_with_ej_point(
         chi_matrix_hz: sw.chi_matrix_hz,
         eigenvalues_hz: sw.eigenvalues_hz,
         min_overlap: sw.min_overlap,
+        max_fock_boundary_occupation: sw.max_fock_boundary_occupation,
+        fock_boundary_occupation_by_subsystem: sw.fock_boundary_occupation_by_subsystem,
     })
 }
 
@@ -2144,10 +2274,16 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             } else {
                 fast_sym_eigh(&h_real, d_tot)?
             };
-            let spec = label_spectrum_bipartite(&dims, &evals, |b_idx, k| {
+            let mut spec = label_spectrum_bipartite(&dims, &evals, |b_idx, k| {
                 let v = evecs[k][b_idx];
                 v * v
             });
+            for (j, sp_j) in solved_ports.iter().enumerate() {
+                spec.fock_boundary_occupation_by_subsystem[j] =
+                    spec.fock_boundary_occupation_by_subsystem[j].max(sp_j.port_basis_boundary_occ);
+            }
+            spec.max_fock_boundary_occupation =
+                spec.fock_boundary_occupation_by_subsystem.iter().copied().fold(0.0_f64, f64::max);
             Ok((spec, flux_el_sq))
         } else if let Some(n_mats) = all_n {
             // Fast 100% real-symmetric ChargePeriodic path under diagonal Fock gauge R_m = i^{a_m^dagger a_m}:
@@ -2236,10 +2372,16 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             } else {
                 fast_sym_eigh(&h_real, d_tot)?
             };
-            let spec = label_spectrum_bipartite(&dims, &evals, |b_idx, k| {
+            let mut spec = label_spectrum_bipartite(&dims, &evals, |b_idx, k| {
                 let v = evecs[k][b_idx];
                 v * v
             });
+            for (j, sp_j) in solved_ports.iter().enumerate() {
+                spec.fock_boundary_occupation_by_subsystem[j] =
+                    spec.fock_boundary_occupation_by_subsystem[j].max(sp_j.port_basis_boundary_occ);
+            }
+            spec.max_fock_boundary_occupation =
+                spec.fock_boundary_occupation_by_subsystem.iter().copied().fold(0.0_f64, f64::max);
             Ok((spec, flux_el_sq))
         } else {
             // General complex Hermitian path
@@ -2298,7 +2440,13 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             }
 
             let (evals, evecs) = hermitian_eig(&h_mat).map_err(|e| Error::from_kernel(e.to_string()))?;
-            let spec = label_spectrum_bipartite(&dims, &evals, |b_idx, k| evecs[(b_idx, k)].norm_sqr());
+            let mut spec = label_spectrum_bipartite(&dims, &evals, |b_idx, k| evecs[(b_idx, k)].norm_sqr());
+            for (j, sp_j) in solved_ports.iter().enumerate() {
+                spec.fock_boundary_occupation_by_subsystem[j] =
+                    spec.fock_boundary_occupation_by_subsystem[j].max(sp_j.port_basis_boundary_occ);
+            }
+            spec.max_fock_boundary_occupation =
+                spec.fock_boundary_occupation_by_subsystem.iter().copied().fold(0.0_f64, f64::max);
             Ok((spec, flux_el_sq))
         }
     };
@@ -2323,6 +2471,17 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
         Some(&flux_el_sq),
     );
 
+    let mut subsystems: Vec<String> = nl_ports.iter().map(|p| p.name.clone()).collect();
+    for m in 0..m_cav {
+        subsystems.push(format!("cavity_{}", m + 1));
+    }
+    let base_fock_warn = fock_truncation_warning_msg(
+        spec.max_fock_boundary_occupation,
+        &subsystems,
+        &dims,
+        &spec.fock_boundary_occupation_by_subsystem,
+    );
+
     let (sweep, sweep_elapsed_s) =
         if let Some(schedule) = parse_sweep_schedule(&nl_ports, &base_ej_sum_hz, sweep_port, params)? {
             let t_sw = Instant::now();
@@ -2342,6 +2501,12 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                                 phis[sweep_port] = phi_ext_rad;
                                 ej_ovs[sweep_port] = None;
                                 let (sp, _) = solve_cb_at_state(&phis, &ej_ovs)?;
+                                let warn = fock_truncation_warning_msg(
+                                    sp.max_fock_boundary_occupation,
+                                    &subsystems,
+                                    &dims,
+                                    &sp.fock_boundary_occupation_by_subsystem,
+                                );
                                 local.push(FluxSweepPoint {
                                     phi_ext_rad,
                                     flux_phi0,
@@ -2353,12 +2518,21 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                                     chi_matrix_hz: sp.chi_matrix_hz,
                                     eigenvalues_hz: sp.eigenvalues_hz,
                                     min_overlap: sp.min_overlap,
+                                    max_fock_boundary_occupation: sp.max_fock_boundary_occupation,
+                                    fock_boundary_occupation_by_subsystem: sp.fock_boundary_occupation_by_subsystem,
+                                    fock_truncation_warning: warn,
                                 });
                             }
                             SweepPointSpec::EffectiveEj { phi_ext_rad, flux_phi0, e_j_hz } => {
                                 phis[sweep_port] = if target_el <= 1.0e3 { 0.0 } else { base_phi_exts[sweep_port] };
                                 ej_ovs[sweep_port] = Some(e_j_hz.max(0.0));
                                 let (sp, _) = solve_cb_at_state(&phis, &ej_ovs)?;
+                                let warn = fock_truncation_warning_msg(
+                                    sp.max_fock_boundary_occupation,
+                                    &subsystems,
+                                    &dims,
+                                    &sp.fock_boundary_occupation_by_subsystem,
+                                );
                                 local.push(FluxSweepPoint {
                                     phi_ext_rad,
                                     flux_phi0,
@@ -2370,6 +2544,9 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
                                     chi_matrix_hz: sp.chi_matrix_hz,
                                     eigenvalues_hz: sp.eigenvalues_hz,
                                     min_overlap: sp.min_overlap,
+                                    max_fock_boundary_occupation: sp.max_fock_boundary_occupation,
+                                    fock_boundary_occupation_by_subsystem: sp.fock_boundary_occupation_by_subsystem,
+                                    fock_truncation_warning: warn,
                                 });
                             }
                         }
@@ -2385,11 +2562,6 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
             (None, None)
         };
 
-    let mut subsystems: Vec<String> = nl_ports.into_iter().map(|p| p.name).collect();
-    for m in 0..m_cav {
-        subsystems.push(format!("cavity_{}", m + 1));
-    }
-
     Ok(HamiltonianReport {
         basis: "craig_bampton".into(),
         hilbert_dim: d_tot,
@@ -2402,6 +2574,9 @@ fn run_craig_bampton(result: &SolveResult, params: &Value) -> Result<Hamiltonian
         chi_matrix_hz: spec.chi_matrix_hz,
         eigenvalues_hz: spec.eigenvalues_hz,
         min_overlap: spec.min_overlap,
+        max_fock_boundary_occupation: spec.max_fock_boundary_occupation,
+        fock_boundary_occupation_by_subsystem: spec.fock_boundary_occupation_by_subsystem,
+        fock_truncation_warning: base_fock_warn,
         elapsed_s,
         f_cav_hz,
         g_matrix_hz: g_jm,
@@ -2726,5 +2901,93 @@ mod tests {
         let sw_nf = rep_zero_nf.sweep.unwrap();
         assert_eq!(sw_nf[1].e_j_hz, Some(0.0));
         assert!(sw_nf[1].f01_hz.iter().all(|x| x.is_finite()));
+    }
+
+    #[test]
+    fn fock_boundary_occupation_warns_when_undertruncated_without_extra_resolves() {
+        let scale = jj_flux_scale();
+        let e_j_hz = 16.0e9;
+        let l_j_h = scale / e_j_hz;
+        let c_port = 75.0e-15;
+        let c_r = 50.0e-15;
+        let c_g = 1.5e-15;
+        let omega_r = 2.0 * PI * 6.8e9;
+        let l_r_inv = omega_r * omega_r * (c_r + c_g);
+
+        let mut rom = CircuitRom {
+            ports: vec![RomPort {
+                name: "Q1_JJ".into(),
+                kind: "lumped_jj".into(),
+                l_j_h: Some(l_j_h),
+                e_j_hz: Some(e_j_hz),
+                c_j_f: 0.0,
+                e_l_hz: None,
+                phi_ext_rad: 0.0,
+                n_g: 0.0,
+                squid_asymmetry: None,
+                z0_ohm: None,
+                direction: [0.0, 1.0, 0.0],
+                formulation: "rank1".into(),
+            }],
+            r_static: 0,
+            r_dyn: 2,
+            k_r: vec![vec![0.0, 0.0], vec![0.0, MU0 * l_r_inv]],
+            c_r: vec![],
+            m_r: vec![vec![(c_port + c_g) / EPS0, -c_g / EPS0], vec![-c_g / EPS0, (c_r + c_g) / EPS0]],
+            b_r: vec![vec![1.0], vec![0.0]],
+            c_port_f: vec![],
+            modes: vec![],
+        };
+        rom.modes = project_rom_modes(&rom, &rom.ports).unwrap();
+        let res = SolveResult { scalars: vec![rom.scalar()], ..Default::default() };
+
+        // 1. Severely under-truncated normal_fock ([3, 3]): |2> lies at N_max=2 => occupation ~ 1.0 > 1e-4, warning emitted
+        let rep_under =
+            hamiltonian_with_params(&res, &json!({ "basis": "normal_fock", "fock_trunc": [3, 3] })).unwrap();
+        assert_eq!(rep_under.dims, vec![3, 3]);
+        assert!(rep_under.max_fock_boundary_occupation > 1.0e-4);
+        assert!(rep_under.fock_truncation_warning.is_some());
+        let j_under = rep_under.to_json();
+        assert_eq!(j_under["fock_truncation_adequate"], json!(false));
+        assert!(j_under["fock_truncation_warning"].as_str().is_some());
+        assert!(j_under["warning"].as_str().is_some());
+
+        // 2. Well-converged normal_fock ([12, 6]): boundary occupation << 1e-4, no warning
+        let rep_ok = hamiltonian_with_params(&res, &json!({ "basis": "normal_fock", "fock_trunc": [12, 6] })).unwrap();
+        assert_eq!(rep_ok.dims, vec![12, 6]);
+        assert!(
+            rep_ok.max_fock_boundary_occupation < 1.0e-4,
+            "expected converged boundary occupation < 1e-4, got {:e}",
+            rep_ok.max_fock_boundary_occupation
+        );
+        assert!(rep_ok.fock_truncation_warning.is_none());
+        let j_ok = rep_ok.to_json();
+        assert_eq!(j_ok["fock_truncation_adequate"], json!(true));
+        assert!(j_ok.get("fock_truncation_warning").is_none());
+
+        // 3. Craig-Bampton with tiny 1D charge cutoff (n_charge_cut=1 -> 3 charge states) triggers warning;
+        //    default n_charge_cut=15, port_trunc=8, fock_trunc=[6] is well-converged.
+        let rep_cb_under = hamiltonian_with_params(
+            &res,
+            &json!({ "basis": "craig_bampton", "port_trunc": 3, "fock_trunc": [3], "n_charge_cut": 2 }),
+        )
+        .unwrap();
+        assert!(rep_cb_under.max_fock_boundary_occupation > 1.0e-4);
+        assert!(rep_cb_under.fock_truncation_warning.is_some());
+
+        let rep_cb_ok = hamiltonian_with_params(
+            &res,
+            &json!({ "basis": "craig_bampton", "port_trunc": 8, "fock_trunc": [6], "flux_sweep": [0.0] }),
+        )
+        .unwrap();
+        assert!(
+            rep_cb_ok.max_fock_boundary_occupation < 1.0e-4,
+            "CB converged boundary occ = {:e}",
+            rep_cb_ok.max_fock_boundary_occupation
+        );
+        assert!(rep_cb_ok.fock_truncation_warning.is_none());
+        let sw_pt = &rep_cb_ok.sweep.as_ref().unwrap()[0];
+        assert!(sw_pt.max_fock_boundary_occupation < 1.0e-4);
+        assert_eq!(sw_pt.to_json()["fock_truncation_adequate"], json!(true));
     }
 }

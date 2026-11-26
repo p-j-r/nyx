@@ -20,7 +20,7 @@ fn exported(registry: &Registry, physics: &str, result: &SolveResult, role: &str
 
 /// A kernel knows the regions by number and names a scalar of one region `... domain <number> ...` (`share in domain 3 1`); the model knows
 /// the names, so the scalar becomes `share in disk 1` (ADR 80). A number that is not a region of the model is left as it is.
-fn name_domains(result: &mut SolveResult, model: &MeshedModel) {
+pub(crate) fn name_domains(result: &mut SolveResult, model: &MeshedModel) {
     let regions = model.regions();
     for (name, _) in result.scalars.iter_mut() {
         let words: Vec<&str> = name.split(' ').collect();
@@ -62,6 +62,18 @@ pub fn run_chain_partial(
     library: &Arc<femcore::material::Library>,
     progress: Arc<Progress>,
 ) -> (Vec<SolveResult>, Option<Error>) {
+    run_chain_partial_with(registry, project, model, targets, library, progress, project.mesh.retain_amr_data)
+}
+
+pub(crate) fn run_chain_partial_with(
+    registry: &Registry,
+    project: &Project,
+    model: &MeshedModel,
+    targets: &[String],
+    library: &Arc<femcore::material::Library>,
+    progress: Arc<Progress>,
+    retain_amr_data: bool,
+) -> (Vec<SolveResult>, Option<Error>) {
     let ids: Vec<&str> = targets.iter().map(String::as_str).collect();
     let order = match registry.solve_order(&ids) {
         Ok(o) => o,
@@ -72,7 +84,9 @@ pub fn run_chain_partial(
     for id in order {
         match solve_one_single(registry, project, model, &id, library, &progress, &done) {
             Ok(mut result) => {
-                nyx_physics::ElectroAmrData::strip_from(&mut result);
+                if !retain_amr_data {
+                    nyx_physics::ElectroAmrData::strip_from(&mut result);
+                }
                 done.push((id, result));
             }
             Err(e) => {
@@ -84,30 +98,58 @@ pub fn run_chain_partial(
     (done.into_iter().map(|(_, r)| r).collect(), failed)
 }
 
-/// Like [`run_chain_partial`], and runs multi-pass electrostatic AMR (`AF-1`) when `project` and `targets` request `adapt_passes > 1`,
+/// Like [`run_chain_partial`], and runs multi-pass AMR (`dfs`, `ems::cavity`, or `sms`) when configured,
 /// returning the final adapted [`MeshedModel`] alongside the solved results.
 pub fn run_chain_partial_amr(
+    registry: &Registry,
+    project: &Project,
+    model: Arc<MeshedModel>,
+    targets: &[String],
+    library: &Arc<femcore::material::Library>,
+    progress: Arc<Progress>,
+) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>) {
+    run_chain_partial_amr_with(registry, project, model, targets, library, progress, project.mesh.retain_amr_data)
+}
+
+pub(crate) fn run_chain_partial_amr_with(
     registry: &Registry,
     project: &Project,
     mut model: Arc<MeshedModel>,
     targets: &[String],
     library: &Arc<femcore::material::Library>,
     progress: Arc<Progress>,
+    retain_amr_data: bool,
 ) -> (Arc<MeshedModel>, Vec<SolveResult>, Option<Error>) {
     let ids: Vec<&str> = targets.iter().map(String::as_str).collect();
     let order = match registry.solve_order(&ids) {
         Ok(o) => o,
         Err(e) => return (model, vec![], Some(e)),
     };
-    let use_amr = crate::amr::project_uses_electro_amr(project, targets);
+    let use_electro_amr = crate::amr::project_uses_electro_amr(project, targets);
+    let use_ems_amr = crate::amr::project_uses_ems_cavity_amr(project, targets);
+    let use_sms_amr = crate::amr::project_uses_sms_amr(project, targets);
     let mut done: Vec<(String, SolveResult)> = vec![];
     let mut failed = None;
     for id in order {
-        let step = if id == "dfs" && use_amr {
-            crate::amr::solve_dfs_with_amr(registry, project, model.clone(), library, &progress, &done)
+        let step = if id == "dfs" && use_electro_amr {
+            crate::amr::solve_dfs_with_amr_opts(
+                registry,
+                project,
+                model.clone(),
+                library,
+                &progress,
+                &done,
+                retain_amr_data,
+            )
+        } else if id == "ems" && use_ems_amr {
+            crate::amr::solve_ems_cavity_with_amr(registry, project, model.clone(), library, &progress, &done)
+        } else if id == "sms" && use_sms_amr {
+            crate::amr::solve_sms_with_amr(registry, project, model.clone(), library, &progress, &done)
         } else {
             solve_one_single(registry, project, &model, &id, library, &progress, &done).map(|mut r| {
-                nyx_physics::ElectroAmrData::strip_from(&mut r);
+                if !retain_amr_data {
+                    nyx_physics::ElectroAmrData::strip_from(&mut r);
+                }
                 (model.clone(), r)
             })
         };
@@ -123,6 +165,29 @@ pub fn run_chain_partial_amr(
         }
     }
     (model, done.into_iter().map(|(_, r)| r).collect(), failed)
+}
+
+/// Builds a [`Ctx`] with imported fields from previously solved physics in `done`.
+pub(crate) fn build_solve_ctx<'a>(
+    registry: &Registry,
+    model: &'a MeshedModel,
+    p: &dyn nyx_physics::Physics,
+    spec: &nyx_physics::ProblemSpec,
+    library: &Arc<femcore::material::Library>,
+    progress: &Arc<Progress>,
+    done: &[(String, SolveResult)],
+) -> Ctx<'a> {
+    let mut ctx = Ctx::new(model);
+    ctx.progress = progress.clone();
+    ctx.library = Some(library.clone());
+    ctx.wavelength = crate::materials::study_wavelength(p, spec);
+    ctx.frequency = crate::materials::study_frequency(p, spec);
+    for imp in p.imports() {
+        if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
+            ctx.inputs.insert(imp.role.clone(), values);
+        }
+    }
+    ctx
 }
 
 /// One physics of a chain, with the fields of the physics solved before it.
@@ -157,16 +222,7 @@ pub(crate) fn solve_one_single(
     }
     validate_spec(p, spec)?;
     p.validate(spec, model.mesh())?;
-    let mut ctx = Ctx::new(model);
-    ctx.progress = progress.clone();
-    ctx.library = Some(library.clone());
-    ctx.wavelength = crate::materials::study_wavelength(p, spec);
-    ctx.frequency = crate::materials::study_frequency(p, spec);
-    for imp in p.imports() {
-        if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
-            ctx.inputs.insert(imp.role.clone(), values);
-        }
-    }
+    let mut ctx = build_solve_ctx(registry, model, p, spec, library, progress, done);
     let mut result = p.solve(model.mesh(), spec, &mut ctx)?;
     name_domains(&mut result, model);
     Ok(result)

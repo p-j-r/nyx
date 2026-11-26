@@ -153,6 +153,10 @@ pub struct App {
     pub opening: Option<String>,
     pub conv_factor: f64,
     pub conv_tol: f64,
+    pub conv_grids: usize,
+    pub conv_match: String,
+    pub conv_extrapolate: String,
+    pub conv_quantities: String,
     /// the `nyx-mcp` program the Connect menu registers with Claude (found at start, or picked by the user)
     pub mcp_server: Option<PathBuf>,
     /// the Connect menu: what each AI app's config says about nyx (installed apps only) and the last thing done
@@ -247,6 +251,10 @@ impl App {
             opening: None,
             conv_factor: 0.6,
             conv_tol: 1e-3,
+            conv_grids: 2,
+            conv_match: "index".into(),
+            conv_extrapolate: "none".into(),
+            conv_quantities: String::new(),
             mcp_server: nyx_connect::find_server(),
             connect_status: vec![],
             connect_note: None,
@@ -406,7 +414,24 @@ impl App {
         // an engine job: it shows in the job list, reports its two solves as stages and can be cancelled; behind a running job it waits in the
         // queue and replaces a check that has not started
         let opts = QueueOpts { supersede: true, ..Default::default() };
-        match self.engine.start_convergence_with(&active, self.conv_factor, Some(self.conv_tol), &opts) {
+        let quantities: Vec<String> = self
+            .conv_quantities
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        let matching = match self.conv_match.as_str() {
+            "nearest" => nyx_engine::convergence::Matching::Nearest,
+            _ => nyx_engine::convergence::Matching::Index,
+        };
+        let limits = nyx_engine::convergence::Limits {
+            grids: if self.conv_grids >= 3 { 3 } else { 2 },
+            extrapolate: (self.conv_extrapolate != "none").then(|| self.conv_extrapolate.clone()),
+            quantities: (!quantities.is_empty()).then_some(quantities),
+            ..Default::default()
+        };
+        match self.engine.start_convergence_limited(&active, self.conv_factor, Some(self.conv_tol), &matching, &opts, limits) {
             Ok(id) => {
                 self.waiting.retain(|w| w.kind != JobKind::Convergence);
                 self.convergence = None;
@@ -3704,5 +3729,69 @@ nyx.result_info(physics=\"ems\")
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn study_tab_runs_three_grid_convergence_and_results_tab_surfaces_diagnostics_unconditionally() {
+        use nyx_engine::facade::physics::{DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, SolverDiagnostics, SpatialErrorEstimate};
+        let mut a = app();
+        a.load_example(example("02_cantilever"));
+        wait_idle(&mut a, 30);
+
+        // Configure new Study convergence controls (grids=3, match=nearest, extrapolate, quantities).
+        a.conv_grids = 3;
+        a.conv_tol = 0.5;
+        a.conv_factor = 0.6;
+        a.conv_quantities = "scalar *, value*".into();
+        a.compute();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+
+        // Inject diagnostics & error_budget on the displayed ResultView to verify unconditional summary rendering while logs stay collapsed.
+        if let Some(rv) = a.results.first_mut() {
+            let mut r = (*rv.result).clone();
+            r.diagnostics = Some(SolverDiagnostics {
+                solver_kind: "lu_direct".into(),
+                converged: true,
+                max_algebraic_residual: 1.25e-13,
+                warnings: vec![DiagnosticWarning {
+                    code: "test_gui_warning".into(),
+                    severity: DiagnosticSeverity::Warning,
+                    message: "surface diagnostic summary without opening raw logs".into(),
+                }],
+                ..Default::default()
+            });
+            r.error_budget = Some(NumericalErrorBudget {
+                algebraic_rel: 1.25e-13,
+                spatial_discretization: Some(SpatialErrorEstimate {
+                    method: "roache_gci_3grid".into(),
+                    rel_bound: 4.5e-4,
+                    is_epistemic_bound: false,
+                    observed_order: Some(2.0),
+                    refinement_ratio: Some(1.66),
+                    safety_factor: Some(1.25),
+                    extrapolated_scalars_only: Some(true),
+                }),
+                combined_num_uncertainty_rel: Some(4.5e-4),
+                ..Default::default()
+            });
+            rv.result = Arc::new(r);
+        }
+
+        a.check_convergence();
+        wait_idle(&mut a, 120);
+        assert!(a.error.is_none(), "{:?}", a.error);
+        let c = a.convergence.as_ref().expect("3-grid convergence answer stored");
+        assert_eq!(c["grids"], json!(3), "{c}");
+        assert!(c.get("gci").is_some(), "expected 3-grid GCI payload: {c}");
+
+        // Render Study and Results tabs without opening the collapsed solver log.
+        let ctx = a.ctx.clone();
+        a.tab = Tab::Study;
+        frame(&ctx, |ui| a.inspector(ui));
+
+        a.tab = Tab::Results;
+        a.show_results = true;
+        frame(&ctx, |ui| a.inspector(ui));
     }
 }

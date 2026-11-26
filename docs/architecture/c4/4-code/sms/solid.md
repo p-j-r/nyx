@@ -5,20 +5,21 @@ C4 level 4 (code) of the component **Solid kernel** (`sms.solid`) in the contain
 > Linear elastic solid mechanics on P1/P2 triangles and tetrahedra and MixedDiscretisation: static (`SourceField` MMS) solve and eigenfrequencies.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 1 file, 3180 lines.
+**Size:** 1 file, 3344 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/solid.rs` | 3180 |  |
+| `crates/nyx-sms/src/solid.rs` | 3344 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fem_mixed, fields, linalg::amg_elastic, linalg::arnoldi_real, linalg::csr, linalg::csr::assembly, linalg::driver +9 | AMG_THRESHOLD, Amg, AmgOptions, AmgSystem, C, CellFields, CellType, Coo, EigOpts, EigPairs +54 |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | CellField, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of, discretise_mixed |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fem_mixed, fields, linalg::amg_elastic, linalg::arnoldi_real, linalg::csr, linalg::csr::assembly, linalg::driver +9 | AMG_THRESHOLD, Amg, AmgOptions, AmgSystem, C, CellFields, CellType, Coo, DirectSolver, EigOpts +56 |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | CellField, DiagnosticSeverity, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of +1 |
+| [Physics adapter](./adapter.md) | diag | SmsDiag |
 | [Cross-section study kernel](./crosssection.md) | cross_section | solve_axisymmetric, solve_axisymmetric_mixed, solve_waveguide_modes, solve_waveguide_modes_mixed |
 | [Floquet kernel](./floquet.md) | floquet | solve_floquet, solve_floquet_mixed |
 | [Low-reflecting boundary](./lrb.md) | lrb | solve_lrb, solve_lrb_mixed, voigt_moduli |
@@ -98,7 +99,7 @@ classDiagram
       ~thermal_strain(a, dt) slice
       ~b_matrix(grad, nloc, d, b)
       ~dof_layout(mesh, order, c, scratch, full)
-      +more_24_functions()
+      +more_25_functions()
   }
   ResolvedIeDomains --> ResolvedIeDomain
   StaticAssembly --> Thermal
@@ -142,12 +143,13 @@ classDiagram
 | fn | `assemble_static` | `solid.rs:2251` | `pub fn assemble_static(mesh: &Discretisation, spec: &Problem, st: &Setup, k: Csr) -> Result<StaticAssembly, String>` |
 | fn | `add_boundary_load_mixed` | `solid.rs:2259` | `pub(crate) fn add_boundary_load_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, labels: &[i32], tc: f64, out: &mut [f64], comp: usize, )` |
 | fn | `solve_static` | `solid.rs:2496` | `pub fn solve_static( mesh: &Discretisation, spec: &Problem, st: &Setup, asm: &StaticAssembly, ) -> Result<(Vec<f64>, Option<String>), String>` —  Stage 2: the displacement (component blocks) by the linear solver `spec.solver` names, and its note. |
-| fn | `cell_rho` | `solid.rs:2710` | `pub(crate) fn cell_rho( materials: &femcore::props::Materials, mesh: &Discretisation, inactive: &[i32], ) -> Result<Vec<f64>, String>` —  Density per cell; domains in `inactive` get `0.0` without requiring `"rho"`, while active domains without `"rho"` return an error. |
-| fn | `solve_solid_with_source` | `solid.rs:2728` | `pub fn solve_solid_with_source<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` —  Solves the solid mechanics problem with a monomorphized [`SourceField<D>`] (VVUQ Pillar b MMS). |
-| fn | `solve_solid` | `solid.rs:2759` | `pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting |
-| fn | `solve_solid_mixed_with_source` | `solid.rs:2768` | `pub fn solve_solid_mixed_with_source<const D: usize, S: SourceField<D>>( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` —  Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) solid solver with monomorphized [`SourceField<D>`]. |
-| fn | `solve_solid_mixed` | `solid.rs:2793` | `pub fn solve_solid_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String>` —  Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) and Static Infinite Element solid solver. |
-| fn | `centroid_stress` | `solid.rs:3144` | `pub fn centroid_stress(mesh: &Discretisation, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>>` —  Element-wise stress at the centroid of every cell, one row per cell: |
+| fn | `solve_static_checked` | `solid.rs:2506` | `pub(crate) fn solve_static_checked( mesh: &Discretisation, spec: &Problem, st: &Setup, asm: &StaticAssembly, ) -> Result<(Vec<f64>, Option<String>, crate::diag::SmsDiag), String>` |
+| fn | `cell_rho` | `solid.rs:2856` | `pub(crate) fn cell_rho( materials: &femcore::props::Materials, mesh: &Discretisation, inactive: &[i32], ) -> Result<Vec<f64>, String>` —  Density per cell; domains in `inactive` get `0.0` without requiring `"rho"`, while active domains without `"rho"` return an error. |
+| fn | `solve_solid_with_source` | `solid.rs:2874` | `pub fn solve_solid_with_source<const D: usize, S: SourceField<D>>( mesh: &Discretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` —  Solves the solid mechanics problem with a monomorphized [`SourceField<D>`] (VVUQ Pillar b MMS). |
+| fn | `solve_solid` | `solid.rs:2905` | `pub fn solve_solid(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` —  Solves the problem: the three stages in order, with the variants for perfectly matched layers, Floquet pairs and low-reflecting |
+| fn | `solve_solid_mixed_with_source` | `solid.rs:2914` | `pub fn solve_solid_mixed_with_source<const D: usize, S: SourceField<D>>( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, source: &S, ) -> Result<SolveResult, String>` —  Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) solid solver with monomorphized [`SourceField<D>`]. |
+| fn | `solve_solid_mixed` | `solid.rs:2939` | `pub fn solve_solid_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem) -> Result<SolveResult, String>` —  Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) and Static Infinite Element solid solver. |
+| fn | `centroid_stress` | `solid.rs:3308` | `pub fn centroid_stress(mesh: &Discretisation, u: &[f64], c6: &[M6], plane: Plane, order: usize) -> Vec<Vec<f64>>` —  Element-wise stress at the centroid of every cell, one row per cell: |
 | fn | `ResolvedIeDomains::from_mixed` | `solid.rs:487` | `pub(crate) fn from_mixed(mixed: &MixedDiscretisation, spec: &Problem) -> Self` |
 | fn | `ResolvedIeDomains::contains` | `solid.rs:537` | `pub(crate) fn contains(&self, dom: i32) -> bool` |
 | fn | `ResolvedIeDomains::has_rational` | `solid.rs:541` | `pub(crate) fn has_rational(&self) -> bool` |

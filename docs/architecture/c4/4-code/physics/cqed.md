@@ -33,6 +33,7 @@ C4 level 4 (code) of the component **cQED result payloads** (`physics.cqed`) in 
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | cqed | CircuitRom, ModeEnergyRow, RomPort, TlsMeta |
 | [ems: Typed problem](../ems/problem.md) | cqed | TlsInterfaces |
 | [engine: Analyses](../engine/analyse.md) | cqed | CapacitanceMatrixData, CircuitRom |
+| [engine: Commands](../engine/commands.md) | cqed | CapacitanceMatrixData |
 | [engine: Job runner and queue](../engine/jobs.md) | cqed | CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, TlsMeta |
 | [engine: Meshing seam](../engine/meshing.md) | cqed | AdaptPassRecord, CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, TlsMeta |
 | [Problem envelope](./envelope.md) | cqed | TlsInterfaceSpec, TlsInterfaces |

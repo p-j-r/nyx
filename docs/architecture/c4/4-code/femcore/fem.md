@@ -41,7 +41,7 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | fem | geometry, quad_rule, shape |
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | fem | facet_rule, geometry, quad_rule, shape |
 | [analysis: Field samples](../analysis/samples.md) | fem, fields | geometry, local_bary, quad_rule, shape |
-| [dfs: Shared helpers](../dfs/common.md) | farfield, fem, fem_mixed, fields, pml, props | CurvedTet, FarFieldPermittivity, IsoparametricCell, JacobianEval, LagrangeSpace, LinearSolver, Materials, MixedLagrangeDofMap +20 |
+| [dfs: Shared helpers](../dfs/common.md) | farfield, fem, fem_mixed, fields, pml, props | AmgSystem, CurvedTet, FarFieldPermittivity, IsoparametricCell, JacobianEval, LagrangeSpace, LinearSolver, Materials +22 |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | fem, fem_mixed, fields, props, rt | CellFields, CellPermittivity, EquilibratedFluxResult, LagrangeSpace, LinearSolver, MixedLagrangeDofMap, RobinBoundary, TensorKind +5 |
 | [dfs: Heat kernel](../dfs/heat.md) | fem, fem_mixed, fields, props | AmgSystem, CellFields, LagrangeSpace, LinearSolver, MixedLagrangeDofMap, TensorKind, amg_wanted, assemble_mass_mixed +1 |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | edge_mixed, fem, fem_mixed, fields, props | CellFields, IsoparametricCell, LagrangeSpace, LinearSolver, MixedLagrangeDofMap, NedEvalScratch, NedMixed, cell_corner_ref_coords +7 |

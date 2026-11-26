@@ -5,14 +5,14 @@ C4 level 4 (code) of the component **Direct solvers** (`femcore.ladirect`) in th
 > Shifted sparse direct solves with symbolic reuse, `R31` pivot/inertia diagnostics & shift/Krylov recovery, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 6 files, 6115 lines.
+**Size:** 6 files, 6397 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/linalg/blr.rs` | 947 | **Low-rank (block low-rank, BLR) multifrontal sparse LU** (port item S4, the sparse-solver half). |
-| `crates/femcore/src/linalg/direct.rs` | 3508 | Shifted sparse direct solves `(A − σB)⁻¹` with symbolic-factorisation reuse (port item S1). |
+| `crates/femcore/src/linalg/direct.rs` | 3790 | Shifted sparse direct solves `(A − σB)⁻¹` with symbolic-factorisation reuse (port item S1). |
 | `crates/femcore/src/linalg/lowrank.rs` | 622 | **Low-rank (rank-structured) matrices and a fast direct solver** (port item S4): adaptive cross approximation, the HODLR format (hierarchically off-diagonal low-rank) and its `O(n log² n)` direct solve. |
 | `crates/femcore/src/linalg/mixed.rs` | 304 | **Mixed-precision shifted factorisation** with iterative refinement (port item S3): the sparse LU of `A − σB` is computed in single precision (`f32` for real, `Complex<f32>` for complex matrices) — about half the factor memory and a... |
 | `crates/femcore/src/linalg/ordering.rs` | 252 | Fill-reducing ordering by **graph nested dissection** (port item S2), for the sparse Cholesky of [`crate::linalg::direct::ShiftedFactorization`]. |
@@ -32,8 +32,9 @@ C4 level 4 (code) of the component **Direct solvers** (`femcore.ladirect`) in th
 
 | Component | Modules | Items |
 |---|---|---|
+| [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::direct | FactorBackend, FactorStats, Used |
 | [Matrices and vectors](./lacore.md) | linalg::direct | deterministic_factor_env |
-| [Linear algebra driver](./ladriver.md) | linalg::direct, linalg::ordering | Definiteness, FactorBackend, FactorStats, FillOrdering, ShiftInvertOperator, ShiftedFactorization, ShiftedSolver, SolverError +2 |
+| [Linear algebra driver](./ladriver.md) | linalg::direct, linalg::ordering | Definiteness, FactorBackend, FactorDiagnostics, FactorStats, FillOrdering, ShiftInvertOperator, ShiftedFactorization, ShiftedSolver +3 |
 | [Eigensolvers](./laeigen.md) | linalg::direct | Definiteness, ShiftedFactorization, ShiftedSolver, SolverError, Threads |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::blr, linalg::direct | BlrOptions, Definiteness, FactorBackend, FactorStats, ShiftedBlrLu, ShiftedFactorization, ShiftedSolver, SolverError |
 | [Preconditioners](./laprecond.md) | linalg::direct | Definiteness, DirectSolve, ShiftedFactorization, ShiftedSolver, SolverError |
@@ -161,15 +162,16 @@ classDiagram
         <<struct>>
         +min_pivot_abs f64
         +max_pivot_abs f64
-        +matrix_scale f64
-        +small_pivots usize
-        +first_bad_pivot_index Option~usize~
-        +positive_inertia Option~usize~
-        +negative_inertia Option~usize~
-        +zero_inertia Option~usize~
-        +more_4_fields
+        +min_diag_abs f64
+        +max_diag_abs f64
+        +max_entry_abs f64
+        +pivot_growth f64
+        +pivot_ratio f64
+        +has_factor_pivots bool
+        +more_10_fields
         +shift_perturbation() T
         +has_shift_perturbation() bool
+        +is_anomalous_pivot_growth() bool
     }
     class FactorStats {
         <<struct>>
@@ -202,10 +204,15 @@ classDiagram
         +threads ThreadPolicy
         +ordering FillOrdering
         +recovery SingularRecovery
+        +accept_perturbed_shift bool
         +iterative_threshold Option~usize~
         +new(a, b, definiteness) Result
+        +set_shift_invert_pencil(skip)
+        +is_shift_invert_pencil() bool
+        +factor_sigma() T
         +diagnostics() FactorDiagnostics
         +replace_matrices(a, b) Result
+        +estimate_rcond_1norm() Option~f64~
     }
     class ShiftInvertOperator {
         <<struct>>
@@ -398,26 +405,31 @@ classDiagram
 | fn | `deterministic_factor_env` | `linalg/direct.rs:129` | `pub(crate) fn deterministic_factor_env() -> bool` —  Returns `true` when `NYX_DETERMINISTIC_FACTOR` requests strictly sequential (`Par::Seq`) |
 | struct | `ThreadPolicy` | `linalg/direct.rs:179` | fields: `factor`, `solve` —  Parallelism of numeric factorisation and of the triangular solves. |
 | enum | `SingularRecovery` | `linalg/direct.rs:193` | variants: `Auto`, `PerturbShift`, `IterativeFallback`, `Disabled` —  Recovery strategy used by [`ShiftedFactorization`] when `(A - sigma B)` is singular, |
-| struct | `FactorDiagnostics` | `linalg/direct.rs:208` | fields: `min_pivot_abs`, `max_pivot_abs`, `matrix_scale`, `small_pivots`, `first_bad_pivot_index`, `positive_inertia`, `negative_inertia`, `zero_inertia`, `shift_perturbation_re`, `shift_perturbation_im`, `krylov_fallback`, `krylov_iterations` —  Pivot, Sylvester inertia, and singular-recovery diagnostics for [`ShiftedFactorization`] (R31). |
-| struct | `FactorStats` | `linalg/direct.rs:250` | fields: `analyse_secs`, `symbolic_count`, `numeric_secs_total`, `numeric_secs_last`, `numeric_count`, `assemble_secs_last`, `used`, `backend`, `cholesky_fallbacks`, `solves`, `factor_nnz`, `solve_secs_total` —  Timings and counters of a [`ShiftedFactorization`] (seconds). |
-| trait | `ShiftedSolver` | `linalg/direct.rs:277` | methods: `dim`, `set_shift`, `solve_block_in_place`, `stats` —  "Factorise at a shift, then solve": the interface the eigensolvers use. A backend other than |
-| struct | `Assembled` | `linalg/direct.rs:288` | fields: `col_ptr`, `row_idx`, `a`, `b` —  Union pattern (CSC) of `A`, `B` (or the identity), optionally restricted to the lower |
-| fn | `assemble` | `linalg/direct.rs:295` | `pub(crate) fn assemble<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>, lower: bool) -> Result<Assembled<T>, SolverError>` |
-| fn | `assemble_lower_sorted` | `linalg/direct.rs:362` | `pub(crate) fn assemble_lower_sorted<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Assembled<T>, SolverError>` —  The lower-triangle union pattern of symmetric `A` and `B` in O(nnz) without sorting: column `c` of the lower triangle is row `c` of |
-| struct | `ShiftedFactorization` | `linalg/direct.rs:1793` | fields: `threads`, `ordering`, `recovery`, `iterative_threshold` —  `faer`-backed [`ShiftedSolver`] with symbolic reuse and fill-reducing ordering on the |
-| struct | `ShiftInvertOperator` | `linalg/direct.rs:3012` |  The spectral transformation `x ↦ (A − σB)⁻¹ B x` as a [`LinearOperator`], so that the |
-| struct | `ShiftedSolvePreconditioner` | `linalg/direct.rs:3056` |  A [`Preconditioner`] (crate::linalg::linop::Preconditioner) from a factorisation of `A − τB`: `z = (A − τB)⁻¹ r`. |
-| struct | `DirectSolve` | `linalg/direct.rs:3078` |  An owned exact solver as a [`Preconditioner`] (crate::linalg::linop::Preconditioner): factorises `A` once |
+| struct | `FactorDiagnostics` | `linalg/direct.rs:208` | fields: `min_pivot_abs`, `max_pivot_abs`, `min_diag_abs`, `max_diag_abs`, `max_entry_abs`, `pivot_growth`, `pivot_ratio`, `has_factor_pivots`, `matrix_scale`, `small_pivots`, `first_bad_pivot_index`, `positive_inertia`, ... —  Pivot, Sylvester inertia, and singular-recovery diagnostics for [`ShiftedFactorization`] (R31). |
+| struct | `FactorStats` | `linalg/direct.rs:277` | fields: `analyse_secs`, `symbolic_count`, `numeric_secs_total`, `numeric_secs_last`, `numeric_count`, `assemble_secs_last`, `used`, `backend`, `cholesky_fallbacks`, `solves`, `factor_nnz`, `solve_secs_total` —  Timings and counters of a [`ShiftedFactorization`] (seconds). |
+| trait | `ShiftedSolver` | `linalg/direct.rs:304` | methods: `dim`, `set_shift`, `solve_block_in_place`, `stats` —  "Factorise at a shift, then solve": the interface the eigensolvers use. A backend other than |
+| struct | `Assembled` | `linalg/direct.rs:315` | fields: `col_ptr`, `row_idx`, `a`, `b` —  Union pattern (CSC) of `A`, `B` (or the identity), optionally restricted to the lower |
+| fn | `assemble` | `linalg/direct.rs:322` | `pub(crate) fn assemble<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>, lower: bool) -> Result<Assembled<T>, SolverError>` |
+| fn | `assemble_lower_sorted` | `linalg/direct.rs:389` | `pub(crate) fn assemble_lower_sorted<T: Scalar>(a: &Csr<T>, b: Option<&Csr<T>>) -> Result<Assembled<T>, SolverError>` —  The lower-triangle union pattern of symmetric `A` and `B` in O(nnz) without sorting: column `c` of the lower triangle is row `c` of |
+| struct | `ShiftedFactorization` | `linalg/direct.rs:1890` | fields: `threads`, `ordering`, `recovery`, `accept_perturbed_shift`, `iterative_threshold` —  `faer`-backed [`ShiftedSolver`] with symbolic reuse and fill-reducing ordering on the |
+| struct | `ShiftInvertOperator` | `linalg/direct.rs:3294` |  The spectral transformation `x ↦ (A − σB)⁻¹ B x` as a [`LinearOperator`], so that the |
+| struct | `ShiftedSolvePreconditioner` | `linalg/direct.rs:3338` |  A [`Preconditioner`] (crate::linalg::linop::Preconditioner) from a factorisation of `A − τB`: `z = (A − τB)⁻¹ r`. |
+| struct | `DirectSolve` | `linalg/direct.rs:3360` |  An owned exact solver as a [`Preconditioner`] (crate::linalg::linop::Preconditioner): factorises `A` once |
 | fn | `Threads::par` | `linalg/direct.rs:137` | `pub(crate) fn par(self) -> Par` |
 | fn | `Threads::par_for_factor` | `linalg/direct.rs:156` | `pub(crate) fn par_for_factor(self, n: usize) -> Par` —  Parallelism for factorising a sparse matrix of dimension `n`: under [`Threads::Global`], |
-| fn | `FactorDiagnostics::shift_perturbation` | `linalg/direct.rs:238` | `pub fn shift_perturbation<T: Scalar>(&self) -> T` —  Returns the complex/real shift perturbation `delta = factor_sigma - requested_sigma`. |
-| fn | `FactorDiagnostics::has_shift_perturbation` | `linalg/direct.rs:243` | `pub fn has_shift_perturbation(&self) -> bool` —  Returns `true` when automatic shift perturbation was applied. |
-| fn | `ShiftedFactorization::new` | `linalg/direct.rs:1842` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, definiteness: Definiteness) -> Result<Self, SolverError>` —  Prepares the pattern for `A − σB` (`B = None` means the identity). With |
-| fn | `ShiftedFactorization::diagnostics` | `linalg/direct.rs:1902` | `pub fn diagnostics(&self) -> FactorDiagnostics` —  Returns a snapshot of pivot, Sylvester inertia, and singular/Krylov recovery diagnostics (R31). |
-| fn | `ShiftedFactorization::replace_matrices` | `linalg/direct.rs:1931` | `pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError>` —  Replaces the *values* of `A` (and `B`) without redoing the symbolic analysis, for matrices |
-| fn | `ShiftInvertOperator::new` | `linalg/direct.rs:3018` | `pub fn new(solver: &'a S, b: Option<&'a Csr<T>>) -> Self` |
-| fn | `ShiftedSolvePreconditioner::new` | `linalg/direct.rs:3062` | `pub fn new(solver: &'a S) -> Self` |
-| fn | `DirectSolve::new` | `linalg/direct.rs:3083` | `pub fn new(a: &Csr<T>, definiteness: Definiteness) -> Result<Self, SolverError>` |
+| fn | `FactorDiagnostics::shift_perturbation` | `linalg/direct.rs:251` | `pub fn shift_perturbation<T: Scalar>(&self) -> T` —  Returns the complex/real shift perturbation `delta = factor_sigma - requested_sigma`. |
+| fn | `FactorDiagnostics::has_shift_perturbation` | `linalg/direct.rs:256` | `pub fn has_shift_perturbation(&self) -> bool` —  Returns `true` when automatic shift perturbation was applied. |
+| fn | `FactorDiagnostics::is_anomalous_pivot_growth` | `linalg/direct.rs:262` | `pub fn is_anomalous_pivot_growth(&self) -> bool` —  Returns `true` when zero-cost factorization diagnostics indicate anomalous pivot/diagonal |
+| fn | `ShiftedFactorization::new` | `linalg/direct.rs:1943` | `pub fn new(a: &Csr<T>, b: Option<&Csr<T>>, definiteness: Definiteness) -> Result<Self, SolverError>` —  Prepares the pattern for `A − σB` (`B = None` means the identity). With |
+| fn | `ShiftedFactorization::set_shift_invert_pencil` | `linalg/direct.rs:2006` | `pub fn set_shift_invert_pencil(&mut self, skip: bool)` —  Marks whether this factorization is for a shift-and-invert spectral pencil `(A - sigma B)`, |
+| fn | `ShiftedFactorization::is_shift_invert_pencil` | `linalg/direct.rs:2011` | `pub fn is_shift_invert_pencil(&self) -> bool` —  Returns `true` when dynamic `rcond` probing is skipped (shift-and-invert pencils). |
+| fn | `ShiftedFactorization::factor_sigma` | `linalg/direct.rs:2017` | `pub fn factor_sigma(&self) -> T` —  Returns the shift actually factored by the latest `set_shift` (`sigma + delta` if shift |
+| fn | `ShiftedFactorization::diagnostics` | `linalg/direct.rs:2022` | `pub fn diagnostics(&self) -> FactorDiagnostics` —  Returns a snapshot of pivot, Sylvester inertia, and singular/Krylov recovery diagnostics (R31). |
+| fn | `ShiftedFactorization::replace_matrices` | `linalg/direct.rs:2051` | `pub fn replace_matrices(&mut self, a: &Csr<T>, b: Option<&Csr<T>>) -> Result<(), SolverError>` —  Replaces the *values* of `A` (and `B`) without redoing the symbolic analysis, for matrices |
+| fn | `ShiftedFactorization::estimate_rcond_1norm` | `linalg/direct.rs:2968` | `pub fn estimate_rcond_1norm(&self) -> Option<f64>` —  2-step Hager-Higham 1-norm reciprocal condition number estimate (`1 / (\|\|M\|\|_1 \|\|M^{-1}\|\|_1)`). |
+| fn | `ShiftInvertOperator::new` | `linalg/direct.rs:3300` | `pub fn new(solver: &'a S, b: Option<&'a Csr<T>>) -> Self` |
+| fn | `ShiftedSolvePreconditioner::new` | `linalg/direct.rs:3344` | `pub fn new(solver: &'a S) -> Self` |
+| fn | `DirectSolve::new` | `linalg/direct.rs:3365` | `pub fn new(a: &Csr<T>, definiteness: Definiteness) -> Result<Self, SolverError>` |
 | struct | `LowRank` | `linalg/lowrank.rs:43` | fields: `m`, `n`, `r`, `u`, `v` —  `A ≈ U Vᴴ` with `U: m × r`, `V: n × r` (column-major). |
 | fn | `aca_partial` | `linalg/lowrank.rs:103` | `pub fn aca_partial<T: Scalar>( m: usize, n: usize, entry: &dyn Fn(usize, usize) -> T, tol: f64, max_rank: usize, ) -> LowRank<T>` —  Adaptive cross approximation with **partial pivoting** (Bebendorf): the block `A[0..m, 0..n]` is given |
 | fn | `aca_full` | `linalg/lowrank.rs:190` | `pub fn aca_full<T: Scalar>(a: &mut [T], m: usize, n: usize, tol: f64, max_rank: usize) -> LowRank<T>` —  ACA with **full pivoting** on an explicit column-major `m × n` block (destroyed; on return it holds the residual): |

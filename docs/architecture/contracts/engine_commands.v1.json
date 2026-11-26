@@ -852,11 +852,35 @@
             "null"
           ]
         },
+        "adapt_growth": {
+          "description": "target mesh cell growth multiplier per ems::cavity / sms AMR pass (> 1.0); null uses 1.5",
+          "exclusiveMinimum": 1.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "adapt_max_cells": {
           "description": "adaptive / AMR maximum cell count (>= 1); null uses 2000000",
           "minimum": 1,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "adapt_passes": {
+          "description": "number of outer goal-oriented AMR passes for ems::cavity (Maxwell residual) and sms (Hessian estimator); null or 1 disables AMR",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "adapt_rel_tol": {
+          "description": "relative quantity-of-interest tolerance between consecutive ems::cavity / sms AMR passes; null uses 1e-3",
+          "exclusiveMinimum": 0,
+          "type": [
+            "number",
             "null"
           ]
         },
@@ -958,6 +982,10 @@
             "null"
           ]
         },
+        "retain_amr_data": {
+          "description": "retain transient cellwise ElectroAmrData indicators on SolveResult instead of stripping them after solve, default false",
+          "type": "boolean"
+        },
         "singular_edges": {
           "description": "3D sheet stack: edge singularity enrichment on zero-thickness conductor rims (\"none\" or \"quarter_point\"); null uses study defaults",
           "enum": [
@@ -1014,6 +1042,14 @@
           },
           "type": [
             "array",
+            "null"
+          ]
+        },
+        "target_tol": {
+          "description": "target relative discretization tolerance used to certify error bounds (e.g. Prager-Synge flux_bounds) before a convergence check; null uses default 1e-2",
+          "exclusiveMinimum": 0,
+          "type": [
+            "number",
             "null"
           ]
         },
@@ -1120,6 +1156,10 @@
           },
           "type": "array"
         },
+        "retain_amr_data": {
+          "description": "retain transient cellwise ElectroAmrData indicators on the stored result instead of stripping them after solve; default false",
+          "type": "boolean"
+        },
         "save_fields": {
           "description": "when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses, keeping scalars and eigenvalues; default true",
           "type": "boolean"
@@ -1213,22 +1253,46 @@
   },
   {
     "access": "expensive",
-    "description": "Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a mesh `convergence` check (`physics`, `factor`, `tolerance`) and returns its entry at once. The heavy lane runs one job at a time in order of priority (1 a person's request, 2 an agent's, the default, 3 sweeps and batches; a waiting job rises one level after a minute), then in turns between owners, then in order of submission. The job carries a frozen copy of the project: later edits do not change it (`project_changed` says they happened). `supersede` replaces a queued request of the same kind and targets; `hold` keeps it from starting until `queue_release`. A job that comes after another of the same project reuses the mesh the first built.",
+    "description": "Queues a `solve` (default; `physics` is a code or a list), a `mesh` build or a mesh `convergence` check (`physics`, `factor`, `grids`, `tolerance`) and returns its entry at once. The heavy lane runs one job at a time in order of priority (1 a person's request, 2 an agent's, the default, 3 sweeps and batches; a waiting job rises one level after a minute), then in turns between owners, then in order of submission. The job carries a frozen copy of the project: later edits do not change it (`project_changed` says they happened). `supersede` replaces a queued request of the same kind and targets; `hold` keeps it from starting until `queue_release`. A job that comes after another of the same project reuses the mesh the first built.",
     "name": "queue_submit",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "apply_extrapolated": {
+          "description": "convergence: promote extrapolated capacitance matrix onto stored result",
+          "type": "boolean"
+        },
+        "coarsen": {
+          "description": "convergence: invert factor < 1 into a coarsening ladder relative to present mesh",
+          "type": "boolean"
+        },
         "detached": {
           "description": "solve only, with `shared`: write the item into the queue and return at once, with nothing of this session waiting for it; the answer is the item (`shared_id`, and `results`, the file that `open_results` reads once its state is `done`). Closing the program leaves it running",
           "type": "boolean"
         },
+        "extrapolate": {
+          "description": "convergence: optional Richardson extrapolation mode",
+          "enum": [
+            "richardson_log_spd",
+            "richardson_linear"
+          ],
+          "type": "string"
+        },
         "factor": {
-          "description": "convergence: finer/present element size, default 0.6",
+          "description": "convergence: comparison/present element size, default 0.6",
           "type": "number"
         },
         "force": {
           "description": "start even when the memory estimate says this machine cannot hold the solve (an estimate exists once earlier solves of this kind ran in workers); without it such a solve is refused, and one that fits the machine but not the memory free now waits",
           "type": "boolean"
+        },
+        "grids": {
+          "description": "convergence: number of mesh levels (2 default, or 3 for Roache GCI)",
+          "enum": [
+            2,
+            3
+          ],
+          "type": "integer"
         },
         "hold": {
           "description": "start held",
@@ -1244,6 +1308,14 @@
             "solve",
             "mesh",
             "convergence"
+          ],
+          "type": "string"
+        },
+        "match": {
+          "description": "convergence: solution pairing strategy (index or nearest)",
+          "enum": [
+            "index",
+            "nearest"
           ],
           "type": "string"
         },
@@ -1303,6 +1375,19 @@
         "priority": {
           "description": "1, 2 or 3; lower runs first",
           "type": "integer"
+        },
+        "quantities": {
+          "description": "convergence: quantity filter list",
+          "items": {
+            "description": "quantity filter",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "retain_amr_data": {
+          "description": "solve only: retain transient cellwise ElectroAmrData indicators on the stored result instead of stripping them after solve; default false",
+          "type": "boolean"
         },
         "save_fields": {
           "description": "solve only: when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses; default true",
@@ -1725,7 +1810,7 @@
   },
   {
     "access": "read",
-    "description": "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not) and scalars, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored), and `validated`: `{state, reason, check?}` where `state` is `exploratory` (no mesh-convergence check with a tolerance has passed on this problem), `checked` (one did: `check` says factor, tolerance, what was compared and the worst difference) or `check_not_affordable` (not checked, and a check is expected not to fit this machine). A stale result is never checked; every answer that carries `stale` carries `validated`.",
+    "description": "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not), scalars, unconditional solver `diagnostics` and numerical `error_budget`, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored), and `validated`: `{state, tier, reason, check?}` where `state` is `exploratory` (no mesh-convergence check with a tolerance has passed on this problem), `checked` (one did or flux bounds certified it) or `check_not_affordable` (not checked, and a check is expected not to fit this machine). A stale result is never checked; every answer that carries `stale` carries `validated`.",
     "name": "result_info",
     "schema": {
       "additionalProperties": false,
@@ -1964,7 +2049,7 @@
   },
   {
     "access": "read",
-    "description": "The largest (`op: max`, default) or smallest (`min`) real value of an expression at the nodes of the cells of a region, with the cell and the point. It is the maximum over the nodes, not over the interpolant between them. A complex expression has no order: wrap it in `abs`, `abs2`, `re` or `im`.",
+    "description": "The largest (`op: max`, default) or smallest (`min`) real value of an expression in a region. By default reports the extremum at the nodes while checking P2 candidate cells for larger interior peaks (`interior_extremum`); pass `interior: true` to return the P2 sub-sampled/Newton-refined interior extremum directly as `value`. A complex expression has no order: wrap it in `abs`, `abs2`, `re` or `im`.",
     "name": "extremum",
     "schema": {
       "additionalProperties": false,
@@ -1977,6 +2062,10 @@
             "object",
             "array"
           ]
+        },
+        "interior": {
+          "description": "for P2 fields, return the sub-sampled and Newton-refined interior extremum directly in `value` instead of the nodal value; default false still checks peak candidates and surfaces `interior_extremum` when higher",
+          "type": "boolean"
         },
         "op": {
           "description": "default max",
@@ -2891,17 +2980,28 @@
   },
   {
     "access": "expensive",
-    "description": "Solves the physics on a second mesh with element sizes multiplied by `factor` (`< 1` refines, `> 1` coarsens; the active project is never mutated) and compares every eigenvalue, value and scalar between the coarse and fine grids. By default `scale_sizes` is true so non-suppressed `add_size` rules (`h`, `max_deviation`, `min_layers`) and `gap_cells` scale proportionally with `factor` on the comparison copy. With `tolerance` each row says pass or fail, `converged` summarises, and the verdict is kept (`validated` becomes `checked` or stays `exploratory`). When mode ordering changes between meshes, `match: \"nearest\"` pairs mutual nearest eigenvalues and `track` filters candidate modes on both meshes by target (`f`, `n_b` or `n_eff`) and/or physical mode signatures (`region`/`min_share`, `component`/`min_component`, `max_layer_fraction`). With `extrapolate` (`\"richardson_log_spd\"` or `\"richardson_linear\"`), computes two-grid Richardson extrapolation (`extrapolate_order` defaults to 1.0 on 3D/sheet capacitance matrices, else `2 * order`) and optionally promotes the extrapolated capacitance matrix onto the stored result when `apply_extrapolated` is true.",
+    "description": "Solves the physics on 1 comparison mesh (2-grid default) or 2 comparison meshes (3-grid Roache GCI when `grids: 3`) with element sizes scaled by `factor` (`< 1` refines, `> 1` coarsens, or inverted coarsening ladder `[1.0, 1/factor, (1/factor)^2]` when `coarsen: true`; the active project is never mutated) and compares every eigenvalue, value and scalar across grids. By default `scale_sizes` is true so non-suppressed `add_size` rules (`h`, `max_deviation`, `min_layers`) and `gap_cells` scale proportionally on comparison copies. With `tolerance` each row says pass or fail, `converged` summarises, and the verdict is kept (`validated` becomes `checked` with tier `gci_verified` / `two_grid_checked` or stays `exploratory` / `non_convergent`). Sub-solves are isolated through `nyx-worker` and admitted against machine RAM when available. When mode ordering changes between meshes, `match: \"nearest\"` pairs mutual nearest eigenvalues and `track` filters candidate modes by target (`f`, `n_b` or `n_eff`) and/or physical mode signatures. With `extrapolate` (`\"richardson_log_spd\"` or `\"richardson_linear\"`), computes Richardson extrapolation (`extrapolate_order` defaults to 1.0 on 3D/sheet capacitance matrices, else `2 * order`) and promotes extrapolated capacitance matrices when `apply_extrapolated` is true (tagging `SpatialErrorEstimate.extrapolated_scalars_only = true`).",
     "name": "convergence_check",
     "schema": {
       "additionalProperties": false,
       "properties": {
         "apply_extrapolated": {
-          "description": "when true, promote the extrapolated capacitance matrix onto the stored latest result of physics, default false",
+          "description": "when true, promote the extrapolated capacitance matrix onto the stored latest result of physics and mark extrapolated_scalars_only in error_budget, default false",
           "type": "boolean"
         },
+        "coarsen": {
+          "description": "when true and factor < 1, invert factor into a coarsening ladder [1.0, 1/factor, (1/factor)^2] relative to the present mesh when memory headroom is tight, default false",
+          "type": "boolean"
+        },
+        "coarsen_factors": {
+          "description": "explicit coarsening element-size multipliers (> 1.0) relative to the present mesh (1 entry for grids=2, 2 entries for grids=3)",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
         "dry_run": {
-          "description": "only build both meshes and answer their cells and what a solve of each is expected to cost; nothing is solved",
+          "description": "only build the comparison mesh(es) and answer their cells and what a solve of each is expected to cost; nothing is solved",
           "type": "boolean"
         },
         "extrapolate": {
@@ -2913,15 +3013,31 @@
           "type": "string"
         },
         "extrapolate_order": {
-          "description": "asymptotic convergence order p > 0 for Richardson extrapolation; default 1.0 for 3D/sheet capacitance matrices, else 2 * order",
+          "description": "asymptotic convergence order p > 0 for Richardson extrapolation and GCI theoretical order; default 1.0 for 3D/sheet capacitance matrices, else 2 * order",
           "type": "number"
         },
         "factor": {
           "description": "comparison/present element-size ratio, positive and not 1 (< 1 refines, > 1 coarsens), default 0.6",
           "type": "number"
         },
+        "force": {
+          "description": "start convergence sub-solves even when machine memory estimate flags low headroom, default false",
+          "type": "boolean"
+        },
+        "grids": {
+          "description": "number of mesh levels to solve: 2 (default fast check) or 3 (Roache GCI with observed order and safety factor)",
+          "enum": [
+            2,
+            3
+          ],
+          "type": "integer"
+        },
+        "isolate": {
+          "description": "override worker process isolation for convergence sub-solves (default uses nyx-worker when configured)",
+          "type": "boolean"
+        },
         "match": {
-          "description": "how the solutions of the two meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the other mesh in the complex plane and lists the modes without a partner",
+          "description": "how the solutions of the meshes are paired: index (default) compares solution i with solution i; nearest pairs each mode with the nearest eigenvalue of the other mesh in the complex plane and lists the modes without a partner",
           "enum": [
             "index",
             "nearest"
@@ -2955,16 +3071,16 @@
           "type": "array"
         },
         "scale_sizes": {
-          "description": "scale non-suppressed add_size features (h, max_deviation, min_layers) proportionally with factor on the comparison copy, default true",
+          "description": "scale non-suppressed add_size features (h, max_deviation, min_layers) proportionally with factor on comparison copies, default true",
           "type": "boolean"
         },
         "tolerance": {
-          "description": "largest accepted relative difference, e.g. 1e-3; omit to only report",
+          "description": "largest accepted relative difference (or 3-grid GCI), e.g. 1e-3; omit to only report",
           "type": "number"
         },
         "track": {
           "additionalProperties": false,
-          "description": "follow mode(s) matching a target eigenvalue (f, n_b or n_eff) and/or physical mode-signature filters across both meshes",
+          "description": "follow mode(s) matching a target eigenvalue (f, n_b or n_eff) and/or physical mode-signature filters across meshes",
           "properties": {
             "component": {
               "description": "field component name (e.g. Ex, Ey, Ez) whose share must be >= min_component",
@@ -3042,7 +3158,7 @@
   },
   {
     "access": "read",
-    "description": "The project title, the mesh size and for each physics the study, size, time, number of solutions and scalars of a results file.",
+    "description": "The project title, the mesh size and for each physics the study, size, time, number of solutions, scalars, solver diagnostics and numerical error budget of a results file.",
     "name": "results_file_info",
     "schema": {
       "additionalProperties": false,

@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Error estimators** (`femcore.estimators`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements.
+> Error estimation and the solve-estimate-adapt loop; analytic/CurvedTet Maxwell residual estimator (`maxwell.rs`) and `estimate`/`estimate3` for `sms` R6f AMR.
 
-**Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 53](../../../adr/0053-maxwell-residual-estimator-and-the-generic-adaptation-loop.md)  
-**Size:** 4 files, 2653 lines.
+**Decisions:** [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 53](../../../adr/0053-maxwell-residual-estimator-and-the-generic-adaptation-loop.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 4 files, 3730 lines.
 
 ## Files
 
@@ -14,7 +14,7 @@ C4 level 4 (code) of the component **Error estimators** (`femcore.estimators`) i
 | `crates/femcore/src/adapt/electro.rs` | 1528 |  |
 | `crates/femcore/src/adapt/estimate.rs` | 344 | Error estimation and the solve-estimate-adapt loop for the meshes of `meshing`. |
 | `crates/femcore/src/adapt/estimate3.rs` | 317 | Error estimation and the solve-estimate-adapt loop for tetrahedral meshes (the 3D counterpart of `estimate`, without the 2D geometry pipeline: the start mesh is any tetrahedral mesh, adaptation is `adapt::drive3`). |
-| `crates/femcore/src/adapt/maxwell.rs` | 464 | A posteriori error estimator for time-harmonic Maxwell fields on tetrahedra (ADR 53), and the metric it asks for. |
+| `crates/femcore/src/adapt/maxwell.rs` | 1541 | A posteriori error estimator for time-harmonic Maxwell fields on tetrahedra (ADR 53), and the metric it asks for. |
 
 ## What it uses
 
@@ -36,7 +36,7 @@ C4 level 4 (code) of the component **Error estimators** (`femcore.estimators`) i
 | Component | Modules | Items |
 |---|---|---|
 | [dfs: Electrostatics kernel](../dfs/electro.md) | adapt::electro, adapt::estimate, adapt::estimate3 | DEFAULT_EPS_FLOOR, ElectroEstimatorOptions, Permittivity, electro_goal_indicators, electro_term_indicators, recovered_hessians |
-| [engine: Meshing seam](../engine/meshing.md) | adapt::electro | ElectroMetric2dOptions, ElectroMetric3dOptions, electro_metrics_3d, electro_overlay_metrics_2d, project_indicators_to_overlay_2d |
+| [engine: Meshing seam](../engine/meshing.md) | adapt::electro, adapt::estimate, adapt::estimate3, adapt::maxwell | CurlField, ElectroMetric2dOptions, ElectroMetric3dOptions, EquidistributeOptions, Estimator, MaxwellOptions, electro_metrics_3d, electro_overlay_metrics_2d +4 |
 
 ## Class diagram
 
@@ -201,6 +201,14 @@ classDiagram
     class CurlField {
         <<interface>>
         +sample(cell, lam) tuple
+        +sample_derivatives(_cell, _lam) OptionCC
+    }
+    class DomainSkipRule {
+        <<struct>>
+        +pml_labels BTreeSet~i32~
+        +anisotropic_labels BTreeSet~i32~
+        +new(pml_labels, anisotropic_labels) Self
+        +should_skip(label) bool
     }
     class MaxwellOptions {
         <<struct>>
@@ -216,6 +224,21 @@ classDiagram
         +parts slice
         +total f64
     }
+    class NedelecEval {
+        <<struct>>
+        +w Vec~V3~
+        +curl Vec~V3~
+        +div Vec~f64~
+        +curl_curl Vec~V3~
+    }
+    class NedelecTetField {
+        <<struct>>
+        +mesh SimplexMesh
+        +order usize
+        +cell_dofs slice
+        +cell_keys slice
+        +dofs slice
+    }
     class EquidistributeOptions {
         <<struct>>
         +order usize
@@ -225,6 +248,7 @@ classDiagram
     }
     class fns_adapt_maxwell_rs {
         <<module adapt/maxwell.rs>>
+        +eval_nedelec_tet_with_derivatives(order, lam, j_mat, g, det, h_jac, gid) Result
         +maxwell_indicators(mesh, field, opt) Result
         +indicator_metrics(mesh, eta2, opt, floor) Result
     }
@@ -237,6 +261,7 @@ classDiagram
   LoopResult --> WarmStart
   LoopSettings3 --> Estimator
   LoopResult3 --> Cycle3
+  NedelecTetField ..|> CurlField
 ```
 
 ## Public items
@@ -281,11 +306,17 @@ classDiagram
 | fn | `adapt_loop3` | `adapt/estimate3.rs:231` | `pub fn adapt_loop3<R>( start: &SimplexMesh, s: &LoopSettings3, floor: Option<&dyn Fn(&SimplexMesh) -> Result<Vec<Sym<3>>, String>>, solve: &mut dyn FnMut(&SimplexMesh) -> Result<(R, f64), String>, metrics: &mut dyn FnMut(&SimplexMesh, &R, f64, Option<&[Sym<3>]>) -> Result<Vec<Sym<3>>, String>, adapt: &mut dyn FnMut(&SimplexMesh, &[Sym<3>], f64) -> Result<SimplexMesh, String>, ) -> Result<LoopResult3<R>, String>` —  The loop of `solve_adaptively3` with the two choices left to the caller: what the solution asks of the mesh (`metrics`: the mesh, the |
 | fn | `solve_adaptively3` | `adapt/estimate3.rs:271` | `pub fn solve_adaptively3<R: PlotFields>( start: &SimplexMesh, s: &LoopSettings3, floor: Option<&dyn Fn(&SimplexMesh) -> Result<Vec<Sym<3>>, String>>, solve: &mut dyn FnMut(&SimplexMesh) -> Result<(R, f64), String>, ) -> Result<LoopResult3<R>, String>` —  Solve on `start`, adapt to the solution, solve again, until the quantity of interest settles. `solve` gets a mesh and returns the |
 | fn | `LoopSettings3::new` | `adapt/estimate3.rs:205` | `pub fn new(h: f64) -> Self` |
-| trait | `CurlField` | `adapt/maxwell.rs:43` | methods: `sample` —  The field of one solution, as the estimator reads it. |
-| struct | `MaxwellOptions` | `adapt/maxwell.rs:50` | fields: `k0_sq`, `eps_r`, `mu_r`, `skip`, `natural` —  The medium and the boundary conditions of the problem the field solves. |
-| struct | `Indicators` | `adapt/maxwell.rs:66` | fields: `eta2`, `parts`, `total` —  The indicators of one field. |
-| fn | `maxwell_indicators` | `adapt/maxwell.rs:158` | `pub fn maxwell_indicators(mesh: &SimplexMesh, field: &dyn CurlField, opt: &MaxwellOptions) -> Result<Indicators, String>` —  The indicators `eta_T^2` of `field` on `mesh`. |
-| struct | `EquidistributeOptions` | `adapt/maxwell.rs:317` | fields: `order`, `h_max`, `h_min_fraction`, `target_cells` —  Settings of [`indicator_metrics`]. |
-| fn | `indicator_metrics` | `adapt/maxwell.rs:333` | `pub fn indicator_metrics(mesh: &SimplexMesh, eta2: &[f64], opt: &EquidistributeOptions, floor: Option<&[Sym<3>]>) -> Result<Vec<Sym<3>>, String>` —  The isotropic metric at every vertex that equidistributes the indicators over about `target_cells` cells. A cell of size `s` with |
+| trait | `CurlField` | `adapt/maxwell.rs:66` | methods: `sample`, `sample_derivatives` —  The field of one solution, as the estimator reads it. |
+| struct | `DomainSkipRule` | `adapt/maxwell.rs:82` | fields: `pml_labels`, `anisotropic_labels` —  Skip-rule helper identifying non-isotropic / absorbing domain labels (PML and anisotropic regions) for [`MaxwellOptions::skip`]. |
+| struct | `MaxwellOptions` | `adapt/maxwell.rs:104` | fields: `k0_sq`, `eps_r`, `mu_r`, `skip`, `natural` —  The medium and the boundary conditions of the problem the field solves. |
+| struct | `Indicators` | `adapt/maxwell.rs:120` | fields: `eta2`, `parts`, `total` —  The indicators of one field. |
+| struct | `NedelecEval` | `adapt/maxwell.rs:341` | fields: `w`, `curl`, `div`, `curl_curl` —  Evaluates all local Nedelec `H(curl)` basis functions (`6` for `order == 1`, `20` for `order == 2`) and their exact |
+| fn | `eval_nedelec_tet_with_derivatives` | `adapt/maxwell.rs:356` | `pub fn eval_nedelec_tet_with_derivatives( order: usize, lam: &[f64; 4], j_mat: &[[f64; 3]; 3], g: &[V3; 4], det: f64, h_jac: &JacHessian, gid: &[(u32, u32); 4], ) -> Result<NedelecEval, String>` —  Evaluates Nedelec order-1 (`6`) or order-2 (`20`) tetrahedral basis functions and exact analytic physical derivatives |
+| struct | `NedelecTetField` | `adapt/maxwell.rs:493` | fields: `mesh`, `order`, `cell_dofs`, `cell_keys`, `dofs` —  Self-contained complex Nedelec [`CurlField`] over a [`SimplexMesh`] (straight or [`CurvedTet`]) |
+| fn | `maxwell_indicators` | `adapt/maxwell.rs:755` | `pub fn maxwell_indicators(mesh: &SimplexMesh, field: &dyn CurlField, opt: &MaxwellOptions) -> Result<Indicators, String>` —  The indicators `eta_T^2` of `field` on `mesh`. |
+| struct | `EquidistributeOptions` | `adapt/maxwell.rs:1040` | fields: `order`, `h_max`, `h_min_fraction`, `target_cells` —  Settings of [`indicator_metrics`]. |
+| fn | `indicator_metrics` | `adapt/maxwell.rs:1056` | `pub fn indicator_metrics(mesh: &SimplexMesh, eta2: &[f64], opt: &EquidistributeOptions, floor: Option<&[Sym<3>]>) -> Result<Vec<Sym<3>>, String>` —  The isotropic metric at every vertex that equidistributes the indicators over about `target_cells` cells. A cell of size `s` with |
+| fn | `DomainSkipRule::new` | `adapt/maxwell.rs:89` | `pub fn new(pml_labels: impl IntoIterator<Item = i32>, anisotropic_labels: impl IntoIterator<Item = i32>) -> Self` —  Constructs a skip rule from PML and anisotropic cell domain labels. |
+| fn | `DomainSkipRule::should_skip` | `adapt/maxwell.rs:98` | `pub fn should_skip(&self, label: i32) -> bool` —  Returns `true` when `label` belongs to either the PML or anisotropic domain sets. |
 
-Trait implementations in this component: `Estimator: Default`
+Trait implementations in this component: `Estimator: Default`, `NedelecTetField: CurlField`

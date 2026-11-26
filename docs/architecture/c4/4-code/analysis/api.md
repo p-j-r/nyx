@@ -19,7 +19,7 @@ C4 level 4 (code) of the component **Analysis API** (`analysis.api`) in the cont
 |---|---|---|
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, error, result | Error, Mesh, SolveResult |
 | [Capacitance and inductance matrices](./capacitance.md) | capacitance | CapacitanceMatrixAnalysis, InductanceMatrixAnalysis, OpenBoxExtrapolation, capacitance_matrix, capacitance_matrix_applies, capacitance_matrix_with_mesh_and_params, capacitance_matrix_with_params, extrapolate_open_box_maxwell, inductance_matrix, inductance_matrix_applies |
-| [cQED quantization and TLS participation](./cqed.md) | tls | QuasiElectrostaticTlsMode, TlsParticipationAnalysis, TlsReport, tls_participation, tls_participation_applies, tls_participation_quasi_electrostatic, tls_participation_with_params |
+| [cQED quantization and TLS participation](./cqed.md) | tls | QuasiElectrostaticTlsMode, R0PlateauCheck, TlsParticipationAnalysis, TlsReport, tls_participation, tls_participation_applies, tls_participation_quasi_electrostatic, tls_participation_with_params, tls_r0_plateau_check |
 | [Mode report](./modes.md) | modes | AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved, analyze_modes |
 | [Piezo resonator analysis](./piezo.md) | piezo_resonator | PiezoModeMetrics, PiezoResonatorAnalysis, PiezoResonatorReport, mbvd_admittance, piezo_resonator_applies, piezo_resonator_with_params |
 | [Field samples](./samples.md) | samples | PolarizationInput, polarization_input |

@@ -19,6 +19,7 @@ Solves the active physics (or the named ones, in coupling order), meshing first 
 | `post_analyses[].label` | text | no |  | optional label attached to this post-analysis entry in the reply |
 | `post_analyses[].params` | object | no |  | optional parameters object for shorthand `analysis` |
 | `post_analyses[].physics` | text | no |  | three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis |
+| `retain_amr_data` | true or false | no |  | retain transient cellwise ElectroAmrData indicators on the stored result instead of stripping them after solve; default false |
 | `save_fields` | true or false | no |  | when false, omit mesh and nodal/cell field arrays from worker HDF5 I/O and stored results after running any post_analyses, keeping scalars and eigenvalues; default true |
 | `shared` | true or false | no |  | hand the solve to the queue of the workspace, which every program that uses the workspace shares (the window, the MCP server, `nyx queue`): a queue worker process runs the items one at a time in a worker, and keeps running when the program that asked is closed. Default: what the program was set up to do; implies a worker process |
 | `wait` | true or false | no |  | wait for the result, default true |

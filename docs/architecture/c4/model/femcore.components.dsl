@@ -79,11 +79,11 @@ adaptdrive = component "Adaptation drivers" "Passes of operators until the mesh 
         "codeDiagram" "4-code/femcore/adaptdrive.md"
     }
 }
-estimators = component "Error estimators" "Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements." "Rust modules" {
+estimators = component "Error estimators" "Error estimation and the solve-estimate-adapt loop; analytic/CurvedTet Maxwell residual estimator (`maxwell.rs`) and `estimate`/`estimate3` for `sms` R6f AMR." "Rust modules" {
     properties {
-        "adr" "7, 17, 53"
+        "adr" "7, 17, 53, 133"
         "code" "crates/femcore/src: adapt/electro.rs, adapt/estimate.rs, adapt/estimate3.rs, adapt/maxwell.rs"
-        "lines" "2653"
+        "lines" "3730"
         "codeDiagram" "4-code/femcore/estimators.md"
     }
 }
@@ -99,7 +99,7 @@ ladriver = component "Linear algebra driver" "The door the physics kernels use: 
     properties {
         "adr" "33"
         "code" "crates/femcore/src: linalg/driver.rs, linalg/pc.rs, linalg/problem.rs"
-        "lines" "1454"
+        "lines" "1810"
         "codeDiagram" "4-code/femcore/ladriver.md"
     }
 }
@@ -107,7 +107,7 @@ ladirect = component "Direct solvers" "Shifted sparse direct solves with symboli
     properties {
         "adr" "33, 8, 132"
         "code" "crates/femcore/src: linalg/blr.rs, linalg/direct.rs, linalg/lowrank.rs, linalg/mixed.rs, linalg/ordering.rs, linalg/sparse_lu.rs"
-        "lines" "6115"
+        "lines" "6397"
         "codeDiagram" "4-code/femcore/ladirect.md"
     }
 }
@@ -123,7 +123,7 @@ laeigen = component "Eigensolvers" "Krylov-Schur, LOBPCG, Jacobi-Davidson, quadr
     properties {
         "adr" "33, 8, 11"
         "code" "crates/femcore/src: linalg/arnoldi_real.rs, linalg/chebfsi.rs, linalg/contour.rs, linalg/eps/krylov_schur.rs, linalg/eps/mod.rs, linalg/eps/orth.rs, ... (12 files)"
-        "lines" "4694"
+        "lines" "4731"
         "codeDiagram" "4-code/femcore/laeigen.md"
     }
 }
@@ -139,7 +139,7 @@ laother = component "Time, nonlinear, sweeps" "Time integration, Newton and opti
     properties {
         "adr" "33, 8, 106, 129"
         "code" "crates/femcore/src: linalg/expm.rs, linalg/matfree.rs, linalg/opt.rs, linalg/prom.rs, linalg/snes.rs, linalg/sweep.rs, ... (11 files)"
-        "lines" "4859"
+        "lines" "5102"
         "codeDiagram" "4-code/femcore/laother.md"
     }
 }

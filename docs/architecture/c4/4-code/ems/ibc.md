@@ -5,21 +5,21 @@ C4 level 4 (code) of the component **Thin-film IBC and Josephson ROM** (`ems.ibc
 > Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid, curved Jacobian integrals), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata.
 
 **Decisions:** [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 2 files, 3222 lines.
+**Size:** 2 files, 3285 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-ems/src/ibc.rs` | 1758 |  |
-| `crates/nyx-ems/src/rom.rs` | 1464 |  |
+| `crates/nyx-ems/src/rom.rs` | 1527 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | edge, edge_mixed, fem, fem_mixed, linalg::amg_elastic, linalg::csr, linalg::csr::assembly, linalg::dense +6 | C, CCoo, CCsr, CellType, Coo, CurvedTet, Dense, DirectSolver, FacetType, Geometry +36 |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root | CircuitRom, Discretisation, ModeEnergyRow, RomPort, TlsMeta |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, result | CircuitRom, DiagnosticSeverity, DiagnosticWarning, Discretisation, ModeEnergyRow, RomPort, TlsMeta |
 | [3D cavity kernel](./cavity.md) | cavity | CURVED_QUAD_DEGREE, EmwAssembly, Ned3, basis3_keyed, gradient_full, safe_curved_jacobian |
 | [Native mixed-cell EM](./mixed.md) | mixed_ops | gradient_mixed_full, scalar_nullspace_count_mixed |
 | [Mode kernel](./modes.md) | crate root | C0 |
@@ -110,11 +110,18 @@ classDiagram
     }
   }
   namespace rom_rs {
+    class RomBuildDiagnostics {
+        <<struct>>
+        +warnings Vec~DiagnosticWarning~
+        +max_algebraic_residual f64
+    }
     class fns_rom_rs {
         <<module rom.rs>>
         +compute_mode_energy_and_scale(f, x_red, rot, asm) tuple
         +build_circuit_rom(mesh, problem, asm, solved_vectors, freq_indices, modes, pert_eval) Result
+        +build_circuit_rom_checked(mesh, problem, asm, solved_vectors, freq_indices, modes, pert_eval) Result
         +build_circuit_rom_mixed(mesh, ned, problem, asm, solved_vectors, freq_indices, modes, pert_eval) Result
+        +build_circuit_rom_mixed_checked(mesh, ned, problem, asm, solved_vectors, freq_indices, modes, pert_eval) Result
         +rom_eigenfrequencies(rom) Result
         +rom_complex_eigenfrequencies(rom) Result
         +build_tls_meta(mesh, problem) TlsMeta
@@ -161,8 +168,11 @@ classDiagram
 | fn | `PerturbativeIbcEvaluator::eval_mode` | `ibc.rs:452` | `pub fn eval_mode(&self, x_full: &[C]) -> (f64, f64)` —  Evaluates `(sum_T (L_k_sq / mu_0) int_T \|K_tilde\|^2 dS, sum_T R_s int_T \|K_tilde\|^2 dS)` |
 | fn | `PerturbativeIbcEvaluator::eval_rom_grams` | `ibc.rs:473` | `pub fn eval_rom_grams(&self, q_full_cols: &[Vec<f64>]) -> (Vec<Vec<f64>>, Vec<Vec<f64>>)` —  Evaluates the symmetric `r x r` Gram matrices `(dk_kin, g_r_mat)` on full-DOF real basis columns `q_full_cols`: |
 | fn | `compute_mode_energy_and_scale` | `rom.rs:80` | `pub fn compute_mode_energy_and_scale(f: C, x_red: &[C], rot: C, asm: &EmwAssembly) -> (f64, ModeEnergyRow, f64)` —  Computes the physical scaling factor `s_E > 0` such that `U_elec,m = (1/4) eps_0 (s_E x_m)^H M_tot (s_E x_m) = 1 J`, |
-| fn | `build_circuit_rom` | `rom.rs:562` | `pub fn build_circuit_rom( mesh: &Discretisation, problem: &Problem, asm: &EmwAssembly, solved_vectors: &[Vec<C>], freq_indices: &[(C, usize)], modes: Vec<ModeEnergyRow>, pert_eval: Option<&PerturbativeIbcEvaluator>, ) -> Result<CircuitRom, String>` —  Assembles the passive Craig-Bampton reduced-order model `CircuitRom` (`Q = orth_{M_0}([Q_static, Q_dyn])`). |
-| fn | `build_circuit_rom_mixed` | `rom.rs:576` | `pub fn build_circuit_rom_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &EmwAssembly, solved_vectors: &[Vec<C>], freq_indices: &[(C, usize)], modes: Vec<ModeEnergyRow>, pert_eval: Option<&PerturbativeIbcEvaluator>, ) -> Result<CircuitRom, String>` —  Assembles `CircuitRom` on a native 3D `MixedDiscretisation`. |
-| fn | `rom_eigenfrequencies` | `rom.rs:1275` | `pub fn rom_eigenfrequencies(rom: &CircuitRom) -> Result<Vec<f64>, String>` —  Evaluates the linearized resonant eigenfrequencies (Hz, ascending) of a `CircuitRom` by solving the |
-| fn | `rom_complex_eigenfrequencies` | `rom.rs:1313` | `pub fn rom_complex_eigenfrequencies(rom: &CircuitRom) -> Result<Vec<C>, String>` —  Evaluates the complex damped resonant eigenfrequencies (Hz, positive real part, ascending by `Re(f)`) |
-| fn | `build_tls_meta` | `rom.rs:1384` | `pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta` —  Builds `TlsMeta` for dielectric TLS surface participation analysis on a 3D `ems` result. |
+| struct | `RomBuildDiagnostics` | `rom.rs:512` | fields: `warnings`, `max_algebraic_residual` —  Diagnostics returned alongside [`CircuitRom`] construction. |
+| fn | `build_circuit_rom` | `rom.rs:572` | `pub fn build_circuit_rom( mesh: &Discretisation, problem: &Problem, asm: &EmwAssembly, solved_vectors: &[Vec<C>], freq_indices: &[(C, usize)], modes: Vec<ModeEnergyRow>, pert_eval: Option<&PerturbativeIbcEvaluator>, ) -> Result<CircuitRom, String>` —  Assembles the passive Craig-Bampton reduced-order model `CircuitRom` (`Q = orth_{M_0}([Q_static, Q_dyn])`). |
+| fn | `build_circuit_rom_checked` | `rom.rs:585` | `pub fn build_circuit_rom_checked( mesh: &Discretisation, problem: &Problem, asm: &EmwAssembly, solved_vectors: &[Vec<C>], freq_indices: &[(C, usize)], modes: Vec<ModeEnergyRow>, pert_eval: Option<&PerturbativeIbcEvaluator>, ) -> Result<(CircuitRom, RomBuildDiagnostics), String>` —  Checked variant of [`build_circuit_rom`] also returning projection/lift diagnostics. |
+| fn | `build_circuit_rom_mixed` | `rom.rs:599` | `pub fn build_circuit_rom_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &EmwAssembly, solved_vectors: &[Vec<C>], freq_indices: &[(C, usize)], modes: Vec<ModeEnergyRow>, pert_eval: Option<&PerturbativeIbcEvaluator>, ) -> Result<CircuitRom, String>` —  Assembles `CircuitRom` on a native 3D `MixedDiscretisation`. |
+| fn | `build_circuit_rom_mixed_checked` | `rom.rs:613` | `pub fn build_circuit_rom_mixed_checked( mesh: &MixedDiscretisation, ned: &NedMixed, problem: &Problem, asm: &EmwAssembly, solved_vectors: &[Vec<C>], freq_indices: &[(C, usize)], modes: Vec<ModeEnergyRow>, pert_eval: Option<&PerturbativeIbcEvaluator>, ) -> Result<(CircuitRom, RomBuildDiagnostics), String>` —  Checked variant of [`build_circuit_rom_mixed`] also returning projection/lift diagnostics. |
+| fn | `rom_eigenfrequencies` | `rom.rs:1338` | `pub fn rom_eigenfrequencies(rom: &CircuitRom) -> Result<Vec<f64>, String>` —  Evaluates the linearized resonant eigenfrequencies (Hz, ascending) of a `CircuitRom` by solving the |
+| fn | `rom_complex_eigenfrequencies` | `rom.rs:1376` | `pub fn rom_complex_eigenfrequencies(rom: &CircuitRom) -> Result<Vec<C>, String>` —  Evaluates the complex damped resonant eigenfrequencies (Hz, positive real part, ascending by `Re(f)`) |
+| fn | `build_tls_meta` | `rom.rs:1447` | `pub fn build_tls_meta(mesh: &Discretisation, problem: &Problem) -> TlsMeta` —  Builds `TlsMeta` for dielectric TLS surface participation analysis on a 3D `ems` result. |

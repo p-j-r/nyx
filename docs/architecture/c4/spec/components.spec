@@ -9,9 +9,9 @@
 # Every source file of a crate must belong to exactly one component; gen.pl fails otherwise.
 
 [app | app | nyx]
-window    | Window | main.rs app.rs state.rs feedback.rs spans.rs | 23, 57, 92, 130 | The application object around one Engine: WSLg display backend selection, opaque clear, repaint bursts, pointer/zoom handling, window layout, the run-time state and the frame update loop.
-shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs examples.rs menu.rs activity.rs sweepui.rs | 14, 23, 87, 88, 123, 124, 130 | The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
-inspector | Inspector tabs | tabs.rs forms.rs geomui.rs | 23, 57, 130 | The tabs beside the viewport: geometry editor with wrapped hints, materials, physics, study, results (with integer mode-plot ticks), analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
+window    | Window | main.rs app.rs state.rs feedback.rs spans.rs | 23, 57, 92, 130, 133 | The application object around one Engine: WSLg display backend selection, opaque clear, repaint bursts, pointer/zoom handling, window layout, Study `grids`/`match`/`extrapolate`/`quantities` convergence controls, the run-time state and the frame update loop.
+shell     | Shell and dashboard | shell.rs dashboard.rs wfview.rs sheets.rs examples.rs menu.rs activity.rs sweepui.rs | 14, 23, 87, 88, 123, 124, 130, 133 | The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover with validation tier badges, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
+inspector | Inspector tabs | tabs.rs forms.rs geomui.rs | 23, 57, 130, 133 | The tabs beside the viewport: geometry editor with wrapped hints, materials, physics, study, results (with integer mode-plot ticks and unconditional solver diagnostics/error budget summary above collapsed logs), analysis. Forms are drawn from the physics descriptors; the geometry editor generates one form per feature kind.
 viewport  | Viewport | viewport.rs scene.rs colormap.rs regions.rs | 23, 88, 123 | The 2D/3D viewport: camera, drawing of meshes and result fields, picking, colour maps, the colour slots of regions (solid, hatched, grey) with their number chips and legend, and what is kept between frames.
 style     | Look and widgets | theme.rs kit.rs tokens.rs fmt.rs cvd.rs | 23, 88, 123, 124, 130 | The nyx look (colour tokens, fonts, egui visuals with full weak-text contrast, light and dark) and the small brand widgets (cards, chips, buttons, glyphs, sparklines, sheets), and how numbers and counts are written.
 headless  | Scripts and batch | batch.rs runfile.rs apicmd.rs script.rs pyscript.rs console.rs matcmd.rs | 23, 89, 93, 123, 124, 130 | Runs without a person at the window: scripted runs with screenshots (--script driving ADR 124 shell and deterministic feedback waits), batch runs for clusters, command lists (nyx check, nyx run) and the command reference (nyx api), and the optional user Python script.
@@ -68,15 +68,15 @@ cqed         | cQED result payloads | cqed.rs | 103, 104, 105, 106 | Typed super
 testsupport  | Test support | testkit.rs contract.rs | 10, 19 | The golden-file harness and the contract-test helpers shared by every physics crate.
 
 [dfs | nyx-dfs | nyx_dfs]
-adapter  | Physics adapter | lib.rs | 41, 25, 103 | The Physics implementation of dfs: descriptors, validation, solve entry.
+adapter  | Physics adapter | lib.rs | 41, 25, 103, 132, 133 | The Physics implementation of dfs: descriptors, validation, R32 curved guards, solve entry.
 problem  | Typed problem | problem.rs | 41, 103 | The typed dfs problem the kernels read, decoded from the ProblemSpec envelope.
-heat     | Heat kernel | heat.rs | 41, 9, 132 | Heat transfer on P1/P2 simplices, stationary and transient (`SourceField` MMS, BDF2 time-varying forcing, R32 curved guard).
-electro  | Electrostatics kernel | electro.rs ac_loss.rs planar_bem.rs | 41, 9, 103, 132 | Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, `SourceField` MMS, and multi-RHS terminal conditions.
-magneto  | Magnetostatics kernel | magneto.rs | 103, 132 | Gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`), `SourceField` MMS, R32 guard, and inductance matrix extraction.
-common   | Shared helpers | common.rs | 41, 132 | Per-cell gradients, curved helpers, and values shared by the heat and electrostatics kernels.
+heat     | Heat kernel | heat.rs | 41, 9, 132, 133 | Heat transfer on P1/P2 simplices, stationary and transient (`SourceField` MMS, BDF2 time-varying forcing & temporal error estimate, R32 curved guard).
+electro  | Electrostatics kernel | electro.rs ac_loss.rs planar_bem.rs | 41, 9, 103, 132, 133 | Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, `SourceField` MMS, planar BEM Richardson bounds, tightened AMG convergence, and multi-RHS terminal conditions.
+magneto  | Magnetostatics kernel | magneto.rs | 103, 132, 133 | Gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`), `SourceField` MMS, R32 guard, and inductance matrix extraction.
+common   | Shared helpers | common.rs diag.rs | 41, 132, 133 | Per-cell gradients, curved helpers, `SolverDiagnostics`/`NumericalErrorBudget` builder, and values shared by the heat, electrostatics, and magnetostatics kernels.
 
 [sms | nyx-sms | nyx_sms]
-adapter       | Physics adapter | lib.rs | 42, 25, 68, 101, 129, 132 | The Physics implementation of sms with five studies (static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, driven frequency sweep): descriptors, validation, R32 curved guard, solve entry.
+adapter       | Physics adapter | lib.rs diag.rs | 42, 25, 68, 101, 129, 132, 133 | The Physics implementation of sms with five studies (static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, driven frequency sweep): descriptors, validation, R32 curved guard, shared solver diagnostics builder, solve entry.
 problem       | Typed problem | problem.rs | 42, 68, 101, 129, 132 | The typed sms problem the kernels read, decoded from the envelope, with straight-simplex checks.
 solid         | Solid kernel | solid.rs | 42, 9, 132 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra and MixedDiscretisation: static (`SourceField` MMS) solve and eigenfrequencies.
 piezo         | Piezoelectric kernel | piezo.rs piezo_mat.rs piezo_asm.rs piezo_driven.rs | 129, 106, 128, 132 | Coupled piezoelectric `(u, phi)` constitutive condensation, simplex/mixed assembly, equilibrated direct / Schur Krylov-Schur / QEP / Schur-AMG Right-FGMRES static/eigen solvers, and driven multi-port `Y`/`Z`/`S` PROM sweep on `SimplexMesh` and `MixedDiscretisation`.
@@ -88,7 +88,7 @@ pml           | Absorbing-layer kernel | pml.rs | 42, 101, 132 | Eigenfrequencie
 lrb           | Low-reflecting boundary | lrb.rs | 42, 132 | Low-reflecting boundaries for solid mechanics (with `r`-weighted axisymmetric `damping_matrix`, R6b).
 
 [ems | nyx-ems | nyx_ems]
-adapter   | Physics adapter | lib.rs | 45, 25, 104, 106 | The Physics implementation of ems: descriptors, validation, solve entry.
+adapter   | Physics adapter | lib.rs diag.rs | 45, 25, 104, 106, 133 | The Physics implementation of ems: descriptors, validation, shared `EmsDiag` solver diagnostics builder, solve entry.
 problem   | Typed problem | problem.rs | 45, 104, 106 | The typed ems problem the kernels read, decoded from the envelope.
 modes     | Mode kernel | modes.rs | 45, 9, 132 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed, R32 straight-mesh check).
 modescx   | Complex-mode kernel | modes_complex.rs | 45, 132 | Complex-valued mode analysis: lossy media and perfectly matched layers (`+4` Krylov + `layer_fraction` filter, R32 check).
@@ -151,7 +151,7 @@ meshcheck   | Meshing validation harness | meshing/validate/ | 7 | A small indep
 metric      | Metric fields | adapt/mod.rs adapt/metric.rs adapt/field.rs adapt/field3.rs adapt/work.rs adapt/timer.rs | 7, 5 | Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers.
 adaptops    | Adaptation operators | adapt/ops.rs adapt/ops3.rs adapt/topo.rs adapt/topo3.rs | 7, 51 | Edge split, collapse, flip and smoothing on the working meshes in 2D and 3D, with the vertex classification.
 adaptdrive  | Adaptation drivers | adapt/drive.rs adapt/drive3.rs adapt/geom.rs adapt/geom3.rs | 7, 51 | Passes of operators until the mesh conforms to the metric, with geometry oracles saying where a boundary vertex may go.
-estimators  | Error estimators | adapt/estimate.rs adapt/estimate3.rs adapt/maxwell.rs adapt/electro.rs | 7, 17, 53 | Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements.
+estimators  | Error estimators | adapt/estimate.rs adapt/estimate3.rs adapt/maxwell.rs adapt/electro.rs | 7, 17, 53, 133 | Error estimation and the solve-estimate-adapt loop; analytic/CurvedTet Maxwell residual estimator (`maxwell.rs`) and `estimate`/`estimate3` for `sms` R6f AMR.
 lacore      | Matrices and vectors | linalg/mod.rs linalg/csr.rs linalg/csr/ linalg/bsr.rs linalg/basis.rs linalg/vecops.rs linalg/scalar.rs linalg/kernels.rs linalg/par.rs linalg/rng.rs linalg/linop.rs linalg/mm.rs linalg/bundle.rs linalg/dense/ linalg/faer_glue.rs linalg/maxwell.rs linalg/equilibrate.rs | 33, 8, 11, 129 | The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, symmetric Ruiz equilibration, problem bundles and test-problem generators.
 ladriver    | Linear algebra driver | linalg/driver.rs linalg/problem.rs linalg/pc.rs | 33 | The door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models.
 ladirect    | Direct solvers | linalg/direct.rs linalg/sparse_lu.rs linalg/blr.rs linalg/lowrank.rs linalg/mixed.rs linalg/ordering.rs | 33, 8, 132 | Shifted sparse direct solves with symbolic reuse, `R31` pivot/inertia diagnostics & shift/Krylov recovery, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection.

@@ -60,6 +60,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [ems: Optical mode sets](../ems/optical.md) | linalg::csr::assembly | c |
 | [ems: Typed problem](../ems/problem.md) | linalg::csr::assembly | c |
 | [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |
+| [engine: Meshing seam](../engine/meshing.md) | linalg::csr::assembly | C |
 | [Error estimators](./estimators.md) | linalg::csr::assembly | C |
 | [Expressions](./expr.md) | linalg::csr::assembly | C |
 | [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly, linalg::par, linalg::scalar | C, CCoo, CCsr, Coo, Csr, RCsr, Scalar, c |
@@ -67,10 +68,11 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +7 |
 | [Eigensolvers](./laeigen.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop +4 | Basis, BasisView, C64, Csr, Dense, DenseError, FaerScalar, Identity +18 |
 | [Krylov solvers](./laksp.md) | linalg::basis, linalg::dense, linalg::linop, linalg::rng, linalg::scalar, linalg::vecops | Basis, C64, Dense, LinearOperator, Preconditioner, Scalar, Scaling, axpy +5 |
-| [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par +2 | C, C64, CCoo, CCsr, Csr, Dense, FaerScalar, FnOperator +11 |
+| [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par +2 | C, C64, CCoo, CCsr, Csr, Dense, FaerScalar, FnOperator +12 |
 | [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar +1 | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map +1 |
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
 | [Runtime services](./runtime.md) | linalg::scalar | C64, Scalar |
+| [sms: Physics adapter](../sms/adapter.md) | linalg::csr::assembly | C, CCsr |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [sms: Cross-section study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Csr, RCsr, c |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |

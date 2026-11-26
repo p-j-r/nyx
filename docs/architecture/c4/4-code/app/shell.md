@@ -2,16 +2,16 @@
 
 C4 level 4 (code) of the component **Shell and dashboard** (`app.shell`) in the container **app** (crate `nyx`). [Component view of the container](../../3-components/app.md) · [All code pages](../README.md)
 
-> The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
+> The tab bar, high-DPI UI scaling and persistence, the native menu and palette actions, responsive dashboard cards with live status, the busy chip and queue popover with validation tier badges, non-overlapping workflow toolbars, the sheets (new, search, versions, share, settings) and the example starting points.
 
-**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
-**Size:** 8 files, 5481 lines.
+**Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 23](../../../adr/0023-app-is-a-thin-shell-over-one-project.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 88](../../../adr/0088-colour-has-roles-and-the-window-follows-the-system.md), [ADR 123](../../../adr/0123-window-reset-gui-subsystem-absorbing-layers-as-a-role-and-quiet-chrome.md), [ADR 124](../../../adr/0124-one-bar-five-tabs-always-on-viewport-script-dock-and-physics-dropdown.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 8 files, 5482 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/app/src/activity.rs` | 413 |  |
+| `crates/app/src/activity.rs` | 414 |  |
 | `crates/app/src/dashboard.rs` | 400 |  |
 | `crates/app/src/examples.rs` | 171 |  |
 | `crates/app/src/menu.rs` | 368 |  |
@@ -329,7 +329,7 @@ classDiagram
 | struct | `Activity` | `activity.rs:33` | fields: `rows`, `paused` —  The running and waiting jobs, running first, waiting in the order they will start. |
 | fn | `asked_by` | `activity.rs:125` | `pub fn asked_by(owner: &str) -> Option<&'static str>` —  Who asked, in words, for a row that is not the person's own (the window's engine only ever holds the person's jobs today; the queue entry |
 | fn | `priority_word` | `activity.rs:134` | `pub fn priority_word(p: u8) -> &'static str` —  What the priority numbers mean to a person. |
-| fn | `validation_state` | `activity.rs:351` | `pub fn validation_state(v: nyx_engine::validated::Validation) -> State` —  The glyph state of a validated state. |
+| fn | `validation_state` | `activity.rs:352` | `pub fn validation_state(v: nyx_engine::validated::Validation) -> State` —  The glyph state of a validated state. |
 | fn | `Activity::of` | `activity.rs:40` | `pub fn of(entries: &[Value], paused: bool) -> Activity` —  From the entries of `queue_list` (finished, failed and cancelled jobs are not activity). |
 | fn | `Activity::running` | `activity.rs:66` | `pub fn running(&self) -> Option<&Row>` |
 | fn | `Activity::waiting` | `activity.rs:70` | `pub fn waiting(&self) -> usize` |

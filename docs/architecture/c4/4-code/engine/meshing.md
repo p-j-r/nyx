@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 > MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92).
 
 **Decisions:** [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 92](../../../adr/0092-feedback-while-editing-is-a-value-never-a-job.md)  
-**Size:** 4 files, 1616 lines.
+**Size:** 4 files, 2029 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-engine/src/amr.rs` | 335 |  |
+| `crates/nyx-engine/src/amr.rs` | 748 |  |
 | `crates/nyx-engine/src/meshing.rs` | 559 |  |
 | `crates/nyx-engine/src/pml.rs` | 533 |  |
 | `crates/nyx-engine/src/preview.rs` | 189 |  |
@@ -21,11 +21,12 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 | Target | Modules | Items |
 |---|---|---|
 | [container `analysis` (nyx-analysis)](../../3-components/analysis.md) | modes, polarization | ModeAnalysis |
-| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::electro, material, material::spec, mesh, mesh::cells, meshing, meshing::geomdrive, meshing::geomdrive3 +8 | Adaptive, CANCELLED, CellType, ElectroMetric2dOptions, ElectroMetric3dOptions, Layer, Library, M6, MeshReport, MeshRequest +31 |
+| [container `ems` (nyx-ems)](../../3-components/ems.md) | cavity, crate root, problem | C0, Ned3, assemble_emw_eigen, basis3_keyed, decode, emw_eigen_fields, solve_emw_modes, symmetry_facet_flags |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::electro, adapt::estimate, adapt::estimate3, adapt::maxwell, linalg::csr::assembly, material, material::spec, mesh +13 | Adaptive, C, CANCELLED, CellType, CurlField, ElectroMetric2dOptions, ElectroMetric3dOptions, EquidistributeOptions, Estimator, GeomMeshOpts +43 |
 | [container `geom` (geom)](../../3-components/geom.md) | eval, labels, model, select, sim | EntityKind, EntitySet, Evaluated, FeatureList, LabelMap, PmlCoordKind, PmlGrowMode, PmlRegion, PmlRole, Selector |
-| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, error, physics, registry, result, spec | AdaptPassRecord, BcSpec, CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, Error, LabelResolver, MaterialAssign, Mesh, ProblemSpec +5 |
+| [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, error, physics, registry, result, spec, validate | AdaptPassRecord, BcSpec, CAPACITANCE_KEY, CapacitanceMatrixData, ElectroAmrData, Error, LabelResolver, MaterialAssign, Mesh, ProblemSpec +7 |
 | [Commands](./commands.md) | engine | Engine |
-| [Job runner and queue](./jobs.md) | estimate, solve | Estimate, History, chain_key, chain_key_for_project, solve_one_single |
+| [Job runner and queue](./jobs.md) | estimate, solve | Estimate, History, build_solve_ctx, chain_key, chain_key_for_project, name_domains, solve_one_single |
 | [Project](./project.md) | crate root, project | MeshSettings, PmlModeRequest, Project, SweepLayer |
 | [Registry and facade](./registry.md) | crate root | physics_for |
 
@@ -35,10 +36,10 @@ C4 level 4 (code) of the component **Meshing seam** (`engine.meshing`) in the co
 |---|---|---|
 | [app: Window](../app/window.md) | meshing, preview | MeshedModel, SizePreview |
 | [Analyses](./analyse.md) | meshing | MeshedModel |
-| [Commands](./commands.md) | amr, meshing | FemcoreMesher, MeshedModel, Mesher, project_uses_electro_amr |
-| [Job runner and queue](./jobs.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, solve_dfs_with_amr |
+| [Commands](./commands.md) | amr, meshing | FemcoreMesher, MeshedModel, Mesher, project_uses_amr |
+| [Job runner and queue](./jobs.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, project_uses_ems_cavity_amr, project_uses_sms_amr, solve_dfs_with_amr_opts +2 |
 | [Registry and facade](./registry.md) | meshing | FemcoreMesher, MeshedModel, Mesher |
-| [Results files](./resultsIO.md) | amr, meshing | MeshedModel, Mesher, project_has_electro_amr |
+| [Results files](./resultsIO.md) | amr, meshing | MeshedModel, Mesher, project_has_amr |
 
 ## Class diagram
 
@@ -47,11 +48,22 @@ Public types with their public fields (or variants) and methods, free functions 
 ```mermaid
 classDiagram
   namespace amr_rs {
+    class CavityCurlMode {
+        <<impl block>>
+    }
     class fns_amr_rs {
         <<module amr.rs>>
         +project_uses_electro_amr(project, targets) bool
         +project_has_electro_amr(project) bool
+        +project_uses_ems_cavity_amr(project, targets) bool
+        +project_uses_sms_amr(project, targets) bool
+        +project_uses_amr(project, targets) bool
+        +project_has_amr(project) bool
         ~solve_dfs_with_amr(registry, project, initial_model, library, progress, done) Result
+        ~solve_dfs_with_amr_opts(registry, project, initial_model, library, progress, done, retain_amr_data) Result
+        ~solve_ems_cavity_with_amr(registry, project, initial_model, library, progress, done) Result
+        ~solve_ems_cavity_with_amr(registry, project, initial_model, library, progress, done) Result
+        +more_1_functions()
     }
   }
   namespace meshing_rs {
@@ -121,7 +133,15 @@ classDiagram
 |---|---|---|---|
 | fn | `project_uses_electro_amr` | `amr.rs:66` | `pub fn project_uses_electro_amr(project: &Project, targets: &[String]) -> bool` —  True when `project` and `targets` request multi-pass electrostatic AMR (`adapt_passes > 1`) on an unswept mesh. |
 | fn | `project_has_electro_amr` | `amr.rs:74` | `pub fn project_has_electro_amr(project: &Project) -> bool` —  True when `project` carries a `dfs` `electrostatic` study configured with `adapt_passes > 1`. |
-| fn | `solve_dfs_with_amr` | `amr.rs:132` | `pub(crate) fn solve_dfs_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs the multi-pass goal-oriented AMR loop for `dfs` `electrostatic` and returns `(final_model, final_result)`. |
+| fn | `project_uses_ems_cavity_amr` | `amr.rs:79` | `pub fn project_uses_ems_cavity_amr(project: &Project, targets: &[String]) -> bool` —  True when `project` and `targets` request multi-pass Maxwell residual AMR on `ems::cavity`. |
+| fn | `project_uses_sms_amr` | `amr.rs:88` | `pub fn project_uses_sms_amr(project: &Project, targets: &[String]) -> bool` —  True when `project` and `targets` request multi-pass recovered-Hessian AMR on `sms`. |
+| fn | `project_uses_amr` | `amr.rs:97` | `pub fn project_uses_amr(project: &Project, targets: &[String]) -> bool` —  True when `project` and `targets` activate multi-pass AMR for any compiled physics. |
+| fn | `project_has_amr` | `amr.rs:104` | `pub fn project_has_amr(project: &Project) -> bool` —  True when `project` carries any physics configured for multi-pass AMR on an unswept mesh. |
+| fn | `solve_dfs_with_amr` | `amr.rs:164` | `pub(crate) fn solve_dfs_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs the multi-pass goal-oriented AMR loop for `dfs` `electrostatic` and returns `(final_model, final_result)`. |
+| fn | `solve_dfs_with_amr_opts` | `amr.rs:175` | `pub(crate) fn solve_dfs_with_amr_opts( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], retain_amr_data: bool, ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` |
+| fn | `solve_ems_cavity_with_amr` | `amr.rs:493` | `pub(crate) fn solve_ems_cavity_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs multi-pass goal-oriented Maxwell residual AMR (`femcore::adapt::maxwell`) on 3D `ems::cavity` studies. |
+| fn | `solve_ems_cavity_with_amr` | `amr.rs:632` | `pub(crate) fn solve_ems_cavity_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` |
+| fn | `solve_sms_with_amr` | `amr.rs:645` | `pub(crate) fn solve_sms_with_amr( registry: &Registry, project: &Project, initial_model: Arc<MeshedModel>, library: &Arc<femcore::material::Library>, progress: &Arc<Progress>, done: &[(String, SolveResult)], ) -> Result<(Arc<MeshedModel>, SolveResult), Error>` —  Runs multi-pass recovered-Hessian AMR (`femcore::adapt::{estimate, estimate3}`) over `PlotFields` for `sms` studies. |
 | struct | `MeshedModel` | `meshing.rs:17` |  |
 | trait | `Mesher` | `meshing.rs:271` | methods: `mesh` —  Builds the mesh of a model. `sizing` is what the physics of the project want resolved (`MeshSettings::physics_sizing`); the engine |
 | struct | `FemcoreMesher` | `meshing.rs:291` |  The mesher of `femcore`, driven by a `MeshRequest` (ADR 54): 2D and 3D models, simple or adaptive, inline or structured absorbing |
@@ -156,4 +176,4 @@ classDiagram
 | fn | `Engine::size_preview` | `preview.rs:133` | `pub fn size_preview(&self, geometry: FeatureList, mesh: MeshSettings) -> Result<SizeTask, Error>` —  A trial mesh of the project with `geometry` and `mesh` applied, as a task that can run on any thread. Refused (with the reason, in plain |
 | fn | `Engine::polarization_task` | `preview.rs:161` | `pub fn polarization_task( &self, physics: &str, ) -> Option<(Arc<SolveResult>, impl FnOnce() -> Result<ModeAnalysis, Error> + Send + 'static)>` —  The polarization analysis of the latest result of `physics` as a function that does not borrow the engine, so it can run beside the |
 
-Trait implementations in this component: `MeshedModel: LabelResolver`, `FemcoreMesher: Mesher`
+Trait implementations in this component: `CavityCurlMode: CurlField`, `MeshedModel: LabelResolver`, `FemcoreMesher: Mesher`

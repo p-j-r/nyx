@@ -9,7 +9,10 @@ Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_ce
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
 | `adapt_grade` | number or null | no |  | adaptive / AMR metric gradation slope (> 0); null uses 0.4 |
+| `adapt_growth` | number or null | no |  | target mesh cell growth multiplier per ems::cavity / sms AMR pass (> 1.0); null uses 1.5 |
 | `adapt_max_cells` | integer or null | no |  | adaptive / AMR maximum cell count (>= 1); null uses 2000000 |
+| `adapt_passes` | integer or null | no |  | number of outer goal-oriented AMR passes for ems::cavity (Maxwell residual) and sms (Hessian estimator); null or 1 disables AMR |
+| `adapt_rel_tol` | number or null | no |  | relative quantity-of-interest tolerance between consecutive ems::cavity / sms AMR passes; null uses 1e-3 |
 | `adapt_scale` | number or null | no |  | adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher |
 | `corner_grading` | true or false | no |  | 3D sheet stack: radical Morrison-Lewis corner grading toward sharp 2D sheet corners, default false |
 | `curved` | true or false | no |  | 3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false |
@@ -24,6 +27,7 @@ Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_ce
 | `pml_mode` | text or null: `auto`, `structured`, `inline`, `null` | no |  | how absorbing layers are meshed: "auto" (default, structured native Quad/Prism/Hex layers when PML regions exist), "structured", or "inline" (legacy unstructured simplices) |
 | `points_per_wavelength` | number or null | no |  | points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2 |
 | `quarter_point_xi` | number or null | no |  | 3D sheet stack: Barsoum quarter-point mid-edge parameter xi_QP in [0.25, 0.50]; null uses 0.25 |
+| `retain_amr_data` | true or false | no |  | retain transient cellwise ElectroAmrData indicators on SolveResult instead of stripping them after solve, default false |
 | `singular_edges` | text or null: `none`, `quarter_point`, `null` | no |  | 3D sheet stack: edge singularity enrichment on zero-thickness conductor rims ("none" or "quarter_point"); null uses study defaults |
 | `strict_mesh` | true or false | no |  | fail meshing if 2D Ruppert refinement terminates early before completion or drops unhealed collinear sliver triangles, default true |
 | `structured_pml` | true or false or null | no |  | legacy boolean alias for pml_mode (true -> "structured", false -> "inline") |
@@ -33,6 +37,7 @@ Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_ce
 | `sweep[].n` | integer | yes |  | cells across the thickness |
 | `sweep[].regions` | object | no |  | optional per-layer region remap { source_region: target_region } in this layer |
 | `sweep[].thickness` | number | yes |  | thickness of the layer along y, metres |
+| `target_tol` | number or null | no |  | target relative discretization tolerance used to certify error bounds (e.g. Prager-Synge flux_bounds) before a convergence check; null uses default 1e-2 |
 | `z_coarsen` | true or false | no |  | 3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false |
 | `z_growth_ratio` | number or null | no |  | 3D sheet stack: geometric growth ratio (> 1.0) for vertical z-slab thickness away from sheet planes; null uses default 1.35 |
 

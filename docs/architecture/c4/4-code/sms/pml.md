@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Absorbing-layer kernel** (`sms.pml`) in the
 > Eigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries.
 
 **Decisions:** [ADR 42](../../../adr/0042-solid-mechanics-moves-into-nyx-sms.md), [ADR 101](../../../adr/0101-sms-waveguide-modes-and-floquet-pml.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 1 file, 1576 lines.
+**Size:** 1 file, 1623 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-sms/src/pml.rs` | 1576 |  |
+| `crates/nyx-sms/src/pml.rs` | 1623 |  |
 
 ## What it uses
 
@@ -19,6 +19,7 @@ C4 level 4 (code) of the component **Absorbing-layer kernel** (`sms.pml`) in the
 |---|---|---|
 | [container `femcore` (femcore)](../../3-components/femcore.md) | fem, fem_mixed, linalg::csr, linalg::csr::assembly, linalg::driver, material, material::coupled, mesh::cells +7 | BackwardWaveCheck, C, CCoo, CCsr, EPSILON_0, FacetType, IsoparametricCell, LagrangeSpace, M3, M6 +41 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | crate root, result | Discretisation, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
+| [Physics adapter](./adapter.md) | diag | SmsDiag, rigal_gaches_complex_residuals |
 | [Axisymmetric kernel](./axisym.md) | axisym | average_about_axis |
 | [Floquet kernel](./floquet.md) | floquet | mixed_nodal_relations |
 | [Low-reflecting boundary](./lrb.md) | lrb | AMPLIFYING_IM_TOL |
@@ -72,6 +73,8 @@ classDiagram
       <<struct>>
       +freqs Vec
       +vectors Vec
+      +residuals Vec~f64~
+      +restarts usize
       +dim usize
       +converged bool
   }
@@ -108,11 +111,11 @@ classDiagram
 | fn | `solve_solid_pml` | `pml.rs:890` | `pub fn solve_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String>` |
 | fn | `solve_solid_pml_mixed` | `pml.rs:899` | `pub fn solve_solid_pml_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, ) -> Result<SolveResult, String>` —  Native mixed-cell (`Tri`/`Quad` and `Tet`/`Prism`/`Hex`) PML eigenfrequency solve. |
 | struct | `PmlAssembly` | `pml.rs:1114` | fields: `order`, `d`, `n`, `kff`, `mff`, `free`, `red`, `n_pairs`, `n_modes`, `f_search`, `has_fixed`, `diagnostics`, ... —  Stage 1 of the solid kernel with perfectly matched layers: the complex stiffness and the mass (weighted by the |
-| struct | `PmlSolve` | `pml.rs:1134` | fields: `freqs`, `vectors`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
-| fn | `assemble_solid_pml` | `pml.rs:1141` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
-| fn | `solve_pml_modes` | `pml.rs:1374` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
-| fn | `push_pml_mode_scalars_and_label` | `pml.rs:1397` | `pub(crate) fn push_pml_mode_scalars_and_label( j: usize, f: C, layer_fraction: f64, phys_mass_norm: f64, any_pml: bool, has_interior: bool, scalars: &mut Vec<(String, Scalar)>, unstable_count: &mut usize, ) -> (String, f64)` |
-| fn | `pml_fields` | `pml.rs:1471` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, frequencies, signed Q, |
+| struct | `PmlSolve` | `pml.rs:1134` | fields: `freqs`, `vectors`, `residuals`, `restarts`, `dim`, `converged` —  Stage 2 output: eigenvalue index and complex frequency (Hz) of every mode sorted by real part, the free-dof vectors. |
+| fn | `assemble_solid_pml` | `pml.rs:1143` | `pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String>` |
+| fn | `solve_pml_modes` | `pml.rs:1376` | `pub fn solve_pml_modes(asm: &PmlAssembly) -> Result<PmlSolve, String>` —  Stage 2: the complex eigenpairs nearest the search frequency. |
+| fn | `push_pml_mode_scalars_and_label` | `pml.rs:1408` | `pub(crate) fn push_pml_mode_scalars_and_label( j: usize, f: C, layer_fraction: f64, phys_mass_norm: f64, any_pml: bool, has_interior: bool, scalars: &mut Vec<(String, Scalar)>, unstable_count: &mut usize, ) -> (String, f64)` |
+| fn | `pml_fields` | `pml.rs:1482` | `pub fn pml_fields(mesh: &Discretisation, asm: &PmlAssembly, solved: &PmlSolve) -> Result<SolveResult, String>` —  Stage 3: plot fields and per-cell complex displacement of every mode, frequencies, signed Q, |
 | fn | `ResolvedPmlDomains::from_simplex` | `pml.rs:383` | `pub fn from_simplex(mesh: &Discretisation, spec: &Problem, axisym: bool, f_search: f64) -> Result<Self, String>` |
 | fn | `ResolvedPmlDomains::from_mixed` | `pml.rs:401` | `pub fn from_mixed( mixed: &MixedDiscretisation, spec: &Problem, axisym: bool, f_search: f64, ) -> Result<Self, String>` |
 | fn | `ResolvedPmlDomains::contains` | `pml.rs:425` | `pub fn contains(&self, dom: i32) -> bool` |
