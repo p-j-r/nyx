@@ -16,7 +16,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 
 /// Collects explicit active temperatures declared on `ctx` or `spec` (study params, uniform thermal load, imported fields, or heat BCs).
-fn collect_pre_solve_temperatures(spec: &ProblemSpec, ctx: &Ctx) -> Vec<f64> {
+pub(crate) fn collect_pre_solve_temperatures(spec: &ProblemSpec, ctx: &Ctx) -> Vec<f64> {
     let mut temps = Vec::new();
     let mut push_finite = |t: f64| {
         if t.is_finite() && !temps.iter().any(|x: &f64| x.to_bits() == t.to_bits()) {

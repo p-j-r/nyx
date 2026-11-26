@@ -54,6 +54,7 @@ pub mod solve;
 pub mod store_link;
 pub mod sweep;
 pub mod validated;
+pub mod vvuq_report;
 pub mod worker;
 
 pub use commands::{Access, CommandDesc};

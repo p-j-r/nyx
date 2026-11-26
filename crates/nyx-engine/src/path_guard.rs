@@ -68,11 +68,19 @@ pub fn confine(root: &Path, requested: &str) -> Result<PathBuf, String> {
     Ok(root.join(inside))
 }
 
+/// Checks one path-like argument against `root` when the path guard is enabled, returning the confined path.
+pub(crate) fn check_path(root: Option<&Path>, command: &str, key: &str, requested: &str) -> Result<PathBuf, Error> {
+    match root {
+        Some(r) => confine(r, requested).map_err(|why| Error::invalid(format!("{command}: `{key}`: {why}"))),
+        None => Ok(PathBuf::from(requested)),
+    }
+}
+
 /// Rewrites the path arguments of one command call, or refuses it.
 pub(crate) fn confine_args(root: &Path, command: &str, args: &mut Map<String, Value>) -> Result<(), Error> {
     for key in PATH_ARGS {
         if let Some(Value::String(s)) = args.get(*key) {
-            let p = confine(root, s).map_err(|why| Error::invalid(format!("{command}: `{key}`: {why}")))?;
+            let p = check_path(Some(root), command, key, s)?;
             args.insert((*key).to_string(), Value::String(p.to_string_lossy().into_owned()));
         }
     }
