@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 > The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, symmetric Ruiz equilibration, problem bundles and test-problem generators.
 
 **Decisions:** [ADR 33](../../../adr/0033-one-linear-algebra-driver-facade.md), [ADR 8](../../../adr/0008-ported-solver-library-staged-not-wired.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md)  
-**Size:** 18 files, 5111 lines.
+**Size:** 18 files, 5110 lines.
 
 ## Files
 
@@ -15,7 +15,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | `crates/femcore/src/linalg/bsr.rs` | 381 | Alternative sparse storage (port items M1 and M1b): |
 | `crates/femcore/src/linalg/bundle.rs` | 117 | Problem bundles: a directory that holds everything needed to reproduce a solve elsewhere. |
 | `crates/femcore/src/linalg/csr.rs` | 731 | Compressed sparse row matrix over a generic [`Scalar`], plus test-problem generators. |
-| `crates/femcore/src/linalg/csr/assembly.rs` | 363 | The one matrix type of the finite-element code: assembly (`Triplets`), the operations the kernels use, and the aliases that keep kernel code readable (`RCsr` real, `CCsr` complex, `Coo`, `CCoo`). Before phase 3 the kernels had a real and... |
+| `crates/femcore/src/linalg/csr/assembly.rs` | 362 | The one matrix type of the finite-element code: assembly (`Triplets`), the operations the kernels use, and the aliases that keep kernel code readable (`RCsr` real, `CCsr` complex, `Coo`, `CCoo`). Before phase 3 the kernels had a real and... |
 | `crates/femcore/src/linalg/dense/mod.rs` | 170 | Small dense linear algebra for the projected (Rayleigh–Ritz / Schur) problems of the Krylov methods, the role of SLEPc's `DS`. |
 | `crates/femcore/src/linalg/dense/schur.rs` | 374 | Complex Schur decomposition `A = Z T Zᴴ` by Householder Hessenberg reduction and single-shift QR, plus the adjacent-swap reordering used by Krylov–Schur restarts. |
 | `crates/femcore/src/linalg/equilibrate.rs` | 210 |  |
@@ -51,7 +51,7 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [dfs: Heat kernel](../dfs/heat.md) | linalg::csr::assembly | RCsr |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | linalg::csr, linalg::csr::assembly | Coo, RCsr |
 | [ems: Axisymmetric kernel](../ems/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
-| [ems: 3D cavity kernel](../ems/cavity.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
+| [ems: 3D cavity kernel](../ems/cavity.md) | linalg::csr, linalg::csr::assembly, linalg::par | C, CCoo, CCsr, Coo, RCsr, c, chunk_map |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | linalg::csr, linalg::csr::assembly, linalg::equilibrate | C, CCsr, Coo, DEFAULT_RUIZ_PASSES, RCsr, RuizTerm, c, ruiz_symmetric_terms +2 |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue | C, CCoo, CCsr, Coo, Dense, RCsr, c, generalized_eig_c64 |
 | [ems: Native mixed-cell EM](../ems/mixed.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Coo, RCsr, c |
@@ -62,25 +62,26 @@ C4 level 4 (code) of the component **Matrices and vectors** (`femcore.lacore`) i
 | [engine: Commands](../engine/commands.md) | linalg::csr::assembly | C |
 | [engine: Job runner and queue](../engine/jobs.md) | linalg::rng | SplitMix64 |
 | [engine: Meshing seam](../engine/meshing.md) | linalg::csr::assembly | C |
-| [Error estimators](./estimators.md) | linalg::csr::assembly | C |
+| [Error estimators](./estimators.md) | linalg::csr::assembly, linalg::par | C, chunk_map |
 | [Expressions](./expr.md) | linalg::csr::assembly | C |
-| [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly, linalg::par, linalg::scalar | C, CCoo, CCsr, Coo, Csr, RCsr, Scalar, c |
+| [Finite-element basics](./fem.md) | linalg::csr, linalg::csr::assembly, linalg::par, linalg::scalar | C, CCoo, CCsr, Coo, Csr, RCsr, Scalar, c +2 |
 | [Direct solvers](./ladirect.md) | linalg::csr, linalg::faer_glue, linalg::linop, linalg::scalar, linalg::vecops | C64, Csr, FaerScalar, LinearOperator, Preconditioner, Scalar, axpy, clear_upper_vector_state +6 |
-| [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::scalar +1 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +7 |
+| [Linear algebra driver](./ladriver.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par +2 | Basis, C64, CCsr, Csr, FaerScalar, LinearOperator, Preconditioner, RCsr +8 |
 | [Eigensolvers](./laeigen.md) | linalg::basis, linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop +4 | Basis, BasisView, C64, Csr, Dense, DenseError, FaerScalar, Identity +18 |
 | [Krylov solvers](./laksp.md) | linalg::basis, linalg::dense, linalg::linop, linalg::rng, linalg::scalar, linalg::vecops | Basis, C64, Dense, LinearOperator, Preconditioner, Scalar, Scaling, axpy +5 |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::csr, linalg::csr::assembly, linalg::dense, linalg::faer_glue, linalg::linop, linalg::par +2 | C, C64, CCoo, CCsr, Csr, Dense, FaerScalar, FnOperator +12 |
 | [Preconditioners](./laprecond.md) | linalg::csr, linalg::csr::assembly, linalg::faer_glue, linalg::linop, linalg::par, linalg::scalar +1 | C64, Csr, FaerScalar, Preconditioner, RCsr, RawCols, Scalar, chunk_map +1 |
+| [3D meshing](./meshing3d.md) | linalg::par | chunk_map |
 | [Optical mode sets](./optical.md) | linalg::csr, linalg::csr::assembly | C, c |
-| [Runtime services](./runtime.md) | linalg::scalar | C64, Scalar |
+| [Runtime services](./runtime.md) | linalg::par, linalg::scalar | C64, Scalar, chunk_map, for_chunks_mut, for_each_mut, worth_parallel |
 | [sms: Physics adapter](../sms/adapter.md) | linalg::csr::assembly | C, CCsr |
 | [sms: Axisymmetric kernel](../sms/axisym.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 | [sms: Cross-section study kernel](../sms/crosssection.md) | linalg::csr, linalg::csr::assembly | C, CCsr, Csr, RCsr, c |
 | [sms: Floquet kernel](../sms/floquet.md) | linalg::csr, linalg::csr::assembly | C, CCsr, RCsr, c |
 | [sms: Low-reflecting boundary](../sms/lrb.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, Coo, RCsr, c |
-| [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::csr, linalg::csr::assembly, linalg::equilibrate, linalg::faer_glue, linalg::linop, linalg::par +1 | C, C64, CCoo, CCsr, Coo, Csr, DEFAULT_RUIZ_PASSES, FaerScalar +11 |
-| [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, RCsr, c |
-| [sms: Solid kernel](../sms/solid.md) | linalg::csr, linalg::csr::assembly | C, Coo, RCsr, c |
+| [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::csr, linalg::csr::assembly, linalg::equilibrate, linalg::faer_glue, linalg::linop, linalg::par +1 | C, C64, CCoo, CCsr, Coo, Csr, DEFAULT_RUIZ_PASSES, FaerScalar +12 |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | linalg::csr, linalg::csr::assembly, linalg::par | C, CCoo, CCsr, RCsr, c, chunk_map |
+| [sms: Solid kernel](../sms/solid.md) | linalg::csr, linalg::csr::assembly, linalg::par | C, Coo, RCsr, c, chunk_map |
 | [sms: Waveguide kernel](../sms/waveguide.md) | linalg::csr, linalg::csr::assembly | C, CCoo, CCsr, c |
 
 ## Class diagram
@@ -601,11 +602,11 @@ classDiagram
 | fn | `Csr::values_mut` | `linalg/csr/assembly.rs:262` | `pub fn values_mut(&mut self) -> &mut [T]` —  The stored values, mutable (same pattern): the row and column scaling of a generalised problem. |
 | fn | `Csr::submatrix` | `linalg/csr/assembly.rs:266` | `pub fn submatrix(&self, rows: &[usize], cols: &[usize]) -> Csr<T>` —  Rows `rows` and columns `cols` (index lists in the given order); entries whose column is not in `cols` are dropped. |
 | fn | `Csr::block_diag` | `linalg/csr/assembly.rs:294` | `pub fn block_diag(blocks: &[&Csr<T>]) -> Csr<T>` |
-| fn | `Csr::sum_all` | `linalg/csr/assembly.rs:323` | `pub fn sum_all(mut parts: Vec<Csr<T>>) -> Csr<T>` —  Sum of matrices of one shape. Blocks of rows are merged on all cores; a row of the sum is a small merge of at most `parts.len()` |
-| fn | `Csr::symmetrized` | `linalg/csr/assembly.rs:344` | `pub fn symmetrized(&self) -> Csr<T>` —  Symmetrised copy `(A + A^T)/2`. |
-| fn | `Csr::conj` | `linalg/csr/assembly.rs:348` | `pub fn conj(&self) -> Csr<T>` —  Entrywise conjugate (identity for real matrices). |
-| fn | `Csr::real_part` | `linalg/csr/assembly.rs:355` | `pub fn real_part(&self) -> Csr<f64>` —  The real part of every entry (same pattern). |
-| fn | `Csr::is_real` | `linalg/csr/assembly.rs:359` | `pub fn is_real(&self) -> bool` —  All imaginary parts are exactly zero. |
+| fn | `Csr::sum_all` | `linalg/csr/assembly.rs:322` | `pub fn sum_all(mut parts: Vec<Csr<T>>) -> Csr<T>` —  Sum of matrices of one shape. Blocks of rows are merged on the shared pool in fixed row chunks. |
+| fn | `Csr::symmetrized` | `linalg/csr/assembly.rs:343` | `pub fn symmetrized(&self) -> Csr<T>` —  Symmetrised copy `(A + A^T)/2`. |
+| fn | `Csr::conj` | `linalg/csr/assembly.rs:347` | `pub fn conj(&self) -> Csr<T>` —  Entrywise conjugate (identity for real matrices). |
+| fn | `Csr::real_part` | `linalg/csr/assembly.rs:354` | `pub fn real_part(&self) -> Csr<f64>` —  The real part of every entry (same pattern). |
+| fn | `Csr::is_real` | `linalg/csr/assembly.rs:358` | `pub fn is_real(&self) -> bool` —  All imaginary parts are exactly zero. |
 | enum | `DenseError` | `linalg/dense/mod.rs:18` | variants: `NoConvergence`, `NonFinite` |
 | struct | `Dense` | `linalg/dense/mod.rs:37` |  Column-major dense matrix with leading dimension equal to the row count. |
 | fn | `hermitian_eig` | `linalg/dense/mod.rs:125` | `pub fn hermitian_eig<T: FaerScalar>(a: &Dense<T>) -> Result<(Vec<f64>, Dense<T>), DenseError>` —  Eigendecomposition `A = U diag(w) Uᴴ` of a Hermitian matrix (only the lower triangle is |

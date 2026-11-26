@@ -31,9 +31,10 @@ C4 level 4 (code) of the component **Materials** (`engine.materials`) in the con
 |---|---|---|
 | [app: Scripts and batch](../app/headless.md) | material_fetch | default_materials_folder, default_name_from_target |
 | [app: Inspector tabs](../app/inspector.md) | material_fetch | convert_to_toml, default_materials_folder, fetch_url_text_with_api_key, remote_catalog, resolve_remote_url |
-| [Commands](./commands.md) | materials | default_dirs, load_library, study_wavelength |
+| [Commands](./commands.md) | material_warnings, materials | collect_pre_solve_temperatures, default_dirs, load_library, study_frequency, study_wavelength |
 | [Job runner and queue](./jobs.md) | material_warnings, materials | finalize, preflight, study_frequency, study_wavelength |
 | [Meshing seam](./meshing.md) | material_warnings | finalize, preflight |
+| [Results files](./resultsIO.md) | materials | default_dirs, load_library |
 
 ## Class diagram
 
@@ -86,6 +87,7 @@ classDiagram
   namespace material_warnings_rs {
     class fns_material_warnings_rs {
         <<module material_warnings.rs>>
+        ~collect_pre_solve_temperatures(spec, ctx) Vec~f64~
         ~preflight(p, spec, ctx, strict_material_range) Result
         ~finalize(result, p, spec, ctx, strict_material_range, pre) Result
     }
@@ -123,6 +125,7 @@ classDiagram
 | fn | `Engine::fetch_material` | `material_fetch.rs:394` | `pub fn fetch_material( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS, converts it into validated TOML, and adds/saves as requested. |
 | fn | `Engine::fetch_material_with_key` | `material_fetch.rs:410` | `pub fn fetch_material_with_key( &mut self, source: &str, target: Option<&str>, name: Option<&str>, description: Option<&str>, extends: Option<&str>, add_to_project: bool, folder: Option<&Path>, api_key: Option<&str>, ) -> Result<Value, Error>` —  Downloads a remote database entry or catalog preset over HTTPS (using `api_key` or `MP_API_KEY` via `curl --config -` stdin for Materials Project), |
 | fn | `Engine::search_remote_materials` | `material_fetch.rs:513` | `pub fn search_remote_materials( &self, query: &str, domain: Option<&str>, source: Option<&str>, live: bool, api_key: Option<&str>, ) -> Result<Value, Error>` —  Searches the curated `REMOTE_CATALOG` and (when `live` is true) live AFLOW and Materials Project HTTPS endpoints. |
+| fn | `collect_pre_solve_temperatures` | `material_warnings.rs:19` | `pub(crate) fn collect_pre_solve_temperatures(spec: &ProblemSpec, ctx: &Ctx) -> Vec<f64>` —  Collects explicit active temperatures declared on `ctx` or `spec` (study params, uniform thermal load, imported fields, or heat BCs). |
 | fn | `preflight` | `material_warnings.rs:96` | `pub(crate) fn preflight( p: &dyn Physics, spec: &ProblemSpec, ctx: &Ctx, strict_material_range: bool, ) -> Result<MaterialAudit, Error>` —  Checks pre-solve active materials and temperatures, refusing immediately if `strict_material_range` is enabled and any curve clamps. |
 | fn | `finalize` | `material_warnings.rs:114` | `pub(crate) fn finalize( result: &mut SolveResult, p: &dyn Physics, spec: &ProblemSpec, ctx: &Ctx, strict_material_range: bool, pre: MaterialAudit, ) -> Result<(), Error>` —  Checks solved thermal fields (if any), enforces `strict_material_range`, and appends deduplicated material warnings into `result.diagnostics.warnings`. |
 | fn | `default_dirs` | `materials.rs:17` | `pub fn default_dirs() -> Vec<PathBuf>` —  The folders searched for bundled/configured material files, first valid match wins when loading the base library: |

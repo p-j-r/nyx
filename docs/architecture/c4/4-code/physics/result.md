@@ -45,11 +45,11 @@ C4 level 4 (code) of the component **Result and frame** (`physics.result`) in th
 | [ems: Complex-mode kernel](../ems/modescx.md) | result | Field, MixedToSimplexProjector, Scalar, Solution, SolveResult, cell_fields_of |
 | [ems: Optical mode sets](../ems/optical.md) | frame | FieldFrame |
 | [engine: Analyses](../engine/analyse.md) | result | Scalar, SolveResult |
-| [engine: Commands](../engine/commands.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, Solution, SolveResult |
+| [engine: Commands](../engine/commands.md) | result | DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, Solution, SolveResult, SolverDiagnostics, SpatialErrorEstimate |
 | [engine: Job runner and queue](../engine/jobs.md) | result | DiagnosticSeverity, DiagnosticWarning, Scalar, SolveResult, SpatialErrorEstimate |
 | [engine: Materials](../engine/materials.md) | result | DiagnosticSeverity, DiagnosticWarning, SolveResult, SolverDiagnostics |
 | [engine: Meshing seam](../engine/meshing.md) | result | Scalar, SolveResult |
-| [engine: Results files](../engine/resultsIO.md) | result | CellField, Field, NumericalErrorBudget, Scalar, Solution, SolveResult, SolverDiagnostics |
+| [engine: Results files](../engine/resultsIO.md) | result | CellField, DiagnosticSeverity, DiagnosticWarning, Field, NumericalErrorBudget, Scalar, Solution, SolveResult +1 |
 | [engine: Store link](../engine/storeLink.md) | result | Scalar, SolveResult |
 | [cQED result payloads](./cqed.md) | result | Scalar, SolveResult |
 | [Problem envelope](./envelope.md) | result | DiagnosticSeverity, DiagnosticWarning, Scalar, SolveResult |

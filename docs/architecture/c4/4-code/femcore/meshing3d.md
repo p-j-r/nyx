@@ -5,16 +5,16 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 > The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model (`R33` crease projection), adaptive meshing driven by exact faces, face sizes and max_dev, Bernstein/`q8` curved Jacobian certification & periodic mid-edge sync, and conformal 3D sheet-stack meshing.
 
 **Decisions:** [ADR 40](../../../adr/0040-3d-geom-models-meshed-by-the-lattice-mesher.md), [ADR 50](../../../adr/0050-wavelength-sizing-in-3d.md), [ADR 51](../../../adr/0051-adaptive-meshing-of-3d-geom-models.md), [ADR 55](../../../adr/0055-lattice-mesher-welds-slivers-and-is-independent-of-the-thread-count.md), [ADR 82](../../../adr/0082-curved-order-2-geometry.md), [ADR 83](../../../adr/0083-face-size-rules-and-max-dev-in-the-lattice-mesher.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 6 files, 7505 lines.
+**Size:** 6 files, 7529 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/meshing/adapt3d.rs` | 528 | Adaptive meshing of a 3D `geom` model (ADR 51): the metric adaptation of `adapt::drive3` driven by the exact faces of the model. |
-| `crates/femcore/src/meshing/curve3.rs` | 999 | Curved edges for 3D meshes (ADR 82): the mid-edge geometry nodes that make the tetrahedra around a curved surface quadratic (isoparametric) instead of straight. |
+| `crates/femcore/src/meshing/curve3.rs` | 1017 | Curved edges for 3D meshes (ADR 82): the mid-edge geometry nodes that make the tetrahedra around a curved surface quadratic (isoparametric) instead of straight. |
 | `crates/femcore/src/meshing/geomdrive3.rs` | 494 | From a 3D `geom` model to a tetrahedral mesh: the adapter between `geom::Evaluated` and the lattice mesher (`mesher3d`), which only knows the trait `Domain3`. |
-| `crates/femcore/src/meshing/mesher3d.rs` | 1425 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
+| `crates/femcore/src/meshing/mesher3d.rs` | 1431 | Tetrahedral meshes of 3D models: a lattice fill that is fitted to the exact geometry of any model that can say which region a point is in. |
 | `crates/femcore/src/meshing/refine3d.rs` | 491 | Local refinement of a tetrahedral mesh by longest-edge (Rivara) bisection. |
 | `crates/femcore/src/meshing/sheet3d.rs` | 3568 |  |
 
@@ -26,10 +26,11 @@ C4 level 4 (code) of the component **3D meshing** (`femcore.meshing3d`) in the c
 | [Adaptation drivers](./adaptdrive.md) | adapt::drive, adapt::drive3, adapt::geom3 | AdaptReport, FacetGeometry, Geometry3, adapt3_with |
 | [Adaptation operators](./adaptops.md) | adapt::ops3, adapt::topo, adapt::topo3 | AdaptOptions3, Sig, TopoOptions3, Work3 |
 | [Finite-element basics](./fem.md) | fem | CurvedTet, quad_rule_collapsed |
+| [Matrices and vectors](./lacore.md) | linalg::par | chunk_map |
 | [Mesh](./mesh.md) | mesh, mesh::cells, mesh::exchange | CellMesh, CellType, Mesh, SimplexMesh |
 | [Meshing facade](./meshing.md) | meshing, meshing::geomdrive, meshing::mesher, meshing::physics_size, meshing::sheet3d_curve, meshing::singularity, meshing::sizing | Adaptive, Chain, DEFAULT_QUARTER_POINT_XI, Fill, GeomMeshOpts, MeshParams, MeshPlan, MeshedGeom, Mesher, NativeRawTuple +15 |
 | [Metric fields](./metric.md) | adapt::field3, adapt::metric, adapt::work | BackgroundMetric3, SimplexMesh, Sym, isotropic, simplex_to_adapt |
-| [Runtime services](./runtime.md) | par, progress | check, lap, threads |
+| [Runtime services](./runtime.md) | par, progress | check, lap, map_chunks, threads |
 | [Structured absorbing layers](./structpml.md) | meshing::pml_geom, meshing::pml_geom3 | Native3, PmlReport, structured_pml_3d_native_with_curved, structured_pml_3d_with_curved |
 
 ## Used by
@@ -222,24 +223,24 @@ classDiagram
 | fn | `FaceTable::nearest_of` | `meshing/adapt3d.rs:89` | `pub fn nearest_of(&self, p: [f64; 3], cands: impl Iterator<Item = usize>) -> Option<i32>` —  The boundary number of the nearest of the faces `cands` to `p`. |
 | fn | `FaceTable::interface_label` | `meshing/adapt3d.rs:114` | `pub fn interface_label(&self, p: [f64; 3], a: i32, b: i32) -> i32` —  The boundary number of the non-sheet face a facet with centroid `p` between the domains `a` and `b` lies on: |
 | fn | `GeomOracle3::from_work` | `meshing/adapt3d.rs:149` | `pub fn from_work(table: &'a FaceTable<'a>, w: &Work3) -> Self` |
-| type | `EdgeNodes` | `meshing/curve3.rs:21` |  The curved edges: sorted vertex pair and the position of the mid-edge node. |
-| struct | `CurveReport` | `meshing/curve3.rs:25` | fields: `curved_edges`, `curved_cells`, `relaxed`, `straightened`, `min_scaled_jacobian` —  What `curve_boundary_edges` did. |
-| const | `MIN_SCALED_JACOBIAN` | `meshing/curve3.rs:45` | `f64` —  A cell must keep this fraction of its straight Jacobian determinant everywhere. |
-| fn | `curve_edges` | `meshing/curve3.rs:76` | `pub fn curve_edges( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], facets: &[[u32; 3]], dom: &dyn Domain3, ) -> (EdgeNodes, CurveReport)` —  The core: curved edges for the tetrahedra `cells` with vertex positions `pos`, from the edges of the facets `facets` (boundary |
-| fn | `relax_edge_nodes` | `meshing/curve3.rs:195` | `pub fn relax_edge_nodes( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], nodes: &mut EdgeNodes, ) -> CurveReport` —  Validates and relaxes curved mid-edge nodes `nodes` over `cells` via exact 20-coefficient tetrahedral |
-| fn | `relax_edge_nodes_periodic_with_qp` | `meshing/curve3.rs:210` | `pub(crate) fn relax_edge_nodes_periodic_with_qp( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], cand: &mut EdgeNodes, periodic_edge_parent: &HashMap<[u32; 2], ([u32; 2], [f64; 3])>, qp_edges: &[[u32; 2]], ) -> CurveReport` —  Periodic-aware curved edge relaxation excluding cells touching Barsoum quarter-point `qp_edges` from |
-| fn | `bernstein_cubic_coeffs` | `meshing/curve3.rs:433` | `pub fn bernstein_cubic_coeffs(ct: &CurvedTet, det_s: f64) -> Option<[f64` —  Computes the exact 20-coefficient tetrahedral Bernstein expansion of cubic `det J(lam) / det_s` on the |
-| fn | `certify_curved_tet_bernstein` | `meshing/curve3.rs:501` | `pub fn certify_curved_tet_bernstein(ct: &CurvedTet, threshold: f64) -> (bool, f64)` —  Certifies via the 20-coefficient tetrahedral Bernstein expansion (subdividing 1-&gt;8 only on borderline |
-| fn | `scaled_jacobian_min_tet` | `meshing/curve3.rs:512` | `pub fn scaled_jacobian_min_tet(ct: &CurvedTet) -> f64` —  Certified Bernstein lower bound of `det J(lam) / det_straight` over a non-QP [`CurvedTet`] (returning |
-| fn | `scaled_jacobian_min` | `meshing/curve3.rs:536` | `pub fn scaled_jacobian_min(mesh: &SimplexMesh, c: usize) -> f64` —  The smallest certified ratio of the Jacobian determinant to the straight cell's over cell `c` of a solver |
-| fn | `scaled_jacobian_min_interior_q8` | `meshing/curve3.rs:543` | `pub fn scaled_jacobian_min_interior_q8(mesh: &SimplexMesh, c: usize) -> f64` —  The smallest ratio of the Jacobian determinant to the straight cell's over all 216 interior Gauss points of |
-| type | `PeriodicVertexParents` | `meshing/curve3.rs:558` |  |
-| type | `PeriodicEdgeParents` | `meshing/curve3.rs:559` |  |
-| fn | `periodic_edge_parent_map` | `meshing/curve3.rs:564` | `pub(crate) fn periodic_edge_parent_map( mesh: &SimplexMesh, target_edges: &[[u32; 2]], periodic: &[(Vec<i32>, Vec<i32>, [f64; 3])], ) -> (PeriodicVertexParents, PeriodicEdgeParents)` —  Maps periodic boundary vertices and candidate edges `(child_edge -> (root_parent_edge, shift))` |
-| fn | `periodic_pairs_from_eval` | `meshing/curve3.rs:714` | `pub(crate) fn periodic_pairs_from_eval( ev: &geom::eval::Evaluated, labels: &geom::labels::LabelMap, ) -> Vec<(Vec<i32>, Vec<i32>, [f64` —  Resolves evaluated `PeriodicPair`s to boundary-label tuples `(src_labels, dst_labels, translation)` for 3D meshes. |
-| fn | `curve_boundary_edges` | `meshing/curve3.rs:740` | `pub fn curve_boundary_edges(mesh: &mut CellMesh<3>, dom: &dyn Domain3) -> CurveReport` —  Curves the edges of the boundary and interface facets of a tetrahedral `CellMesh` (replacing its list of curved edges). Meshes with |
-| fn | `curve_solver_mesh` | `meshing/curve3.rs:754` | `pub fn curve_solver_mesh(mesh: &mut SimplexMesh, dom: &dyn Domain3) -> CurveReport` —  The same for a solver mesh (after an adaptation, say): curves edges of active `dom` regions while |
-| fn | `apply_edge_nodes_validated` | `meshing/curve3.rs:840` | `pub fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeNodes) -> CurveReport` —  Validates and relaxes pre-projected candidate mid-edge nodes against all incident 3D tetrahedra of `mesh` |
+| type | `EdgeNodes` | `meshing/curve3.rs:20` |  The curved edges: sorted vertex pair and the position of the mid-edge node. |
+| struct | `CurveReport` | `meshing/curve3.rs:24` | fields: `curved_edges`, `curved_cells`, `relaxed`, `straightened`, `min_scaled_jacobian` —  What `curve_boundary_edges` did. |
+| const | `MIN_SCALED_JACOBIAN` | `meshing/curve3.rs:44` | `f64` —  A cell must keep this fraction of its straight Jacobian determinant everywhere. |
+| fn | `curve_edges` | `meshing/curve3.rs:75` | `pub fn curve_edges( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], facets: &[[u32; 3]], dom: &dyn Domain3, ) -> (EdgeNodes, CurveReport)` —  The core: curved edges for the tetrahedra `cells` with vertex positions `pos`, from the edges of the facets `facets` (boundary |
+| fn | `relax_edge_nodes` | `meshing/curve3.rs:200` | `pub fn relax_edge_nodes( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], nodes: &mut EdgeNodes, ) -> CurveReport` —  Validates and relaxes curved mid-edge nodes `nodes` over `cells` via exact 20-coefficient tetrahedral |
+| fn | `relax_edge_nodes_periodic_with_qp` | `meshing/curve3.rs:215` | `pub(crate) fn relax_edge_nodes_periodic_with_qp( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], cand: &mut EdgeNodes, periodic_edge_parent: &HashMap<[u32; 2], ([u32; 2], [f64; 3])>, qp_edges: &[[u32; 2]], ) -> CurveReport` —  Periodic-aware curved edge relaxation excluding cells touching Barsoum quarter-point `qp_edges` from |
+| fn | `bernstein_cubic_coeffs` | `meshing/curve3.rs:451` | `pub fn bernstein_cubic_coeffs(ct: &CurvedTet, det_s: f64) -> Option<[f64` —  Computes the exact 20-coefficient tetrahedral Bernstein expansion of cubic `det J(lam) / det_s` on the |
+| fn | `certify_curved_tet_bernstein` | `meshing/curve3.rs:519` | `pub fn certify_curved_tet_bernstein(ct: &CurvedTet, threshold: f64) -> (bool, f64)` —  Certifies via the 20-coefficient tetrahedral Bernstein expansion (subdividing 1-&gt;8 only on borderline |
+| fn | `scaled_jacobian_min_tet` | `meshing/curve3.rs:530` | `pub fn scaled_jacobian_min_tet(ct: &CurvedTet) -> f64` —  Certified Bernstein lower bound of `det J(lam) / det_straight` over a non-QP [`CurvedTet`] (returning |
+| fn | `scaled_jacobian_min` | `meshing/curve3.rs:554` | `pub fn scaled_jacobian_min(mesh: &SimplexMesh, c: usize) -> f64` —  The smallest certified ratio of the Jacobian determinant to the straight cell's over cell `c` of a solver |
+| fn | `scaled_jacobian_min_interior_q8` | `meshing/curve3.rs:561` | `pub fn scaled_jacobian_min_interior_q8(mesh: &SimplexMesh, c: usize) -> f64` —  The smallest ratio of the Jacobian determinant to the straight cell's over all 216 interior Gauss points of |
+| type | `PeriodicVertexParents` | `meshing/curve3.rs:576` |  |
+| type | `PeriodicEdgeParents` | `meshing/curve3.rs:577` |  |
+| fn | `periodic_edge_parent_map` | `meshing/curve3.rs:582` | `pub(crate) fn periodic_edge_parent_map( mesh: &SimplexMesh, target_edges: &[[u32; 2]], periodic: &[(Vec<i32>, Vec<i32>, [f64; 3])], ) -> (PeriodicVertexParents, PeriodicEdgeParents)` —  Maps periodic boundary vertices and candidate edges `(child_edge -> (root_parent_edge, shift))` |
+| fn | `periodic_pairs_from_eval` | `meshing/curve3.rs:732` | `pub(crate) fn periodic_pairs_from_eval( ev: &geom::eval::Evaluated, labels: &geom::labels::LabelMap, ) -> Vec<(Vec<i32>, Vec<i32>, [f64` —  Resolves evaluated `PeriodicPair`s to boundary-label tuples `(src_labels, dst_labels, translation)` for 3D meshes. |
+| fn | `curve_boundary_edges` | `meshing/curve3.rs:758` | `pub fn curve_boundary_edges(mesh: &mut CellMesh<3>, dom: &dyn Domain3) -> CurveReport` —  Curves the edges of the boundary and interface facets of a tetrahedral `CellMesh` (replacing its list of curved edges). Meshes with |
+| fn | `curve_solver_mesh` | `meshing/curve3.rs:772` | `pub fn curve_solver_mesh(mesh: &mut SimplexMesh, dom: &dyn Domain3) -> CurveReport` —  The same for a solver mesh (after an adaptation, say): curves edges of active `dom` regions while |
+| fn | `apply_edge_nodes_validated` | `meshing/curve3.rs:858` | `pub fn apply_edge_nodes_validated(mesh: &mut SimplexMesh, raw_cand: EdgeNodes) -> CurveReport` —  Validates and relaxes pre-projected candidate mid-edge nodes against all incident 3D tetrahedra of `mesh` |
 | struct | `GeomDomain3` | `meshing/geomdrive3.rs:27` |  A `geom` model as the geometry of the lattice mesher. |
 | struct | `Sizes3` | `meshing/geomdrive3.rs:425` | fields: `region_h`, `skip` —  What a caller asks of the 3D mesh beyond the model's own sizes. |
 | fn | `mesh_geom_3d` | `meshing/geomdrive3.rs:436` | `pub fn mesh_geom_3d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, String>` —  Meshes a 3D model with tetrahedra at element size `opts.h`: cells labelled by region (domain numbers), boundary facets by geom face. |
@@ -259,7 +260,7 @@ classDiagram
 | struct | `Spec3d` | `meshing/mesher3d.rs:76` | fields: `h`, `alpha`, `min_layers` —  Settings of the 3D mesher. |
 | struct | `Report3d` | `meshing/mesher3d.rs:95` | fields: `lattice_vertices`, `warped`, `cut_points`, `cells`, `refined`, `curve` —  A report of how the mesh was made. |
 | const | `MAX_SURFACES` | `meshing/mesher3d.rs:109` | `usize` —  Largest number of cutting surfaces: the solid and the regions. |
-| fn | `mesh_3d` | `meshing/mesher3d.rs:395` | `pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3d), String>` —  Meshes the model with tetrahedra. Cells carry `region_label`, boundary facets (outer faces and faces between regions) carry |
+| fn | `mesh_3d` | `meshing/mesher3d.rs:401` | `pub fn mesh_3d(dom: &dyn Domain3, spec: &Spec3d) -> Result<(CellMesh<3>, Report3d), String>` —  Meshes the model with tetrahedra. Cells carry `region_label`, boundary facets (outer faces and faces between regions) carry |
 | fn | `Spec3d::new` | `meshing/mesher3d.rs:88` | `pub fn new(h: f64) -> Self` |
 | enum | `EdgeKind` | `meshing/refine3d.rs:19` | variants: `Interior`, `Boundary`, `Interface` —  Where an edge that is being split lies. |
 | struct | `RefineReport` | `meshing/refine3d.rs:28` | fields: `rounds`, `bisections`, `cells_before`, `cells_after` |

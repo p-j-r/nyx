@@ -431,6 +431,19 @@ impl Engine {
                     ("dry_run", boolean("only build the comparison mesh(es) and answer their cells and what a solve of each is expected to cost; nothing is solved")),
                     ("wait", boolean("wait for the answer, default true; false starts a job that job_list, job_status and job_cancel see and job_wait answers"))], &["physics"])),
             cmd("export_results", "Write the results to an HDF5 file", "Writes the project, the mesh and the latest result of every solved physics (all fields, compressed, exact) into an HDF5 file and an XDMF index of the stored datasets next to it, for nyx and its tools only (not for ParaView or VisIt). Needs a build with HDF5 support; `parallel` also needs `phdf5`.", Expensive, schema(vec![("path", text("file path, .h5")), ("parallel", boolean("write with the MPI-IO driver; every process of an MPI run calls this with the same arguments and writes its own rows (needs a build with the `phdf5` feature)")), ("wait", boolean("wait for the file, default true; false starts a job that writes what the engine holds now, under its name only when complete"))], &["path"])),
+            cmd(
+                "vvuq_export",
+                "Export canonical VVUQ provenance and error-budget report",
+                "Writes an unsigned, canonical JSON VVUQ provenance and error-budget report (`vvuq_report.v1`) linking BLAKE3 digests of canonical project JSON, solver mesh, active/resolved materials, and linked/saved `results.h5` with build metadata, `SimplexMesh::check()` summary, per-physics `SolverDiagnostics`, `NumericalErrorBudget`, `Validated` state/tier, and active material warnings. Pass `export_h5: true` to also write a companion `results.h5` file beside the report when solved and none is linked yet.",
+                Expensive,
+                schema(
+                    vec![
+                        ("path", text("output JSON file path for the vvuq_report.v1 report")),
+                        ("export_h5", boolean("also export a companion results.h5 file beside the report if solved and no results.h5 is linked yet, default false")),
+                    ],
+                    &["path"],
+                ),
+            ),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions, scalars, solver diagnostics and numerical error budget of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
             cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support. With `wait` false it starts a job (reading and meshing happen on it; the project is replaced when job_wait or poll_jobs applies it).", Edit, schema(vec![("path", text("file path, .h5")), ("wait", boolean("wait for it, default true"))], &["path"])),
             cmd("list_analyses", "List the analyses", "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
@@ -855,11 +868,16 @@ impl Engine {
             "export_results" => {
                 let parallel = args.get("parallel").and_then(Value::as_bool).unwrap_or(false);
                 if opt_bool(args, "wait", true) {
-                    self.export_results(get_str(args, "path")?, parallel)
+                    let out = self.export_results(get_str(args, "path")?, parallel)?;
+                    if let Some(p) = out.get("path").and_then(Value::as_str) {
+                        self.last_results_h5 = Some((self.stamp(), std::path::PathBuf::from(p)));
+                    }
+                    Ok(out)
                 } else {
                     Ok(json!({ "job": self.start_export_results(get_str(args, "path")?, parallel)? }))
                 }
             }
+            "vvuq_export" => self.vvuq_export(get_str(args, "path")?, opt_bool(args, "export_h5", false)),
             "results_file_info" => self.results_file_info(get_str(args, "path")?),
             "open_results" => {
                 if opt_bool(args, "wait", true) {

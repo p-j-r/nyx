@@ -35,7 +35,7 @@ meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, R
     properties {
         "adr" "40, 50, 51, 55, 82, 83, 102, 132"
         "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs, meshing/sheet3d.rs"
-        "lines" "7505"
+        "lines" "7529"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -83,7 +83,7 @@ estimators = component "Error estimators" "Error estimation and the solve-estima
     properties {
         "adr" "7, 17, 53, 133"
         "code" "crates/femcore/src: adapt/electro.rs, adapt/estimate.rs, adapt/estimate3.rs, adapt/maxwell.rs"
-        "lines" "3730"
+        "lines" "3737"
         "codeDiagram" "4-code/femcore/estimators.md"
     }
 }
@@ -91,7 +91,7 @@ lacore = component "Matrices and vectors" "The one matrix type Csr over a generi
     properties {
         "adr" "33, 8, 11, 129"
         "code" "crates/femcore/src: linalg/basis.rs, linalg/bsr.rs, linalg/bundle.rs, linalg/csr.rs, linalg/csr/assembly.rs, linalg/dense/mod.rs, ... (18 files)"
-        "lines" "5111"
+        "lines" "5110"
         "codeDiagram" "4-code/femcore/lacore.md"
     }
 }
@@ -99,7 +99,7 @@ ladriver = component "Linear algebra driver" "The door the physics kernels use: 
     properties {
         "adr" "33"
         "code" "crates/femcore/src: linalg/driver.rs, linalg/pc.rs, linalg/problem.rs"
-        "lines" "1810"
+        "lines" "1793"
         "codeDiagram" "4-code/femcore/ladriver.md"
     }
 }
@@ -131,7 +131,7 @@ laprecond = component "Preconditioners" "Smoothed-aggregation multigrid (scalar 
     properties {
         "adr" "33, 8"
         "code" "crates/femcore/src: linalg/ads.rs, linalg/amg.rs, linalg/amg_elastic/mod.rs, linalg/amg_elastic/single.rs, linalg/ams.rs, linalg/fieldsplit.rs, linalg/ilu.rs, linalg/schwarz.rs"
-        "lines" "4112"
+        "lines" "4107"
         "codeDiagram" "4-code/femcore/laprecond.md"
     }
 }
@@ -147,7 +147,7 @@ fem = component "Finite-element basics" "Lagrange P1/P2 and mixed-cell Q1/Q2 ele
     properties {
         "adr" "9, 4, 45, 69, 128"
         "code" "crates/femcore/src: edge.rs, edge_mixed.rs, farfield.rs, fem.rs, fem_mixed.rs, fields.rs, ... (10 files)"
-        "lines" "10398"
+        "lines" "10412"
         "codeDiagram" "4-code/femcore/fem.md"
     }
 }
@@ -183,11 +183,11 @@ expr = component "Expressions" "A small safe expression evaluator for user input
         "codeDiagram" "4-code/femcore/expr.md"
     }
 }
-runtime = component "Runtime services" "The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence helpers." "Rust modules" {
+runtime = component "Runtime services" "The unified fixed-chunk worker pool (`par.rs`), stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence/GCI helpers." "Rust modules" {
     properties {
-        "adr" "9, 11, 96, 132"
+        "adr" "9, 11, 96, 132, 133"
         "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, vvuq.rs, warm.rs"
-        "lines" "1270"
+        "lines" "1275"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

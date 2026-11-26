@@ -5,13 +5,13 @@ C4 level 4 (code) of the component **Workspace** (`store.workspace`) in the cont
 > The folder behind the dashboard: settings (`scale_mode`, `zoom`), the list of workflows (manifests only) and the sections of the dashboard.
 
 **Decisions:** [ADR 14](../../../adr/0014-workflow-store-json-manifests-and-nyx-archives.md), [ADR 130](../../../adr/0130-gui-wslg-highdpi-polish-and-shell-script-driver.md)  
-**Size:** 2 files, 327 lines.
+**Size:** 2 files, 328 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-store/src/lib.rs` | 24 |  |
+| `crates/nyx-store/src/lib.rs` | 25 |  |
 | `crates/nyx-store/src/workspace.rs` | 303 |  |
 
 ## What it uses
@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Workspace** (`store.workspace`) in the cont
 |---|---|---|
 | [Workflow folder](./flow.md) | flow | WorkflowDir |
 | [Data model and card](./model.md) | model |  |
-| [Runs](./runs.md) | runs | RunRecord, RunStatus |
+| [Runs](./runs.md) | runs | BuildProvenance, RunDiagnosticsSummary, RunRecord, RunStatus, RuntimeProvenance |
 | [Utilities](./util.md) | util |  |
 
 ## Used by

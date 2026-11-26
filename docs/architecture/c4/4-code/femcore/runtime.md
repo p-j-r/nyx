@@ -2,17 +2,17 @@
 
 C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence helpers.
+> The unified fixed-chunk worker pool (`par.rs`), stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence/GCI helpers.
 
-**Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
-**Size:** 6 files, 1270 lines.
+**Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
+**Size:** 6 files, 1275 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/lib.rs` | 55 |  |
-| `crates/femcore/src/par.rs` | 163 |  |
+| `crates/femcore/src/par.rs` | 168 |  |
 | `crates/femcore/src/progress.rs` | 297 |  |
 | `crates/femcore/src/validate.rs` | 48 |  |
 | `crates/femcore/src/vvuq.rs` | 417 |  |
@@ -22,13 +22,13 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 
 | Target | Modules | Items |
 |---|---|---|
-| [Matrices and vectors](./lacore.md) | linalg::scalar | C64, Scalar |
+| [Matrices and vectors](./lacore.md) | linalg::par, linalg::scalar | C64, Scalar, chunk_map, for_chunks_mut, for_each_mut, worth_parallel |
 
 ## Used by
 
 | Component | Modules | Items |
 |---|---|---|
-| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | par | map_chunks, threads_up_to |
+| [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | par | map_chunks |
 | [analysis: Mode figures](../analysis/figures.md) | par | map_chunks |
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
 | [dfs: Shared helpers](../dfs/common.md) | progress, vvuq | SourceField, check |
@@ -43,30 +43,30 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
 | [ems: Complex-mode kernel](../ems/modescx.md) | progress | check, note |
 | [ems: Typed problem](../ems/problem.md) | validate | non_finite_token |
-| [engine: Commands](../engine/commands.md) | par, progress | install, note, stage, threads |
+| [engine: Commands](../engine/commands.md) | par, progress | factor_threads, install, note, stage, threads |
 | [engine: Job runner and queue](../engine/jobs.md) | progress, vvuq, warm | Call, Progress, RoacheGciRegime, RoacheGciReport, Warm, from_bytes, install, roache_gci +2 |
 | [engine: Meshing seam](../engine/meshing.md) | progress | CANCELLED, Progress, install, stage |
 | [engine: Registry and facade](../engine/registry.md) | progress | Progress |
-| [engine: Results files](../engine/resultsIO.md) | progress | Progress, install, stage |
+| [engine: Results files](../engine/resultsIO.md) | par, progress | Progress, factor_threads, install, note, stage, threads |
 | [Adaptation drivers](./adaptdrive.md) | progress | check |
-| [Error estimators](./estimators.md) | par |  |
+| [Error estimators](./estimators.md) | par | map_chunks, threads |
 | [Finite-element basics](./fem.md) | par, progress | check, lap_since, stage, threads, threads_up_to |
 | [Matrices and vectors](./lacore.md) | par | threads |
 | [Direct solvers](./ladirect.md) | par | factor_threads |
-| [Linear algebra driver](./ladriver.md) | par, progress, warm | begin, on_factor_pool, threads |
+| [Linear algebra driver](./ladriver.md) | par, progress, warm | begin, map_chunks, on_factor_pool, threads |
 | [Eigensolvers](./laeigen.md) | par, progress, warm | begin, check, threads |
 | [Time, nonlinear, sweeps](./laother.md) | par, progress | check, map_chunks, on_factor_pool |
-| [Preconditioners](./laprecond.md) | par, progress | check, lap_since, note, stage, threads |
+| [Preconditioners](./laprecond.md) | par, progress | check, lap_since, map_chunks, note, stage, threads |
 | [Mesh](./mesh.md) | par | threads |
 | [Meshing facade](./meshing.md) | progress | note |
-| [3D meshing](./meshing3d.md) | par, progress | check, lap, threads |
+| [3D meshing](./meshing3d.md) | par, progress | check, lap, map_chunks, threads |
 | [Metric fields](./metric.md) | par |  |
 | [physics: Physics trait and registry](../physics/trait.md) | progress | Progress |
 | [sms: Physics adapter](../sms/adapter.md) | progress | Progress |
 | [sms: Piezoelectric kernel](../sms/piezo.md) | par, progress | CANCELLED, check, map_chunks, threads |
-| [sms: Absorbing-layer kernel](../sms/pml.md) | par | threads_up_to |
+| [sms: Absorbing-layer kernel](../sms/pml.md) | par | threads |
 | [sms: Typed problem](../sms/problem.md) | validate | non_finite_token |
-| [sms: Solid kernel](../sms/solid.md) | par, progress, vvuq | SourceField, UniformSource, check, lap_since, threads_up_to |
+| [sms: Solid kernel](../sms/solid.md) | par, progress, vvuq | SourceField, UniformSource, check, lap_since, threads |
 
 ## Class diagram
 
@@ -234,7 +234,7 @@ classDiagram
 | const | `CHUNK` | `par.rs:64` | `usize` —  Chunk length used by default. |
 | fn | `fold_chunks_mut` | `par.rs:69` | `pub fn fold_chunks_mut<T: Send, F>(data: &mut [T], chunk: usize, nthreads: usize, f: F) -> f64` —  `f` must only touch its own chunk. With `nthreads == 1`, or fewer than two chunks, everything |
 | fn | `sum_range` | `par.rs:102` | `pub fn sum_range<F>(n: usize, chunk: usize, nthreads: usize, f: F) -> f64` —  Sum of `f(i)` over `0..n`, evaluated in fixed chunks and combined in chunk order. |
-| fn | `map_chunks` | `par.rs:117` | `pub fn map_chunks<T: Sync, R: Send, F: Fn(&[T]) -> R + Sync>(data: &[T], chunk: usize, f: F) -> Vec<R>` —  Evaluates `f` on fixed `chunk`-sized slices of `data` on the shared worker pool, returning results in chunk order. |
+| fn | `map_chunks` | `par.rs:119` | `pub fn map_chunks<T: Sync, R: Send, F: Fn(&[T]) -> R + Sync>(data: &[T], chunk: usize, f: F) -> Vec<R>` —  Evaluates `f` on fixed `chunk`-sized slices of `data` on the shared worker pool, returning results in chunk order. |
 | const | `CANCELLED` | `progress.rs:30` | `&str` —  The error text of a cancelled solve. |
 | struct | `Progress` | `progress.rs:44` |  Shared state of one job. Create with `Progress::new()`. |
 | struct | `Status` | `progress.rs:53` | fields: `stage`, `stage_seconds`, `total_seconds`, `fraction`, `cancelled` —  A snapshot for display. |

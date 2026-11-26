@@ -43,7 +43,7 @@ cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities
     properties {
         "adr" "45, 104, 132"
         "code" "crates/nyx-ems/src: bloch.rs, cavity.rs"
-        "lines" "4325"
+        "lines" "4310"
         "codeDiagram" "4-code/ems/cavity.md"
     }
 }

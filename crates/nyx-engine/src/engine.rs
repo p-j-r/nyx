@@ -125,6 +125,8 @@ pub struct Engine {
     pub(crate) path_root: Option<PathBuf>,
     /// the script (name, text) driving this engine, when one does: the runs it makes keep the text and its hash (`store_link.rs`)
     pub(crate) script: Option<(String, String)>,
+    /// most recently saved, opened, or run-recorded `results.h5` path paired with the project stamp it came from
+    pub(crate) last_results_h5: Option<(String, PathBuf)>,
 }
 
 /// What a worker reported, in words for the log of the run.
@@ -198,6 +200,7 @@ impl Engine {
             checks: BTreeMap::new(),
             path_root: None,
             script: None,
+            last_results_h5: None,
         }
     }
 
@@ -430,6 +433,7 @@ impl Engine {
         self.results.clear();
         self.checks.clear();
         self.link = None;
+        self.last_results_h5 = None;
         self.stages.clear();
     }
 
@@ -1168,6 +1172,15 @@ impl Engine {
                     &post_analyses,
                 );
                 let run_id = run["id"].as_str().map(str::to_string);
+                self.last_results_h5 = run_id
+                    .as_deref()
+                    .and_then(|rid| {
+                        self.link
+                            .as_ref()
+                            .map(|l| l.dir.run_dir(&l.experiment, rid).join("results.h5"))
+                            .filter(|p| p.is_file())
+                    })
+                    .map(|p| (self.stamp(), p));
                 self.store_results(results, keep, id, &solved_on, run_id);
                 let mut answer =
                     json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds });
@@ -1215,7 +1228,12 @@ impl Engine {
                 }
                 self.checked_answer(&physics, &key, v)
             }
-            (Pending::Export, Ok(JobOutput::Exported(v))) => Ok(v),
+            (Pending::Export, Ok(JobOutput::Exported(v))) => {
+                if let Some(p) = v.get("path").and_then(Value::as_str) {
+                    self.last_results_h5 = Some((self.stamp(), PathBuf::from(p)));
+                }
+                Ok(v)
+            }
             (Pending::Open, Ok(JobOutput::Opened(o))) => {
                 let Opened { project, model, results, path, checks } = *o;
                 // the file's project replaces the present one (that is what opening means); the results are stored under the keys of the new project
@@ -1247,6 +1265,7 @@ impl Engine {
                         "diagnostics": arc.diagnostics, "error_budget": arc.error_budget,
                     }));
                 }
+                self.last_results_h5 = Some((self.stamp(), PathBuf::from(&path)));
                 Ok(json!({ "title": self.project.title, "path": path, "cells": cells, "results": physics }))
             }
             (Pending::Solve { project, .. }, Err(e)) => {

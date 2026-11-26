@@ -3277,6 +3277,29 @@
     "title": "Write the results to an HDF5 file"
   },
   {
+    "access": "expensive",
+    "description": "Writes an unsigned, canonical JSON VVUQ provenance and error-budget report (`vvuq_report.v1`) linking BLAKE3 digests of canonical project JSON, solver mesh, active/resolved materials, and linked/saved `results.h5` with build metadata, `SimplexMesh::check()` summary, per-physics `SolverDiagnostics`, `NumericalErrorBudget`, `Validated` state/tier, and active material warnings. Pass `export_h5: true` to also write a companion `results.h5` file beside the report when solved and none is linked yet.",
+    "name": "vvuq_export",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "export_h5": {
+          "description": "also export a companion results.h5 file beside the report if solved and no results.h5 is linked yet, default false",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "output JSON file path for the vvuq_report.v1 report",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "title": "Export canonical VVUQ provenance and error-budget report"
+  },
+  {
     "access": "read",
     "description": "The project title, the mesh size and for each physics the study, size, time, number of solutions, scalars, solver diagnostics and numerical error budget of a results file.",
     "name": "results_file_info",

@@ -19,7 +19,7 @@ solid = component "Solid kernel" "Linear elastic solid mechanics on P1/P2 triang
     properties {
         "adr" "42, 9, 132"
         "code" "crates/nyx-sms/src: solid.rs"
-        "lines" "3344"
+        "lines" "3350"
         "codeDiagram" "4-code/sms/solid.md"
     }
 }
@@ -67,7 +67,7 @@ pml = component "Absorbing-layer kernel" "Eigenfrequencies of elastic bodies wit
     properties {
         "adr" "42, 101, 132"
         "code" "crates/nyx-sms/src: pml.rs"
-        "lines" "1623"
+        "lines" "1618"
         "codeDiagram" "4-code/sms/pml.md"
     }
 }

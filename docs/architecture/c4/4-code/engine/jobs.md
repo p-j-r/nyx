@@ -5,7 +5,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 > Mesh, solve, convergence and file jobs on their own threads with progress and cancel, queued in lanes (priority, owners in turn, stages shared by content), solves in a worker process (killed on cancel, its stage log mirrored, results read back from a file), streaming QMC sweeps over HDF5 checkpoints, memory estimates learned from the workers and admission by free memory, solving physics in the order of the one-way couplings (region names put into the scalars a kernel names by domain number), mesh convergence on a scratch engine with solutions compared by index, paired by nearest eigenvalue or one mode followed; the queue of the workspace as a folder run by a queue worker that outlives the window (ADR 95); warm starts between the points of a sweep (ADR 96).
 
 **Decisions:** [ADR 61](../../../adr/0061-convergence-is-an-engine-command.md), [ADR 80](../../../adr/0080-modes-carry-what-identifies-them-and-a-convergence-check-follows-a-mode.md), [ADR 85](../../../adr/0085-every-long-operation-is-a-job.md), [ADR 87](../../../adr/0087-work-is-queued-in-lanes-and-stages-are-shared-by-content.md), [ADR 86](../../../adr/0086-solves-run-in-a-worker-process.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 95](../../../adr/0095-the-queue-is-a-folder-of-the-workspace-run-by-a-queue-worker.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
-**Size:** 12 files, 7922 lines.
+**Size:** 12 files, 7939 lines.
 
 ## Files
 
@@ -19,10 +19,10 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | `crates/nyx-engine/src/qmc.rs` | 391 |  |
 | `crates/nyx-engine/src/queue.rs` | 707 |  |
 | `crates/nyx-engine/src/reuse.rs` | 204 |  |
-| `crates/nyx-engine/src/shared_queue.rs` | 970 |  |
+| `crates/nyx-engine/src/shared_queue.rs` | 986 |  |
 | `crates/nyx-engine/src/solve.rs` | 244 |  |
 | `crates/nyx-engine/src/sweep.rs` | 1197 |  |
-| `crates/nyx-engine/src/worker.rs` | 512 |  |
+| `crates/nyx-engine/src/worker.rs` | 513 |  |
 
 ## What it uses
 
@@ -39,7 +39,7 @@ C4 level 4 (code) of the component **Job runner and queue** (`engine.jobs`) in t
 | [Meshing seam](./meshing.md) | amr, meshing, preview | FemcoreMesher, MeshedModel, Mesher, cost_of_project, project_uses_electro_amr, project_uses_ems_cavity_amr, project_uses_sms_amr, solve_dfs_with_amr_opts, solve_ems_cavity_with_amr, solve_sms_with_amr |
 | [Project](./project.md) | project | Project |
 | [Registry and facade](./registry.md) | crate root | physics_for, registry |
-| [Results files](./resultsIO.md) | crate root, h5io | L2ShuffleLzfPacked, read_results, write_results_with_provenance |
+| [Results files](./resultsIO.md) | crate root, h5io | L2ShuffleLzfPacked, read_results, write_results_with_full_provenance |
 | [Store link](./storeLink.md) | store_link | RunOutcome, metrics_of |
 
 ## Used by
@@ -469,6 +469,7 @@ classDiagram
     class fns_shared_queue_rs {
         <<module shared_queue.rs>>
         +default_workspace() PathBuf
+        +lease_dead() Duration
         +run_queue(workspace, o) Result
         ~run_shared(q, program, n, spec, progress, id_slot, own) Result
         ~run_shared(_q, _program, _n, _spec, _progress, _id_slot, _own) Result
@@ -682,41 +683,42 @@ classDiagram
 | fn | `WarmLink::guard` | `reuse.rs:98` | `pub fn guard(&self) -> CellGuard` |
 | fn | `WarmLink::for_worker` | `reuse.rs:103` | `pub fn for_worker(input: Option<Arc<Vec<u8>>>, mine: Arc<WarmCell>) -> WarmLink` —  A link for a worker process: it is given the previous point's modes (or none) and leaves its own in `mine`. |
 | fn | `WarmLink::resolve` | `reuse.rs:109` | `pub fn resolve( &self, jobs: &JobRunner, wait: bool, progress: &Arc<femcore::progress::Progress>, ) -> Result<Resolved, Error>` —  Finds what to start from. With `wait` a point whose predecessor is still running waits for it (and stops at once on its own cancel); |
-| fn | `default_workspace` | `shared_queue.rs:33` | `pub fn default_workspace() -> PathBuf` —  The folder the window and the MCP server share by default: `NYX_WORKSPACE`, else the person's `Documents/nyx` (the window's workspace). |
-| const | `LEASE_DEAD` | `shared_queue.rs:38` | `Duration` —  A lease not touched for this long belongs to a queue worker that is gone. |
-| const | `KEEP_FINISHED` | `shared_queue.rs:40` | `Duration` —  A finished item nobody collected is removed after this long. |
-| struct | `Request` | `shared_queue.rs:52` | fields: `id`, `owner`, `priority`, `label`, `targets`, `stamp`, `submitted_ms`, `force`, `estimate`, `from_pid`, `save_fields`, `post_analyses`, ... —  What was asked, written once by the front-end. |
-| struct | `NewItem` | `shared_queue.rs:79` | fields: `owner`, `priority`, `label`, `stamp`, `hold`, `force`, `estimate`, `save_fields`, `post_analyses`, `memory_wait_timeout_s` —  What a front-end puts in an item besides the frozen project. |
-| struct | `State` | `shared_queue.rs:94` | fields: `state`, `stage`, `stage_seconds`, `fraction`, `log`, `error`, `has_results`, `peak_working_set`, `peak_commit`, `started_ms`, `ended_ms`, `child_pid`, ... —  What the queue worker says of an item. An item with no `state.json` is queued. |
-| struct | `Item` | `shared_queue.rs:121` | fields: `request`, `state`, `held`, `cancel_requested`, `priority`, `position` —  An item as a front-end sees it: the request, the worker's state and the markers. |
-| struct | `SharedQueue` | `shared_queue.rs:233` |  The queue folder of one workspace. |
-| struct | `RunnerOptions` | `shared_queue.rs:438` | fields: `worker`, `idle_exit`, `tick`, `age`, `probe`, `history` —  What the queue worker is told. |
-| fn | `run_queue` | `shared_queue.rs:523` | `pub fn run_queue(workspace: &Path, o: &RunnerOptions) -> Result<(), String>` —  Runs the queue of `workspace` until it has been idle for `idle_exit`, or another queue worker holds the lease. Returns at once (and `Ok`) when |
-| fn | `run_shared` | `shared_queue.rs:732` | `pub(crate) fn run_shared( q: &SharedQueue, program: &Path, n: &NewItem, spec: &crate::worker::RemoteSpec, progress: &std::sync::Arc<femcore::progress::Progress>, id_slot: &std::sync::Mutex<Option<String>>, own: &std::sync::Mutex<std::collections::BTreeSet<String>>, ) -> Result<crate::worker::RemoteDone, Error>` —  Hands a solve to the queue of the workspace and waits for it there, as one job of this engine: writes the item, makes sure a queue worker is |
-| fn | `run_shared` | `shared_queue.rs:809` | `pub(crate) fn run_shared( _q: &SharedQueue, _program: &Path, _n: &NewItem, _spec: &crate::worker::RemoteSpec, _progress: &std::sync::Arc<femcore::progress::Progress>, _id_slot: &std::sync::Mutex<Option<String>>, _own: &std::sync::Mutex<std::collections::BTreeSet<String>>, ) -> Result<crate::worker::RemoteDone, Error>` |
-| fn | `cli` | `shared_queue.rs:839` | `pub fn cli(args: &[String]) -> i32` —  `nyx queue list\|cancel\|hold\|release\|priority\|pause\|resume\|clear WORKSPACE [ID [N]]`: what a person at a terminal does with the queue of a |
-| fn | `State::is_finished` | `shared_queue.rs:114` | `pub fn is_finished(&self) -> bool` |
-| fn | `Item::state_name` | `shared_queue.rs:134` | `pub fn state_name(&self) -> &str` —  `queued`, `held`, `running`, `done`, `failed` or `cancelled` |
-| fn | `Item::is_open` | `shared_queue.rs:143` | `pub fn is_open(&self) -> bool` |
-| fn | `Item::to_json` | `shared_queue.rs:148` | `pub fn to_json(&self, workspace_queue: &SharedQueue) -> Value` —  The entry the queue commands show. |
-| fn | `SharedQueue::new` | `shared_queue.rs:239` | `pub fn new(workspace: &Path) -> SharedQueue` —  The queue of `workspace` (the folder is made when the first item is written). |
-| fn | `SharedQueue::root` | `shared_queue.rs:243` | `pub fn root(&self) -> &Path` |
-| fn | `SharedQueue::item_dir` | `shared_queue.rs:251` | `pub fn item_dir(&self, id: &str) -> PathBuf` |
-| fn | `SharedQueue::submit` | `shared_queue.rs:272` | `pub(crate) fn submit(&self, n: &NewItem, spec: &crate::worker::RemoteSpec) -> Result<String, Error>` —  Writes a solve as an item and returns its id. The folder appears under its name only when it is complete. |
-| fn | `SharedQueue::item` | `shared_queue.rs:321` | `pub fn item(&self, id: &str) -> Option<Item>` —  The item `id`, if it is there. |
-| fn | `SharedQueue::items` | `shared_queue.rs:341` | `pub fn items(&self) -> Vec<Item>` —  Every item, oldest first, with its place in the order of starting where the queue worker has ranked it. |
-| fn | `SharedQueue::cancel` | `shared_queue.rs:374` | `pub fn cancel(&self, id: &str) -> bool` —  Asks for `id` to be cancelled: a queued item is cancelled at the next look of the queue worker, a running one has its solver killed. |
-| fn | `SharedQueue::hold` | `shared_queue.rs:378` | `pub fn hold(&self, id: &str) -> bool` |
-| fn | `SharedQueue::release` | `shared_queue.rs:382` | `pub fn release(&self, id: &str) -> bool` |
-| fn | `SharedQueue::set_priority` | `shared_queue.rs:386` | `pub fn set_priority(&self, id: &str, priority: u8) -> bool` |
-| fn | `SharedQueue::pause` | `shared_queue.rs:391` | `pub fn pause(&self) -> bool` —  The queue is paused: the queue worker finishes what it runs and starts nothing. |
-| fn | `SharedQueue::resume` | `shared_queue.rs:395` | `pub fn resume(&self)` |
-| fn | `SharedQueue::paused` | `shared_queue.rs:399` | `pub fn paused(&self) -> bool` |
-| fn | `SharedQueue::remove` | `shared_queue.rs:404` | `pub fn remove(&self, id: &str) -> bool` —  Removes an item (the results of a finished one included); false when it is still open. |
-| fn | `SharedQueue::clear_finished` | `shared_queue.rs:413` | `pub fn clear_finished(&self) -> usize` —  Removes the finished items; returns how many. |
-| fn | `SharedQueue::runner_alive` | `shared_queue.rs:418` | `pub fn runner_alive(&self) -> bool` —  Whether a queue worker holds the lease now. |
-| fn | `SharedQueue::ensure_runner` | `shared_queue.rs:425` | `pub fn ensure_runner(&self, program: &Path) -> Result<(), Error>` —  Starts a queue worker (`program --worker <workspace>`) unless one holds the lease. The program runs on its own (`process::spawn_detached`: |
-| fn | `RunnerOptions::standard` | `shared_queue.rs:453` | `pub fn standard(workspace: &Path) -> RunnerOptions` —  The settings of a real queue worker: the program itself as the solver, the machine's memory, an end after 30 s idle (`NYX_QUEUE_IDLE_SECS`). |
+| fn | `default_workspace` | `shared_queue.rs:34` | `pub fn default_workspace() -> PathBuf` —  The folder the window and the MCP server share by default: `NYX_WORKSPACE`, else the person's `Documents/nyx` (the window's workspace). |
+| const | `LEASE_DEAD` | `shared_queue.rs:39` | `Duration` —  Default timeout after which an untouched lease belongs to a queue worker that is gone. |
+| fn | `lease_dead` | `shared_queue.rs:47` | `pub fn lease_dead() -> Duration` —  Timeout after which an untouched queue worker lease (`runner.lock`) is considered dead. |
+| const | `KEEP_FINISHED` | `shared_queue.rs:56` | `Duration` —  A finished item nobody collected is removed after this long. |
+| struct | `Request` | `shared_queue.rs:68` | fields: `id`, `owner`, `priority`, `label`, `targets`, `stamp`, `submitted_ms`, `force`, `estimate`, `from_pid`, `save_fields`, `post_analyses`, ... —  What was asked, written once by the front-end. |
+| struct | `NewItem` | `shared_queue.rs:95` | fields: `owner`, `priority`, `label`, `stamp`, `hold`, `force`, `estimate`, `save_fields`, `post_analyses`, `memory_wait_timeout_s` —  What a front-end puts in an item besides the frozen project. |
+| struct | `State` | `shared_queue.rs:110` | fields: `state`, `stage`, `stage_seconds`, `fraction`, `log`, `error`, `has_results`, `peak_working_set`, `peak_commit`, `started_ms`, `ended_ms`, `child_pid`, ... —  What the queue worker says of an item. An item with no `state.json` is queued. |
+| struct | `Item` | `shared_queue.rs:137` | fields: `request`, `state`, `held`, `cancel_requested`, `priority`, `position` —  An item as a front-end sees it: the request, the worker's state and the markers. |
+| struct | `SharedQueue` | `shared_queue.rs:249` |  The queue folder of one workspace. |
+| struct | `RunnerOptions` | `shared_queue.rs:454` | fields: `worker`, `idle_exit`, `tick`, `age`, `probe`, `history` —  What the queue worker is told. |
+| fn | `run_queue` | `shared_queue.rs:539` | `pub fn run_queue(workspace: &Path, o: &RunnerOptions) -> Result<(), String>` —  Runs the queue of `workspace` until it has been idle for `idle_exit`, or another queue worker holds the lease. Returns at once (and `Ok`) when |
+| fn | `run_shared` | `shared_queue.rs:748` | `pub(crate) fn run_shared( q: &SharedQueue, program: &Path, n: &NewItem, spec: &crate::worker::RemoteSpec, progress: &std::sync::Arc<femcore::progress::Progress>, id_slot: &std::sync::Mutex<Option<String>>, own: &std::sync::Mutex<std::collections::BTreeSet<String>>, ) -> Result<crate::worker::RemoteDone, Error>` —  Hands a solve to the queue of the workspace and waits for it there, as one job of this engine: writes the item, makes sure a queue worker is |
+| fn | `run_shared` | `shared_queue.rs:825` | `pub(crate) fn run_shared( _q: &SharedQueue, _program: &Path, _n: &NewItem, _spec: &crate::worker::RemoteSpec, _progress: &std::sync::Arc<femcore::progress::Progress>, _id_slot: &std::sync::Mutex<Option<String>>, _own: &std::sync::Mutex<std::collections::BTreeSet<String>>, ) -> Result<crate::worker::RemoteDone, Error>` |
+| fn | `cli` | `shared_queue.rs:855` | `pub fn cli(args: &[String]) -> i32` —  `nyx queue list\|cancel\|hold\|release\|priority\|pause\|resume\|clear WORKSPACE [ID [N]]`: what a person at a terminal does with the queue of a |
+| fn | `State::is_finished` | `shared_queue.rs:130` | `pub fn is_finished(&self) -> bool` |
+| fn | `Item::state_name` | `shared_queue.rs:150` | `pub fn state_name(&self) -> &str` —  `queued`, `held`, `running`, `done`, `failed` or `cancelled` |
+| fn | `Item::is_open` | `shared_queue.rs:159` | `pub fn is_open(&self) -> bool` |
+| fn | `Item::to_json` | `shared_queue.rs:164` | `pub fn to_json(&self, workspace_queue: &SharedQueue) -> Value` —  The entry the queue commands show. |
+| fn | `SharedQueue::new` | `shared_queue.rs:255` | `pub fn new(workspace: &Path) -> SharedQueue` —  The queue of `workspace` (the folder is made when the first item is written). |
+| fn | `SharedQueue::root` | `shared_queue.rs:259` | `pub fn root(&self) -> &Path` |
+| fn | `SharedQueue::item_dir` | `shared_queue.rs:267` | `pub fn item_dir(&self, id: &str) -> PathBuf` |
+| fn | `SharedQueue::submit` | `shared_queue.rs:288` | `pub(crate) fn submit(&self, n: &NewItem, spec: &crate::worker::RemoteSpec) -> Result<String, Error>` —  Writes a solve as an item and returns its id. The folder appears under its name only when it is complete. |
+| fn | `SharedQueue::item` | `shared_queue.rs:337` | `pub fn item(&self, id: &str) -> Option<Item>` —  The item `id`, if it is there. |
+| fn | `SharedQueue::items` | `shared_queue.rs:357` | `pub fn items(&self) -> Vec<Item>` —  Every item, oldest first, with its place in the order of starting where the queue worker has ranked it. |
+| fn | `SharedQueue::cancel` | `shared_queue.rs:390` | `pub fn cancel(&self, id: &str) -> bool` —  Asks for `id` to be cancelled: a queued item is cancelled at the next look of the queue worker, a running one has its solver killed. |
+| fn | `SharedQueue::hold` | `shared_queue.rs:394` | `pub fn hold(&self, id: &str) -> bool` |
+| fn | `SharedQueue::release` | `shared_queue.rs:398` | `pub fn release(&self, id: &str) -> bool` |
+| fn | `SharedQueue::set_priority` | `shared_queue.rs:402` | `pub fn set_priority(&self, id: &str, priority: u8) -> bool` |
+| fn | `SharedQueue::pause` | `shared_queue.rs:407` | `pub fn pause(&self) -> bool` —  The queue is paused: the queue worker finishes what it runs and starts nothing. |
+| fn | `SharedQueue::resume` | `shared_queue.rs:411` | `pub fn resume(&self)` |
+| fn | `SharedQueue::paused` | `shared_queue.rs:415` | `pub fn paused(&self) -> bool` |
+| fn | `SharedQueue::remove` | `shared_queue.rs:420` | `pub fn remove(&self, id: &str) -> bool` —  Removes an item (the results of a finished one included); false when it is still open. |
+| fn | `SharedQueue::clear_finished` | `shared_queue.rs:429` | `pub fn clear_finished(&self) -> usize` —  Removes the finished items; returns how many. |
+| fn | `SharedQueue::runner_alive` | `shared_queue.rs:434` | `pub fn runner_alive(&self) -> bool` —  Whether a queue worker holds the lease now. |
+| fn | `SharedQueue::ensure_runner` | `shared_queue.rs:441` | `pub fn ensure_runner(&self, program: &Path) -> Result<(), Error>` —  Starts a queue worker (`program --worker <workspace>`) unless one holds the lease. The program runs on its own (`process::spawn_detached`: |
+| fn | `RunnerOptions::standard` | `shared_queue.rs:469` | `pub fn standard(workspace: &Path) -> RunnerOptions` —  The settings of a real queue worker: the program itself as the solver, the machine's memory, an end after 30 s idle (`NYX_QUEUE_IDLE_SECS`). |
 | fn | `name_domains` | `solve.rs:23` | `pub(crate) fn name_domains(result: &mut SolveResult, model: &MeshedModel)` —  A kernel knows the regions by number and names a scalar of one region `... domain <number> ...` (`share in domain 3 1`); the model knows |
 | fn | `run_chain` | `solve.rs:41` | `pub fn run_chain( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> Result<Vec<SolveResult>, Error>` —  Solves `targets` (and nothing else) in coupling order. The result of each is returned in the order it was solved. |
 | fn | `run_chain_partial` | `solve.rs:57` | `pub fn run_chain_partial( registry: &Registry, project: &Project, model: &MeshedModel, targets: &[String], library: &Arc<femcore::material::Library>, progress: Arc<Progress>, ) -> (Vec<SolveResult>, Option<Error>)` —  Like `run_chain`, but when a physics fails the physics solved before it are returned with the error: a failed `sms` keeps the `ems` result |
@@ -744,13 +746,13 @@ classDiagram
 | struct | `RemoteDone` | `worker.rs:55` | fields: `results`, `mesh`, `failed`, `run`, `warm_out`, `warm_calls`, `fields_saved`, `post_analyses` —  What a worker handed back. |
 | fn | `material_texts` | `worker.rs:72` | `pub fn material_texts(lib: &femcore::material::Library) -> BTreeMap<String, String>` —  The materials of a library as TOML by name, what a worker rebuilds the library from. |
 | fn | `serve` | `worker.rs:91` | `pub fn serve(args: &[String]) -> i32` —  The worker program: `nyx-worker --job FOLDER` solves one job; `nyx-worker --worker WORKSPACE` is the queue worker of a workspace (Q3, |
-| struct | `ChildEnd` | `worker.rs:317` | fields: `done`, `status`, `stderr` —  What a worker child left when it ended: its last `done` message (none when it stopped without one), how it ended and what it wrote to stderr. |
-| fn | `write_job_files` | `worker.rs:325` | `pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error>` —  Writes what a worker is given into `dir`: the frozen project and the job's description. |
-| fn | `run_child` | `worker.rs:351` | `pub(crate) fn run_child( worker: &Path, dir: &Path, on_status: &mut dyn FnMut(&Value), on_spawn: &mut dyn FnMut(u32), cancelled: &dyn Fn() -> bool, ) -> Result<ChildEnd, Error>` —  Runs `worker --job dir` as a child and waits for it. Every `status` message goes to `on_status`; `on_spawn` gets the child's process id once |
-| fn | `stopped_words` | `worker.rs:417` | `pub(crate) fn stopped_words(status: &std::process::ExitStatus, stderr: &str) -> String` —  The words for a worker that ended without a `done` message. |
-| fn | `read_done` | `worker.rs:426` | `pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>) -> Result<RemoteDone, Error>` —  Reads what a finished worker handed back: the error it reports, the results file in `dir` and what the process cost. |
-| fn | `run_remote` | `worker.rs:461` | `pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error>` —  Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once. |
-| fn | `run_remote` | `worker.rs:495` | `pub(crate) fn run_remote(_spec: &RemoteSpec, _progress: &Arc<Progress>) -> Result<RemoteDone, Error>` |
-| fn | `same_mesh` | `worker.rs:504` | `pub(crate) fn same_mesh(a: &femcore::mesh::SimplexMesh, b: &femcore::mesh::SimplexMesh) -> bool` —  True when the mesh a worker stored is the mesh the parent holds (meshing is deterministic, ADR 55): the check that parent and worker solved |
+| struct | `ChildEnd` | `worker.rs:318` | fields: `done`, `status`, `stderr` —  What a worker child left when it ended: its last `done` message (none when it stopped without one), how it ended and what it wrote to stderr. |
+| fn | `write_job_files` | `worker.rs:326` | `pub(crate) fn write_job_files(dir: &Path, spec: &RemoteSpec) -> Result<(), Error>` —  Writes what a worker is given into `dir`: the frozen project and the job's description. |
+| fn | `run_child` | `worker.rs:352` | `pub(crate) fn run_child( worker: &Path, dir: &Path, on_status: &mut dyn FnMut(&Value), on_spawn: &mut dyn FnMut(u32), cancelled: &dyn Fn() -> bool, ) -> Result<ChildEnd, Error>` —  Runs `worker --job dir` as a child and waits for it. Every `status` message goes to `on_status`; `on_spawn` gets the child's process id once |
+| fn | `stopped_words` | `worker.rs:418` | `pub(crate) fn stopped_words(status: &std::process::ExitStatus, stderr: &str) -> String` —  The words for a worker that ended without a `done` message. |
+| fn | `read_done` | `worker.rs:427` | `pub(crate) fn read_done(d: &Value, dir: &Path, progress: Option<&Arc<Progress>>) -> Result<RemoteDone, Error>` —  Reads what a finished worker handed back: the error it reports, the results file in `dir` and what the process cost. |
+| fn | `run_remote` | `worker.rs:462` | `pub(crate) fn run_remote(spec: &RemoteSpec, progress: &Arc<Progress>) -> Result<RemoteDone, Error>` —  Solves `spec` in a worker and waits for it, mirroring its stage log into `progress`. A cancel on `progress` kills the worker at once. |
+| fn | `run_remote` | `worker.rs:496` | `pub(crate) fn run_remote(_spec: &RemoteSpec, _progress: &Arc<Progress>) -> Result<RemoteDone, Error>` |
+| fn | `same_mesh` | `worker.rs:505` | `pub(crate) fn same_mesh(a: &femcore::mesh::SimplexMesh, b: &femcore::mesh::SimplexMesh) -> bool` —  True when the mesh a worker stored is the mesh the parent holds (meshing is deterministic, ADR 55): the check that parent and worker solved |
 
 Trait implementations in this component: `Limits: Default`, `History: Drop`, `JobRunner: Default`, `QueueOpts: Default`, `WarmLink: Debug`, `CellGuard: Drop`, `JobDir: Drop`

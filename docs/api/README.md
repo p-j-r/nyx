@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:9a132ed200c3eb2b97f2102c65269409` · 113 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:60697136d596a5b047f70971b85b0f54` · 114 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -119,3 +119,4 @@ Catalog hash: `b3:9a132ed200c3eb2b97f2102c65269409` · 113 commands. `nyx api li
 | [`sweep_table`](sweep_table.md) | read | The table of a sweep |
 | [`tag_feature`](tag_feature.md) | edit | Tag a feature |
 | [`update_feature`](update_feature.md) | edit | Change a feature |
+| [`vvuq_export`](vvuq_export.md) | expensive | Export canonical VVUQ provenance and error-budget report |

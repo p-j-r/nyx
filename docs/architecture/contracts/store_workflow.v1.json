@@ -1,45 +1,45 @@
 {
-  "nyx": 1,
-  "kind": "workflow",
-  "id": "wf-example",
-  "title": "Exemplar",
-  "status": "active",
-  "pinned": false,
-  "origin": "gui",
   "created": "2026-11-03T00:00:00Z",
-  "touched": "2026-11-03T00:00:00Z",
+  "experiments": [
+    {
+      "card": {
+        "dim": 0,
+        "geometry": {
+          "dims": [],
+          "family": "",
+          "summary": ""
+        },
+        "keywords": [],
+        "materials": [],
+        "physics": "",
+        "study": "",
+        "summary": ""
+      },
+      "id": "e1",
+      "runs": {
+        "count": 0,
+        "failed": 0,
+        "metrics": {},
+        "ok": 0,
+        "params": {},
+        "starred": []
+      },
+      "spec_hash": "b3:0000",
+      "title": "TE modes"
+    }
+  ],
+  "id": "wf-example",
+  "kind": "workflow",
+  "nyx": 1,
+  "origin": "gui",
+  "pinned": false,
+  "scripts_approved": false,
+  "share": "recipe",
+  "status": "active",
   "tags": [
     "soi"
   ],
-  "share": "recipe",
-  "version": 1,
-  "scripts_approved": false,
-  "experiments": [
-    {
-      "id": "e1",
-      "title": "TE modes",
-      "spec_hash": "b3:0000",
-      "card": {
-        "physics": "",
-        "study": "",
-        "dim": 0,
-        "geometry": {
-          "family": "",
-          "summary": "",
-          "dims": []
-        },
-        "materials": [],
-        "keywords": [],
-        "summary": ""
-      },
-      "runs": {
-        "count": 0,
-        "ok": 0,
-        "failed": 0,
-        "params": {},
-        "metrics": {},
-        "starred": []
-      }
-    }
-  ]
+  "title": "Exemplar",
+  "touched": "2026-11-03T00:00:00Z",
+  "version": 1
 }

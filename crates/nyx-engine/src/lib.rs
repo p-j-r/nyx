@@ -43,6 +43,7 @@ pub mod pml;
 pub mod preview;
 pub mod process;
 pub mod project;
+pub mod provenance;
 pub mod qmc;
 pub mod queue;
 pub mod reduce;
@@ -54,6 +55,7 @@ pub mod solve;
 pub mod store_link;
 pub mod sweep;
 pub mod validated;
+pub mod vvuq_report;
 pub mod worker;
 
 pub use commands::{Access, CommandDesc};

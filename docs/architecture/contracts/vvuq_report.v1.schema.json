@@ -1,0 +1,632 @@
+{
+  "$defs": {
+    "build_metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "cargo_lock_blake3": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "git_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "git_dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "nyx_factor_threads": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "nyx_threads": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "nyx_version": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "rustc_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_triple": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nyx_version",
+        "git_commit",
+        "git_dirty",
+        "rustc_version",
+        "target_triple",
+        "profile",
+        "cargo_lock_blake3",
+        "os",
+        "arch",
+        "nyx_threads",
+        "nyx_factor_threads"
+      ],
+      "type": "object"
+    },
+    "diagnostic_warning": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "type": "object"
+    },
+    "material_warning": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "physics": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "physics",
+        "code",
+        "severity",
+        "message"
+      ],
+      "type": "object"
+    },
+    "mesh_check": {
+      "additionalProperties": false,
+      "properties": {
+        "dim": {
+          "enum": [
+            2,
+            3
+          ],
+          "type": "integer"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "n_cells": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_curved_edges": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_edges": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_facets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_points": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "n_qp_edges": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "dim",
+        "n_points",
+        "n_cells",
+        "n_facets",
+        "n_edges",
+        "n_curved_edges",
+        "n_qp_edges"
+      ],
+      "type": "object"
+    },
+    "numerical_error_budget": {
+      "additionalProperties": false,
+      "properties": {
+        "alg_below_disc_ratio": {
+          "type": "number"
+        },
+        "algebraic_rel": {
+          "type": "number"
+        },
+        "combined_num_uncertainty_rel": {
+          "type": "number"
+        },
+        "model_truncation_rel": {
+          "type": "number"
+        },
+        "spatial_discretization": {
+          "$ref": "#/$defs/spatial_error_estimate"
+        },
+        "temporal_rel": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "algebraic_rel"
+      ],
+      "type": "object"
+    },
+    "physics_entry": {
+      "additionalProperties": false,
+      "properties": {
+        "diagnostics": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/solver_diagnostics"
+            }
+          ]
+        },
+        "dofs": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error_budget": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/numerical_error_budget"
+            }
+          ]
+        },
+        "order": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "solved": {
+          "type": "boolean"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "study": {
+          "type": "string"
+        },
+        "validated": {
+          "$ref": "#/$defs/validated_entry"
+        }
+      },
+      "required": [
+        "study",
+        "order",
+        "solved",
+        "stale",
+        "dofs",
+        "seconds",
+        "diagnostics",
+        "error_budget",
+        "validated"
+      ],
+      "type": "object"
+    },
+    "solver_diagnostics": {
+      "additionalProperties": false,
+      "properties": {
+        "cholesky_fallbacks": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "converged": {
+          "type": "boolean"
+        },
+        "iterations": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_algebraic_residual": {
+          "type": "number"
+        },
+        "per_mode_residuals": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "rcond_estimate": {
+          "type": "number"
+        },
+        "restarts": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "solver_kind": {
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/diagnostic_warning"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "solver_kind",
+        "converged",
+        "max_algebraic_residual",
+        "cholesky_fallbacks"
+      ],
+      "type": "object"
+    },
+    "spatial_error_estimate": {
+      "additionalProperties": false,
+      "properties": {
+        "extrapolated_scalars_only": {
+          "type": "boolean"
+        },
+        "is_epistemic_bound": {
+          "type": "boolean"
+        },
+        "method": {
+          "type": "string"
+        },
+        "observed_order": {
+          "type": "number"
+        },
+        "refinement_ratio": {
+          "type": "number"
+        },
+        "rel_bound": {
+          "type": "number"
+        },
+        "safety_factor": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "method",
+        "rel_bound",
+        "is_epistemic_bound"
+      ],
+      "type": "object"
+    },
+    "validated_check": {
+      "additionalProperties": false,
+      "properties": {
+        "cells": {
+          "$ref": "#/$defs/validated_check_cells"
+        },
+        "factor": {
+          "type": "number"
+        },
+        "gci_21": {
+          "type": "number"
+        },
+        "gci_regime": {
+          "type": "string"
+        },
+        "grids": {
+          "minimum": 2,
+          "type": "integer"
+        },
+        "matching": {
+          "type": "string"
+        },
+        "max_algebraic_residual": {
+          "type": "number"
+        },
+        "observable": {
+          "type": "string"
+        },
+        "observed_order": {
+          "type": "number"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "r_eff": {
+          "type": "number"
+        },
+        "seconds": {
+          "type": "number"
+        },
+        "tolerance": {
+          "type": "number"
+        },
+        "worst_quantity": {
+          "type": "string"
+        },
+        "worst_relative": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "factor",
+        "tolerance",
+        "observable",
+        "matching",
+        "passed",
+        "grids",
+        "worst_relative",
+        "worst_quantity",
+        "cells",
+        "seconds"
+      ],
+      "type": "object"
+    },
+    "validated_check_cells": {
+      "additionalProperties": false,
+      "properties": {
+        "coarse": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "medium": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "refined": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "coarse",
+        "refined"
+      ],
+      "type": "object"
+    },
+    "validated_entry": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "$ref": "#/$defs/validated_check"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "exploratory",
+            "checked",
+            "check_not_affordable"
+          ]
+        },
+        "tier": {
+          "enum": [
+            "bound_certified",
+            "gci_verified",
+            "two_grid_checked",
+            "residual_checked",
+            "exploratory",
+            "not_affordable",
+            "non_convergent"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "tier",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "validated_summary": {
+      "additionalProperties": false,
+      "properties": {
+        "by_physics": {
+          "additionalProperties": {
+            "$ref": "#/$defs/validated_tier_pair"
+          },
+          "type": "object"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "exploratory",
+            "checked",
+            "check_not_affordable"
+          ]
+        },
+        "tier": {
+          "enum": [
+            "bound_certified",
+            "gci_verified",
+            "two_grid_checked",
+            "residual_checked",
+            "exploratory",
+            "not_affordable",
+            "non_convergent"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "tier",
+        "reason",
+        "by_physics"
+      ],
+      "type": "object"
+    },
+    "validated_tier_pair": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "exploratory",
+            "checked",
+            "check_not_affordable"
+          ]
+        },
+        "tier": {
+          "enum": [
+            "bound_certified",
+            "gci_verified",
+            "two_grid_checked",
+            "residual_checked",
+            "exploratory",
+            "not_affordable",
+            "non_convergent"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "tier"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://nyx.dev/contracts/vvuq_report.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Unsigned canonical VVUQ provenance and numerical error-budget report emitted by `vvuq_export`.",
+  "properties": {
+    "build": {
+      "$ref": "#/$defs/build_metadata"
+    },
+    "format": {
+      "const": "vvuq_report.v1"
+    },
+    "generated_utc": {
+      "type": "string"
+    },
+    "material_warnings": {
+      "items": {
+        "$ref": "#/$defs/material_warning"
+      },
+      "type": "array"
+    },
+    "materials_blake3": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "mesh_blake3": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mesh_check": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/mesh_check"
+        }
+      ]
+    },
+    "physics": {
+      "additionalProperties": {
+        "$ref": "#/$defs/physics_entry"
+      },
+      "type": "object"
+    },
+    "project_blake3": {
+      "type": "string"
+    },
+    "project_title": {
+      "type": "string"
+    },
+    "results_h5_blake3": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "validated": {
+      "$ref": "#/$defs/validated_summary"
+    }
+  },
+  "required": [
+    "format",
+    "generated_utc",
+    "project_title",
+    "project_blake3",
+    "mesh_blake3",
+    "materials_blake3",
+    "results_h5_blake3",
+    "build",
+    "mesh_check",
+    "material_warnings",
+    "validated",
+    "physics"
+  ],
+  "title": "vvuq_report.v1",
+  "type": "object"
+}

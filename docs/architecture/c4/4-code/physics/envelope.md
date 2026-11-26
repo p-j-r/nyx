@@ -33,11 +33,12 @@ C4 level 4 (code) of the component **Problem envelope** (`physics.envelope`) in 
 | [ems: Physics adapter](../ems/adapter.md) | decode | Params, materials_by_region |
 | [ems: Typed problem](../ems/problem.md) | decode, spec | MaterialAssign, Params, ProblemSpec, domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec |
 | [engine: API reference](../engine/apiref.md) | spec | canonical_json |
-| [engine: Commands](../engine/commands.md) | decode, spec, validate | BcSpec, MaterialAssign, ProblemSpec, StudySpec, canonical_json, materials_by_label, validate_spec |
+| [engine: Commands](../engine/commands.md) | decode, spec, validate | BcSpec, MaterialAssign, ProblemSpec, StudySpec, audit_active_materials, canonical_json, materials_by_label, validate_spec |
 | [engine: Job runner and queue](../engine/jobs.md) | spec, validate | ProblemSpec, validate_spec |
 | [engine: Materials](../engine/materials.md) | decode, spec | MaterialAudit, ProblemSpec, audit_active_materials |
 | [engine: Meshing seam](../engine/meshing.md) | spec, validate | BcSpec, MaterialAssign, ProblemSpec, check_result_finite, validate_spec |
 | [engine: Project](../engine/project.md) | spec, validate | FORMAT, ProblemSpec, canonical_json, validate_spec |
+| [engine: Results files](../engine/resultsIO.md) | spec | MaterialAssign, canonical_json |
 | [engine: Store link](../engine/storeLink.md) | spec | MaterialAssign |
 | [Test support](./testsupport.md) | spec | canonical_json |
 | [Physics trait and registry](./trait.md) | decode, spec, validate | BcSpec, FORMAT, MaterialAssign, MaterialAudit, MaterialClampEvent, ProblemSpec, PropValue, StudySpec +8 |

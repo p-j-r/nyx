@@ -7,7 +7,7 @@
 //!
 //! `NYX_WRITE_CONTRACT=1 cargo test --release -p nyx-store --test contracts` rewrites the exemplars (only with a version bump, ADR 19).
 use nyx_store::model::{Card, Digest, Experiment, Status, Workflow, FORMAT};
-use nyx_store::runs::{Artifact, RunRecord, RunStatus};
+use nyx_store::runs::{Artifact, BuildProvenance, Convergence, RunDiagnosticsSummary, RunRecord, RunStatus, RuntimeProvenance};
 use nyx_store::WorkflowDir;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -94,14 +94,62 @@ fn store_run_record_exemplar_is_stable_and_old_lines_still_read() {
         note: "first".into(),
         artifacts: vec![Artifact { kind: "fields".into(), path: "r0001_abcd/fields.h5".into(), bytes: 1024 }],
         error: None,
-        convergence: None,
+        convergence: Some(Convergence {
+            factor: 0.6,
+            tolerance: 1e-3,
+            observable: "2 quantities (eigenvalues, values, numeric scalars), solutions matched by index, 3-grid GCI".into(),
+            passed: true,
+            worst_relative: 2.5e-4,
+            grids: Some(3),
+            r_eff: Some(1.67),
+            gci_fine: Some(1.2e-4),
+            gci_p_obs: Some(2.0),
+            gci_regime: Some("monotonic".into()),
+            tier: Some("gci_verified".into()),
+        }),
         reuse: None,
+        build: Some(BuildProvenance {
+            nyx_version: "0.1.0".into(),
+            git_commit: "000000000000".into(),
+            git_dirty: false,
+            rustc_version: "rustc 1.99.1".into(),
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            profile: "release".into(),
+            cargo_lock_blake3: "b3:0000".into(),
+        }),
+        runtime: Some(RuntimeProvenance {
+            os: "linux".into(),
+            cpu_arch: "x86_64".into(),
+            nyx_threads: 4,
+            nyx_factor_threads: 4,
+            created_utc: "2026-11-03T00:00:00Z".into(),
+        }),
+        diagnostics: Some(RunDiagnosticsSummary {
+            results_with_diagnostics: 1,
+            all_converged: true,
+            info_count: 0,
+            warning_count: 0,
+            error_count: 0,
+            worst_severity: "none".into(),
+            max_algebraic_residual: 1.0e-14,
+            min_rcond_estimate: Some(1.0e-4),
+            cholesky_fallbacks: 0,
+            warning_codes: vec![],
+            warnings: vec![],
+        }),
+        material_hashes: Some([("silicon".to_string(), "b3:1111".to_string())].into()),
     };
     check_exemplar("store_run.v1.json", &serde_json::to_value(&r).unwrap(), false);
     // a line written before `version`, `tags`, `star`, `note` and `artifacts` existed still reads (they are `#[serde(default)]`)
     let old = r#"{"id":"r1","t":"2026-10-31T00:00:00Z","sec":1.0,"status":"ok","spec":"b3:1","femcore":"0.1.0","params":{},"metrics":{}}"#;
     let rec: RunRecord = serde_json::from_str(old).unwrap();
     assert_eq!((rec.version, rec.star, rec.tags.len(), rec.note.as_str(), rec.artifacts.len()), (0, false, 0, "", 0));
+    assert!(rec.build.is_none() && rec.runtime.is_none() && rec.diagnostics.is_none() && rec.material_hashes.is_none());
+    // a store_run 1.0 record still deserializes cleanly under schema 1.1
+    let v1_0 = r#"{"id":"r0001_abcd","t":"2026-11-03T00:00:00Z","sec":0.25,"status":"ok","spec":"b3:0000","femcore":"0.1.0","version":2,"params":{"w":5e-7},"metrics":{"neff_re":2.44},"tags":["baseline"],"star":true,"note":"first","artifacts":[{"kind":"fields","path":"r0001_abcd/fields.h5","bytes":1024}]}"#;
+    let rec_v1_0: RunRecord = serde_json::from_str(v1_0).unwrap();
+    assert_eq!(rec_v1_0.id, "r0001_abcd");
+    assert!(rec_v1_0.build.is_none() && rec_v1_0.runtime.is_none() && rec_v1_0.diagnostics.is_none() && rec_v1_0.material_hashes.is_none());
     assert_eq!(serde_json::to_value(RunStatus::Cancelled).unwrap(), json!("cancelled"));
 }
 

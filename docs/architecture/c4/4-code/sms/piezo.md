@@ -20,7 +20,7 @@ C4 level 4 (code) of the component **Piezoelectric kernel** (`sms.piezo`) in the
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::metric, crate root, fem, fem_mixed, fields, linalg::amg_elastic, linalg::csr, linalg::csr::assembly +20 | AmgOptions, AmgSystem, C, C64, CANCELLED, CCoo, CCsr, CellFields, Coo, Csr +84 |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | adapt::metric, crate root, fem, fem_mixed, fields, linalg::amg_elastic, linalg::csr, linalg::csr::assembly +20 | AmgOptions, AmgSystem, C, C64, CANCELLED, CCoo, CCsr, CellFields, Coo, Csr +85 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, frame, result | CellField, DiagnosticSeverity, DiagnosticWarning, Discretisation, DrivenPortData, Field, FieldFrame, Mesh, MixedToSimplexProjector, Scalar +3 |
 | [Physics adapter](./adapter.md) | diag | SmsDiag |
 | [Floquet kernel](./floquet.md) | floquet | mixed_nodal_relations |
@@ -261,7 +261,7 @@ classDiagram
 
 | Kind | Item | File:line | Signature or summary |
 |---|---|---|---|
-| struct | `SchurShiftInvertOp` | `piezo.rs:51` | fields: `n_u`, `n_tot`, `m_uu_scaled`, `fac`, `d_scale` —  Shift-and-invert Schur operator acting strictly on reduced mechanical displacement DOFs `u` (`dim = n_u`), |
+| struct | `SchurShiftInvertOp` | `piezo.rs:50` | fields: `n_u`, `n_tot`, `m_uu_scaled`, `fac`, `d_scale` —  Shift-and-invert Schur operator acting strictly on reduced mechanical displacement DOFs `u` (`dim = n_u`), |
 | struct | `SchurQepShiftInvertOp` | `piezo.rs:116` | fields: `n_u`, `n_tot`, `a2_uu`, `p_prime_uu`, `fac`, `d_scale` —  Companion shift-and-invert operator in **dimensionless** `s = omega / omega_0` on `C^{2 n_u}` for |
 | fn | `recover_phi_complex` | `piezo.rs:213` | `pub(crate) fn recover_phi_complex(k_pp: &CCsr, k_pu: &CCsr, u_vecs: &[Vec<C64>]) -> Result<Vec<Vec<C64>>, String>` |
 | struct | `PiezoComplexEigenInput` | `piezo.rs:232` | fields: `n_u`, `n_tot`, `n_modes`, `f_search`, `is_hermitian`, `has_pml`, `has_dielectric_loss`, `n_pairs`, `k_red`, `m_uu_red`, `c_uu_red`, `k_pp_red`, ... |

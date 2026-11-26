@@ -23,8 +23,9 @@ Nothing outside the component (the standard library and external crates are not 
 |---|---|---|
 | [engine: API reference](../engine/apiref.md) | util | hash_bytes |
 | [engine: Command lists](../engine/commandlist.md) | util | hash_bytes |
-| [engine: Commands](../engine/commands.md) | util | hash_bytes |
-| [engine: Store link](../engine/storeLink.md) | util | hash_bytes, write_atomic |
+| [engine: Commands](../engine/commands.md) | util | hash_bytes, hash_file, iso, now_secs, write_atomic |
+| [engine: Results files](../engine/resultsIO.md) | util | hash_bytes |
+| [engine: Store link](../engine/storeLink.md) | util | hash_bytes, iso, now_secs, write_atomic |
 | [Archives](./archive.md) | util |  |
 | [Workflow folder](./flow.md) | util |  |
 | [Data model and card](./model.md) | util | iso, now_secs, parse_iso, short_id |

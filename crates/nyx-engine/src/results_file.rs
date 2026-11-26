@@ -15,6 +15,7 @@ pub struct Snapshot {
     pub model: std::sync::Arc<crate::meshing::MeshedModel>,
     pub results: Vec<(String, std::sync::Arc<nyx_physics::SolveResult>)>,
     pub checks: std::collections::BTreeMap<String, crate::validated::Check>,
+    pub materials: std::collections::BTreeMap<String, crate::provenance::MaterialProvenance>,
 }
 
 /// Writes `snapshot` into the HDF5 file `path` and its XDMF description. With `atomic` the file is written under another name and renamed when it
@@ -30,13 +31,14 @@ pub fn write_snapshot(snapshot: &Snapshot, path: &str, parallel: bool, atomic: b
         let temporary = std::path::PathBuf::from(format!("{path}.partial"));
         let atomic = atomic && !parallel;
         let target = if atomic { temporary.as_path() } else { p };
-        let written = crate::h5io::write_results_mode_with_provenance(
+        let written = crate::h5io::write_results_mode_with_full_provenance(
             target,
             mode,
             &snapshot.project,
             &mesh,
             &refs,
             Some(&snapshot.checks),
+            Some(&snapshot.materials),
         )
         .map_err(Error::invalid);
         let root = match written {
@@ -99,6 +101,15 @@ pub(crate) fn read_and_mesh(
         let mut scratch = Engine::with(registry.clone(), mesher.clone());
         scratch.set_base_library_arc(library.clone());
         scratch.set_project(project.clone());
+        let local_lib = scratch.library().unwrap_or_else(|_| library.clone());
+        let drift_warnings = crate::provenance::check_material_drift(&stored.materials, &project, &local_lib);
+        if !drift_warnings.is_empty() {
+            let _installed = femcore::progress::install(progress);
+            for msg in &drift_warnings {
+                eprintln!("warning: {msg}");
+                femcore::progress::note(format!("warning: {msg}"));
+            }
+        }
         let sizing = scratch.sizing();
         let model = {
             let _installed = femcore::progress::install(progress);
@@ -140,13 +151,27 @@ pub(crate) fn read_and_mesh(
                 model
             }
         };
-        Ok(crate::jobs::Opened {
-            project,
-            model,
-            results: stored.results,
-            path: path.to_string(),
-            checks: stored.validated_checks,
-        })
+        let mut results = stored.results;
+        if !drift_warnings.is_empty() {
+            for (code, res) in &mut results {
+                let diag = res.diagnostics.get_or_insert_with(|| nyx_physics::SolverDiagnostics {
+                    solver_kind: format!("{code}.{}", res.study),
+                    converged: true,
+                    ..Default::default()
+                });
+                for msg in &drift_warnings {
+                    res.log.push(format!("warning: {msg}"));
+                    if !diag.warnings.iter().any(|w| w.code == "material_drift" && w.message == *msg) {
+                        diag.warnings.push(nyx_physics::DiagnosticWarning {
+                            code: "material_drift".into(),
+                            severity: nyx_physics::DiagnosticSeverity::Warning,
+                            message: msg.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(crate::jobs::Opened { project, model, results, path: path.to_string(), checks: stored.validated_checks })
     }
     #[cfg(not(feature = "hdf5"))]
     {
@@ -170,7 +195,14 @@ impl Engine {
         if results.is_empty() {
             return Err(Error::invalid("there are no results yet; solve first"));
         }
-        Ok(Snapshot { project: self.project.clone(), model, results, checks: self.checks.clone() })
+        let lib = self.library().ok();
+        let materials = lib
+            .as_deref()
+            .map(|l| crate::provenance::resolve_materials_with_merged_library(&self.project, l))
+            .unwrap_or_else(|| {
+                crate::provenance::resolve_materials_for_project(&self.project, Some(self.base_library()))
+            });
+        Ok(Snapshot { project: self.project.clone(), model, results, checks: self.checks.clone(), materials })
     }
 
     /// Writes the project, the mesh and the latest result of every solved physics into an HDF5 file, and waits for it. With `parallel` the file
@@ -199,8 +231,19 @@ impl Engine {
                 .ok()
                 .and_then(|v| v.get("title").cloned())
                 .unwrap_or(Value::Null);
+            let material_warnings = crate::project::Project::from_json(&s.project)
+                .ok()
+                .map(|p| {
+                    let merged =
+                        if p.materials.is_empty() { None } else { self.base_library().with_texts(&p.materials).ok() };
+                    let lib = merged.as_ref().unwrap_or_else(|| self.base_library().as_ref());
+                    crate::provenance::check_material_drift(&s.materials, &p, lib)
+                })
+                .unwrap_or_default();
             Ok(json!({
                 "title": title, "dim": s.dim, "cells": s.cells, "points": s.points,
+                "materials": s.materials,
+                "material_warnings": material_warnings,
                 "results": s.results.iter().map(|(c, r)| json!({
                     "physics": c, "study": r.study, "order": r.order, "dofs": r.dofs, "seconds": r.seconds,
                     "diagnostics": r.diagnostics, "error_budget": r.error_budget,

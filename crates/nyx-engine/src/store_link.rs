@@ -145,6 +145,8 @@ pub struct StoreLink {
     pub experiment: String,
     /// the script (name, text) the runs recorded now are made by, when a script drives the engine: its text is kept with each run (S4)
     pub script: Option<(String, String)>,
+    /// optional material library override used when resolving `material_hashes` and HDF5 `/provenance/materials_json`
+    pub library: Option<std::sync::Arc<femcore::material::Library>>,
 }
 
 impl StoreLink {
@@ -153,7 +155,7 @@ impl StoreLink {
         let dir = WorkflowDir::create_with(workspace, None, &project.title, origin, &project.to_json(), card_of)
             .map_err(store_err)?;
         let experiment = dir.wf.experiments[0].id.clone();
-        Ok(StoreLink { dir, experiment, script: None })
+        Ok(StoreLink { dir, experiment, script: None, library: None })
     }
 
     /// Opens a workflow folder and reads the project of its first experiment (or of `experiment`).
@@ -174,7 +176,7 @@ impl StoreLink {
         };
         let text = dir.read_spec(&experiment).map_err(store_err)?;
         let project = Project::from_json(&text)?;
-        Ok((StoreLink { dir, experiment, script: None }, project))
+        Ok((StoreLink { dir, experiment, script: None, library: None }, project))
     }
 
     /// Stores the project when it differs from the saved one; returns the new version number, `None` when nothing changed.
@@ -255,11 +257,19 @@ impl StoreLink {
     ) -> Result<RunRecord, Error> {
         let (existing, _) = self.dir.runs(&self.experiment);
         let id = runs::next_id(&existing);
+        let created_utc = nyx_store::util::iso(nyx_store::util::now_secs());
+        let materials_prov = crate::provenance::resolve_materials_for_project(project, self.library.as_deref());
+        let material_hashes: BTreeMap<String, String> =
+            materials_prov.iter().map(|(k, v)| (k.clone(), v.blake3.clone())).collect();
         let mut rec = RunRecord {
             id: id.clone(),
+            t: created_utc.clone(),
             sec: seconds,
             femcore: format!("nyx-engine {}", env!("CARGO_PKG_VERSION")),
             reuse: reuse.cloned(),
+            build: Some(crate::provenance::build_provenance()),
+            runtime: Some(crate::provenance::runtime_provenance(created_utc)),
+            material_hashes: (!material_hashes.is_empty()).then_some(material_hashes),
             ..Default::default()
         };
         for p in project.geometry.params.iter().filter_map(|p| match p.value {
@@ -288,6 +298,7 @@ impl StoreLink {
         match outcome {
             RunOutcome::Solved(results) => {
                 rec.status = RunStatus::Ok;
+                rec.diagnostics = crate::provenance::summarize_diagnostics(results);
                 for r in results {
                     let prefix = if results.len() > 1 { format!("{}_", r.physics) } else { String::new() };
                     for (k, v) in metrics_of(r) {
@@ -310,13 +321,15 @@ impl StoreLink {
                         .map_err(|e| Error::invalid(format!("{}: {e}", run_dir.display())))?;
                     let path = run_dir.join("results.h5");
                     let refs: Vec<(String, &SolveResult)> = results.iter().map(|r| (r.physics.clone(), r)).collect();
-                    crate::h5io::write_results_with_options(
+                    crate::h5io::write_results_with_full_provenance(
                         &path,
                         project,
                         mesh,
                         &refs,
                         crate::h5io::FieldStorageLayout::L2ShuffleLzfPacked,
                         fields_saved,
+                        None,
+                        Some(&materials_prov),
                     )
                     .map_err(Error::invalid)?;
                     if fields_saved {

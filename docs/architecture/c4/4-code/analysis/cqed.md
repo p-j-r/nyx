@@ -5,23 +5,23 @@ C4 level 4 (code) of the component **cQED quantization and TLS participation** (
 > KICQ energy participation ratios, normal-Fock and hierarchical Craig-Bampton Josephson quantization, `NetworkAnalysis`, edge-regularized 3D TLS participation ratios, and zero-solve `uq_cqed` interval/aleatoric UQ.
 
 **Decisions:** [ADR 105](../../../adr/0105-kicq-epr-craig-bampton-quantization-and-tls-participation.md), [ADR 118](../../../adr/0118-cqed-cavity-driven-open-robin-network-bbq-and-squid.md), [ADR 133](../../../adr/0133-vvuq-error-budgets-gci-provenance-and-uq.md)  
-**Size:** 5 files, 10641 lines.
+**Size:** 5 files, 10636 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-analysis/src/epr.rs` | 956 |  |
-| `crates/nyx-analysis/src/hamiltonian.rs` | 2994 |  |
+| `crates/nyx-analysis/src/hamiltonian.rs` | 2990 |  |
 | `crates/nyx-analysis/src/network.rs` | 2460 |  |
 | `crates/nyx-analysis/src/tls.rs` | 2155 |  |
-| `crates/nyx-analysis/src/uq.rs` | 2076 |  |
+| `crates/nyx-analysis/src/uq.rs` | 2075 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [container `femcore` (femcore)](../../3-components/femcore.md) | crate root, fem, linalg::dense, linalg::driver, linalg::expm, linalg::rng, linalg::scalar, par | C64, Dense, Scalar, SplitMix64, dense_eigh, dense_gen_eigh, expm, facet_rule, geometry, hermitian_eig +5 |
+| [container `femcore` (femcore)](../../3-components/femcore.md) | crate root, fem, linalg::dense, linalg::driver, linalg::expm, linalg::rng, linalg::scalar, par | C64, Dense, Scalar, SplitMix64, dense_eigh, dense_gen_eigh, expm, facet_rule, geometry, hermitian_eig +4 |
 | [container `physics` (nyx-physics)](../../3-components/physics.md) | cqed, crate root, error, result | CapacitanceMatrixData, CellField, CircuitRom, Discretisation, DrivenPortData, Error, Mesh, ModeEnergyRow, RomPort, Solution +3 |
 | [Analysis API](./api.md) | crate root | Analysis |
 | [Capacitance and inductance matrices](./capacitance.md) | capacitance | PreparedThicknessGram, apply_3d_thickness_gram, capacitance_matrix, capacitance_matrix_applies, prepare_3d_thickness_gram, run_capacitance_matrix_from_thickness |
@@ -440,9 +440,9 @@ classDiagram
 | struct | `HamiltonianReport` | `hamiltonian.rs:109` | fields: `basis`, `hilbert_dim`, `subsystems`, `dims`, `f01_hz`, `f12_hz`, `f02_hz`, `alpha_hz`, `chi_matrix_hz`, `eigenvalues_hz`, `min_overlap`, `max_fock_boundary_occupation`, ... —  Typed output of [`hamiltonian`] and [`hamiltonian_with_params`]. |
 | fn | `hamiltonian_applies` | `hamiltonian.rs:171` | `pub fn hamiltonian_applies(result: &SolveResult) -> bool` —  True when `result` carries a [`CircuitRom`] with at least one nonlinear port (`lumped_jj`). |
 | fn | `resolve_sweep_port` | `hamiltonian.rs:177` | `pub fn resolve_sweep_port(ports: &[RomPort], params: &Value) -> Result<usize, Error>` —  Resolves `"sweep_port"` in `params` (0-based integer index or port `name` string) against `ports` |
-| fn | `hamiltonian` | `hamiltonian.rs:2591` | `pub fn hamiltonian(result: &SolveResult) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with default parameters (`basis = "normal_fock"`). |
-| fn | `hamiltonian_with_params` | `hamiltonian.rs:2596` | `pub fn hamiltonian_with_params(result: &SolveResult, params: &Value) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with optional JSON `params`. |
-| struct | `HamiltonianAnalysis` | `hamiltonian.rs:2608` |  Full cosine-potential circuit quantization analysis behind the [`Analysis`] trait (`id: "hamiltonian"`). |
+| fn | `hamiltonian` | `hamiltonian.rs:2587` | `pub fn hamiltonian(result: &SolveResult) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with default parameters (`basis = "normal_fock"`). |
+| fn | `hamiltonian_with_params` | `hamiltonian.rs:2592` | `pub fn hamiltonian_with_params(result: &SolveResult, params: &Value) -> Result<HamiltonianReport, Error>` —  Runs circuit quantization with optional JSON `params`. |
+| struct | `HamiltonianAnalysis` | `hamiltonian.rs:2604` |  Full cosine-potential circuit quantization analysis behind the [`Analysis`] trait (`id: "hamiltonian"`). |
 | fn | `FluxSweepPoint::to_json` | `hamiltonian.rs:82` | `pub fn to_json(&self) -> Value` |
 | fn | `HamiltonianReport::to_json` | `hamiltonian.rs:134` | `pub fn to_json(&self) -> Value` |
 | struct | `QepMode` | `network.rs:36` | fields: `f_re_hz`, `f_im_hz`, `q_c`, `kappa_hz` —  Complex eigenmode extracted from the `2r x 2r` damped `CircuitRom` quadratic eigenvalue problem. |
@@ -507,11 +507,11 @@ classDiagram
 | struct | `UqQuantity` | `uq.rs:206` | fields: `name`, `unit`, `nominal`, `aleatoric`, `epistemic`, `outer_envelope` —  Uncertainty-quantified Quantity of Interest (QoI) under strict ASME V&V 20 separation. |
 | struct | `UqCqedReport` | `uq.rs:238` | fields: `seed`, `n_samples`, `zero_fem_solves`, `epistemic_aleatoric_separated`, `domains_evaluated`, `uncertain_parameters`, `quantities`, `diagnostics`, `elapsed_s` —  Typed output of [`uq_cqed`] and [`uq_cqed_with_params`]. |
 | fn | `uq_cqed_applies` | `uq.rs:276` | `pub fn uq_cqed_applies(result: &SolveResult) -> bool` —  True when `result` carries at least one cQED payload (`CircuitRom`, `CapacitanceMatrixData`, or `TlsMeta`/E-field). |
-| fn | `uq_cqed` | `uq.rs:1942` | `pub fn uq_cqed(mesh: &Mesh, result: &SolveResult) -> Result<UqCqedReport, Error>` —  Runs zero-solve cQED post-processing UQ with default parameters (nominal + any epistemic bounds). |
-| fn | `uq_cqed_with_params` | `uq.rs:1947` | `pub fn uq_cqed_with_params(result: &SolveResult, params: &Value) -> Result<UqCqedReport, Error>` —  Runs zero-solve cQED post-processing UQ without a mesh (ROM and CapacitanceMatrix without 3D thickness). |
-| fn | `uq_cqed_with_mesh_and_params` | `uq.rs:1952` | `pub fn uq_cqed_with_mesh_and_params(mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<UqCqedReport, Error>` —  Runs zero-solve cQED post-processing UQ with a mesh (enabling TLS and 3D thickness UQ). |
-| fn | `uq_cqed_with_companion_and_params` | `uq.rs:1959` | `pub fn uq_cqed_with_companion_and_params( primary_mesh: Option<&Mesh>, primary_result: &SolveResult, companion: Option<(&Mesh, &SolveResult)>, params: &Value, ) -> Result<UqCqedReport, Error>` —  Runs joint zero-solve cQED UQ across a primary `SolveResult` (e.g., `ems` `CircuitRom`) paired with a |
-| struct | `UqCqedAnalysis` | `uq.rs:2053` |  Zero-solve cQED post-processing uncertainty quantification behind the [`Analysis`] trait (`id: "uq_cqed"`). |
+| fn | `uq_cqed` | `uq.rs:1941` | `pub fn uq_cqed(mesh: &Mesh, result: &SolveResult) -> Result<UqCqedReport, Error>` —  Runs zero-solve cQED post-processing UQ with default parameters (nominal + any epistemic bounds). |
+| fn | `uq_cqed_with_params` | `uq.rs:1946` | `pub fn uq_cqed_with_params(result: &SolveResult, params: &Value) -> Result<UqCqedReport, Error>` —  Runs zero-solve cQED post-processing UQ without a mesh (ROM and CapacitanceMatrix without 3D thickness). |
+| fn | `uq_cqed_with_mesh_and_params` | `uq.rs:1951` | `pub fn uq_cqed_with_mesh_and_params(mesh: &Mesh, result: &SolveResult, params: &Value) -> Result<UqCqedReport, Error>` —  Runs zero-solve cQED post-processing UQ with a mesh (enabling TLS and 3D thickness UQ). |
+| fn | `uq_cqed_with_companion_and_params` | `uq.rs:1958` | `pub fn uq_cqed_with_companion_and_params( primary_mesh: Option<&Mesh>, primary_result: &SolveResult, companion: Option<(&Mesh, &SolveResult)>, params: &Value, ) -> Result<UqCqedReport, Error>` —  Runs joint zero-solve cQED UQ across a primary `SolveResult` (e.g., `ems` `CircuitRom`) paired with a |
+| struct | `UqCqedAnalysis` | `uq.rs:2052` |  Zero-solve cQED post-processing uncertainty quantification behind the [`Analysis`] trait (`id: "uq_cqed"`). |
 | fn | `EpistemicInterval::from_bounds` | `uq.rs:90` | `pub fn from_bounds(low: f64, up: f64, nominal: f64, source: impl Into<String>, is_strict_bound: bool) -> Self` |
 | fn | `EpistemicInterval::from_rel_bound` | `uq.rs:106` | `pub fn from_rel_bound( nominal: f64, rel_bound: f64, non_negative: bool, source: String, is_strict_bound: bool, ) -> Self` |
 | fn | `EpistemicInterval::to_json` | `uq.rs:119` | `pub fn to_json(&self) -> Value` |

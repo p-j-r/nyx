@@ -11,7 +11,7 @@ workspace = component "Workspace" "The folder behind the dashboard: settings (`s
     properties {
         "adr" "14, 130"
         "code" "crates/nyx-store/src: lib.rs, workspace.rs"
-        "lines" "327"
+        "lines" "328"
         "codeDiagram" "4-code/store/workspace.md"
     }
 }
@@ -31,11 +31,11 @@ versions = component "Versions" "Every change to an experiment's set-up kept in 
         "codeDiagram" "4-code/store/versions.md"
     }
 }
-runs = component "Runs" "Append-only run records in runs.jsonl, the digest derived from them and the filter language of the runs table." "Rust modules" {
+runs = component "Runs" "Append-only run records in runs.jsonl (`store_run` 1.1 provenance), the digest derived from them and the filter language of the runs table." "Rust modules" {
     properties {
-        "adr" "64"
+        "adr" "64, 133"
         "code" "crates/nyx-store/src: runs.rs"
-        "lines" "454"
+        "lines" "588"
         "codeDiagram" "4-code/store/runs.md"
     }
 }

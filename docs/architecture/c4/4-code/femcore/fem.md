@@ -5,28 +5,28 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 > Lagrange P1/P2 and mixed-cell Q1/Q2 elements and quadrature, 2D and mixed Nedelec edge-element bases, derived fields, PML coordinate stretching, Floquet pairs and material properties per domain.
 
 **Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 4](../../../adr/0004-simplexmesh-is-the-solver-contract.md), [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 69](../../../adr/0069-axis-conditions-and-cylindrical-stretch-of-the-axisymmetric-solid.md), [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md)  
-**Size:** 10 files, 10398 lines.
+**Size:** 10 files, 10412 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/femcore/src/edge.rs` | 81 |  |
-| `crates/femcore/src/edge_mixed.rs` | 1741 |  |
+| `crates/femcore/src/edge_mixed.rs` | 1736 |  |
 | `crates/femcore/src/farfield.rs` | 617 |  |
-| `crates/femcore/src/fem.rs` | 1350 |  |
+| `crates/femcore/src/fem.rs` | 1345 |  |
 | `crates/femcore/src/fem_mixed.rs` | 1764 |  |
-| `crates/femcore/src/fields.rs` | 277 |  |
-| `crates/femcore/src/periodic.rs` | 663 |  |
+| `crates/femcore/src/fields.rs` | 276 |  |
+| `crates/femcore/src/periodic.rs` | 665 |  |
 | `crates/femcore/src/pml.rs` | 1245 |  |
 | `crates/femcore/src/props.rs` | 533 |  |
-| `crates/femcore/src/rt.rs` | 2127 |  |
+| `crates/femcore/src/rt.rs` | 2150 |  |
 
 ## What it uses
 
 | Target | Modules | Items |
 |---|---|---|
-| [Matrices and vectors](./lacore.md) | linalg::csr, linalg::csr::assembly, linalg::par, linalg::scalar | C, CCoo, CCsr, Coo, Csr, RCsr, Scalar, c |
+| [Matrices and vectors](./lacore.md) | linalg::csr, linalg::csr::assembly, linalg::par, linalg::scalar | C, CCoo, CCsr, Coo, Csr, RCsr, Scalar, c, chunk_map, for_chunks_mut |
 | [Linear algebra driver](./ladriver.md) | linalg::driver | DirectSolver, dense_eigh |
 | [Preconditioners](./laprecond.md) | linalg::amg_elastic, linalg::ams | Amg, AmgOptions, AmsP2Topology, block_pcg, pcg |
 | [Material specification](./material.md) | material | Anisotropy, M3, M6 |
@@ -556,103 +556,103 @@ classDiagram
 | struct | `CellData` | `edge.rs:48` | fields: `sign`, `gdofs`, `net` |
 | fn | `cell_data` | `edge.rs:54` | `pub fn cell_data(mesh: &SimplexMesh, order: usize) -> CellData` |
 | fn | `tri_g` | `edge.rs:76` | `pub fn tri_g(geo: &Geometry, c: usize) -> [[f64` |
-| fn | `nedelec_nloc` | `edge_mixed.rs:29` | `pub fn nedelec_nloc(cell_type: CellType, order: usize) -> usize` —  Number of local `H(curl)` basis functions on `cell_type` at polynomial `order` (`1` or `2`). |
-| struct | `NedMixed` | `edge_mixed.rs:46` | fields: `dim`, `order`, `n_edges`, `n_tri_faces`, `n_quad_faces`, `n_dofs`, `vkey`, `cell_dof_offsets`, `cell_dofs_flat`, `cell_interior_start` —  Global conforming Nedelec `H(curl)` DOF numbering over a [`MixedDiscretisation`] (2D or 3D, order 1 or 2). |
-| fn | `eval_ref_basis_2d` | `edge_mixed.rs:297` | `pub fn eval_ref_basis_2d( cell_type: CellType, order: usize, xi: &[f64], vkeys: &[(u32, u32)], w_ref: &mut Vec<[f64; 2]>, curl_ref: &mut Vec<f64>, )` —  Evaluates 2D reference Nedelec basis `w_ref[a] = [w_\xi, w_\eta]` and scalar curl `curl_ref[a]` |
-| fn | `eval_ref_basis_3d` | `edge_mixed.rs:402` | `pub fn eval_ref_basis_3d( cell_type: CellType, order: usize, xi: &[f64], vkeys: &[(u32, u32)], w_ref: &mut Vec<[f64; 3]>, curl_ref: &mut Vec<[f64; 3]>, )` —  Evaluates 3D reference Nedelec basis `w_ref[a]` and reference curl `curl_ref[a]` |
-| struct | `NedEvalScratch` | `edge_mixed.rs:730` | fields: `vkeys`, `w_ref2`, `curl_ref2`, `w_ref3`, `curl_ref3`, `shape_n`, `shape_dn` —  Scratch workspace for allocation-free Nedelec basis + Jacobian evaluation inside quadrature loops. |
-| fn | `eval_cell_basis_3d` | `edge_mixed.rs:748` | `pub fn eval_cell_basis_3d( mesh: &MixedDiscretisation, ned: &NedMixed, ci: usize, iso: &IsoparametricCell, xi: &[f64], scratch: &mut NedEvalScratch, w_out: &mut Vec<[f64; 3]>, curl_out: &mut Vec<[f64; 3]>, ) -> JacobianEval` —  Evaluates physical 3D Nedelec basis `w[a]` and physical `curl[a]` on cell `ci` at `xi` using covariant Piola mapping. |
-| fn | `eval_cell_basis_2d` | `edge_mixed.rs:782` | `pub fn eval_cell_basis_2d( mesh: &MixedDiscretisation, ned: &NedMixed, ci: usize, iso: &IsoparametricCell, xi: &[f64], scratch: &mut NedEvalScratch, w_out: &mut Vec<[f64; 2]>, curl_out: &mut Vec<f64>, ) -> JacobianEval` —  Evaluates physical 2D Nedelec basis `w[a] = [w_x, w_z]` and scalar `curl[a]` on cell `ci` at `xi` using covariant Piola mapping. |
-| fn | `ned_mixed_periodic_relations` | `edge_mixed.rs:818` | `pub fn ned_mixed_periodic_relations( mesh: &MixedDiscretisation, ned: &NedMixed, src_facets: &[usize], vmap: &std::collections::HashMap<u32, u32>, phase: f64, ) -> Result<Vec<(usize, usize, C)>, String>` —  Floquet-periodic Nedelec DOF relations `(dest_dof, src_dof, exp(-i phase))` across `Tri3`, `Quad4`, or `Edge2` facets. |
-| fn | `gradient_p1_full` | `edge_mixed.rs:892` | `pub fn gradient_p1_full(mesh: &MixedDiscretisation, vkey: &[u32]) -> Csr` —  Full discrete gradient `G_1` (`n_edges x n_points`): row `e` has `-1` at `lo` and `+1` at `hi` ordered by `(vkey[v], v)`. |
-| fn | `edge_vectors_full` | `edge_mixed.rs:909` | `pub fn edge_vectors_full(mesh: &MixedDiscretisation, vkey: &[u32]) -> Vec<[f64` —  Edge tangent vectors `x_hi - x_lo` (`len = n_edges`) matching the row orientation of [`gradient_p1_full`]. |
-| fn | `p1_to_p2_full` | `edge_mixed.rs:925` | `pub fn p1_to_p2_full(mesh: &MixedDiscretisation, ned2: &NedMixed) -> Csr` —  Exact `P_1 -> P_2` inclusion matrix (`ned2.n_dofs x n_edges`): embeds lowest-order `N_1` edge `e` at row `2 * e`. |
-| fn | `scalar_p2_tensor_count` | `edge_mixed.rs:936` | `pub fn scalar_p2_tensor_count(mesh: &MixedDiscretisation) -> usize` —  Number of scalar `H^1` DOFs in the exact order-2 de Rham partner space `S_2` (`Order2Tensor` hierarchical space). |
-| fn | `gradient_p2_full` | `edge_mixed.rs:951` | `pub fn gradient_p2_full(mesh: &MixedDiscretisation, ned2: &NedMixed) -> Csr` —  Full exact discrete gradient `G_2` (`ned2.n_dofs x n_scalar_p2_tensor`) mapping the full tensor-product |
-| fn | `ams_p2_blocks_full` | `edge_mixed.rs:1026` | `pub fn ams_p2_blocks_full(mesh: &MixedDiscretisation, ned2: &NedMixed) -> Vec<Vec<usize>>` —  Disjoint local DOF blocks in full `NedMixed` order-2 space (for block Gauss–Seidel smoothing in `AmsP2`). |
-| struct | `AmsP1Data` | `edge_mixed.rs:1067` | fields: `free_edges`, `free_vertices`, `gradient_p1`, `edge_vectors` —  Constrained lowest-order (`N_1`) auxiliary-space inputs ready for [`crate::linalg::ams::Ams::new`]. |
-| fn | `build_ams_p1` | `edge_mixed.rs:1079` | `pub fn build_ams_p1(mesh: &MixedDiscretisation, vkey: &[u32], pec_facets: &[usize]) -> AmsP1Data` —  Builds [`AmsP1Data`] after eliminating constrained PEC facets (`pec_facets` are indices in `0..mesh.n_facets()`). |
-| fn | `build_ams_p1_from_masks` | `edge_mixed.rs:1101` | `pub fn build_ams_p1_from_masks( mesh: &MixedDiscretisation, vkey: &[u32], fixed_edges: &[bool], fixed_verts: &[bool], ) -> AmsP1Data` —  Builds [`AmsP1Data`] from explicit boolean masks of constrained edges and constrained vertices. |
-| struct | `AmsP2Data` | `edge_mixed.rs:1123` | fields: `free_dofs_p2`, `free_scalar_p2`, `topology` —  Constrained second-order (`N_2`) auxiliary-space topology ready for [`crate::linalg::ams::AmsP2::new`]. |
-| fn | `build_ams_p2` | `edge_mixed.rs:1133` | `pub fn build_ams_p2(mesh: &MixedDiscretisation, ned2: &NedMixed, pec_facets: &[usize]) -> AmsP2Data` —  Builds [`AmsP2Data`] after eliminating constrained PEC facets (`pec_facets` are indices in `0..mesh.n_facets()`). |
-| fn | `build_ams_p2_from_masks` | `edge_mixed.rs:1164` | `pub fn build_ams_p2_from_masks( mesh: &MixedDiscretisation, ned2: &NedMixed, fixed_p2: &[bool], fixed_edges: &[bool], fixed_verts: &[bool], fixed_quad_faces: &[bool], ) -> AmsP2Data` —  Builds [`AmsP2Data`] from explicit boolean masks of constrained `N_2` DOFs, edges, vertices, and 3D quad faces. |
-| fn | `assemble_maxwell_3d_real` | `edge_mixed.rs:1241` | `pub fn assemble_maxwell_3d_real<FMu, FEps>( mesh: &MixedDiscretisation, ned: &NedMixed, quad_degree: usize, mu_inv_at: FMu, eps_at: FEps, ) -> (Csr, Csr)` —  Assembles real 3D curl-curl `K_{ij} = \int (\nabla\times w_i) \cdot (\mu^{-1}(x_q) \nabla\times w_j)` |
-| fn | `assemble_maxwell_3d_complex` | `edge_mixed.rs:1300` | `pub fn assemble_maxwell_3d_complex<FMu, FEps>( mesh: &MixedDiscretisation, ned: &NedMixed, quad_degree: usize, mu_inv_at: FMu, eps_at: FEps, ) -> (CCsr, CCsr)` —  Assembles complex symmetric 3D curl-curl `K` and mass `M` matrices over a 3D [`MixedDiscretisation`], |
-| fn | `assemble_maxwell_2d_real` | `edge_mixed.rs:1375` | `pub fn assemble_maxwell_2d_real<FMu, FEps>( mesh: &MixedDiscretisation, ned: &NedMixed, quad_degree: usize, mu_inv_at: FMu, eps_at: FEps, ) -> (Csr, Csr)` —  Assembles real 2D curl-curl `K_{ij} = \int \mu^{-1}(x_q) (\mathrm{curl}\,w_i)(\mathrm{curl}\,w_j)` |
-| fn | `NedMixed::new` | `edge_mixed.rs:65` | `pub fn new(mesh: &MixedDiscretisation, order: usize) -> Self` —  Builds a `NedMixed` numbering with default vertex keys (`0..n_points`). |
-| fn | `NedMixed::with_vkey` | `edge_mixed.rs:71` | `pub fn with_vkey(mesh: &MixedDiscretisation, order: usize, vkey: Vec<u32>) -> Self` —  Builds a `NedMixed` numbering with explicit vertex ordering keys `vkey` (supporting Floquet periodicity). |
-| fn | `NedMixed::cell_dofs` | `edge_mixed.rs:190` | `pub fn cell_dofs(&self, c: usize) -> &[usize]` —  Global DOFs of cell `c`. |
-| fn | `NedMixed::key_of` | `edge_mixed.rs:196` | `pub fn key_of(&self, v: u32) -> (u32, u32)` —  Composite vertex key `(vkey[v], v)` (uses `vkey` primarily and breaks ties deterministically). |
-| fn | `NedMixed::facet_dofs` | `edge_mixed.rs:201` | `pub fn facet_dofs(&self, mesh: &MixedDiscretisation, f: usize) -> Vec<usize>` —  Tangential Nedelec DOFs owned by boundary/sheet facet `f` (edges + face bubbles). |
-| fn | `NedMixed::boundary_dofs` | `edge_mixed.rs:247` | `pub fn boundary_dofs(&self, mesh: &MixedDiscretisation, labels: &[i32]) -> Vec<usize>` —  Sorted unique tangential Nedelec DOFs on all facets carrying any of `labels`. |
-| fn | `NedMixed::exterior_pec_dofs` | `edge_mixed.rs:258` | `pub fn exterior_pec_dofs(&self, mesh: &MixedDiscretisation) -> Vec<usize>` —  Sorted unique tangential Nedelec DOFs on all exterior facets (`mesh.exterior_facets[f] == true`). |
-| fn | `NedEvalScratch::new` | `edge_mixed.rs:741` | `pub fn new() -> Self` |
+| fn | `nedelec_nloc` | `edge_mixed.rs:28` | `pub fn nedelec_nloc(cell_type: CellType, order: usize) -> usize` —  Number of local `H(curl)` basis functions on `cell_type` at polynomial `order` (`1` or `2`). |
+| struct | `NedMixed` | `edge_mixed.rs:45` | fields: `dim`, `order`, `n_edges`, `n_tri_faces`, `n_quad_faces`, `n_dofs`, `vkey`, `cell_dof_offsets`, `cell_dofs_flat`, `cell_interior_start` —  Global conforming Nedelec `H(curl)` DOF numbering over a [`MixedDiscretisation`] (2D or 3D, order 1 or 2). |
+| fn | `eval_ref_basis_2d` | `edge_mixed.rs:296` | `pub fn eval_ref_basis_2d( cell_type: CellType, order: usize, xi: &[f64], vkeys: &[(u32, u32)], w_ref: &mut Vec<[f64; 2]>, curl_ref: &mut Vec<f64>, )` —  Evaluates 2D reference Nedelec basis `w_ref[a] = [w_\xi, w_\eta]` and scalar curl `curl_ref[a]` |
+| fn | `eval_ref_basis_3d` | `edge_mixed.rs:401` | `pub fn eval_ref_basis_3d( cell_type: CellType, order: usize, xi: &[f64], vkeys: &[(u32, u32)], w_ref: &mut Vec<[f64; 3]>, curl_ref: &mut Vec<[f64; 3]>, )` —  Evaluates 3D reference Nedelec basis `w_ref[a]` and reference curl `curl_ref[a]` |
+| struct | `NedEvalScratch` | `edge_mixed.rs:729` | fields: `vkeys`, `w_ref2`, `curl_ref2`, `w_ref3`, `curl_ref3`, `shape_n`, `shape_dn` —  Scratch workspace for allocation-free Nedelec basis + Jacobian evaluation inside quadrature loops. |
+| fn | `eval_cell_basis_3d` | `edge_mixed.rs:747` | `pub fn eval_cell_basis_3d( mesh: &MixedDiscretisation, ned: &NedMixed, ci: usize, iso: &IsoparametricCell, xi: &[f64], scratch: &mut NedEvalScratch, w_out: &mut Vec<[f64; 3]>, curl_out: &mut Vec<[f64; 3]>, ) -> JacobianEval` —  Evaluates physical 3D Nedelec basis `w[a]` and physical `curl[a]` on cell `ci` at `xi` using covariant Piola mapping. |
+| fn | `eval_cell_basis_2d` | `edge_mixed.rs:781` | `pub fn eval_cell_basis_2d( mesh: &MixedDiscretisation, ned: &NedMixed, ci: usize, iso: &IsoparametricCell, xi: &[f64], scratch: &mut NedEvalScratch, w_out: &mut Vec<[f64; 2]>, curl_out: &mut Vec<f64>, ) -> JacobianEval` —  Evaluates physical 2D Nedelec basis `w[a] = [w_x, w_z]` and scalar `curl[a]` on cell `ci` at `xi` using covariant Piola mapping. |
+| fn | `ned_mixed_periodic_relations` | `edge_mixed.rs:817` | `pub fn ned_mixed_periodic_relations( mesh: &MixedDiscretisation, ned: &NedMixed, src_facets: &[usize], vmap: &std::collections::HashMap<u32, u32>, phase: f64, ) -> Result<Vec<(usize, usize, C)>, String>` —  Floquet-periodic Nedelec DOF relations `(dest_dof, src_dof, exp(-i phase))` across `Tri3`, `Quad4`, or `Edge2` facets. |
+| fn | `gradient_p1_full` | `edge_mixed.rs:891` | `pub fn gradient_p1_full(mesh: &MixedDiscretisation, vkey: &[u32]) -> Csr` —  Full discrete gradient `G_1` (`n_edges x n_points`): row `e` has `-1` at `lo` and `+1` at `hi` ordered by `(vkey[v], v)`. |
+| fn | `edge_vectors_full` | `edge_mixed.rs:908` | `pub fn edge_vectors_full(mesh: &MixedDiscretisation, vkey: &[u32]) -> Vec<[f64` —  Edge tangent vectors `x_hi - x_lo` (`len = n_edges`) matching the row orientation of [`gradient_p1_full`]. |
+| fn | `p1_to_p2_full` | `edge_mixed.rs:924` | `pub fn p1_to_p2_full(mesh: &MixedDiscretisation, ned2: &NedMixed) -> Csr` —  Exact `P_1 -> P_2` inclusion matrix (`ned2.n_dofs x n_edges`): embeds lowest-order `N_1` edge `e` at row `2 * e`. |
+| fn | `scalar_p2_tensor_count` | `edge_mixed.rs:935` | `pub fn scalar_p2_tensor_count(mesh: &MixedDiscretisation) -> usize` —  Number of scalar `H^1` DOFs in the exact order-2 de Rham partner space `S_2` (`Order2Tensor` hierarchical space). |
+| fn | `gradient_p2_full` | `edge_mixed.rs:950` | `pub fn gradient_p2_full(mesh: &MixedDiscretisation, ned2: &NedMixed) -> Csr` —  Full exact discrete gradient `G_2` (`ned2.n_dofs x n_scalar_p2_tensor`) mapping the full tensor-product |
+| fn | `ams_p2_blocks_full` | `edge_mixed.rs:1025` | `pub fn ams_p2_blocks_full(mesh: &MixedDiscretisation, ned2: &NedMixed) -> Vec<Vec<usize>>` —  Disjoint local DOF blocks in full `NedMixed` order-2 space (for block Gauss–Seidel smoothing in `AmsP2`). |
+| struct | `AmsP1Data` | `edge_mixed.rs:1066` | fields: `free_edges`, `free_vertices`, `gradient_p1`, `edge_vectors` —  Constrained lowest-order (`N_1`) auxiliary-space inputs ready for [`crate::linalg::ams::Ams::new`]. |
+| fn | `build_ams_p1` | `edge_mixed.rs:1078` | `pub fn build_ams_p1(mesh: &MixedDiscretisation, vkey: &[u32], pec_facets: &[usize]) -> AmsP1Data` —  Builds [`AmsP1Data`] after eliminating constrained PEC facets (`pec_facets` are indices in `0..mesh.n_facets()`). |
+| fn | `build_ams_p1_from_masks` | `edge_mixed.rs:1100` | `pub fn build_ams_p1_from_masks( mesh: &MixedDiscretisation, vkey: &[u32], fixed_edges: &[bool], fixed_verts: &[bool], ) -> AmsP1Data` —  Builds [`AmsP1Data`] from explicit boolean masks of constrained edges and constrained vertices. |
+| struct | `AmsP2Data` | `edge_mixed.rs:1122` | fields: `free_dofs_p2`, `free_scalar_p2`, `topology` —  Constrained second-order (`N_2`) auxiliary-space topology ready for [`crate::linalg::ams::AmsP2::new`]. |
+| fn | `build_ams_p2` | `edge_mixed.rs:1132` | `pub fn build_ams_p2(mesh: &MixedDiscretisation, ned2: &NedMixed, pec_facets: &[usize]) -> AmsP2Data` —  Builds [`AmsP2Data`] after eliminating constrained PEC facets (`pec_facets` are indices in `0..mesh.n_facets()`). |
+| fn | `build_ams_p2_from_masks` | `edge_mixed.rs:1163` | `pub fn build_ams_p2_from_masks( mesh: &MixedDiscretisation, ned2: &NedMixed, fixed_p2: &[bool], fixed_edges: &[bool], fixed_verts: &[bool], fixed_quad_faces: &[bool], ) -> AmsP2Data` —  Builds [`AmsP2Data`] from explicit boolean masks of constrained `N_2` DOFs, edges, vertices, and 3D quad faces. |
+| fn | `assemble_maxwell_3d_real` | `edge_mixed.rs:1240` | `pub fn assemble_maxwell_3d_real<FMu, FEps>( mesh: &MixedDiscretisation, ned: &NedMixed, quad_degree: usize, mu_inv_at: FMu, eps_at: FEps, ) -> (Csr, Csr)` —  Assembles real 3D curl-curl `K_{ij} = \int (\nabla\times w_i) \cdot (\mu^{-1}(x_q) \nabla\times w_j)` |
+| fn | `assemble_maxwell_3d_complex` | `edge_mixed.rs:1299` | `pub fn assemble_maxwell_3d_complex<FMu, FEps>( mesh: &MixedDiscretisation, ned: &NedMixed, quad_degree: usize, mu_inv_at: FMu, eps_at: FEps, ) -> (CCsr, CCsr)` —  Assembles complex symmetric 3D curl-curl `K` and mass `M` matrices over a 3D [`MixedDiscretisation`], |
+| fn | `assemble_maxwell_2d_real` | `edge_mixed.rs:1370` | `pub fn assemble_maxwell_2d_real<FMu, FEps>( mesh: &MixedDiscretisation, ned: &NedMixed, quad_degree: usize, mu_inv_at: FMu, eps_at: FEps, ) -> (Csr, Csr)` —  Assembles real 2D curl-curl `K_{ij} = \int \mu^{-1}(x_q) (\mathrm{curl}\,w_i)(\mathrm{curl}\,w_j)` |
+| fn | `NedMixed::new` | `edge_mixed.rs:64` | `pub fn new(mesh: &MixedDiscretisation, order: usize) -> Self` —  Builds a `NedMixed` numbering with default vertex keys (`0..n_points`). |
+| fn | `NedMixed::with_vkey` | `edge_mixed.rs:70` | `pub fn with_vkey(mesh: &MixedDiscretisation, order: usize, vkey: Vec<u32>) -> Self` —  Builds a `NedMixed` numbering with explicit vertex ordering keys `vkey` (supporting Floquet periodicity). |
+| fn | `NedMixed::cell_dofs` | `edge_mixed.rs:189` | `pub fn cell_dofs(&self, c: usize) -> &[usize]` —  Global DOFs of cell `c`. |
+| fn | `NedMixed::key_of` | `edge_mixed.rs:195` | `pub fn key_of(&self, v: u32) -> (u32, u32)` —  Composite vertex key `(vkey[v], v)` (uses `vkey` primarily and breaks ties deterministically). |
+| fn | `NedMixed::facet_dofs` | `edge_mixed.rs:200` | `pub fn facet_dofs(&self, mesh: &MixedDiscretisation, f: usize) -> Vec<usize>` —  Tangential Nedelec DOFs owned by boundary/sheet facet `f` (edges + face bubbles). |
+| fn | `NedMixed::boundary_dofs` | `edge_mixed.rs:246` | `pub fn boundary_dofs(&self, mesh: &MixedDiscretisation, labels: &[i32]) -> Vec<usize>` —  Sorted unique tangential Nedelec DOFs on all facets carrying any of `labels`. |
+| fn | `NedMixed::exterior_pec_dofs` | `edge_mixed.rs:257` | `pub fn exterior_pec_dofs(&self, mesh: &MixedDiscretisation) -> Vec<usize>` —  Sorted unique tangential Nedelec DOFs on all exterior facets (`mesh.exterior_facets[f] == true`). |
+| fn | `NedEvalScratch::new` | `edge_mixed.rs:740` | `pub fn new() -> Self` |
 | enum | `FarFieldPermittivity` | `farfield.rs:24` | variants: `Scalar`, `Tensor` —  Relative permittivity field passed to [`assemble_farfield_robin`]. |
 | fn | `farfield_centroid` | `farfield.rs:157` | `pub fn farfield_centroid(mesh: &SimplexMesh, labels: &[i32]) -> [f64` —  Computes the deterministic area-weighted (3D) or length-weighted (2D) centroid of all facets carrying |
 | fn | `farfield_positive_measure` | `farfield.rs:201` | `pub fn farfield_positive_measure(mesh: &SimplexMesh, labels: &[i32], center: [f64; 3]) -> f64` —  Computes the total outward-facing positive measure (`\int_{f: \mathbf{r}\cdot\mathbf{n}_f > 0} dS`) |
 | fn | `assemble_boundary_mass_weighted` | `farfield.rs:273` | `pub fn assemble_boundary_mass_weighted<W>(mesh: &SimplexMesh, labels: &[i32], order: usize, weight: W) -> Csr` —  Assembles the weighted boundary mass matrix |
 | fn | `assemble_farfield_robin` | `farfield.rs:404` | `pub fn assemble_farfield_robin( mesh: &SimplexMesh, labels: &[i32], fe_order: usize, bc_order: usize, decay_power: f64, center: [f64; 3], eps0: f64, eps_r: FarFieldPermittivity<'_>, ) -> Csr` —  Assembles the far-field Robin (`bc_order = 1`) or second-order symmetric Bayliss-Turkel |
-| struct | `Quad` | `fem.rs:30` | fields: `lam`, `w` —  Quadrature on the reference simplex: barycentric points and weights summing to 1 |
-| fn | `quad_rule` | `fem.rs:41` | `pub fn quad_rule(dim: usize, degree: usize) -> Quad` |
-| fn | `facet_rule` | `fem.rs:86` | `pub fn facet_rule(facet_dim: usize) -> Quad` —  Rule on a boundary facet (Gauss on edges in 2D, degree-4 Dunavant on triangles in 3D). |
-| fn | `shape` | `fem.rs:104` | `pub fn shape(lam: &[f64], order: usize) -> (Vec<f64>, Vec<f64>)` —  Shape functions at barycentric point `lam`: values `n[a]` and derivatives with respect to |
-| struct | `RefElement` | `fem.rs:133` | fields: `dim`, `order`, `nloc`, `w`, `n`, `dn` —  Quadrature rule with shape functions tabulated at its points. |
-| struct | `Geometry` | `fem.rs:161` | fields: `vol`, `g` —  Per-cell volume and gradients of the barycentric coordinates: `g[c*(d+1)*d + b*d + k]`. |
-| fn | `geometry` | `fem.rs:166` | `pub fn geometry(mesh: &SimplexMesh) -> Geometry` |
-| fn | `quad_rule_collapsed` | `fem.rs:261` | `pub fn quad_rule_collapsed(degree: usize) -> Quad` —  A quadrature rule on the reference tetrahedron that is exact to at least `degree`, built by collapsing the unit cube (Duffy |
-| const | `TET_EDGES` | `fem.rs:279` | `[(usize, usize)` —  The local vertex pairs of a tetrahedron in the order of its edge numbering (and of the geometry nodes 4 to 9 of [`CurvedTet`]). |
-| struct | `CurvedTet` | `fem.rs:289` | fields: `x` —  A tetrahedron with quadratic (isoparametric) geometry: the map from the reference cell is the quadratic Lagrange interpolation of ten |
-| fn | `shape_gradients` | `fem.rs:401` | `pub fn shape_gradients(re: &RefElement, geo: &Geometry, c: usize, q: usize, out: &mut [f64])` —  Physical gradients of the shape functions at quadrature point `q` of cell `c`: |
-| fn | `assemble_parallel` | `fem.rs:420` | `pub fn assemble_parallel<F>(nc: usize, nrows: usize, ncols: usize, f: F) -> Csr` —  Runs `f(range, &mut coo)` over fixed cell chunks on all available threads and merges the results |
-| fn | `assemble_laplace` | `fem.rs:471` | `pub fn assemble_laplace(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `K_ij = integral coeff grad(phi_i) . grad(phi_j)`; `coeff` holds one value per cell. |
-| fn | `assemble_laplace_tensor` | `fem.rs:505` | `pub fn assemble_laplace_tensor(mesh: &SimplexMesh, order: usize, k: &[[[f64; 3]; 3]]) -> Csr` —  `K_ij = integral grad(phi_i) . K grad(phi_j)` with a symmetric tensor `K` per cell (only |
-| fn | `assemble_mass` | `fem.rs:545` | `pub fn assemble_mass(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `M_ij = integral coeff phi_i phi_j`. |
-| fn | `assemble_source` | `fem.rs:574` | `pub fn assemble_source(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Vec<f64>` —  Integral of `coeff phi_i` over every cell: the load of a per-cell source density. |
-| const | `TET_FACES` | `fem.rs:582` | `[[usize` —  Local vertex triples of the four faces of a tetrahedron. |
-| fn | `build_face_to_cell_3d` | `fem.rs:587` | `pub fn build_face_to_cell_3d(mesh: &SimplexMesh) -> std::collections::HashMap<[u32` —  Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to one adjacent |
-| fn | `build_face_to_cells_3d` | `fem.rs:606` | `pub fn build_face_to_cells_3d(mesh: &SimplexMesh) -> std::collections::HashMap<[u32` —  Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to all adjacent |
-| fn | `facet_measure` | `fem.rs:623` | `pub fn facet_measure(mesh: &SimplexMesh, f: usize) -> f64` |
-| fn | `facets_with` | `fem.rs:637` | `pub fn facets_with<'a>(mesh: &'a SimplexMesh, labels: &'a [i32]) -> impl Iterator<Item = usize> + 'a` |
-| fn | `assemble_boundary_mass` | `fem.rs:642` | `pub fn assemble_boundary_mass(mesh: &SimplexMesh, labels: &[i32], order: usize, coeff: f64) -> Csr` —  `integral coeff phi_i phi_j` over the facets carrying one of `labels` (convective term). |
-| fn | `assemble_boundary_load` | `fem.rs:668` | `pub fn assemble_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: f64, order: usize) -> Vec<f64>` —  Load `integral value phi_i` over the facets carrying one of `labels`. |
-| fn | `add_boundary_load` | `fem.rs:676` | `pub fn add_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: &dyn Fn(usize) -> f64, order: usize, out: &mut [f64], ncomp: usize, comp: usize)` —  Adds the boundary load of a per-facet value into component `comp` of a vector of `ncomp` |
-| fn | `boundary_dofs` | `fem.rs:699` | `pub fn boundary_dofs(mesh: &SimplexMesh, labels: &[i32], order: usize) -> Vec<usize>` —  Dofs on the boundary facets with any of the given boundary numbers (sorted, unique). |
-| fn | `dirichlet_constraints` | `fem.rs:712` | `pub fn dirichlet_constraints(mesh: &SimplexMesh, values: &BTreeMap<i32, f64>, order: usize) -> (Vec<usize>, Vec<f64>)` —  Fixed dofs and values for `{boundary number: value}`. A dof shared by boundaries with |
-| fn | `solve_dirichlet` | `fem.rs:731` | `pub fn solve_dirichlet(k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<Vec<f64>, String>` —  Solves `K u = f` with `u[fixed] = values` by elimination. |
-| fn | `untouched_dofs` | `fem.rs:758` | `pub fn untouched_dofs(mesh: &SimplexMesh, order: usize, ncomp: usize, inactive: &[i32]) -> Vec<usize>` —  Dofs (of `ncomp` component blocks of `n_dofs(order)`) that no active cell touches: the cells |
-| fn | `free_dofs` | `fem.rs:781` | `pub fn free_dofs(n: usize, fixed: &[usize]) -> Vec<usize>` —  Free dof indices (complement of `fixed`). |
-| const | `AMG_THRESHOLD` | `fem.rs:795` | `usize` —  Free-dof count above which `LinearSolver::Auto` switches to multigrid in 2D. In 3D multigrid |
-| const | `AMG_THRESHOLD_3D` | `fem.rs:796` | `usize` |
-| const | `LOBPCG_MIN_FREE` | `fem.rs:800` | `usize` —  Free dofs above which eigenfrequency studies (Auto) try LOBPCG instead of a factorisation. Measured with the shared |
-| const | `FACTORISE_MAX_FREE` | `fem.rs:802` | `usize` —  Above this many free dofs a factorisation is not attempted for eigenfrequencies. |
-| const | `LOBPCG_MAX_FACTOR` | `fem.rs:804` | `f64` —  Multigrid is used for eigenfrequencies when its convergence factor is at most this. |
-| fn | `amg_wanted` | `fem.rs:807` | `pub fn amg_wanted(dim: usize, n_free: usize) -> bool` —  Whether `LinearSolver::Auto` should use multigrid for a system with `n_free` unknowns. |
-| fn | `detect_vertical_columns` | `fem.rs:870` | `pub fn detect_vertical_columns(mesh: &SimplexMesh, order: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>)` —  Auto-detects vertical prismatic columns on a 3D mesh by grouping P1 vertices with identical |
-| struct | `AmgSystem` | `fem.rs:945` | fields: `setup_seconds` —  A symmetric positive definite system over all dofs with some dofs constrained, prepared for |
-| fn | `solve_spd` | `fem.rs:1207` | `pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String>` —  Solves `K u = f` with `u[fixed] = values` choosing between the sparse direct solver and |
-| fn | `solve_spd_with` | `fem.rs:1213` | `pub fn solve_spd_with( mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64], tol: f64, line_smooth: bool, ) -> Result<(Vec<f64>, Option<String>), String>` —  Like [`solve_spd`] with explicit iterative tolerance `tol` and vertical-line smoother toggle `line_smooth`. |
-| fn | `check_boundary_labels` | `fem.rs:1270` | `pub fn check_boundary_labels(mesh: &SimplexMesh, labels: impl IntoIterator<Item = i32>) -> Result<(), String>` —  Refuses boundary numbers that the mesh does not have, naming the ones it has. Every physics checks its conditions with it. |
-| fn | `cell_values_at_nodes` | `fem.rs:1283` | `pub fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64>` —  The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`. |
-| fn | `RefElement::new` | `fem.rs:145` | `pub fn new(dim: usize, order: usize, degree: usize) -> Self` |
-| fn | `CurvedTet::new` | `fem.rs:294` | `pub fn new(x: [[f64; 3]; 10]) -> Self` |
-| fn | `CurvedTet::straight` | `fem.rs:299` | `pub fn straight(v: [[f64; 3]; 4]) -> Self` —  The straight cell with vertices `v` (edge nodes at the midpoints). |
-| fn | `CurvedTet::dx_dlam` | `fem.rs:312` | `pub fn dx_dlam(&self, lam: &[f64; 4]) -> [[f64` —  Derivatives of the position with respect to each barycentric coordinate treated as independent: `d[b]` is the sum over nodes of |
-| fn | `CurvedTet::position` | `fem.rs:332` | `pub fn position(&self, lam: &[f64; 4]) -> [f64` —  Position at the barycentric point `lam`. |
-| fn | `CurvedTet::jacobian_matrix` | `fem.rs:350` | `pub fn jacobian_matrix(&self, lam: &[f64; 4]) -> [[f64` —  The Jacobian matrix `J[i][k] = dx_i / dxi_k` with respect to the reference coordinates `(lambda_1, lambda_2, lambda_3)`. |
-| fn | `CurvedTet::jacobian` | `fem.rs:363` | `pub fn jacobian(&self, lam: &[f64; 4]) -> ([[f64` —  Physical gradients of the four barycentric functions at `lam`, and the determinant of the Jacobian (negative for an inverted |
-| fn | `CurvedTet::min_det_at_nodes` | `fem.rs:380` | `pub fn min_det_at_nodes(&self) -> f64` —  The smallest determinant over the ten nodes of the cell (vertices and edge nodes), a cheap validity probe. |
-| fn | `CurvedTet::volume` | `fem.rs:392` | `pub fn volume(&self) -> f64` —  Volume of the curved cell: the integral of `\|det J\|` over the reference tetrahedron, with a rule exact to degree 8. |
-| fn | `AmgSystem::new` | `fem.rs:960` | `pub fn new(mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize]) -> Result<AmgSystem, String>` —  `a` is the matrix over all `n = ncomp * n_dofs(order)` dofs (entries in constrained rows and |
-| fn | `AmgSystem::new_with` | `fem.rs:965` | `pub fn new_with( mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize], mut opts: crate::linalg::amg_elastic::AmgOptions, ) -> Result<AmgSystem, String>` —  Like [`AmgSystem::new`] with explicit [`crate::linalg::amg_elastic::AmgOptions`] (such as `line_smooth`). |
-| fn | `AmgSystem::n_levels` | `fem.rs:1053` | `pub fn n_levels(&self) -> usize` |
-| fn | `AmgSystem::sizes` | `fem.rs:1057` | `pub fn sizes(&self) -> Vec<usize>` |
-| fn | `AmgSystem::line_smooth_active` | `fem.rs:1062` | `pub fn line_smooth_active(&self) -> bool` —  Whether Thomas tridiagonal vertical-line smoothing is active in the hierarchy. |
-| fn | `AmgSystem::n_line_columns` | `fem.rs:1067` | `pub fn n_line_columns(&self) -> usize` —  Number of vertical columns detected and smoothed on the primary P1/P2 levels. |
-| fn | `AmgSystem::solve_with` | `fem.rs:1074` | `pub fn solve_with(&self, matrix: Option<&Csr>, b: &[f64], fixed_values: &[(usize, f64)], tol: f64, max_iter: usize) -> (Vec<f64>, usize, f64)` —  Solves `A x = b` for the right-hand side over all dofs (entries at constrained dofs are taken |
-| fn | `AmgSystem::solve_block_with` | `fem.rs:1104` | `pub fn solve_block_with( &self, matrix: Option<&Csr>, b_list: &[Vec<f64>], fixed_values_list: &[Vec<(usize, f64)>], tol: f64, max_iter: usize, ) -> (Vec<Vec<f64>>, usize, f64)` —  Solves `A X = B` simultaneously for `K = b_list.len()` right-hand sides using multi-RHS |
-| fn | `AmgSystem::convergence_factor` | `fem.rs:1154` | `pub fn convergence_factor(&self) -> f64` —  Average residual reduction per iteration of multigrid-preconditioned CG on a random |
-| fn | `AmgSystem::precondition_free` | `fem.rs:1172` | `pub fn precondition_free(&self, r_free: &[f64]) -> Vec<f64>` —  One multigrid cycle applied to a vector over the free dofs: an approximation of the inverse |
-| fn | `AmgSystem::solve_free` | `fem.rs:1187` | `pub fn solve_free(&self, matrix: Option<&Csr>, b_free: &[f64], tol: f64) -> Result<Vec<f64>, String>` —  Solves for the unconstrained dofs only: `b` and the result are vectors over the free dofs. |
+| struct | `Quad` | `fem.rs:29` | fields: `lam`, `w` —  Quadrature on the reference simplex: barycentric points and weights summing to 1 |
+| fn | `quad_rule` | `fem.rs:40` | `pub fn quad_rule(dim: usize, degree: usize) -> Quad` |
+| fn | `facet_rule` | `fem.rs:85` | `pub fn facet_rule(facet_dim: usize) -> Quad` —  Rule on a boundary facet (Gauss on edges in 2D, degree-4 Dunavant on triangles in 3D). |
+| fn | `shape` | `fem.rs:103` | `pub fn shape(lam: &[f64], order: usize) -> (Vec<f64>, Vec<f64>)` —  Shape functions at barycentric point `lam`: values `n[a]` and derivatives with respect to |
+| struct | `RefElement` | `fem.rs:132` | fields: `dim`, `order`, `nloc`, `w`, `n`, `dn` —  Quadrature rule with shape functions tabulated at its points. |
+| struct | `Geometry` | `fem.rs:160` | fields: `vol`, `g` —  Per-cell volume and gradients of the barycentric coordinates: `g[c*(d+1)*d + b*d + k]`. |
+| fn | `geometry` | `fem.rs:165` | `pub fn geometry(mesh: &SimplexMesh) -> Geometry` |
+| fn | `quad_rule_collapsed` | `fem.rs:260` | `pub fn quad_rule_collapsed(degree: usize) -> Quad` —  A quadrature rule on the reference tetrahedron that is exact to at least `degree`, built by collapsing the unit cube (Duffy |
+| const | `TET_EDGES` | `fem.rs:278` | `[(usize, usize)` —  The local vertex pairs of a tetrahedron in the order of its edge numbering (and of the geometry nodes 4 to 9 of [`CurvedTet`]). |
+| struct | `CurvedTet` | `fem.rs:288` | fields: `x` —  A tetrahedron with quadratic (isoparametric) geometry: the map from the reference cell is the quadratic Lagrange interpolation of ten |
+| fn | `shape_gradients` | `fem.rs:400` | `pub fn shape_gradients(re: &RefElement, geo: &Geometry, c: usize, q: usize, out: &mut [f64])` —  Physical gradients of the shape functions at quadrature point `q` of cell `c`: |
+| fn | `assemble_parallel` | `fem.rs:419` | `pub fn assemble_parallel<F>(nc: usize, nrows: usize, ncols: usize, f: F) -> Csr` —  Runs `f(range, &mut coo)` over fixed cell chunks on all available threads and merges the results |
+| fn | `assemble_laplace` | `fem.rs:466` | `pub fn assemble_laplace(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `K_ij = integral coeff grad(phi_i) . grad(phi_j)`; `coeff` holds one value per cell. |
+| fn | `assemble_laplace_tensor` | `fem.rs:500` | `pub fn assemble_laplace_tensor(mesh: &SimplexMesh, order: usize, k: &[[[f64; 3]; 3]]) -> Csr` —  `K_ij = integral grad(phi_i) . K grad(phi_j)` with a symmetric tensor `K` per cell (only |
+| fn | `assemble_mass` | `fem.rs:540` | `pub fn assemble_mass(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Csr` —  `M_ij = integral coeff phi_i phi_j`. |
+| fn | `assemble_source` | `fem.rs:569` | `pub fn assemble_source(mesh: &SimplexMesh, order: usize, coeff: &[f64]) -> Vec<f64>` —  Integral of `coeff phi_i` over every cell: the load of a per-cell source density. |
+| const | `TET_FACES` | `fem.rs:577` | `[[usize` —  Local vertex triples of the four faces of a tetrahedron. |
+| fn | `build_face_to_cell_3d` | `fem.rs:582` | `pub fn build_face_to_cell_3d(mesh: &SimplexMesh) -> std::collections::HashMap<[u32` —  Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to one adjacent |
+| fn | `build_face_to_cells_3d` | `fem.rs:601` | `pub fn build_face_to_cells_3d(mesh: &SimplexMesh) -> std::collections::HashMap<[u32` —  Builds a map from each sorted triangle face `[v0, v1, v2]` in a 3D tetrahedral mesh to all adjacent |
+| fn | `facet_measure` | `fem.rs:618` | `pub fn facet_measure(mesh: &SimplexMesh, f: usize) -> f64` |
+| fn | `facets_with` | `fem.rs:632` | `pub fn facets_with<'a>(mesh: &'a SimplexMesh, labels: &'a [i32]) -> impl Iterator<Item = usize> + 'a` |
+| fn | `assemble_boundary_mass` | `fem.rs:637` | `pub fn assemble_boundary_mass(mesh: &SimplexMesh, labels: &[i32], order: usize, coeff: f64) -> Csr` —  `integral coeff phi_i phi_j` over the facets carrying one of `labels` (convective term). |
+| fn | `assemble_boundary_load` | `fem.rs:663` | `pub fn assemble_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: f64, order: usize) -> Vec<f64>` —  Load `integral value phi_i` over the facets carrying one of `labels`. |
+| fn | `add_boundary_load` | `fem.rs:671` | `pub fn add_boundary_load(mesh: &SimplexMesh, labels: &[i32], value: &dyn Fn(usize) -> f64, order: usize, out: &mut [f64], ncomp: usize, comp: usize)` —  Adds the boundary load of a per-facet value into component `comp` of a vector of `ncomp` |
+| fn | `boundary_dofs` | `fem.rs:694` | `pub fn boundary_dofs(mesh: &SimplexMesh, labels: &[i32], order: usize) -> Vec<usize>` —  Dofs on the boundary facets with any of the given boundary numbers (sorted, unique). |
+| fn | `dirichlet_constraints` | `fem.rs:707` | `pub fn dirichlet_constraints(mesh: &SimplexMesh, values: &BTreeMap<i32, f64>, order: usize) -> (Vec<usize>, Vec<f64>)` —  Fixed dofs and values for `{boundary number: value}`. A dof shared by boundaries with |
+| fn | `solve_dirichlet` | `fem.rs:726` | `pub fn solve_dirichlet(k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<Vec<f64>, String>` —  Solves `K u = f` with `u[fixed] = values` by elimination. |
+| fn | `untouched_dofs` | `fem.rs:753` | `pub fn untouched_dofs(mesh: &SimplexMesh, order: usize, ncomp: usize, inactive: &[i32]) -> Vec<usize>` —  Dofs (of `ncomp` component blocks of `n_dofs(order)`) that no active cell touches: the cells |
+| fn | `free_dofs` | `fem.rs:776` | `pub fn free_dofs(n: usize, fixed: &[usize]) -> Vec<usize>` —  Free dof indices (complement of `fixed`). |
+| const | `AMG_THRESHOLD` | `fem.rs:790` | `usize` —  Free-dof count above which `LinearSolver::Auto` switches to multigrid in 2D. In 3D multigrid |
+| const | `AMG_THRESHOLD_3D` | `fem.rs:791` | `usize` |
+| const | `LOBPCG_MIN_FREE` | `fem.rs:795` | `usize` —  Free dofs above which eigenfrequency studies (Auto) try LOBPCG instead of a factorisation. Measured with the shared |
+| const | `FACTORISE_MAX_FREE` | `fem.rs:797` | `usize` —  Above this many free dofs a factorisation is not attempted for eigenfrequencies. |
+| const | `LOBPCG_MAX_FACTOR` | `fem.rs:799` | `f64` —  Multigrid is used for eigenfrequencies when its convergence factor is at most this. |
+| fn | `amg_wanted` | `fem.rs:802` | `pub fn amg_wanted(dim: usize, n_free: usize) -> bool` —  Whether `LinearSolver::Auto` should use multigrid for a system with `n_free` unknowns. |
+| fn | `detect_vertical_columns` | `fem.rs:865` | `pub fn detect_vertical_columns(mesh: &SimplexMesh, order: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>)` —  Auto-detects vertical prismatic columns on a 3D mesh by grouping P1 vertices with identical |
+| struct | `AmgSystem` | `fem.rs:940` | fields: `setup_seconds` —  A symmetric positive definite system over all dofs with some dofs constrained, prepared for |
+| fn | `solve_spd` | `fem.rs:1202` | `pub fn solve_spd(mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64]) -> Result<(Vec<f64>, Option<String>), String>` —  Solves `K u = f` with `u[fixed] = values` choosing between the sparse direct solver and |
+| fn | `solve_spd_with` | `fem.rs:1208` | `pub fn solve_spd_with( mesh: &SimplexMesh, order: usize, ncomp: usize, solver: crate::props::LinearSolver, k: &Csr, f: &[f64], fixed: &[usize], values: &[f64], tol: f64, line_smooth: bool, ) -> Result<(Vec<f64>, Option<String>), String>` —  Like [`solve_spd`] with explicit iterative tolerance `tol` and vertical-line smoother toggle `line_smooth`. |
+| fn | `check_boundary_labels` | `fem.rs:1265` | `pub fn check_boundary_labels(mesh: &SimplexMesh, labels: impl IntoIterator<Item = i32>) -> Result<(), String>` —  Refuses boundary numbers that the mesh does not have, naming the ones it has. Every physics checks its conditions with it. |
+| fn | `cell_values_at_nodes` | `fem.rs:1278` | `pub fn cell_values_at_nodes(mesh: &SimplexMesh, u: &[f64], order: usize) -> Vec<f64>` —  The values of a dof field at the local dofs of every cell: `out[c*nloc + a]`. |
+| fn | `RefElement::new` | `fem.rs:144` | `pub fn new(dim: usize, order: usize, degree: usize) -> Self` |
+| fn | `CurvedTet::new` | `fem.rs:293` | `pub fn new(x: [[f64; 3]; 10]) -> Self` |
+| fn | `CurvedTet::straight` | `fem.rs:298` | `pub fn straight(v: [[f64; 3]; 4]) -> Self` —  The straight cell with vertices `v` (edge nodes at the midpoints). |
+| fn | `CurvedTet::dx_dlam` | `fem.rs:311` | `pub fn dx_dlam(&self, lam: &[f64; 4]) -> [[f64` —  Derivatives of the position with respect to each barycentric coordinate treated as independent: `d[b]` is the sum over nodes of |
+| fn | `CurvedTet::position` | `fem.rs:331` | `pub fn position(&self, lam: &[f64; 4]) -> [f64` —  Position at the barycentric point `lam`. |
+| fn | `CurvedTet::jacobian_matrix` | `fem.rs:349` | `pub fn jacobian_matrix(&self, lam: &[f64; 4]) -> [[f64` —  The Jacobian matrix `J[i][k] = dx_i / dxi_k` with respect to the reference coordinates `(lambda_1, lambda_2, lambda_3)`. |
+| fn | `CurvedTet::jacobian` | `fem.rs:362` | `pub fn jacobian(&self, lam: &[f64; 4]) -> ([[f64` —  Physical gradients of the four barycentric functions at `lam`, and the determinant of the Jacobian (negative for an inverted |
+| fn | `CurvedTet::min_det_at_nodes` | `fem.rs:379` | `pub fn min_det_at_nodes(&self) -> f64` —  The smallest determinant over the ten nodes of the cell (vertices and edge nodes), a cheap validity probe. |
+| fn | `CurvedTet::volume` | `fem.rs:391` | `pub fn volume(&self) -> f64` —  Volume of the curved cell: the integral of `\|det J\|` over the reference tetrahedron, with a rule exact to degree 8. |
+| fn | `AmgSystem::new` | `fem.rs:955` | `pub fn new(mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize]) -> Result<AmgSystem, String>` —  `a` is the matrix over all `n = ncomp * n_dofs(order)` dofs (entries in constrained rows and |
+| fn | `AmgSystem::new_with` | `fem.rs:960` | `pub fn new_with( mesh: &SimplexMesh, order: usize, ncomp: usize, a: &Csr, fixed: &[usize], mut opts: crate::linalg::amg_elastic::AmgOptions, ) -> Result<AmgSystem, String>` —  Like [`AmgSystem::new`] with explicit [`crate::linalg::amg_elastic::AmgOptions`] (such as `line_smooth`). |
+| fn | `AmgSystem::n_levels` | `fem.rs:1048` | `pub fn n_levels(&self) -> usize` |
+| fn | `AmgSystem::sizes` | `fem.rs:1052` | `pub fn sizes(&self) -> Vec<usize>` |
+| fn | `AmgSystem::line_smooth_active` | `fem.rs:1057` | `pub fn line_smooth_active(&self) -> bool` —  Whether Thomas tridiagonal vertical-line smoothing is active in the hierarchy. |
+| fn | `AmgSystem::n_line_columns` | `fem.rs:1062` | `pub fn n_line_columns(&self) -> usize` —  Number of vertical columns detected and smoothed on the primary P1/P2 levels. |
+| fn | `AmgSystem::solve_with` | `fem.rs:1069` | `pub fn solve_with(&self, matrix: Option<&Csr>, b: &[f64], fixed_values: &[(usize, f64)], tol: f64, max_iter: usize) -> (Vec<f64>, usize, f64)` —  Solves `A x = b` for the right-hand side over all dofs (entries at constrained dofs are taken |
+| fn | `AmgSystem::solve_block_with` | `fem.rs:1099` | `pub fn solve_block_with( &self, matrix: Option<&Csr>, b_list: &[Vec<f64>], fixed_values_list: &[Vec<(usize, f64)>], tol: f64, max_iter: usize, ) -> (Vec<Vec<f64>>, usize, f64)` —  Solves `A X = B` simultaneously for `K = b_list.len()` right-hand sides using multi-RHS |
+| fn | `AmgSystem::convergence_factor` | `fem.rs:1149` | `pub fn convergence_factor(&self) -> f64` —  Average residual reduction per iteration of multigrid-preconditioned CG on a random |
+| fn | `AmgSystem::precondition_free` | `fem.rs:1167` | `pub fn precondition_free(&self, r_free: &[f64]) -> Vec<f64>` —  One multigrid cycle applied to a vector over the free dofs: an approximation of the inverse |
+| fn | `AmgSystem::solve_free` | `fem.rs:1182` | `pub fn solve_free(&self, matrix: Option<&Csr>, b_free: &[f64], tol: f64) -> Result<Vec<f64>, String>` —  Solves for the unconstrained dofs only: `b` and the result are vectors over the free dofs. |
 | fn | `gauss_legendre_1d` | `fem_mixed.rs:20` | `pub fn gauss_legendre_1d(n: usize) -> Vec<(f64, f64)>` —  1D Gauss–Legendre points and weights on `[-1, 1]` (`n` points, exact to degree `2*n - 1`, weights sum to `2.0`). |
 | struct | `MixedQuadRule` | `fem_mixed.rs:53` | fields: `cell_type`, `pts`, `w` —  Quadrature rule on a reference cell (`Tri`, `Quad`, `Tet`, `Prism`, `Hex`). |
 | fn | `quad_rule_mixed` | `fem_mixed.rs:92` | `pub fn quad_rule_mixed(cell_type: CellType, degree: usize) -> MixedQuadRule` —  Quadrature rule on `cell_type` exact to total/coordinate polynomial `degree`. |
@@ -691,44 +691,44 @@ classDiagram
 | fn | `MixedLagrangeDofMap::boundary_dofs` | `fem_mixed.rs:1280` | `pub fn boundary_dofs(&self, mesh: &MixedDiscretisation, labels: &[i32]) -> Vec<usize>` —  Sorted unique scalar DOFs lying on facets carrying any of `labels`. |
 | fn | `MixedLagrangeDofMap::dirichlet_constraints` | `fem_mixed.rs:1293` | `pub fn dirichlet_constraints( &self, mesh: &MixedDiscretisation, values: &BTreeMap<i32, f64>, ) -> (Vec<usize>, Vec<f64>)` —  Fixed Dirichlet DOFs and values for `{boundary_label: value}` (shared boundary DOFs receive the mean). |
 | fn | `MixedLagrangeDofMap::dof_coordinates` | `fem_mixed.rs:1316` | `pub fn dof_coordinates(&self, mesh: &MixedDiscretisation) -> Vec<f64>` —  Physical coordinates (`dim` per DOF) of every scalar DOF in global order. |
-| fn | `local_bary` | `fields.rs:15` | `pub fn local_bary(dim: usize, order: usize) -> Vec<Vec<f64>>` —  Barycentric coordinates of the local dofs (vertices, then edge midpoints). |
-| fn | `gradients_at_nodes` | `fields.rs:35` | `pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: usize) -> Vec<f64>` —  Gradients of `ncomp` stacked scalar dof fields (each `n_dofs` long) at the local dofs of |
-| fn | `node_average` | `fields.rs:131` | `pub fn node_average(mesh: &SimplexMesh, vals: &[f64], m: usize, order: usize) -> Vec<f64>` —  Mean over the cells touching each dof of per-cell nodal values `vals[(c*nloc + a)*m + j]`. |
-| struct | `Display` | `fields.rs:161` | fields: `dim`, `dofs`, `points`, `tris`, `tri_label` —  Surface mesh for plotting: the cells in 2D, the boundary facets in 3D, with every P2 |
-| struct | `CellField` | `fields.rs:228` | fields: `name`, `unit`, `re`, `im` —  One quantity at the local dofs of every cell, not averaged over the cells that share a node: |
-| struct | `CellFields` | `fields.rs:238` | fields: `order`, `nloc`, `fields` —  The un-averaged per-cell fields of one solution. This is what an error estimator needs (the jump of a flux |
-| fn | `Display::new` | `fields.rs:172` | `pub fn new(mesh: &SimplexMesh, order: usize) -> Self` |
-| fn | `Display::pick` | `fields.rs:218` | `pub fn pick(&self, values: &[f64]) -> Vec<f32>` |
-| fn | `CellFields::new` | `fields.rs:246` | `pub fn new(mesh: &SimplexMesh, order: usize) -> Self` |
-| fn | `CellFields::get` | `fields.rs:250` | `pub fn get(&self, name: &str) -> Option<&CellField>` |
-| fn | `CellFields::push_real` | `fields.rs:254` | `pub fn push_real(&mut self, name: impl Into<String>, unit: impl Into<String>, re: Vec<f64>)` |
-| fn | `CellFields::push_complex` | `fields.rs:258` | `pub fn push_complex(&mut self, name: impl Into<String>, unit: impl Into<String>, re: Vec<f64>, im: Vec<f64>)` |
-| fn | `CellFields::push_components` | `fields.rs:264` | `pub fn push_components(&mut self, prefix: &str, names: &[&str], unit: &str, g: &[f64])` —  The `ncomp` interleaved per-cell values `g[(c*nloc + a)*ncomp + j]` as one real field per component, named |
-| fn | `CellFields::node_average` | `fields.rs:273` | `pub fn node_average(&self, mesh: &SimplexMesh, name: &str) -> Option<Vec<f64>>` —  The node average of a real component (the plot field it must reproduce). |
+| fn | `local_bary` | `fields.rs:14` | `pub fn local_bary(dim: usize, order: usize) -> Vec<Vec<f64>>` —  Barycentric coordinates of the local dofs (vertices, then edge midpoints). |
+| fn | `gradients_at_nodes` | `fields.rs:34` | `pub fn gradients_at_nodes(mesh: &SimplexMesh, u: &[f64], ncomp: usize, order: usize) -> Vec<f64>` —  Gradients of `ncomp` stacked scalar dof fields (each `n_dofs` long) at the local dofs of |
+| fn | `node_average` | `fields.rs:130` | `pub fn node_average(mesh: &SimplexMesh, vals: &[f64], m: usize, order: usize) -> Vec<f64>` —  Mean over the cells touching each dof of per-cell nodal values `vals[(c*nloc + a)*m + j]`. |
+| struct | `Display` | `fields.rs:160` | fields: `dim`, `dofs`, `points`, `tris`, `tri_label` —  Surface mesh for plotting: the cells in 2D, the boundary facets in 3D, with every P2 |
+| struct | `CellField` | `fields.rs:227` | fields: `name`, `unit`, `re`, `im` —  One quantity at the local dofs of every cell, not averaged over the cells that share a node: |
+| struct | `CellFields` | `fields.rs:237` | fields: `order`, `nloc`, `fields` —  The un-averaged per-cell fields of one solution. This is what an error estimator needs (the jump of a flux |
+| fn | `Display::new` | `fields.rs:171` | `pub fn new(mesh: &SimplexMesh, order: usize) -> Self` |
+| fn | `Display::pick` | `fields.rs:217` | `pub fn pick(&self, values: &[f64]) -> Vec<f32>` |
+| fn | `CellFields::new` | `fields.rs:245` | `pub fn new(mesh: &SimplexMesh, order: usize) -> Self` |
+| fn | `CellFields::get` | `fields.rs:249` | `pub fn get(&self, name: &str) -> Option<&CellField>` |
+| fn | `CellFields::push_real` | `fields.rs:253` | `pub fn push_real(&mut self, name: impl Into<String>, unit: impl Into<String>, re: Vec<f64>)` |
+| fn | `CellFields::push_complex` | `fields.rs:257` | `pub fn push_complex(&mut self, name: impl Into<String>, unit: impl Into<String>, re: Vec<f64>, im: Vec<f64>)` |
+| fn | `CellFields::push_components` | `fields.rs:263` | `pub fn push_components(&mut self, prefix: &str, names: &[&str], unit: &str, g: &[f64])` —  The `ncomp` interleaved per-cell values `g[(c*nloc + a)*ncomp + j]` as one real field per component, named |
+| fn | `CellFields::node_average` | `fields.rs:272` | `pub fn node_average(&self, mesh: &SimplexMesh, name: &str) -> Option<Vec<f64>>` —  The node average of a real component (the plot field it must reproduce). |
 | fn | `phase_factor` | `periodic.rs:19` | `pub fn phase_factor(phase: f64) -> C` —  The Floquet factor `exp(-i phase)`. |
 | struct | `Match` | `periodic.rs:24` | fields: `map`, `src_facets`, `shift` —  Vertex correspondence of a periodic pair. |
 | fn | `match_vertices` | `periodic.rs:48` | `pub fn match_vertices(mesh: &SimplexMesh, p: &Periodic) -> Result<Match, String>` —  Matches the vertices of the source boundaries to those of the destination boundaries. |
 | fn | `nodal_relations` | `periodic.rs:115` | `pub fn nodal_relations(mesh: &SimplexMesh, order: usize, ncomp: usize, m: &Match, phase: f64) -> Result<Vec<(usize, usize, C)>, String>` —  Relations for nodal fields of `ncomp` component blocks (dof layout: component blocks of |
-| struct | `Reduction` | `periodic.rs:211` | fields: `n`, `roots`, `index_of`, `ratio` —  `x_full = P x_red`: the reduced dofs are the roots of the constraint classes that contain no |
-| fn | `congruence_fast` | `periodic.rs:522` | `pub fn congruence_fast(red: &Reduction, a: &CCsr) -> CCsr` —  Single-pass `O(nnz)` congruence `P^H A P` from a `Reduction`. |
-| fn | `congruence_real` | `periodic.rs:527` | `pub fn congruence_real(red: &Reduction, a: &RCsr) -> Result<RCsr, String>` —  Single-pass `O(nnz)` real congruence `P^T A P` from a `Reduction`. |
-| fn | `restrict_rhs` | `periodic.rs:532` | `pub fn restrict_rhs<T: Scalar>(red: &Reduction, f: &[T]) -> Vec<T>` —  Restricts a full RHS vector `f` via `P^H f`. |
-| fn | `ccsr_mul` | `periodic.rs:537` | `pub fn ccsr_mul(a: &CCsr, b: &CCsr) -> CCsr` —  Sparse complex product. |
-| fn | `ccsr_adjoint` | `periodic.rs:568` | `pub fn ccsr_adjoint(a: &CCsr) -> CCsr` —  Conjugate transpose. |
-| fn | `congruence` | `periodic.rs:574` | `pub fn congruence(p: &CCsr, a: &CCsr) -> CCsr` —  `P^H A P`. |
-| fn | `Reduction::build` | `periodic.rs:224` | `pub fn build(n: usize, relations: &[(usize, usize, C)], fixed: &[usize]) -> Reduction` |
-| fn | `Reduction::try_build` | `periodic.rs:238` | `pub fn try_build(n: usize, relations: &[(usize, usize, C)], fixed: &[usize]) -> Result<Reduction, String>` —  Builds a `Reduction` while rejecting inconsistent periodic/equipotential constraint cycles. |
-| fn | `Reduction::try_build_with_values` | `periodic.rs:253` | `pub fn try_build_with_values( n: usize, relations: &[(usize, usize, C)], fixed_vals: &[(usize, C)], ) -> Result<(Reduction, Vec<C>), String>` —  Builds a `Reduction` and inhomogeneous Dirichlet lifting vector `g` (`x = P x_red + g`), |
-| fn | `Reduction::try_build_real_with_values` | `periodic.rs:295` | `pub fn try_build_real_with_values( n: usize, relations: &[(usize, usize, f64)], fixed_vals: &[(usize, f64)], ) -> Result<(Reduction, Vec<f64>), String>` —  Real-valued convenience wrapper around [`Self::try_build_with_values`]. |
-| fn | `Reduction::n_reduced` | `periodic.rs:326` | `pub fn n_reduced(&self) -> usize` |
-| fn | `Reduction::prolong` | `periodic.rs:331` | `pub fn prolong(&self) -> CCsr` —  The prolongation `P` (`n x n_reduced`). |
-| fn | `Reduction::prolong_real` | `periodic.rs:344` | `pub fn prolong_real(&self) -> Result<RCsr, String>` —  The real prolongation `P` (`n x n_reduced`); errors if any active class carries a non-real ratio. |
-| fn | `Reduction::congruence_fast` | `periodic.rs:461` | `pub fn congruence_fast(&self, a: &CCsr) -> CCsr` —  Single-pass `O(nnz)` Galerkin congruence `P^H A P` for complex matrices. |
-| fn | `Reduction::congruence_real` | `periodic.rs:466` | `pub fn congruence_real(&self, a: &RCsr) -> Result<RCsr, String>` —  Single-pass `O(nnz)` Galerkin congruence `P^T A P` for real matrices; errors if any active ratio is complex. |
-| fn | `Reduction::restrict_rhs` | `periodic.rs:472` | `pub fn restrict_rhs<T: Scalar>(&self, f: &[T]) -> Vec<T>` —  Restricts a full RHS vector `f` via `f_red = P^H f`. |
-| fn | `Reduction::lift_rhs` | `periodic.rs:487` | `pub fn lift_rhs<T: Scalar>(&self, a: &Csr<T>, f: &[T], g: &[T]) -> Vec<T>` —  Computes the reduced RHS with inhomogeneous Dirichlet lifting `f_red = P^H (f - A g)`. |
-| fn | `Reduction::expand` | `periodic.rs:500` | `pub fn expand(&self, xr: &[C]) -> Vec<C>` |
-| fn | `Reduction::expand_with` | `periodic.rs:505` | `pub fn expand_with<T: Scalar>(&self, xr: &[T], g: &[T]) -> Vec<T>` —  Expands a reduced solution `xr` back to the full vector `x = P x_red + g`. |
+| struct | `Reduction` | `periodic.rs:213` | fields: `n`, `roots`, `index_of`, `ratio` —  `x_full = P x_red`: the reduced dofs are the roots of the constraint classes that contain no |
+| fn | `congruence_fast` | `periodic.rs:524` | `pub fn congruence_fast(red: &Reduction, a: &CCsr) -> CCsr` —  Single-pass `O(nnz)` congruence `P^H A P` from a `Reduction`. |
+| fn | `congruence_real` | `periodic.rs:529` | `pub fn congruence_real(red: &Reduction, a: &RCsr) -> Result<RCsr, String>` —  Single-pass `O(nnz)` real congruence `P^T A P` from a `Reduction`. |
+| fn | `restrict_rhs` | `periodic.rs:534` | `pub fn restrict_rhs<T: Scalar>(red: &Reduction, f: &[T]) -> Vec<T>` —  Restricts a full RHS vector `f` via `P^H f`. |
+| fn | `ccsr_mul` | `periodic.rs:539` | `pub fn ccsr_mul(a: &CCsr, b: &CCsr) -> CCsr` —  Sparse complex product. |
+| fn | `ccsr_adjoint` | `periodic.rs:570` | `pub fn ccsr_adjoint(a: &CCsr) -> CCsr` —  Conjugate transpose. |
+| fn | `congruence` | `periodic.rs:576` | `pub fn congruence(p: &CCsr, a: &CCsr) -> CCsr` —  `P^H A P`. |
+| fn | `Reduction::build` | `periodic.rs:226` | `pub fn build(n: usize, relations: &[(usize, usize, C)], fixed: &[usize]) -> Reduction` |
+| fn | `Reduction::try_build` | `periodic.rs:240` | `pub fn try_build(n: usize, relations: &[(usize, usize, C)], fixed: &[usize]) -> Result<Reduction, String>` —  Builds a `Reduction` while rejecting inconsistent periodic/equipotential constraint cycles. |
+| fn | `Reduction::try_build_with_values` | `periodic.rs:255` | `pub fn try_build_with_values( n: usize, relations: &[(usize, usize, C)], fixed_vals: &[(usize, C)], ) -> Result<(Reduction, Vec<C>), String>` —  Builds a `Reduction` and inhomogeneous Dirichlet lifting vector `g` (`x = P x_red + g`), |
+| fn | `Reduction::try_build_real_with_values` | `periodic.rs:297` | `pub fn try_build_real_with_values( n: usize, relations: &[(usize, usize, f64)], fixed_vals: &[(usize, f64)], ) -> Result<(Reduction, Vec<f64>), String>` —  Real-valued convenience wrapper around [`Self::try_build_with_values`]. |
+| fn | `Reduction::n_reduced` | `periodic.rs:328` | `pub fn n_reduced(&self) -> usize` |
+| fn | `Reduction::prolong` | `periodic.rs:333` | `pub fn prolong(&self) -> CCsr` —  The prolongation `P` (`n x n_reduced`). |
+| fn | `Reduction::prolong_real` | `periodic.rs:346` | `pub fn prolong_real(&self) -> Result<RCsr, String>` —  The real prolongation `P` (`n x n_reduced`); errors if any active class carries a non-real ratio. |
+| fn | `Reduction::congruence_fast` | `periodic.rs:463` | `pub fn congruence_fast(&self, a: &CCsr) -> CCsr` —  Single-pass `O(nnz)` Galerkin congruence `P^H A P` for complex matrices. |
+| fn | `Reduction::congruence_real` | `periodic.rs:468` | `pub fn congruence_real(&self, a: &RCsr) -> Result<RCsr, String>` —  Single-pass `O(nnz)` Galerkin congruence `P^T A P` for real matrices; errors if any active ratio is complex. |
+| fn | `Reduction::restrict_rhs` | `periodic.rs:474` | `pub fn restrict_rhs<T: Scalar>(&self, f: &[T]) -> Vec<T>` —  Restricts a full RHS vector `f` via `f_red = P^H f`. |
+| fn | `Reduction::lift_rhs` | `periodic.rs:489` | `pub fn lift_rhs<T: Scalar>(&self, a: &Csr<T>, f: &[T], g: &[T]) -> Vec<T>` —  Computes the reduced RHS with inhomogeneous Dirichlet lifting `f_red = P^H (f - A g)`. |
+| fn | `Reduction::expand` | `periodic.rs:502` | `pub fn expand(&self, xr: &[C]) -> Vec<C>` |
+| fn | `Reduction::expand_with` | `periodic.rs:507` | `pub fn expand_with<T: Scalar>(&self, xr: &[T], g: &[T]) -> Vec<T>` —  Expands a reduced solution `xr` back to the full vector `x = P x_red + g`. |
 | struct | `PmlJacobian` | `pml.rs:51` | fields: `j`, `j_inv`, `det`, `s_theta`, `s_dist` —  Pointwise coordinate-stretching Jacobian `J_s = d x_tilde / d x` at a quadrature point. |
 | struct | `AutoScaleResult` | `pml.rs:82` | fields: `d_auto`, `psi_max`, `kappa_max`, `order`, `layers_p1`, `layers_p2`, `layer_grading` —  Closed-form dimensionless PML calibration parameters (`PML_FEATURE_REQUEST.md` §2 Verdict 4). |
 | fn | `rational_moment_integral` | `pml.rs:111` | `pub fn rational_moment_integral(m: f64, z: f64) -> f64` —  Evaluates `\Phi_m(z) = \int_0^1 s^m / (1 - z s)^2 ds` for `z = c_rat * t` in `[0, 1)` and `m >= 0`. |
@@ -777,16 +777,16 @@ classDiagram
 | fn | `Materials::cell_viscosity_skipping` | `props.rs:374` | `pub fn cell_viscosity_skipping(&self, mesh: &SimplexMesh, skip: &[i32]) -> Result<Vec<M6>, String>` —  Global-frame `6x6` dynamic viscosity tensor `eta` (solver Voigt order, `Pa*s`) of every cell; |
 | fn | `Materials::cell_values` | `props.rs:401` | `pub fn cell_values(&self, mesh: &SimplexMesh, name: &str, fallback: Option<f64>) -> Result<Vec<f64>, String>` —  One value of `name` per cell. Without a `fallback`, a domain lacking the property is an error. |
 | fn | `LinearSolver::name` | `props.rs:437` | `pub fn name(self) -> &'static str` |
-| enum | `CellPermittivity` | `rt.rs:20` | variants: `Scalar`, `Tensor` —  Per-cell permittivity `eps` (in F/m, e.g. `eps0 * eps_r` or `eps0 * eps_tensor`). |
-| enum | `RobinBoundary` | `rt.rs:32` | variants: `None`, `FacetAlpha`, `Pointwise` —  Optional exterior Robin (`FarField`) boundary specification `D . n = alpha * V` (`alpha > 0`) on `Gamma_inf`. |
-| struct | `EquilibratedFluxResult` | `rt.rs:43` | fields: `order`, `rt_order`, `dim`, `n_patches`, `n_sheet_splits`, `max_div_l2`, `cell_rt_coeffs`, `w_flux_matrix`, `q_pairing_matrix`, `c_upper_matrix`, `c_lower_matrix`, `c_mid_matrix`, ... —  Output of `RT_{p-1}` vertex-patch equilibration and Thomson / Prager-Synge complementary matrix bounds. |
-| fn | `rt_nloc` | `rt.rs:78` | `pub fn rt_nloc(dim: usize, order: usize) -> usize` —  Number of local degrees of freedom of `RT_{order - 1}` on a `dim`-simplex (`dim` in `{2, 3}`, `order` in `{1, 2}`). |
-| fn | `eval_rt_ref` | `rt.rs:98` | `pub fn eval_rt_ref( dim: usize, order: usize, lam: &[f64], out_vec: &mut [[f64; 3]], out_div: &mut [f64], )` —  Evaluates the reference `RT_{order - 1}(hat_K)` basis vectors and reference divergences at barycentric coordinates `lam` (`len == dim + 1`). |
-| fn | `eval_rt_piola` | `rt.rs:154` | `pub fn eval_rt_piola( dim: usize, order: usize, j_mat: &[[f64; 3]; 3], det_j: f64, lam: &[f64], out_vec: &mut [[f64; 3]], out_div: &mut [f64], )` —  Evaluates contravariant Piola-mapped physical `RT_{order - 1}(K)` basis vectors `(1 / \|det J\|) J * phi_hat` |
-| fn | `goal_weighted_cell_eta2` | `rt.rs:813` | `pub fn goal_weighted_cell_eta2( terminal_cell_eta2: &[Vec<f64>], c_ref: &[Vec<f64>], eps_floor: f64, ) -> Vec<f64>` —  Goal-oriented Cauchy-Schwarz combination of per-terminal Prager-Synge cell indicators `terminal_cell_eta2[j][c]`, |
-| fn | `equilibrate_electro_flux_bounds` | `rt.rs:856` | `pub fn equilibrate_electro_flux_bounds( mesh: &SimplexMesh, order: usize, potentials: &[Vec<f64>], eps: CellPermittivity<'_>, dirichlet_labels: &[i32], robin: RobinBoundary<'_>, c_upper_override: Option<&[Vec<f64>]>, ) -> Result<EquilibratedFluxResult, String>` —  High-level electrostatic flux equilibration and complementary capacitance bound computation from boundary label lists. |
-| fn | `equilibrate_flux_patches` | `rt.rs:893` | `pub fn equilibrate_flux_patches( mesh: &SimplexMesh, order: usize, potentials: &[Vec<f64>], eps: CellPermittivity<'_>, dirichlet_facets: &[bool], sheet_facets: &[bool], robin: RobinBoundary<'_>, c_upper_override: Option<&[Vec<f64>]>, ) -> Result<EquilibratedFluxResult, String>` —  Braess-Schoberl / Ern-Vohralik `RT_{order - 1}` vertex-patch flux equilibration and complementary Thomson / |
-| fn | `EquilibratedFluxResult::eval_cell_flux` | `rt.rs:1993` | `pub fn eval_cell_flux( &self, mesh: &SimplexMesh, terminal: usize, cell: usize, sorted_lam: &[f64], ) -> Result<([f64` —  Evaluates physical `(D_tilde^(terminal)(x), div D_tilde^(terminal)(x))` on `cell` at barycentric coordinates |
-| fn | `EquilibratedFluxResult::interior_non_sheet_normal_jump_l2` | `rt.rs:2056` | `pub fn interior_non_sheet_normal_jump_l2( &self, mesh: &SimplexMesh, sheet_facets: &[bool], terminal: usize, ) -> Result<f64, String>` —  Computes `(sum_{F not in sheet} \|\|[[D_tilde^(terminal) . n_F]]\|\|^2_{L^2(F)})^{1/2}` over all interior non-sheet faces, |
+| enum | `CellPermittivity` | `rt.rs:19` | variants: `Scalar`, `Tensor` —  Per-cell permittivity `eps` (in F/m, e.g. `eps0 * eps_r` or `eps0 * eps_tensor`). |
+| enum | `RobinBoundary` | `rt.rs:31` | variants: `None`, `FacetAlpha`, `Pointwise` —  Optional exterior Robin (`FarField`) boundary specification `D . n = alpha * V` (`alpha > 0`) on `Gamma_inf`. |
+| struct | `EquilibratedFluxResult` | `rt.rs:42` | fields: `order`, `rt_order`, `dim`, `n_patches`, `n_sheet_splits`, `max_div_l2`, `cell_rt_coeffs`, `w_flux_matrix`, `q_pairing_matrix`, `c_upper_matrix`, `c_lower_matrix`, `c_mid_matrix`, ... —  Output of `RT_{p-1}` vertex-patch equilibration and Thomson / Prager-Synge complementary matrix bounds. |
+| fn | `rt_nloc` | `rt.rs:77` | `pub fn rt_nloc(dim: usize, order: usize) -> usize` —  Number of local degrees of freedom of `RT_{order - 1}` on a `dim`-simplex (`dim` in `{2, 3}`, `order` in `{1, 2}`). |
+| fn | `eval_rt_ref` | `rt.rs:97` | `pub fn eval_rt_ref( dim: usize, order: usize, lam: &[f64], out_vec: &mut [[f64; 3]], out_div: &mut [f64], )` —  Evaluates the reference `RT_{order - 1}(hat_K)` basis vectors and reference divergences at barycentric coordinates `lam` (`len == dim + 1`). |
+| fn | `eval_rt_piola` | `rt.rs:153` | `pub fn eval_rt_piola( dim: usize, order: usize, j_mat: &[[f64; 3]; 3], det_j: f64, lam: &[f64], out_vec: &mut [[f64; 3]], out_div: &mut [f64], )` —  Evaluates contravariant Piola-mapped physical `RT_{order - 1}(K)` basis vectors `(1 / \|det J\|) J * phi_hat` |
+| fn | `goal_weighted_cell_eta2` | `rt.rs:812` | `pub fn goal_weighted_cell_eta2( terminal_cell_eta2: &[Vec<f64>], c_ref: &[Vec<f64>], eps_floor: f64, ) -> Vec<f64>` —  Goal-oriented Cauchy-Schwarz combination of per-terminal Prager-Synge cell indicators `terminal_cell_eta2[j][c]`, |
+| fn | `equilibrate_electro_flux_bounds` | `rt.rs:855` | `pub fn equilibrate_electro_flux_bounds( mesh: &SimplexMesh, order: usize, potentials: &[Vec<f64>], eps: CellPermittivity<'_>, dirichlet_labels: &[i32], robin: RobinBoundary<'_>, c_upper_override: Option<&[Vec<f64>]>, ) -> Result<EquilibratedFluxResult, String>` —  High-level electrostatic flux equilibration and complementary capacitance bound computation from boundary label lists. |
+| fn | `equilibrate_flux_patches` | `rt.rs:892` | `pub fn equilibrate_flux_patches( mesh: &SimplexMesh, order: usize, potentials: &[Vec<f64>], eps: CellPermittivity<'_>, dirichlet_facets: &[bool], sheet_facets: &[bool], robin: RobinBoundary<'_>, c_upper_override: Option<&[Vec<f64>]>, ) -> Result<EquilibratedFluxResult, String>` —  Braess-Schoberl / Ern-Vohralik `RT_{order - 1}` vertex-patch flux equilibration and complementary Thomson / |
+| fn | `EquilibratedFluxResult::eval_cell_flux` | `rt.rs:2016` | `pub fn eval_cell_flux( &self, mesh: &SimplexMesh, terminal: usize, cell: usize, sorted_lam: &[f64], ) -> Result<([f64` —  Evaluates physical `(D_tilde^(terminal)(x), div D_tilde^(terminal)(x))` on `cell` at barycentric coordinates |
+| fn | `EquilibratedFluxResult::interior_non_sheet_normal_jump_l2` | `rt.rs:2079` | `pub fn interior_non_sheet_normal_jump_l2( &self, mesh: &SimplexMesh, sheet_facets: &[bool], terminal: usize, ) -> Result<f64, String>` —  Computes `(sum_{F not in sheet} \|\|[[D_tilde^(terminal) . n_F]]\|\|^2_{L^2(F)})^{1/2}` over all interior non-sheet faces, |
 
 Trait implementations in this component: `PmlJacobian: Default`, `PmlProfile: Default`, `Pml: Default`

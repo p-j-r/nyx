@@ -84,7 +84,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/geom/tests/arc_fitting.rs` | 121, 102, 114 | 1-DOF circular arc fitting (`Polygons::arc_tol` & `GdsImportOptions::arc_tol`) and `Curve::Circle` preservation tests |
 | `crates/geom/tests/thick_sheet_stack.rs` | 121, 102 | conformal finite-thickness metal (`thickness`) and substrate trench (`etch_depth`) 3D stack tests |
 | `crates/geom/tests/{fuzz_gds,bvh}.rs` | 131, 132, 114, 116, 3 | Phase 1 `bolero` GDSII fuzz target and `proptest`/deep-skewed BVH brute-force equivalence suite |
-| `crates/geom/tests/*` | 3, 131, 132 | |
+| `crates/geom/tests/*` | 3, 131, 132, 133 | geometry kernel unit/integration suites and Tier A `RAYON_NUM_THREADS` 0-ULP determinism tests |
 | `crates/geom/golden/*` | 10, 2 | |
 | `crates/geom/examples/*` | none | benchmarks and studies |
 | `crates/geom/*.md` | 2, 3 | |
@@ -122,7 +122,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/meshing/sheet3d_amr.rs` | 120, 102, 114 | `OverlayOracle2` 2D-overlay and `full_3d` sheet-preserving adaptive mesh refinement helpers |
 | `crates/femcore/src/meshing/sheet3d_curve.rs` | 121, 82, 102, 132 | exact 2D `Curve::Circle` / `Curve::Ellipse` mid-edge node projection and periodic twin sync on extruded `sheet3d` meshes |
 | `crates/femcore/src/meshing/singularity.rs` | 120, 115, 82, 132 | Barsoum quarter-point P2 rim shifting (with curved-rim clamping, periodic twin sync) and Morrison–Lewis radical corner grading |
-| `crates/femcore/src/par.rs` | 11 | R03; the fixed-chunk reductions of the adaptation live here too (was `adapt/par.rs`) |
+| `crates/femcore/src/par.rs` | 11, 133 | R03; unified fixed-chunk deterministic reductions and `chunk_map` folds across femcore and physics crates |
 | `crates/femcore/src/adapt/electro.rs` | 120, 7, 53 | goal-oriented a posteriori electrostatic flux-jump estimator, 2D column projection, isotropic corner balls, and 3D metrics |
 | `crates/femcore/src/adapt/estimate*.rs` | 7, 17, 53 | |
 | `crates/femcore/src/adapt/work.rs` | 5, 4, 7 | the adaptation's private simplex working mesh and its conversion from and to the solver mesh (was `mesh/native.rs`, `mesh/interop.rs`) |
@@ -195,7 +195,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/examples/*` | none | benchmarks and studies; the numbers are in the history |
 | `crates/femcore/Cargo.toml` | 13, 8, 11 | feature `portable-kernels` |
 | `crates/nyx-storage/*` | 107, 62, 99, 131, 133 | pure-Rust HDF5 storage engine (`hdf5-pure` + `zlib-rs`), packed 5D Shuffle+LZF layout, streaming reader/writer with `max_solutions` & byte budgets, XDMF, sweep checkpoint (`SkippedSweepPoint`) |
-| `crates/nyx-store/*` | 14, 39, 130, 131 | JSON specs, settings (`scale_mode`, `zoom`), `.nys`/`.xdmf` archive rules, and the card function (39) |
+| `crates/nyx-store/*` | 14, 39, 130, 131, 133 | JSON specs, settings (`scale_mode`, `zoom`), `.nys`/`.xdmf` archive rules, `store_run` `1.1` (`BuildProvenance`, `RuntimeProvenance`, `RunDiagnosticsSummary`, optional `Convergence` GCI, `material_hashes`), and the card function (39) |
 | `crates/app/src/{tokens,theme,kit,menu,regions,activity,sweepui,cvd}.rs` | 88, 123, 124, 130, 133 | colour tokens as data, the looks built from them (`weak_text_color`), the widgets, the one table of actions (palette and native menu), the colour slots of regions (solid, hatched, grey), the busy chip, queue popover and stale band from the engine queue, the Sweep section of the Build page, the colour-vision simulation of the scripted shots |
 | `crates/app/src/console.rs` | 123, 122, 131 | the console of the command-line modes on Windows: the program is of the GUI subsystem, the command-line modes join the console of the terminal that started it unless the caller redirected the handles (`// SAFETY:` audited) |
 | `crates/app/tests/colour_literals.rs` | 88 | the ratchet: colour literals in the window code only go down |
@@ -207,8 +207,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-mcp/tests/{reset_session,multi_session}.rs` | 113, 94 | `reset_session` REPL global reset and isolated concurrent multi-session (`session`) MCP tests |
 | `crates/nyx-mcp/*` | 94, 97, 15, 113, 131 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels with bounded framing/sessions |
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
-| `.github/workflows/*` | 131, 20 | 3-tier VVUQ CI workflow (PR fast gate, full workspace + portable-kernels differential, Linux nightly Miri/Kani/bolero/cross-OS) |
-| `tools/vvuq_ci.*` | 131, 20 | local Linux/WSL and Windows PowerShell VVUQ 3-tier CI playbook runners |
+| `.github/workflows/*` | 131, 20, 133 | 3-tier VVUQ CI workflow (PR fast gate, full workspace + portable-kernels differential, Linux nightly Miri/Kani/bolero + Tier 3 Cross-OS determinism & R22 oracle matrix) |
+| `tools/vvuq_ci.*` | 131, 20, 133 | local Linux/WSL and Windows PowerShell VVUQ 3-tier CI playbook runners |
+| `tools/vvuq_telemetry.py` | 133, 20 | best-of-N quiet-runner wall-time, peak RSS (`ru_maxrss`/`K32GetProcessMemoryInfo`), and ASME V&V 20 telemetry ledger |
 | `tools/*` | 20 | baseline and helper scripts |
 | `.cargo/*` | 26, 27, 107 | shared target directory (no `HDF5_DIR` C dependency) |
 | `crates/nyx-physics/src/decode.rs` | 41, 25, 109, 113, 133 | typed parameters, inline tensor decoding (`PropValue`), name resolution, and active-study `audit_active_materials` shared by every physics |
@@ -291,8 +292,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/src/gds.rs` | 114, 120, 121, 93 | `Engine::import_gds` (`arc_tol`, `lateral_pad`) and `Engine::add_chip_stack` 3D stack builder behind `path_guard` |
 | `crates/nyx-engine/cards/cqed.md` | 113, 94 | embedded `cqed` guide card for `get_guide` and `nyx-mcp`'s `api` tool |
 | `crates/nyx-engine/src/scriptout.rs` | 94, 114, 116, 120 | export as script (`project_script`): the project as a command list replayed on a scratch engine to verify it, then rendered as Python; three forms (`commands`, `geometry_json`, `project_json`) |
-| `crates/nyx-engine/src/shared_queue.rs` | 95 | the queue in the workspace folder: items and markers, the lease, the queue worker (`--worker`), `run_shared` for the job that waits for an item, the `nyx queue` commands |
-| `crates/nyx-engine/tests/shared_queue.rs` | 95 | two front-ends on one queue, a submitter that exits, a solver killed, a queue worker killed, cancel and steering from another program |
+| `crates/nyx-engine/src/shared_queue.rs` | 95, 133 | the queue in the workspace folder: items and markers, configurable `LEASE_DEAD` (`NYX_QUEUE_LEASE_DEAD_SECS`), the queue worker (`--worker`), `run_shared`, and the `nyx queue` commands |
+| `crates/nyx-engine/tests/shared_queue.rs` | 95, 133 | two front-ends on one queue, configured lease timeout recovery, submitter/solver/worker kill, cancel and steering tests |
 | `crates/nyx-engine/tests/cqed_validated.rs` | 102, 103, 105, 91 | end-to-end superconducting CPW `Engine` workflow reaching `validated: checked` and running `capacitance_matrix` & `tls_participation` |
 | `crates/nyx-engine/tests/{convergence_sizes,convergence_extrapolate}.rs` | 112, 61, 80, 91 | `scale_sizes`, mode-signature `track`, bidirectional `factor`, and log-space SPD Richardson extrapolation tests |
 | `crates/nyx-engine/tests/figure3d.rs` | 111, 99 | `Engine::figure` 3D kinds, auto-resolved `periodic_shift` / `periodic_phase`, and latency tests |
@@ -304,7 +305,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-engine/tests/squadds_engine_smoke.rs` | 102, 104, 105, 106, 116, 118, 125, 126, 11 | PR CI `Engine::call` smoke suite for `CLT` QEP vs Taubin driven fit, `QubitCavity` M1/M2/M3 equivalence, `Hole`-post airbridges, `bug2`–`bug5`, and thread determinism |
 | `crates/nyx-engine/tests/fr25_33_e2e.rs` | 125, 126, 127 | end-to-end post-SQuADDS (`FR-25..FR-33`) integration tests through `Engine::call` (`ibc_mode: "perturbative"`, hybrid quasi-electrostatic TLS, and `ems::driven` `blr`/`ams_fgmres` + memory calibration) |
 | `crates/nyx-engine/tests/piezo_driven_network.rs` | 129, 106, 118 | Mason 1D BAW driven piezo FEM -> `NetworkAnalysis` and `piezo_resonator` mBVD round-trip tests |
-| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130, 131, 132, 133 | `Project`, commands, jobs, `material_warnings.rs` & `strict_material_range`, `qmc.rs` streaming LHS/Sobol QMC `sweep_run`, store wiring (`card_of` swept 3D), pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs` with R32 `CurvedEdgesIgnored`, `results_file.rs` v4), Phase 3/4 tests (`vvuq_phase3.rs`, `vvuq_phase4_*.rs`, `validation_*.rs`, `common/mod.rs`) and geometry descriptors; the registry from cargo features |
+| `crates/nyx-engine/*` | 37, 38, 25, 26, 62, 99, 102, 103, 104, 105, 107, 110, 111, 112, 113, 114, 115, 116, 118, 119, 120, 121, 127, 129, 130, 131, 132, 133 | `Project`, `build.rs` provenance metadata, commands, jobs, `material_warnings.rs`, `qmc.rs`, `provenance.rs` (material library BLAKE3 drift check), `vvuq_report.rs` (`vvuq_export`), store wiring, pure-Rust HDF5 results (`h5io.rs`, `xdmf.rs`, `results_file.rs` v4), Phase 3–5 tests (`vvuq_phase3.rs`, `vvuq_phase4_*.rs`, `vvuq_phase5_*.rs`, `validation_*.rs`, `common/mod.rs`) and geometry descriptors |
 | `crates/nyx-script/src/{lib,host,convert,stubs}.rs` | 93, 94, 57, 113 | scripts: the host (run and check a script through a worker process, BOM stripping), JSON to and from script values, the `nyx` stub generated from the catalog |
 | `crates/nyx-script/src/{trace.rs,prelude.nys}` | 90, 93, 113 | tracing of script functions (N3, including dict recursion): the Python prelude, formula functions, `nyx` wrapper, and static guard |
 | `crates/nyx-script/src/kernel.rs` | 94, 93, 113, 131 | the kernel: Monty session with per-turn suspension budget, proactive dump recycle, `reset`, `nyx.aio` futures, timeout/output clamping, network refusal, and worker recovery |

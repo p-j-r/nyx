@@ -47,6 +47,7 @@ Nothing outside the component (the standard library and external crates are not 
 | [engine: Materials](../engine/materials.md) | material, material::bcs, material::coupled, material::import, material::spec | EV_TO_J, FilmModel, ImportFormat, ImportOptions, Library, M3, M6, MaterialSpec +12 |
 | [engine: Meshing seam](../engine/meshing.md) | material, material::spec | Library, M6, isotropic_stiffness, rotate_m6_global |
 | [engine: Results files](../engine/resultsIO.md) | material::spec | Library |
+| [engine: Store link](../engine/storeLink.md) | material::spec | Library |
 | [Error estimators](./estimators.md) | material | M3 |
 | [Finite-element basics](./fem.md) | material | Anisotropy, M3, M6 |
 | [Meshing facade](./meshing.md) | material | M3, M6 |
