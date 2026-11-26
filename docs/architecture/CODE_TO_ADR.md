@@ -139,6 +139,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/femcore/src/fieldexpr.rs` | 90 | the typed expression tree over complex field values and its evaluator (N1; N2 added comparisons, `where` and more functions) |
 | `crates/femcore/src/formula.rs` | 90 | the text formula parser that produces that tree: grammar, vectors, names resolved by the caller (N2) |
 | `crates/femcore/src/validate.rs` | 9 | |
+| `crates/femcore/src/vvuq.rs` | 132, 19 | shared VVUQ Layer 2 zero-sized `SourceField`/`UniformSource` MMS trait and `assert_convergence_rate` order checker |
 | `crates/femcore/src/progress.rs` | 9, 11 | |
 | `crates/femcore/src/warm.rs` | 96 | warm starts of the eigensolvers: a context on the solving thread, the previous solve's modes as the start block, bytes for a worker process |
 | `crates/femcore/tests/warm.rs` | 96 | same modes in fewer iterations; no context or an empty one is the same bits; another size is a cold start |

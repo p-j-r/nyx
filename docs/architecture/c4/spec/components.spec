@@ -164,7 +164,7 @@ material    | Material specification | material/ | 29, 30, 34, 35, 101, 104 | TO
 optical     | Optical mode sets | optical.rs | 21, 9, 45 | Optical modes of a 2D cross-section as a field-evaluable set with the material data to evaluate them.
 section     | Frame and sections | section.rs | 1 | The one place that knows the wafer axes (x lateral, z normal, waves along +y).
 expr        | Expressions | expr.rs fieldexpr.rs formula.rs | 65, 2, 90 | A small safe expression evaluator for user input (a copy of geom's kept equal by a corpus test), and the typed tree over complex field values that the reductions of results evaluate, and the text formulas parsed into it (ADR 90).
-runtime     | Runtime services | par.rs progress.rs warm.rs validate.rs lib.rs | 9, 11, 96 | The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity.
+runtime     | Runtime services | par.rs progress.rs warm.rs validate.rs vvuq.rs lib.rs | 9, 11, 96, 132 | The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence helpers.
 view femcore | meshing | Meshing and adaptation | mesh meshio fixtures meshing meshing3d structpml meshcheck metric adaptops adaptdrive estimators
 view femcore | linalg | Linear algebra | lacore ladriver ladirect laksp laeigen laprecond laother
 view femcore | fem | Finite elements, materials and services | fem material optical section expr runtime mesh

@@ -50,4 +50,5 @@ pub mod section;
 pub mod testkit;
 pub mod linalg;
 pub mod validate;
+pub mod vvuq;
 
