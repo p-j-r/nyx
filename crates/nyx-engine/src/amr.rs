@@ -535,6 +535,7 @@ pub(crate) fn solve_ems_cavity_with_amr(
         }
         p.validate(spec, current_model.mesh())?;
         let ctx = crate::solve::build_solve_ctx(registry, &current_model, p, spec, library, progress, done);
+        let pre_audit = crate::material_warnings::preflight(p, spec, &ctx, project.strict_material_range)?;
         let problem = nyx_ems::decode(spec, &ctx)?;
         let sm_cur = current_model.solver_mesh();
         let n_cells = sm_cur.n_cells();
@@ -550,6 +551,7 @@ pub(crate) fn solve_ems_cavity_with_amr(
         nyx_physics::check_result_finite(&result)?;
         result.log.extend(progress.log().into_iter().skip(first_line));
         crate::solve::name_domains(&mut result, &current_model);
+        crate::material_warnings::finalize(&mut result, p, spec, &ctx, project.strict_material_range, pre_audit)?;
 
         let max_rel_delta = prev_result.as_ref().and_then(|prev| max_rel_result_delta(prev, &result));
         let eps_r: Vec<f64> =

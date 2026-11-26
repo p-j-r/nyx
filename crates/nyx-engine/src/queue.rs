@@ -41,6 +41,8 @@ pub struct QueueOpts {
     pub memory_wait_timeout_s: Option<f64>,
     /// keep transient cellwise `ElectroAmrData` indicators on `SolveResult` instead of stripping them after solve
     pub retain_amr_data: bool,
+    /// override `Project::strict_material_range` for this solve (`None` uses the project setting)
+    pub strict_material_range: Option<bool>,
 }
 
 impl Default for QueueOpts {
@@ -57,6 +59,7 @@ impl Default for QueueOpts {
             post_analyses: Vec::new(),
             memory_wait_timeout_s: None,
             retain_amr_data: false,
+            strict_material_range: None,
         }
     }
 }
@@ -190,6 +193,13 @@ pub(crate) fn retain_amr_data_of(args: &Value) -> Result<bool, Error> {
     match args.get("retain_amr_data") {
         None | Some(Value::Null) => Ok(false),
         Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`retain_amr_data` must be true or false")),
+    }
+}
+
+pub(crate) fn strict_material_range_of(args: &Value) -> Result<Option<bool>, Error> {
+    match args.get("strict_material_range") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| Error::invalid("`strict_material_range` must be true or false")),
     }
 }
 
@@ -458,6 +468,7 @@ impl Engine {
                     post_analyses: post_analyses_of(args)?,
                     memory_wait_timeout_s: memory_wait_timeout_of(args)?,
                     retain_amr_data: retain_amr_data_of(args)?,
+                    strict_material_range: strict_material_range_of(args)?,
                 };
                 let physics = args.get("physics").and_then(Value::as_str);
                 let job = match args.get("kind").and_then(Value::as_str).unwrap_or("solve") {

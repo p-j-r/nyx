@@ -26,10 +26,19 @@ impl Source {
         self.verified.is_some()
     }
 
+    /// True if the citation text marks the data as approximate or representative.
+    pub fn is_approximate(&self) -> bool {
+        self.cite.to_ascii_lowercase().contains("approximate")
+    }
+
+    /// True if the citation text marks the data as unverified against a primary source.
+    pub fn is_unverified(&self) -> bool {
+        self.cite.to_ascii_lowercase().contains("unverified")
+    }
+
     /// True if the citation text itself flags the data as unchecked.
     pub fn flags_uncertainty(&self) -> bool {
-        let c = self.cite.to_ascii_lowercase();
-        c.contains("unverified") || c.contains("approximate")
+        self.is_unverified() || self.is_approximate()
     }
 }
 

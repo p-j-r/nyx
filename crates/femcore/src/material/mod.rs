@@ -32,11 +32,11 @@ pub use coupled::{
     Dielectric, ElectroOptic, InterfaceLayer, Interfaces, Photoelastic, PiezoForm, Piezoelectric, Viscoelastic, EPSILON_0,
 };
 pub use elastic::{Class, Elastic, Unique};
-pub use optics::{Dispersion, Optical, OpticsError};
+pub use optics::{AxisModel, Dispersion, Optical, OpticsError};
 pub use reader::MaterialError;
 pub use source::Source;
 pub use spec::{merge_over, Library, MaterialSpec};
-pub use state_t::{CrystalSetting, MaterialKind, PointGroup, TempCurve, TempTensor};
+pub use state_t::{AxisClamp, CheckedTempEval, ComponentClamp, CrystalSetting, MaterialKind, PointGroup, TempClampInfo, TempCurve, TempTensor, TEMP_CURVE_KEYS};
 pub use tensor::TensorProp;
 
 pub type M3 = [[f64; 3]; 3];

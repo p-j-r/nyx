@@ -7,6 +7,7 @@
 
 use super::reader::{MaterialError, Section};
 use super::source::{read_sources, write_sources, Source};
+use super::state_t::{clamp_temp_range, AxisClamp, CheckedTempEval};
 use super::units::{self, Dim};
 use super::M3;
 use num_complex::Complex64;
@@ -89,6 +90,24 @@ pub struct AxisModel {
     /// Optional valid temperature range `[T_min, T_max]` [K] for thermo-optic evaluation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dn_dt_range: Option<[f64; 2]>,
+}
+
+impl AxisModel {
+    /// Citations attached to this optical axis model.
+    pub fn sources(&self) -> &[Source] {
+        &self.source
+    }
+
+    /// Checks `temperature_k` against `dn_dt_range` (when present) and returns the effective temperature with clamping metadata.
+    pub fn eval_dn_dt_temperature_checked(&self, temperature_k: f64) -> CheckedTempEval<f64> {
+        match self.dn_dt_range {
+            Some([lo, hi]) => {
+                let (value, clamp) = clamp_temp_range(temperature_k, lo, hi);
+                CheckedTempEval { value, clamp }
+            }
+            None => CheckedTempEval { value: temperature_k, clamp: None },
+        }
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -430,8 +449,13 @@ impl Optical {
         self.range.map(|(lo, hi)| (lo * self.unit_m, hi * self.unit_m))
     }
 
-    /// `(n, k, dn/dlambda, dk/dlambda)` for crystal axis 0, 1 or 2 (derivatives per metre).
-    pub fn nk(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<(f64, f64, f64, f64), OpticsError> {
+    /// `(n, k, dn/dlambda, dk/dlambda)` for crystal axis 0, 1 or 2 (derivatives per metre), returning any `dn_dT_range` clamping metadata.
+    pub fn nk_checked(
+        &self,
+        axis: usize,
+        lambda_m: f64,
+        temp_k: Option<f64>,
+    ) -> Result<CheckedTempEval<(f64, f64, f64, f64)>, OpticsError> {
         if !(lambda_m.is_finite() && lambda_m > 0.0) {
             return Err(OpticsError::BadWavelength);
         }
@@ -462,11 +486,11 @@ impl Optical {
                 return Err(out_of(kl[0], kl[kl.len() - 1]));
             }
         }
+        let mut clamp = None;
         if let Some(t_raw) = temp_k {
-            let t = match m.dn_dt_range {
-                Some([lo, hi]) => t_raw.clamp(lo, hi),
-                None => t_raw,
-            };
+            let tc = m.eval_dn_dt_temperature_checked(t_raw);
+            clamp = tc.clamp;
+            let t = tc.value;
             if let Some(theta) = m.dn_dt_einstein_theta {
                 let g_t = super::state_t::einstein_thermal_coordinate(t, theta);
                 let g_ref = super::state_t::einstein_thermal_coordinate(self.reference_temperature, theta);
@@ -478,13 +502,26 @@ impl Optical {
         if !(n.is_finite() && k.is_finite()) {
             return Err(OpticsError::NotFinite { lambda_m });
         }
-        Ok((n, k, dn / self.unit_m, dk / self.unit_m))
+        Ok(CheckedTempEval { value: (n, k, dn / self.unit_m, dk / self.unit_m), clamp })
+    }
+
+    /// `(n, k, dn/dlambda, dk/dlambda)` for crystal axis 0, 1 or 2 (derivatives per metre).
+    pub fn nk(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<(f64, f64, f64, f64), OpticsError> {
+        self.nk_checked(axis, lambda_m, temp_k).map(|r| r.value)
+    }
+
+    /// Complex index `n - j k` together with any `dn_dT_range` clamping metadata.
+    pub fn index_checked(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<CheckedTempEval<Complex64>, OpticsError> {
+        let checked = self.nk_checked(axis, lambda_m, temp_k)?;
+        Ok(CheckedTempEval {
+            value: Complex64::new(checked.value.0, -checked.value.1),
+            clamp: checked.clamp,
+        })
     }
 
     /// Complex index `n - j k`.
     pub fn index(&self, axis: usize, lambda_m: f64, temp_k: Option<f64>) -> Result<Complex64, OpticsError> {
-        let (n, k, ..) = self.nk(axis, lambda_m, temp_k)?;
-        Ok(Complex64::new(n, -k))
+        self.index_checked(axis, lambda_m, temp_k).map(|r| r.value)
     }
 
     /// `d(n - j k)/d lambda` per metre.
@@ -499,19 +536,37 @@ impl Optical {
         Ok(n - lambda_m * dn)
     }
 
-    /// Relative permittivity along the three crystal axes, `(n - j k)^2`.
-    pub fn permittivity_diag(&self, lambda_m: f64, temp_k: Option<f64>) -> Result<[Complex64; 3], OpticsError> {
+    /// Relative permittivity along the three crystal axes, `(n - j k)^2`, returning any per-axis clamping events.
+    pub fn permittivity_diag_checked(
+        &self,
+        lambda_m: f64,
+        temp_k: Option<f64>,
+    ) -> Result<([Complex64; 3], Vec<AxisClamp>), OpticsError> {
         let mut e = [Complex64::new(0.0, 0.0); 3];
+        let mut clamps = Vec::new();
         for (a, v) in e.iter_mut().enumerate() {
-            let n = self.index(a, lambda_m, temp_k)?;
-            *v = n * n;
+            let checked = self.index_checked(a, lambda_m, temp_k)?;
+            if let Some(info) = checked.clamp {
+                clamps.push((a, info));
+            }
+            *v = checked.value * checked.value;
         }
-        Ok(e)
+        Ok((e, clamps))
     }
 
-    /// Relative permittivity tensor in the global frame for a crystal rotated by the Bunge angles (degrees).
-    pub fn permittivity_global(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64; 3]; 3], OpticsError> {
-        let d = self.permittivity_diag(lambda_m, temp_k)?;
+    /// Relative permittivity along the three crystal axes, `(n - j k)^2`.
+    pub fn permittivity_diag(&self, lambda_m: f64, temp_k: Option<f64>) -> Result<[Complex64; 3], OpticsError> {
+        self.permittivity_diag_checked(lambda_m, temp_k).map(|(e, _)| e)
+    }
+
+    /// Relative permittivity tensor in the global frame for a rotated crystal, returning any per-axis `dn_dT_range` clamping events.
+    pub fn permittivity_global_checked(
+        &self,
+        lambda_m: f64,
+        temp_k: Option<f64>,
+        euler_deg: [f64; 3],
+    ) -> Result<([[Complex64; 3]; 3], Vec<AxisClamp>), OpticsError> {
+        let (d, clamps) = self.permittivity_diag_checked(lambda_m, temp_k)?;
         let r: M3 = super::rotation(euler_deg);
         let mut out = [[Complex64::new(0.0, 0.0); 3]; 3];
         for i in 0..3 {
@@ -521,7 +576,12 @@ impl Optical {
                 }
             }
         }
-        Ok(out)
+        Ok((out, clamps))
+    }
+
+    /// Relative permittivity tensor in the global frame for a crystal rotated by the Bunge angles (degrees).
+    pub fn permittivity_global(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64; 3]; 3], OpticsError> {
+        self.permittivity_global_checked(lambda_m, temp_k, euler_deg).map(|(m, _)| m)
     }
 
     // ----- reading and writing -----

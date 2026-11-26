@@ -201,6 +201,7 @@ impl Engine {
             post_analyses: crate::queue::post_analyses_of(args)?,
             memory_wait_timeout_s,
             retain_amr_data: false,
+            strict_material_range: None,
         };
         let warm = match args.get("reuse").and_then(Value::as_str) {
             None | Some("none") => false,

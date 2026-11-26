@@ -36,7 +36,10 @@ pub use cqed::{
     ModeEnergyRow, RomPort, TlsInterfaceSpec, TlsInterfaces, TlsMeta, CAPACITANCE_KEY, CIRCUIT_ROM_KEY,
     DRIVEN_PORT_KEY, ELECTRO_AMR_KEY, INDUCTANCE_KEY, TLS_META_KEY,
 };
-pub use decode::{tls_interface_from_material_name, tls_interfaces_from_spec};
+pub use decode::{
+    audit_active_materials, materials_by_label_checked, tls_interface_from_material_name, tls_interfaces_from_spec,
+    MaterialAudit, MaterialClampEvent,
+};
 pub use desc::*;
 pub use error::Error;
 /// Native mixed-cell discretisation (`Tri`+`Quad` in 2D, `Tet`+`Prism`+`Hex` in 3D) without splitting structured cells.

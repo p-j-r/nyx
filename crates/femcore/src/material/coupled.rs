@@ -17,7 +17,7 @@
 use super::elastic::sym_eigenvalues;
 use super::reader::{MaterialError, Section, Tree};
 use super::source::{read_sources, write_sources, Source};
-use super::state_t::{PointGroup, TempTensor};
+use super::state_t::{ComponentClamp, PointGroup, TempTensor};
 use super::tensor::{Requirement, TensorProp};
 use super::units::{self, Dim};
 use super::{rotate_tensor, M3, M6, Stiffness};
@@ -312,17 +312,19 @@ impl Dielectric {
         }
     }
 
-    /// Evaluates `(eps_re, eps_im_loss)` in the crystal frame where passive loss corresponds to
-    /// `eps_tilde = eps_re - i eps_im_loss` (`exp(+i omega t)` convention) and `eps_im_loss >= 0`.
-    pub fn complex_permittivity(
+    /// Evaluates `(eps_re, eps_im_loss)` together with any `eps_T` clamping events in the crystal frame.
+    pub fn complex_permittivity_checked(
         &self,
         freq_hz: Option<f64>,
         temperature_k: Option<f64>,
         e_field_v_per_m: Option<f64>,
         prefer_free: bool,
-    ) -> Option<(M3, M3)> {
+    ) -> Option<((M3, M3), Vec<ComponentClamp>)> {
+        let mut clamps = Vec::new();
         let base_re = if let (Some(t), Some(curve)) = (temperature_k, &self.eps_t) {
-            Some(curve.eval_tensor(t).matrix())
+            let (tp, c) = curve.eval_tensor_checked(t);
+            clamps = c;
+            Some(tp.matrix())
         } else {
             let picked = if prefer_free {
                 self.eps_free.as_ref().or(self.eps_clamped.as_ref()).or(self.eps_r.as_ref())
@@ -340,7 +342,19 @@ impl Dielectric {
             }
         }
         let loss = symmetrize3(&mul_mat3(&base_re, &tan_d));
-        Some((base_re, loss))
+        Some(((base_re, loss), clamps))
+    }
+
+    /// Evaluates `(eps_re, eps_im_loss)` in the crystal frame where passive loss corresponds to
+    /// `eps_tilde = eps_re - i eps_im_loss` (`exp(+i omega t)` convention) and `eps_im_loss >= 0`.
+    pub fn complex_permittivity(
+        &self,
+        freq_hz: Option<f64>,
+        temperature_k: Option<f64>,
+        e_field_v_per_m: Option<f64>,
+        prefer_free: bool,
+    ) -> Option<(M3, M3)> {
+        self.complex_permittivity_checked(freq_hz, temperature_k, e_field_v_per_m, prefer_free).map(|(v, _)| v)
     }
 }
 

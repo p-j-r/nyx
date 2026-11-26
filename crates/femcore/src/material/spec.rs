@@ -700,18 +700,19 @@ impl MaterialSpec {
         Some(el.c)
     }
 
-    /// Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where
-    /// `eps_tilde = eps_re - i eps_im_loss` (`exp(+i omega t)`) and `eps_im_loss >= 0`.
-    pub fn complex_microwave_permittivity(
+    /// Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` together with any `eps_T` clamping events.
+    pub fn complex_microwave_permittivity_checked(
         &self,
         freq_hz: Option<f64>,
         temp_k: Option<f64>,
         e_field_v_per_m: Option<f64>,
         prefer_free: bool,
         euler_deg: [f64; 3],
-    ) -> Option<(M3, M3)> {
+    ) -> Option<((M3, M3), Vec<super::state_t::ComponentClamp>)> {
+        let mut clamps = Vec::new();
         let (mut re_cryst, mut im_cryst) = if let Some(dl) = &self.dielectric {
-            if let Some((re, im)) = dl.complex_permittivity(freq_hz, temp_k, e_field_v_per_m, prefer_free) {
+            if let Some(((re, im), c)) = dl.complex_permittivity_checked(freq_hz, temp_k, e_field_v_per_m, prefer_free) {
+                clamps = c;
                 (re, im)
             } else {
                 let re = if prefer_free { self.permittivity_free()? } else { self.permittivity_clamped()? };
@@ -743,31 +744,69 @@ impl MaterialSpec {
             }
         }
         let r = rotation(euler_deg);
-        Some((rotate_tensor(&re_cryst, &r), rotate_tensor(&im_cryst, &r)))
+        Some(((rotate_tensor(&re_cryst, &r), rotate_tensor(&im_cryst, &r)), clamps))
+    }
+
+    /// Evaluates global-frame microwave complex permittivity `(eps_re, eps_im_loss)` where
+    /// `eps_tilde = eps_re - i eps_im_loss` (`exp(+i omega t)`) and `eps_im_loss >= 0`.
+    pub fn complex_microwave_permittivity(
+        &self,
+        freq_hz: Option<f64>,
+        temp_k: Option<f64>,
+        e_field_v_per_m: Option<f64>,
+        prefer_free: bool,
+        euler_deg: [f64; 3],
+    ) -> Option<(M3, M3)> {
+        self.complex_microwave_permittivity_checked(freq_hz, temp_k, e_field_v_per_m, prefer_free, euler_deg)
+            .map(|(v, _)| v)
+    }
+
+    /// Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k` with clamping metadata.
+    pub fn thermal_conductivity_at_checked(
+        &self,
+        temp_k: Option<f64>,
+    ) -> Option<(TensorProp, Vec<super::state_t::ComponentClamp>)> {
+        match (temp_k, &self.thermal.conductivity_t) {
+            (Some(t), Some(curve)) => Some(curve.eval_tensor_checked(t)),
+            _ => self.thermal.conductivity.clone().map(|v| (v, Vec::new())),
+        }
     }
 
     /// Evaluates thermal conductivity `k(T)` (W/(m*K)) at `temp_k`, defaulting to reference temperature.
     pub fn thermal_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp> {
-        match (temp_k, &self.thermal.conductivity_t) {
-            (Some(t), Some(curve)) => Some(curve.eval_tensor(t)),
-            _ => self.thermal.conductivity.clone(),
+        self.thermal_conductivity_at_checked(temp_k).map(|(v, _)| v)
+    }
+
+    /// Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k` with optional clamping metadata.
+    pub fn specific_heat_at_checked(&self, temp_k: Option<f64>) -> Option<(f64, Option<super::state_t::TempClampInfo>)> {
+        match (temp_k, &self.thermal.specific_heat_t) {
+            (Some(t), Some(curve)) => {
+                let checked = curve.eval_checked(t);
+                Some((checked.value, checked.clamp))
+            }
+            _ => self.thermal.specific_heat.map(|v| (v, None)),
         }
     }
 
     /// Evaluates specific heat `c_p(T)` (J/(kg*K)) at `temp_k`, defaulting to reference temperature.
     pub fn specific_heat_at(&self, temp_k: Option<f64>) -> Option<f64> {
-        match (temp_k, &self.thermal.specific_heat_t) {
-            (Some(t), Some(curve)) => Some(curve.eval(t)),
-            _ => self.thermal.specific_heat,
+        self.specific_heat_at_checked(temp_k).map(|(v, _)| v)
+    }
+
+    /// Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k` with clamping metadata.
+    pub fn thermal_expansion_at_checked(
+        &self,
+        temp_k: Option<f64>,
+    ) -> Option<(TensorProp, Vec<super::state_t::ComponentClamp>)> {
+        match (temp_k, &self.thermal.expansion_t) {
+            (Some(t), Some(curve)) => Some(curve.eval_tensor_checked(t)),
+            _ => self.thermal.expansion.clone().map(|v| (v, Vec::new())),
         }
     }
 
     /// Evaluates thermal expansion `alpha(T)` (1/K) at `temp_k`, defaulting to reference temperature.
     pub fn thermal_expansion_at(&self, temp_k: Option<f64>) -> Option<TensorProp> {
-        match (temp_k, &self.thermal.expansion_t) {
-            (Some(t), Some(curve)) => Some(curve.eval_tensor(t)),
-            _ => self.thermal.expansion.clone(),
-        }
+        self.thermal_expansion_at_checked(temp_k).map(|(v, _)| v)
     }
 
     /// Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted.
@@ -888,14 +927,25 @@ impl MaterialSpec {
         m
     }
 
-    /// Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles.
-    pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64; 3]; 3], MaterialError> {
+    /// Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a rotated crystal, returning any per-axis `dn_dT_range` clamping events.
+    pub fn optical_permittivity_checked(
+        &self,
+        lambda_m: f64,
+        temp_k: Option<f64>,
+        euler_deg: [f64; 3],
+    ) -> Result<([[Complex64; 3]; 3], Vec<super::state_t::AxisClamp>), MaterialError> {
         let o = self.optical.as_ref().ok_or_else(|| MaterialError {
             material: self.name.clone(),
             path: "optical".into(),
             message: "this material has no [optical] section, so it has no refractive index; add one (for example model = \"constant\", n = 1.45)".into(),
         })?;
-        o.permittivity_global(lambda_m, temp_k, euler_deg).map_err(|e: OpticsError| MaterialError { material: self.name.clone(), path: "optical".into(), message: e.to_string() })
+        o.permittivity_global_checked(lambda_m, temp_k, euler_deg)
+            .map_err(|e: OpticsError| MaterialError { material: self.name.clone(), path: "optical".into(), message: e.to_string() })
+    }
+
+    /// Relative permittivity tensor at a wavelength (m) and temperature (K) in the frame of a crystal rotated by Bunge angles.
+    pub fn optical_permittivity(&self, lambda_m: f64, temp_k: Option<f64>, euler_deg: [f64; 3]) -> Result<[[Complex64; 3]; 3], MaterialError> {
+        self.optical_permittivity_checked(lambda_m, temp_k, euler_deg).map(|(eps, _)| eps)
     }
 }
 
@@ -1245,6 +1295,7 @@ pub struct Keys {
     pub viscoelastic: &'static [&'static str],
     pub interfaces: &'static [&'static str],
     pub interface_layer: &'static [&'static str],
+    pub temp_curve: &'static [&'static str],
     pub optical: &'static [&'static str],
     pub model: &'static [&'static str],
 }
@@ -1264,6 +1315,7 @@ pub fn keys() -> Keys {
         viscoelastic: super::coupled::VISCOELASTIC_KEYS,
         interfaces: super::coupled::INTERFACES_KEYS,
         interface_layer: super::coupled::IFACE_KEYS,
+        temp_curve: super::state_t::TEMP_CURVE_KEYS,
         optical: optics::OPTICAL_KEYS,
         model: optics::MODEL_KEYS,
     }

@@ -8,9 +8,12 @@ use crate::cqed::{TlsInterfaceSpec, TlsInterfaces};
 use crate::desc::{Applies, BcDesc, ParamDesc, ParamKind, PropDesc, PropKind};
 use crate::error::Error;
 use crate::physics::Ctx;
+use crate::result::{DiagnosticSeverity, DiagnosticWarning};
 use crate::spec::{BcSpec, MaterialAssign, ProblemSpec, PropValue};
+use femcore::material::{MaterialSpec, Source, TempClampInfo};
 use femcore::props::Materials;
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 /// Typed access to the parameters of a study, a condition or the physics: returns the given value or the descriptor default,
 /// rejecting unknown names or mismatched JSON types cleanly with [`Error::Invalid`].
@@ -152,12 +155,86 @@ impl<'a> Params<'a> {
     }
 }
 
-/// The material properties of every region as numbers per domain label: a region name or pattern (`sapphire*`) can match several
-/// domains. A property outside `props` is refused for inline properties (`validate_spec` already does that; this keeps a kernel safe when
-/// called directly). A named material comes from the library of `ctx` (`MaterialAssign::Named`, or `Oriented` with Bunge angles): the
-/// scalar properties the physics lists are taken under their descriptor names, the crystal data (stiffness, tensors) as an `Anisotropy`
-/// where the material is anisotropic or oriented, and `eps_r` from the optical model at `ctx.wavelength` where the material has one.
-pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error> {
+/// Out-of-range temperature clamping recorded while evaluating an active material table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterialClampEvent {
+    pub region: String,
+    pub material: String,
+    pub section: String,
+    pub clamp: TempClampInfo,
+}
+
+impl MaterialClampEvent {
+    /// Converts this clamping event into a [`DiagnosticWarning`] with code `"temperature_clamped"`.
+    pub fn to_warning(&self) -> DiagnosticWarning {
+        DiagnosticWarning {
+            code: "temperature_clamped".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "region '{}' (material '{}' [{}]): temperature {:.4} K is outside calibrated range [{:.4}, {:.4}] K; clamped to {:.4} K",
+                self.region,
+                self.material,
+                self.section,
+                self.clamp.requested_k,
+                self.clamp.bounds_k[0],
+                self.clamp.bounds_k[1],
+                self.clamp.clamped_k,
+            ),
+        }
+    }
+
+    fn describe_out_of_range(&self) -> String {
+        format!(
+            "region '{}' (material '{}' [{}]): T = {:.4} K outside [{:.4}, {:.4}] K",
+            self.region,
+            self.material,
+            self.section,
+            self.clamp.requested_k,
+            self.clamp.bounds_k[0],
+            self.clamp.bounds_k[1],
+        )
+    }
+
+    /// Formats a refusal error for `strict_material_range = true`.
+    pub fn to_strict_error(&self) -> Error {
+        Error::invalid(format!("strict_material_range: {}", self.describe_out_of_range()))
+    }
+}
+
+/// Active-study material provenance uncertainty and temperature-clamping findings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MaterialAudit {
+    pub warnings: Vec<DiagnosticWarning>,
+    pub clamps: Vec<MaterialClampEvent>,
+}
+
+impl MaterialAudit {
+    /// Returns all warnings (both provenance uncertainty and `temperature_clamped`).
+    pub fn all_warnings(&self) -> Vec<DiagnosticWarning> {
+        let mut out = self.warnings.clone();
+        out.extend(self.clamps.iter().map(MaterialClampEvent::to_warning));
+        out
+    }
+
+    /// Returns the first strict refusal error if any active temperature evaluation was clamped.
+    pub fn strict_error(&self) -> Option<Error> {
+        if self.clamps.is_empty() {
+            return None;
+        }
+        let details: Vec<String> = self.clamps.iter().map(MaterialClampEvent::describe_out_of_range).collect();
+        Some(Error::invalid(format!(
+            "strict_material_range refused out-of-range temperature evaluation: {}",
+            details.join("; ")
+        )))
+    }
+}
+
+/// Resolves `spec.materials` per domain label and returns both [`Materials`] and the active-study [`MaterialAudit`].
+pub fn materials_by_label_checked(
+    spec: &ProblemSpec,
+    ctx: &Ctx,
+    props: &[PropDesc],
+) -> Result<(Materials, MaterialAudit), Error> {
     let mut m = Materials::default();
     let is_quasi_static_electro =
         (spec.physics == "dfs" && spec.study.kind == "electrostatic") || spec.physics == "sms";
@@ -171,27 +248,8 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
             None
         }
     };
-    let spec_freq = spec
-        .study
-        .params
-        .get("freq")
-        .or_else(|| spec.study.params.get("frequency"))
-        .and_then(Value::as_f64)
-        .or_else(|| spec.study.params.get("f_search").and_then(Value::as_f64))
-        .filter(|&f| f > 0.0 && f.is_finite());
-    let freq_hz = ctx
-        .frequency
-        .or_else(|| {
-            (!is_quasi_static_electro)
-                .then_some(ctx.wavelength)
-                .flatten()
-                .filter(|&l| l > 0.0)
-                .map(|l| 299_792_458.0 / l)
-        })
-        .or(spec_freq);
-    let temp_k = ctx
-        .temperature
-        .or_else(|| spec.params.get("temperature").and_then(Value::as_f64).filter(|&t| t > 0.0 && t.is_finite()));
+    let freq_hz = effective_freq_hz(spec, ctx, is_quasi_static_electro);
+    let temp_k = effective_temp_k(spec, ctx);
     for (region, assign) in &spec.materials {
         let labels = ctx.resolver.domains(region)?;
         match assign {
@@ -462,7 +520,359 @@ pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> 
             )?,
         }
     }
-    Ok(m)
+    let temps: Vec<f64> = temp_k.into_iter().collect();
+    let audit = audit_active_materials(spec, ctx, props, &temps)?;
+    Ok((m, audit))
+}
+
+/// The material properties of every region as numbers per domain label: a region name or pattern (`sapphire*`) can match several
+/// domains. A property outside `props` is refused for inline properties (`validate_spec` already does that; this keeps a kernel safe when
+/// called directly). A named material comes from the library of `ctx` (`MaterialAssign::Named`, or `Oriented` with Bunge angles): the
+/// scalar properties the physics lists are taken under their descriptor names, the crystal data (stiffness, tensors) as an `Anisotropy`
+/// where the material is anisotropic or oriented, and `eps_r` from the optical model at `ctx.wavelength` where the material has one.
+pub fn materials_by_label(spec: &ProblemSpec, ctx: &Ctx, props: &[PropDesc]) -> Result<Materials, Error> {
+    materials_by_label_checked(spec, ctx, props).map(|(m, _)| m)
+}
+
+fn effective_freq_hz(spec: &ProblemSpec, ctx: &Ctx, is_quasi_static_electro: bool) -> Option<f64> {
+    let spec_freq = spec
+        .study
+        .params
+        .get("freq")
+        .or_else(|| spec.study.params.get("frequency"))
+        .and_then(Value::as_f64)
+        .or_else(|| spec.study.params.get("f_search").and_then(Value::as_f64))
+        .filter(|&f| f > 0.0 && f.is_finite());
+    ctx.frequency
+        .or_else(|| {
+            (!is_quasi_static_electro)
+                .then_some(ctx.wavelength)
+                .flatten()
+                .filter(|&l| l > 0.0)
+                .map(|l| 299_792_458.0 / l)
+        })
+        .or(spec_freq)
+}
+
+fn effective_temp_k(spec: &ProblemSpec, ctx: &Ctx) -> Option<f64> {
+    ctx.temperature
+        .or_else(|| spec.params.get("temperature").and_then(Value::as_f64).filter(|&t| t > 0.0 && t.is_finite()))
+}
+
+fn uses_prop_in_study(spec: &ProblemSpec, props: &[PropDesc], name: &str) -> bool {
+    let study = spec.study.kind.as_str();
+    if spec.physics == "sms" && matches!(name, "rho" | "eta") {
+        return props.iter().any(|d| d.name == name) && study != "static";
+    }
+    props
+        .iter()
+        .find(|d| d.name == name)
+        .is_some_and(|d| d.needed_by.is_empty() || d.needed_by.iter().any(|s| s == study))
+}
+
+#[derive(Default)]
+struct AuditCollector {
+    seen_warnings: BTreeSet<(String, String, String, &'static str)>,
+    seen_clamps: BTreeSet<(String, String, String, u64, u64, u64)>,
+    audit: MaterialAudit,
+}
+
+impl AuditCollector {
+    fn record_sources(&mut self, region: &str, material: &str, section: &str, primary: &[Source], fallback: &[Source]) {
+        let sources = if primary.is_empty() { fallback } else { primary };
+        for src in sources {
+            if !src.flags_uncertainty() {
+                continue;
+            }
+            if src.is_unverified() || !src.is_approximate() {
+                self.push_warning(region, material, section, "material_unverified", &src.cite);
+            }
+            if src.is_approximate() {
+                self.push_warning(region, material, section, "material_approximate", &src.cite);
+            }
+        }
+    }
+
+    fn push_warning(&mut self, region: &str, material: &str, section: &str, code: &'static str, cite: &str) {
+        let key = (region.to_string(), material.to_string(), section.to_string(), code);
+        if self.seen_warnings.insert(key) {
+            self.audit.warnings.push(DiagnosticWarning {
+                code: code.to_string(),
+                severity: DiagnosticSeverity::Warning,
+                message: format!("region '{region}' (material '{material}' [{section}]): {cite}"),
+            });
+        }
+    }
+
+    fn record_clamp(&mut self, region: &str, material: &str, section: impl Into<String>, clamp: TempClampInfo) {
+        let section = section.into();
+        let key = (
+            region.to_string(),
+            material.to_string(),
+            section.clone(),
+            clamp.requested_k.to_bits(),
+            clamp.bounds_k[0].to_bits(),
+            clamp.bounds_k[1].to_bits(),
+        );
+        if self.seen_clamps.insert(key) {
+            self.audit.clamps.push(MaterialClampEvent {
+                region: region.to_string(),
+                material: material.to_string(),
+                section,
+                clamp,
+            });
+        }
+    }
+}
+
+fn clamp_section(base: &str, axis_or_component: Option<&str>) -> String {
+    match axis_or_component {
+        Some(tag) => format!("{base} ({tag})"),
+        None => base.to_string(),
+    }
+}
+
+/// Audits active-study material provenance (`Source::flags_uncertainty()`) and out-of-range temperature clamping across `spec.materials` and boundary conditions.
+pub fn audit_active_materials(
+    spec: &ProblemSpec,
+    ctx: &Ctx,
+    props: &[PropDesc],
+    temps_k: &[f64],
+) -> Result<MaterialAudit, Error> {
+    let mut collector = AuditCollector::default();
+    let mut check_temps: Vec<f64> = Vec::new();
+    for &t in effective_temp_k(spec, ctx).iter().chain(temps_k.iter()) {
+        if !t.is_nan() && !check_temps.iter().any(|x| x.to_bits() == t.to_bits()) {
+            check_temps.push(t);
+        }
+    }
+
+    let is_quasi_static_electro =
+        (spec.physics == "dfs" && spec.study.kind == "electrostatic") || spec.physics == "sms";
+    let freq_hz = effective_freq_hz(spec, ctx, is_quasi_static_electro);
+    let thermal_load_active = spec.physics != "sms"
+        || matches!(spec.params.get("thermal").and_then(Value::as_str), Some("uniform" | "imported"));
+    let has_elec_bc = spec.bcs.iter().any(|bc| {
+        matches!(
+            bc.kind.as_str(),
+            "ground" | "potential" | "surface_charge" | "floating_potential" | "terminal" | "conductor"
+        )
+    });
+    let piezo_active = spec.physics != "sms"
+        || spec.study.kind == "driven"
+        || spec.params.get("piezoelectric").and_then(Value::as_str) == Some("on")
+        || (spec.params.get("piezoelectric").and_then(Value::as_str) != Some("off") && has_elec_bc);
+    let wants_k = uses_prop_in_study(spec, props, "k");
+    let wants_cp = uses_prop_in_study(spec, props, "Cp");
+    let wants_rho = uses_prop_in_study(spec, props, "rho");
+    let wants_alpha = uses_prop_in_study(spec, props, "alpha") && thermal_load_active;
+    let wants_e = uses_prop_in_study(spec, props, "E");
+    let wants_eta = uses_prop_in_study(spec, props, "eta");
+    let wants_eps_r = uses_prop_in_study(spec, props, "eps_r") && piezo_active;
+    let wants_mu_r = uses_prop_in_study(spec, props, "mu_r");
+    let wants_sigma = uses_prop_in_study(spec, props, "sigma")
+        && (spec.physics == "dfs" || !wants_eps_r)
+        && (!wants_eps_r || freq_hz.is_some_and(|f| f > 0.0));
+    let tls_active = (spec.physics == "dfs" && spec.study.kind == "electrostatic")
+        || (spec.physics == "ems" && matches!(spec.study.kind.as_str(), "cavity" | "driven"));
+
+    for (region, assign) in &spec.materials {
+        let (mat_name, euler) = match assign {
+            MaterialAssign::Named(n) => (n.as_str(), [0.0; 3]),
+            MaterialAssign::Oriented { material, euler_deg } => (material.as_str(), *euler_deg),
+            MaterialAssign::Props(_) | MaterialAssign::PropsTensor(_) => continue,
+        };
+        let Some(lib) = ctx.library.as_ref() else { continue };
+        let Ok(mat) = lib.require(mat_name) else { continue };
+        let mat: &MaterialSpec = mat;
+
+        if wants_rho {
+            collector.record_sources(region, mat_name, "density", &mat.source, &[]);
+        }
+        if wants_e {
+            if let Some(el) = &mat.elastic {
+                collector.record_sources(region, mat_name, "elastic", &el.source, &mat.source);
+            } else {
+                collector.record_sources(region, mat_name, "elastic", &[], &mat.source);
+            }
+        }
+        if wants_eta {
+            if let Some(ve) = &mat.viscoelastic {
+                collector.record_sources(region, mat_name, "viscoelastic", &ve.source, &mat.source);
+            }
+        }
+        if spec.physics == "sms" && piezo_active && uses_prop_in_study(spec, props, "piezo_e") {
+            if let Some(pz) = &mat.piezoelectric {
+                collector.record_sources(region, mat_name, "piezoelectric", &pz.source, &mat.source);
+            }
+        }
+        if wants_k {
+            collector.record_sources(region, mat_name, "thermal", &mat.thermal.source, &mat.source);
+            if let Some(curve) = &mat.thermal.conductivity_t {
+                let curve_srcs: Vec<Source> = curve.sources().into_iter().cloned().collect();
+                collector.record_sources(region, mat_name, "thermal.conductivity_T", &curve_srcs, &[]);
+                for &t in &check_temps {
+                    if let Some((_, clamps)) = mat.thermal_conductivity_at_checked(Some(t)) {
+                        for (comp, info) in clamps {
+                            collector.record_clamp(
+                                region,
+                                mat_name,
+                                clamp_section("thermal.conductivity_T", comp),
+                                info,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        if wants_cp {
+            collector.record_sources(region, mat_name, "thermal", &mat.thermal.source, &mat.source);
+            if let Some(curve) = &mat.thermal.specific_heat_t {
+                collector.record_sources(region, mat_name, "thermal.specific_heat_T", curve.sources(), &[]);
+                for &t in &check_temps {
+                    if let Some((_, Some(info))) = mat.specific_heat_at_checked(Some(t)) {
+                        collector.record_clamp(region, mat_name, "thermal.specific_heat_T", info);
+                    }
+                }
+            }
+        }
+        if wants_alpha {
+            collector.record_sources(region, mat_name, "thermal", &mat.thermal.source, &mat.source);
+            if let Some(curve) = &mat.thermal.expansion_t {
+                let curve_srcs: Vec<Source> = curve.sources().into_iter().cloned().collect();
+                collector.record_sources(region, mat_name, "thermal.expansion_T", &curve_srcs, &[]);
+                for &t in &check_temps {
+                    if let Some((_, clamps)) = mat.thermal_expansion_at_checked(Some(t)) {
+                        for (comp, info) in clamps {
+                            collector.record_clamp(region, mat_name, clamp_section("thermal.expansion_T", comp), info);
+                        }
+                    }
+                }
+            }
+        }
+
+        let optical_active = wants_eps_r
+            && !is_quasi_static_electro
+            && mat.optical.is_some()
+            && ctx.wavelength.is_some_and(|l| l <= 3e-4);
+        if optical_active {
+            if let Some(opt) = &mat.optical {
+                let mut opt_sources = opt.source.clone();
+                for ax in opt.axes.models() {
+                    opt_sources.extend(ax.sources().iter().cloned());
+                }
+                collector.record_sources(region, mat_name, "optical", &opt_sources, &mat.source);
+                if let Some(lam) = ctx.wavelength {
+                    for &t in &check_temps {
+                        if let Ok((_, clamps)) = mat.optical_permittivity_checked(lam, Some(t), euler) {
+                            for (axis, info) in clamps {
+                                let label = match &opt.axes {
+                                    femcore::material::optics::Axes::Isotropic(_) => {
+                                        if axis != 0 {
+                                            continue;
+                                        }
+                                        "optical".to_string()
+                                    }
+                                    femcore::material::optics::Axes::Uniaxial { .. } => {
+                                        if axis == 1 {
+                                            continue;
+                                        }
+                                        if axis == 2 {
+                                            "optical.extraordinary".to_string()
+                                        } else {
+                                            "optical.ordinary".to_string()
+                                        }
+                                    }
+                                    femcore::material::optics::Axes::Biaxial(_) => {
+                                        const AX: [&str; 3] = ["optical.x", "optical.y", "optical.z"];
+                                        AX[axis.min(2)].to_string()
+                                    }
+                                };
+                                collector.record_clamp(region, mat_name, label, info);
+                            }
+                        }
+                    }
+                }
+            }
+            if mat.electrical.permeability.is_some() {
+                collector.record_sources(region, mat_name, "electrical", &mat.electrical.source, &mat.source);
+            }
+        } else if wants_eps_r {
+            if let Some(dl) = &mat.dielectric {
+                collector.record_sources(region, mat_name, "dielectric", &dl.source, &mat.source);
+                if let Some(curve) = &dl.eps_t {
+                    let curve_srcs: Vec<Source> = curve.sources().into_iter().cloned().collect();
+                    collector.record_sources(region, mat_name, "dielectric.eps_T", &curve_srcs, &[]);
+                    for &t in &check_temps {
+                        if let Some((_, clamps)) =
+                            mat.complex_microwave_permittivity_checked(freq_hz, Some(t), None, false, euler)
+                        {
+                            for (comp, info) in clamps {
+                                collector.record_clamp(region, mat_name, clamp_section("dielectric.eps_T", comp), info);
+                            }
+                        }
+                    }
+                }
+            } else if mat.electrical.permittivity.is_some() || mat.electrical.loss_tangent.is_some() {
+                collector.record_sources(region, mat_name, "electrical", &mat.electrical.source, &mat.source);
+            } else {
+                collector.record_sources(region, mat_name, "dielectric", &[], &mat.source);
+            }
+            if (!is_quasi_static_electro && mat.electrical.permeability.is_some())
+                || (wants_sigma && mat.electrical.conductivity.is_some())
+            {
+                collector.record_sources(region, mat_name, "electrical", &mat.electrical.source, &mat.source);
+            }
+        } else if (wants_mu_r || wants_sigma)
+            && (mat.electrical.permeability.is_some()
+                || mat.electrical.conductivity.is_some()
+                || mat.electrical.permittivity.is_some())
+        {
+            collector.record_sources(region, mat_name, "electrical", &mat.electrical.source, &mat.source);
+        }
+
+        if tls_active {
+            for (iface_name, layer) in [
+                ("interfaces.ma", &mat.interfaces.ma),
+                ("interfaces.ms", &mat.interfaces.ms),
+                ("interfaces.sa", &mat.interfaces.sa),
+            ] {
+                if let Some(l) = layer {
+                    collector.record_sources(region, mat_name, iface_name, &l.source, &mat.source);
+                }
+            }
+        }
+    }
+
+    if let Some(lib) = ctx.library.as_ref() {
+        for bc in &spec.bcs {
+            let Some(mat_name) =
+                bc.params.get("material").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let Ok(mat) = lib.require(mat_name) else { continue };
+            let scope = format!("bc:{}", bc.kind);
+            if matches!(bc.kind.as_str(), "london_sheet" | "surface_impedance") {
+                if let Some(sc) = &mat.superconducting {
+                    collector.record_sources(&scope, mat_name, "superconducting", &sc.source, &mat.source);
+                }
+            }
+            if tls_active {
+                for (iface_name, layer) in [
+                    ("interfaces.ma", &mat.interfaces.ma),
+                    ("interfaces.ms", &mat.interfaces.ms),
+                    ("interfaces.sa", &mat.interfaces.sa),
+                ] {
+                    if let Some(l) = layer {
+                        collector.record_sources(&scope, mat_name, iface_name, &l.source, &mat.source);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(collector.audit)
 }
 
 /// Resolves each material assignment region key in `spec.materials` to its domain labels.

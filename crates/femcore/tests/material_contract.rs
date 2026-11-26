@@ -116,4 +116,5 @@ fn the_schema_lists_exactly_the_keys_the_loader_knows() {
     optical.extend(set(k.model));
     assert_eq!(keys(&s2["properties"]["optical"]), optical, "v2 [optical]");
     assert_eq!(keys(&s2["$defs"]["model"]), set(k.model), "v2 model table");
+    assert_eq!(keys(&s2["$defs"]["temp_curve"]), set(k.temp_curve), "v2 temp_curve table");
 }

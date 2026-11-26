@@ -196,6 +196,9 @@ pub struct Project {
     /// materials the project carries, by name, as TOML text (ADR 29); a problem names these or the library's. They may `extends` a library material
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub materials: std::collections::BTreeMap<String, String>,
+    /// when true, out-of-range material temperature evaluations refuse the solve instead of clamping and emitting a warning
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strict_material_range: bool,
 }
 
 impl Project {
@@ -209,6 +212,7 @@ impl Project {
             physics: vec![],
             active: None,
             materials: Default::default(),
+            strict_material_range: false,
         }
     }
 

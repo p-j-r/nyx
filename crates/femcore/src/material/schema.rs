@@ -49,7 +49,7 @@ fn temp_scalar_or_curve(desc: &str) -> Value {
 fn temp_tensor_or_curve(desc: &str) -> Value {
     json!({
         "description": format!("{desc}. A constant tensor, a scalar temperature-curve table, or {{ perp = <temp_curve>, par = <temp_curve> }}"),
-        "oneOf": [
+        "anyOf": [
             tensor(desc),
             { "$ref": "#/$defs/temp_curve" },
             {
@@ -122,6 +122,7 @@ fn model_v2() -> Value {
     props.insert("dn_dT_range_unit".into(), json!({ "type": "string" }));
     json!({
         "type": "object",
+        "additionalProperties": false,
         "required": ["model"],
         "properties": props
     })
@@ -320,7 +321,7 @@ fn defs_v2_schema() -> Value {
     );
     defs.insert(
         "temp_curve".into(),
-        json!({ "type": "object", "required": ["form"], "properties": tc_p }),
+        json!({ "type": "object", "additionalProperties": false, "required": ["form"], "properties": tc_p }),
     );
     Value::Object(defs)
 }

@@ -389,14 +389,17 @@ impl Engine {
         let imports: BTreeMap<String, String> =
             from.into_iter().map(|o| (o.clone(), self.key_of(&o, mesh, memo, stack))).collect();
         stack.pop();
-        let v = json!({
-            "physics": id,
-            "problem": spec,
-            "materials": self.project.materials,
-            "library": self.base_library_hash,
-            "mesh": mesh,
-            "imports": imports
-        });
+        let mut obj = serde_json::Map::new();
+        obj.insert("physics".into(), json!(id));
+        obj.insert("problem".into(), json!(spec));
+        obj.insert("materials".into(), json!(self.project.materials));
+        obj.insert("library".into(), json!(self.base_library_hash));
+        obj.insert("mesh".into(), json!(mesh));
+        if self.project.strict_material_range {
+            obj.insert("strict_material_range".into(), json!(true));
+        }
+        obj.insert("imports".into(), json!(imports));
+        let v = serde_json::Value::Object(obj);
         let key = hash_of(&nyx_physics::canonical_json(&v).to_string());
         memo.insert(id.to_string(), key.clone());
         key
@@ -516,7 +519,11 @@ impl Engine {
         let wait_timeout =
             crate::estimate::resolve_memory_wait_timeout(opts.memory_wait_timeout_s, self.memory_wait_timeout)?;
         let (key, keys) = (s.mesh_key(), s.problem_keys());
-        let (registry, mesher, project, sizing) = (s.registry.clone(), s.mesher.clone(), s.project.clone(), s.sizing());
+        let (registry, mesher, mut project, sizing) =
+            (s.registry.clone(), s.mesher.clone(), s.project.clone(), s.sizing());
+        if let Some(strict) = opts.strict_material_range {
+            project.strict_material_range = strict;
+        }
         let base_library = s.base_library().clone();
         let library = s.library()?;
         // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds;

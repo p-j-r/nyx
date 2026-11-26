@@ -309,6 +309,63 @@ pub fn einstein_thermal_coordinate(temperature_k: f64, theta_e_k: f64) -> f64 {
     theta_e_k / ratio.exp_m1()
 }
 
+/// Allowed TOML keys inside a temperature-curve table (`$defs.temp_curve` in `material_schema`).
+pub const TEMP_CURVE_KEYS: &[&str] = &[
+    "form",
+    "source",
+    "T",
+    "T_unit",
+    "T_range",
+    "values",
+    "values_unit",
+    "coeffs",
+    "ref_value",
+    "t_ref",
+    "theta_e",
+    "alpha",
+    "unit",
+];
+
+/// Metadata recorded when a temperature-dependent constitutive curve or axis model is clamped to its valid domain `[T_min, T_max]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TempClampInfo {
+    /// Requested evaluation temperature in Kelvin.
+    pub requested_k: f64,
+    /// Clamped evaluation temperature actually used in Kelvin.
+    pub clamped_k: f64,
+    /// Valid temperature interval `[T_min, T_max]` in Kelvin.
+    pub bounds_k: [f64; 2],
+}
+
+/// Result of evaluating a temperature-dependent quantity together with optional out-of-range clamping metadata.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CheckedTempEval<T> {
+    pub value: T,
+    pub clamp: Option<TempClampInfo>,
+}
+
+/// Optional tensor-component label (`"perp"` / `"par"` or `None` for scalar) paired with clamping metadata.
+pub type ComponentClamp = (Option<&'static str>, TempClampInfo);
+
+/// Optical crystal axis index (`0`, `1`, `2`) paired with thermo-optic clamping metadata.
+pub type AxisClamp = (usize, TempClampInfo);
+
+/// Clamps `temperature_k` to `[lo, hi]` with sub-ULP rounding slack on unit conversions, returning clamping metadata when outside bounds.
+pub(crate) fn clamp_temp_range(temperature_k: f64, lo: f64, hi: f64) -> (f64, Option<TempClampInfo>) {
+    if temperature_k.is_nan() {
+        return (temperature_k, None);
+    }
+    let tol_lo = 1e-12 * lo.abs().max(1.0);
+    let tol_hi = 1e-12 * hi.abs().max(1.0);
+    let clamped_k = temperature_k.clamp(lo, hi);
+    let clamp = if temperature_k < lo - tol_lo || temperature_k > hi + tol_hi {
+        Some(TempClampInfo { requested_k: temperature_k, clamped_k, bounds_k: [lo, hi] })
+    } else {
+        None
+    };
+    (clamped_k, clamp)
+}
+
 /// A temperature-dependent scalar property curve in SI units.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "form", rename_all = "snake_case")]
@@ -347,44 +404,76 @@ pub enum TempCurve {
 }
 
 impl TempCurve {
-    /// Evaluate the scalar quantity (in SI units) at `temperature_k` [K].
-    pub fn eval(&self, temperature_k: f64) -> f64 {
+    /// Valid temperature interval `[T_min, T_max]` in Kelvin when the curve is calibrated on a finite interval.
+    pub fn t_range(&self) -> Option<[f64; 2]> {
         match self {
-            Self::Constant { value } => *value,
+            Self::Constant { .. } | Self::EinsteinShift { .. } => None,
+            Self::Tabulated { t, .. } => (t.len() >= 2).then(|| [t[0], t[t.len() - 1]]),
+            Self::Log10Poly { t_range, .. } => {
+                let lo = t_range[0].max(1e-6);
+                let hi = t_range[1].max(lo);
+                Some([lo, hi])
+            }
+        }
+    }
+
+    /// Citations attached directly to this temperature curve.
+    pub fn sources(&self) -> &[Source] {
+        match self {
+            Self::Constant { .. } => &[],
+            Self::Tabulated { source, .. }
+            | Self::Log10Poly { source, .. }
+            | Self::EinsteinShift { source, .. } => source,
+        }
+    }
+
+    /// Evaluate the scalar quantity (in SI units) at `temperature_k` [K], returning clamping metadata when outside `T_range` / tabulated bounds.
+    pub fn eval_checked(&self, temperature_k: f64) -> CheckedTempEval<f64> {
+        match self {
+            Self::Constant { value } => CheckedTempEval { value: *value, clamp: None },
             Self::Tabulated { t, values, .. } => {
                 if t.is_empty() || values.is_empty() {
-                    return 0.0;
+                    return CheckedTempEval { value: 0.0, clamp: None };
                 }
-                if temperature_k <= t[0] {
-                    return values[0];
+                if temperature_k.is_nan() {
+                    return CheckedTempEval { value: f64::NAN, clamp: None };
                 }
                 let last = t.len().min(values.len()) - 1;
-                if temperature_k >= t[last] {
-                    return values[last];
-                }
-                let idx = t[..=last].partition_point(|&ti| ti <= temperature_k);
-                let i0 = idx.saturating_sub(1).min(last.saturating_sub(1));
-                let i1 = (i0 + 1).min(last);
-                let dt = t[i1] - t[i0];
-                if dt <= 0.0 {
-                    return values[i0];
-                }
-                let w = (temperature_k - t[i0]) / dt;
-                values[i0] + w * (values[i1] - values[i0])
+                let (tc, clamp) = clamp_temp_range(temperature_k, t[0], t[last]);
+                let value = if tc <= t[0] {
+                    values[0]
+                } else if tc >= t[last] {
+                    values[last]
+                } else {
+                    let idx = t[..=last].partition_point(|&ti| ti <= tc);
+                    let i0 = idx.saturating_sub(1).min(last.saturating_sub(1));
+                    let i1 = (i0 + 1).min(last);
+                    let dt = t[i1] - t[i0];
+                    if dt <= 0.0 {
+                        values[i0]
+                    } else {
+                        let w = (tc - t[i0]) / dt;
+                        values[i0] + w * (values[i1] - values[i0])
+                    }
+                };
+                CheckedTempEval { value, clamp }
             }
             Self::Log10Poly { t_range, coeffs, .. } => {
                 if coeffs.is_empty() {
-                    return 0.0;
+                    return CheckedTempEval { value: 0.0, clamp: None };
+                }
+                if temperature_k.is_nan() {
+                    return CheckedTempEval { value: f64::NAN, clamp: None };
                 }
                 let lo = t_range[0].max(1e-6);
                 let hi = t_range[1].max(lo);
-                let tc = temperature_k.clamp(lo, hi);
+                let (tc, clamp) = clamp_temp_range(temperature_k, lo, hi);
                 let l = tc.log10();
                 let mut acc = 0.0;
                 for &c in coeffs.iter().rev() {
                     acc = acc * l + c;
                 }
-                10.0_f64.powf(acc)
+                CheckedTempEval { value: 10.0_f64.powf(acc), clamp }
             }
             Self::EinsteinShift {
                 ref_value,
@@ -395,9 +484,23 @@ impl TempCurve {
             } => {
                 let g_t = einstein_thermal_coordinate(temperature_k, *theta_e);
                 let g_ref = einstein_thermal_coordinate(*t_ref, *theta_e);
-                ref_value + alpha * (g_t - g_ref)
+                CheckedTempEval { value: ref_value + alpha * (g_t - g_ref), clamp: None }
             }
         }
+    }
+
+    /// Evaluate the scalar quantity (in SI units) at `temperature_k` [K], refusing out-of-range clamping.
+    pub fn eval_strict(&self, temperature_k: f64) -> Result<f64, TempClampInfo> {
+        let checked = self.eval_checked(temperature_k);
+        match checked.clamp {
+            Some(info) => Err(info),
+            None => Ok(checked.value),
+        }
+    }
+
+    /// Evaluate the scalar quantity (in SI units) at `temperature_k` [K].
+    pub fn eval(&self, temperature_k: f64) -> f64 {
+        self.eval_checked(temperature_k).value
     }
 
     pub fn at_ref(&self) -> f64 {
@@ -641,21 +744,77 @@ pub enum TempTensor {
 }
 
 impl TempTensor {
-    pub fn eval_tensor(&self, temperature_k: f64) -> TensorProp {
+    /// Returns temperature bounds `[T_min, T_max]` when the underlying scalar curve defines a finite range.
+    pub fn t_range(&self) -> Option<[f64; 2]> {
         match self {
-            Self::Scalar(c) => TensorProp::Scalar(c.eval(temperature_k)),
-            Self::Uniaxial { perp, par } => TensorProp::Uniaxial {
-                perp: perp.eval(temperature_k),
-                par: par.eval(temperature_k),
+            Self::Scalar(c) => c.t_range(),
+            Self::Uniaxial { perp, par } => match (perp.t_range(), par.t_range()) {
+                (Some([a0, a1]), Some([b0, b1])) => Some([a0.max(b0), a1.min(b1)]),
+                (Some(r), None) | (None, Some(r)) => Some(r),
+                (None, None) => None,
             },
         }
     }
 
-    pub fn eval_scalar(&self, temperature_k: f64) -> f64 {
+    /// All source entries attached to the underlying temperature curves.
+    pub fn sources(&self) -> Vec<&Source> {
         match self {
-            Self::Scalar(c) => c.eval(temperature_k),
-            Self::Uniaxial { perp, par } => (2.0 * perp.eval(temperature_k) + par.eval(temperature_k)) / 3.0,
+            Self::Scalar(c) => c.sources().iter().collect(),
+            Self::Uniaxial { perp, par } => perp.sources().iter().chain(par.sources().iter()).collect(),
         }
+    }
+
+    /// Evaluates the scalar/uniaxial tensor property at `temperature_k` [K], returning any clamping events with component label.
+    pub fn eval_tensor_checked(&self, temperature_k: f64) -> (TensorProp, Vec<ComponentClamp>) {
+        match self {
+            Self::Scalar(c) => {
+                let r = c.eval_checked(temperature_k);
+                let clamps = r.clamp.into_iter().map(|info| (None, info)).collect();
+                (TensorProp::Scalar(r.value), clamps)
+            }
+            Self::Uniaxial { perp, par } => {
+                let rp = perp.eval_checked(temperature_k);
+                let rpar = par.eval_checked(temperature_k);
+                let mut clamps = Vec::new();
+                if let Some(info) = rp.clamp {
+                    clamps.push((Some("perp"), info));
+                }
+                if let Some(info) = rpar.clamp {
+                    clamps.push((Some("par"), info));
+                }
+                (TensorProp::Uniaxial { perp: rp.value, par: rpar.value }, clamps)
+            }
+        }
+    }
+
+    /// Evaluates the isotropic / orientation-averaged scalar property at `temperature_k` [K], returning any clamping events.
+    pub fn eval_scalar_checked(&self, temperature_k: f64) -> (f64, Vec<ComponentClamp>) {
+        match self {
+            Self::Scalar(c) => {
+                let r = c.eval_checked(temperature_k);
+                (r.value, r.clamp.into_iter().map(|info| (None, info)).collect())
+            }
+            Self::Uniaxial { perp, par } => {
+                let rp = perp.eval_checked(temperature_k);
+                let rpar = par.eval_checked(temperature_k);
+                let mut clamps = Vec::new();
+                if let Some(info) = rp.clamp {
+                    clamps.push((Some("perp"), info));
+                }
+                if let Some(info) = rpar.clamp {
+                    clamps.push((Some("par"), info));
+                }
+                ((2.0 * rp.value + rpar.value) / 3.0, clamps)
+            }
+        }
+    }
+
+    pub fn eval_tensor(&self, temperature_k: f64) -> TensorProp {
+        self.eval_tensor_checked(temperature_k).0
+    }
+
+    pub fn eval_scalar(&self, temperature_k: f64) -> f64 {
+        self.eval_scalar_checked(temperature_k).0
     }
 
     pub fn read(s: &mut Section, key: &str, dim: Dim, default_unit: Option<&str>) -> Result<Option<Self>, MaterialError> {

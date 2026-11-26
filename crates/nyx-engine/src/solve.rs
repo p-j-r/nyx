@@ -184,6 +184,18 @@ pub(crate) fn build_solve_ctx<'a>(
     ctx.frequency = crate::materials::study_frequency(p, spec);
     for imp in p.imports() {
         if let Some(values) = done.iter().find_map(|(o, r)| exported(registry, o, r, &imp.role)) {
+            if imp.role == "temperature" && ctx.temperature.is_none() {
+                let (mut sum, mut count) = (0.0_f64, 0usize);
+                for &v in &values {
+                    if v.is_finite() && v > 0.0 {
+                        sum += v;
+                        count += 1;
+                    }
+                }
+                if count > 0 {
+                    ctx.temperature = Some(sum / count as f64);
+                }
+            }
             ctx.inputs.insert(imp.role.clone(), values);
         }
     }
@@ -223,7 +235,9 @@ pub(crate) fn solve_one_single(
     validate_spec(p, spec)?;
     p.validate(spec, model.mesh())?;
     let mut ctx = build_solve_ctx(registry, model, p, spec, library, progress, done);
+    let pre_audit = crate::material_warnings::preflight(p, spec, &ctx, project.strict_material_range)?;
     let mut result = p.solve(model.mesh(), spec, &mut ctx)?;
     name_domains(&mut result, model);
+    crate::material_warnings::finalize(&mut result, p, spec, &ctx, project.strict_material_range, pre_audit)?;
     Ok(result)
 }
