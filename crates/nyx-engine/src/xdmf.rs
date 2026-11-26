@@ -52,6 +52,15 @@ pub fn write_xdmf(
         i.push_attribute(("Name", "Note"));
         i.push_attribute(("Value", NOTE));
         w.write_event(Event::Empty(i)).map_err(xe)?;
+        if mesh.has_curved() {
+            let mut c = BytesStart::new("Information");
+            c.push_attribute(("Name", "CurvedEdgesIgnored"));
+            c.push_attribute((
+                "Value",
+                "mesh contains curved mid-edge geometry nodes that XDMF linear/quadratic cell topology indexes without curved surface projection",
+            ));
+            w.write_event(Event::Empty(c)).map_err(xe)?;
+        }
     }
     let item = |w: &mut Writer<Vec<u8>>, dims: &str, number: &str, prec: &str, path: &str| -> Result<(), String> {
         let mut d = BytesStart::new("DataItem");

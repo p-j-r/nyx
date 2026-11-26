@@ -2,19 +2,20 @@
 
 C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity.
+> The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence helpers.
 
-**Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md)  
-**Size:** 5 files, 852 lines.
+**Decisions:** [ADR 9](../../../adr/0009-kernels-are-three-stages.md), [ADR 11](../../../adr/0011-determinism-by-fixed-chunks.md), [ADR 96](../../../adr/0096-a-sweep-may-start-each-point-from-the-modes-of-the-one-before.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 6 files, 1078 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/lib.rs` | 54 |  |
+| `crates/femcore/src/lib.rs` | 55 |  |
 | `crates/femcore/src/par.rs` | 163 |  |
 | `crates/femcore/src/progress.rs` | 297 |  |
 | `crates/femcore/src/validate.rs` | 48 |  |
+| `crates/femcore/src/vvuq.rs` | 225 |  |
 | `crates/femcore/src/warm.rs` | 290 |  |
 
 ## What it uses
@@ -30,10 +31,13 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | par | map_chunks, threads_up_to |
 | [analysis: Mode figures](../analysis/figures.md) | par | map_chunks |
 | [dfs: Physics adapter](../dfs/adapter.md) | progress | Progress |
-| [dfs: Electrostatics kernel](../dfs/electro.md) | par | threads |
+| [dfs: Shared helpers](../dfs/common.md) | vvuq | SourceField |
+| [dfs: Electrostatics kernel](../dfs/electro.md) | par, vvuq | SourceField, UniformSource, threads |
+| [dfs: Heat kernel](../dfs/heat.md) | vvuq | SourceField, UniformSource |
+| [dfs: Magnetostatics kernel](../dfs/magneto.md) | vvuq | SourceField, UniformSource |
 | [dfs: Typed problem](../dfs/problem.md) | validate | non_finite_token |
 | [ems: Physics adapter](../ems/adapter.md) | progress | Progress |
-| [ems: 3D cavity kernel](../ems/cavity.md) | par, progress | lap, threads |
+| [ems: 3D cavity kernel](../ems/cavity.md) | par, progress, vvuq | SourceField, UniformSource, lap, threads |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | par, progress | check, map_chunks |
 | [ems: Native mixed-cell EM](../ems/mixed.md) | progress | note |
 | [ems: Mode kernel](../ems/modes.md) | progress | note |
@@ -62,7 +66,7 @@ C4 level 4 (code) of the component **Runtime services** (`femcore.runtime`) in t
 | [sms: Piezoelectric kernel](../sms/piezo.md) | par, progress | CANCELLED, check, map_chunks, threads |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | par | threads_up_to |
 | [sms: Typed problem](../sms/problem.md) | validate | non_finite_token |
-| [sms: Solid kernel](../sms/solid.md) | par, progress | check, lap_since, threads_up_to |
+| [sms: Solid kernel](../sms/solid.md) | par, progress, vvuq | SourceField, UniformSource, check, lap_since, threads_up_to |
 
 ## Class diagram
 
@@ -126,6 +130,38 @@ classDiagram
         +non_finite_token(text) Option~usize~
     }
   }
+  namespace vvuq_rs {
+    class SourceField {
+        <<interface>>
+        +volume_rhs_re(x, t, domain) slice
+        +volume_rhs_im(_x, _t, _domain) slice
+        +dirichlet_re(x, t, bnd) slice
+        +dirichlet_im(_x, _t, _bnd) slice
+        +neumann_robin_re(x, n, t, bnd) slice
+        +neumann_robin_im(_x, _n, _t, _bnd) slice
+        +is_uniform() bool
+    }
+    class UniformSource {
+        <<struct>>
+    }
+    class FnSource {
+        <<struct>>
+        +volume_rhs FV
+        +dirichlet FD
+        +neumann_robin FN
+    }
+    class ConvergenceReport {
+        <<struct>>
+        +pairwise_slopes Vec~f64~
+        +ols_slope f64
+        +asymptotic_slope f64
+    }
+    class fns_vvuq_rs {
+        <<module vvuq.rs>>
+        +convergence_rate(hs, errs) Result
+        +assert_convergence_rate(hs, errs, expected_p, band) ConvergenceReport
+    }
+  }
   namespace warm_rs {
     class Entry {
         <<struct>>
@@ -164,6 +200,7 @@ classDiagram
         +from_bytes(bytes) Result
     }
   }
+  UniformSource ..|> SourceField
 ```
 
 ## Public items
@@ -198,6 +235,12 @@ classDiagram
 | fn | `Progress::mirror` | `progress.rs:87` | `pub fn mirror(&self, stage: &str, stage_seconds: f64, fraction: Option<f64>, log: Option<Vec<String>>)` —  Shows the state of work done in another process (a worker, productivity plan P4): the stage it is in and for how long, the fraction |
 | fn | `Progress::log` | `progress.rs:102` | `pub fn log(&self) -> Vec<String>` —  The finished-stage lines and notes so far. |
 | fn | `non_finite_token` | `validate.rs:13` | `pub fn non_finite_token(text: &str) -> Option<usize>` —  Byte position of the first bare `NaN` / `inf` token outside quotes in a `Debug` string. |
+| trait | `SourceField` | `vvuq.rs:11` | methods: `volume_rhs_re`, `volume_rhs_im`, `dirichlet_re`, `dirichlet_im`, `neumann_robin_re`, `neumann_robin_im`, `is_uniform` —  Zero-sized default compiles away to zero overhead in production builds; |
+| struct | `UniformSource` | `vvuq.rs:47` |  Production zero-sized source (all MMS callbacks compile away). |
+| struct | `FnSource` | `vvuq.rs:72` | fields: `volume_rhs`, `dirichlet`, `neumann_robin` —  Closure-backed [`SourceField`] adapter for MMS integration tests. |
+| struct | `ConvergenceReport` | `vvuq.rs:99` | fields: `pairwise_slopes`, `ols_slope`, `asymptotic_slope` —  Observed convergence summary across `>= 3` grids or step sizes. |
+| fn | `convergence_rate` | `vvuq.rs:110` | `pub fn convergence_rate(hs: &[f64], errs: &[f64]) -> Result<ConvergenceReport, String>` —  Computes pairwise and OLS log-log convergence rates over strictly decreasing positive |
+| fn | `assert_convergence_rate` | `vvuq.rs:174` | `pub fn assert_convergence_rate( hs: &[f64], errs: &[f64], expected_p: f64, band: (f64, f64), ) -> ConvergenceReport` —  Asserts strictly decreasing positive `hs`, finite positive `errs`, and that both |
 | struct | `Entry` | `warm.rs:30` | fields: `kind`, `n`, `nev`, `cols` —  The modes one eigensolve found: its kind, the number of unknowns, the number of modes asked for, and the vectors (columns). |
 | struct | `Call` | `warm.rs:39` | fields: `kind`, `n`, `nev`, `warm`, `iterations` —  What one eigensolve did with a warm context, for the run's record. |
 | struct | `Warm` | `warm.rs:50` |  The warm context of one solve: the entries of the previous solve (input), the ones this solve leaves (output) and what each call did. |
@@ -216,4 +259,4 @@ classDiagram
 | fn | `Ticket::start_len` | `warm.rs:136` | `pub fn start_len(&self) -> usize` —  How many columns the start has (0 for a cold start). |
 | fn | `Ticket::finish` | `warm.rs:141` | `pub fn finish<'a, T: Scalar + 'a>(self, vectors: impl Iterator<Item = &'a [T]>, iterations: usize)` —  Records the modes this eigensolve found (the first `nev` of them) and how it went. |
 
-Trait implementations in this component: `InstallGuard: Drop`, `Stage: Drop`, `InstallGuard: Drop`
+Trait implementations in this component: `InstallGuard: Drop`, `Stage: Drop`, `UniformSource: SourceField`, `InstallGuard: Drop`

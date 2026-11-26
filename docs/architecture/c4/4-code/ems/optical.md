@@ -4,14 +4,14 @@ C4 level 4 (code) of the component **Optical mode sets** (`ems.optical`) in the 
 
 > The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields.
 
-**Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 21](../../../adr/0021-polarization-analysis-from-complex-fields.md)  
-**Size:** 1 file, 95 lines.
+**Decisions:** [ADR 45](../../../adr/0045-ems-moves-into-nyx-ems.md), [ADR 21](../../../adr/0021-polarization-analysis-from-complex-fields.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 1 file, 101 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/optical.rs` | 95 |  |
+| `crates/nyx-ems/src/optical.rs` | 101 |  |
 
 ## What it uses
 
@@ -54,5 +54,5 @@ classDiagram
 |---|---|---|---|
 | fn | `solve_optical` | `optical.rs:35` | `pub fn solve_optical(mesh: &Discretisation, problem: &Problem) -> Result<OpticalSet, String>` —  Solves the optical modes of `problem` (a `Modes` study in wafer axes), propagating along `+y`; complex materials and PMLs go through the |
 | fn | `solve_optical_wafer` | `optical.rs:40` | `pub fn solve_optical_wafer(mesh: &Discretisation, problem: &Problem, prop_sign: f64) -> Result<OpticalSet, String>` —  Like `solve_optical` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`). |
-| fn | `absorbing_domains` | `optical.rs:80` | `pub(crate) fn absorbing_domains(problem: &Problem) -> Vec<i32>` —  Domains of the problem that are absorbing layers: the polarization analysis leaves their cells out. |
-| fn | `mode_frame` | `optical.rs:86` | `pub(crate) fn mode_frame(problem: &Problem) -> nyx_physics::FieldFrame` —  The frame of the modes of a cross-section study: lateral x, normal z, propagation y (the local triple of the mode solvers, left-handed), |
+| fn | `absorbing_domains` | `optical.rs:86` | `pub(crate) fn absorbing_domains(problem: &Problem) -> Vec<i32>` —  Domains of the problem that are absorbing layers: the polarization analysis leaves their cells out. |
+| fn | `mode_frame` | `optical.rs:92` | `pub(crate) fn mode_frame(problem: &Problem) -> nyx_physics::FieldFrame` —  The frame of the modes of a cross-section study: lateral x, normal z, propagation y (the local triple of the mode solvers, left-handed), |

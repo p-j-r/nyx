@@ -75,24 +75,43 @@ fn the_loop_on_the_soi_wire_converges_n_eff() {
     assert!((last.quantity - nref).abs() < 2e-5, "{} vs {nref}", last.quantity);
 }
 
-/// Study, not a check (run with `--ignored --nocapture`): n_eff of the SOI wire on uniformly scaled simple meshes, to see what the
-/// adaptive loop is converging to.
+/// N_eff uniform-refinement convergence on the SOI wire across scaling factors `[1.0, 0.6, 0.4, 0.3, 0.22, 0.16]`.
 #[test]
-#[ignore]
 fn soi_uniform_convergence_table() {
     use femcore::testkit::soi::SoiWire;
     let wire = SoiWire::default();
-    for f in [1.0, 0.6, 0.4, 0.3, 0.22, 0.16] {
-        let w = SoiWire { h_core: wire.h_core * f, h_near: wire.h_near * f, h_far: wire.h_far * f, ..wire.clone() };
-        let g = mesh_model(&w.model().list, &MeshPlan::simple(w.h_far)).unwrap();
-        let t = std::time::Instant::now();
-        let r = common::solve(&g.mesh, &common::wire_problem(&w, &g)).unwrap();
-        let n = r.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
+    let factors = [1.0_f64, 0.6, 0.4, 0.3, 0.22, 0.16];
+    for order in [1usize, 2] {
+        let mut neffs = Vec::with_capacity(factors.len());
+        for &f in &factors {
+            let w = SoiWire { h_core: wire.h_core * f, h_near: wire.h_near * f, h_far: wire.h_far * f, ..wire.clone() };
+            let g = mesh_model(&w.model().list, &MeshPlan::simple(w.h_far)).unwrap();
+            let mut prob = common::wire_problem(&w, &g);
+            prob.order = order;
+            let t = std::time::Instant::now();
+            let r = common::solve(&g.mesh, &prob).unwrap();
+            let n = r.solutions.iter().filter_map(|s| s.eigenvalue.map(|n| n[0])).fold(0.0, f64::max);
+            neffs.push(n);
+            eprintln!(
+                "P{order} uniform x{f:<5} cells {:6}  n_eff {n:.7}  solve {:.1}s",
+                g.mesh.n_cells(),
+                t.elapsed().as_secs_f64()
+            );
+        }
+        // Assert monotonic convergence toward the finest grid (f = 0.16)
+        let n_ref = *neffs.last().unwrap();
+        let errs: Vec<f64> = neffs[..factors.len() - 1].iter().map(|&n| (n - n_ref).abs()).collect();
+        for w in errs.windows(2) {
+            assert!(w[1] < w[0], "P{order} SOI uniform convergence non-monotonic: errs={errs:?}, neffs={neffs:?}");
+        }
+        let rep = femcore::vvuq::convergence_rate(&factors[..factors.len() - 1], &errs).unwrap();
         eprintln!(
-            "uniform x{f:<5} cells {:6}  n_eff {n:.7}  solve {:.1}s",
-            g.mesh.n_cells(),
-            t.elapsed().as_secs_f64()
+            "P{order} SOI uniform rate: OLS={:.3}, asym={:.3}, pairwise={:?}",
+            rep.ols_slope, rep.asymptotic_slope, rep.pairwise_slopes
         );
+        if order == 1 {
+            assert!(rep.ols_slope >= 1.5 || rep.asymptotic_slope >= 1.5, "P1 rate {:.3} < 1.5", rep.ols_slope);
+        }
     }
 }
 

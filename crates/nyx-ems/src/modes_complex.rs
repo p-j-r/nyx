@@ -134,6 +134,12 @@ pub(crate) fn assemble_modes_complex_with_bcs_and_symmetry(
     pmc_labels: &[i32],
     symmetry: Symmetry,
 ) -> Result<ModeAssemblyC, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex 2D complex mode kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -353,6 +359,10 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
     let mut neff = vec![];
     let (mut et_all, mut phi_all): (Vec<Vec<C>>, Vec<Vec<C>>) = (vec![], vec![]);
     let n_wanted = pairs.values.len();
+    let frob = |m: &CCsr| m.values().iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
+    let norm_a0 = frob(af);
+    let norm_a1 = asm.a1.as_ref().map(frob).unwrap_or(0.0);
+    let norm_b = frob(bf);
     for (i, &lam) in pairs.values.iter().enumerate() {
         // pairs the Krylov process could not converge (clustered radiation modes in the absorbing layers) are dropped
         if pairs.residuals.get(i).is_some_and(|r| *r > 1e-6) {
@@ -363,18 +373,42 @@ pub fn solve_mode_pairs_complex(asm: &ModeAssemblyC, n_target: C, k: usize) -> R
         if nf.re < 0.0 {
             nf = -nf; // choose the forward-propagating (or decaying) root
         }
+        // Check true generalized residual of original pencil (af + j beta a1f) u = lam B u
+        let u = &pairs.vectors[i];
+        let beta = nf * k0;
+        let ax = if let Some(a1f) = &asm.a1 {
+            let a0u = af.matvec(u);
+            let a1u = a1f.matvec(u);
+            let jb = c(0.0, 1.0) * beta;
+            a0u.into_iter().zip(a1u).map(|(x, y)| x + jb * y).collect::<Vec<C>>()
+        } else {
+            af.matvec(u)
+        };
+        let bx = bf.matvec(u);
+        let res_num: f64 = ax.iter().zip(&bx).map(|(&a, &b)| (a - lam * b).norm_sqr()).sum::<f64>().sqrt();
+        let norm_u: f64 = u.iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt().max(1e-300);
+        // Normwise backward error (Rigal-Gaches) for `(A0 + j beta A1) u = lam B u`: immune to
+        // nanophotonic vs RF block-scaling skew while still rejecting unconverged spurious vectors.
+        let res_true = res_num / ((norm_a0 + beta.norm() * norm_a1 + lam.norm() * norm_b) * norm_u + 1e-300);
+        if res_true > 1e-6 {
+            continue;
+        }
         neff.push(nf);
         let mut x = vec![c(0.0, 0.0); n_tot];
         for (a, &dof) in free.iter().enumerate() {
-            x[dof] = pairs.vectors[i][a];
+            x[dof] = u[a];
         }
         et_all.push(x[..net].to_vec());
         phi_all.push(x[net..].iter().map(|v| *v / k0).collect::<Vec<C>>());
     }
     let _ = n_wanted;
-    // sort by closeness to the target
+    // sort deterministically by closeness to the target (tie-break by -Re(neff))
     let mut idx: Vec<usize> = (0..neff.len()).collect();
-    idx.sort_by(|&a, &b| (neff[a] - n_target).norm().partial_cmp(&(neff[b] - n_target).norm()).unwrap());
+    idx.sort_by(|&a, &b| {
+        let da = (neff[a] - n_target).norm();
+        let db = (neff[b] - n_target).norm();
+        da.total_cmp(&db).then_with(|| neff[b].re.total_cmp(&neff[a].re))
+    });
     Ok(ModesC {
         neff: idx.iter().map(|&i| neff[i]).collect(),
         et: idx.iter().map(|&i| et_all[i].clone()).collect(),
@@ -472,6 +506,12 @@ pub fn mode_fields_complex_cells(
 
 /// The modes of a `Modes` study in the complex solver: absorbing layers, lossy or complex materials, a crystal tilted against the guide.
 pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex 2D complex mode kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     let t0 = Instant::now();
     let Study::Modes { freq, n_target, evanescent, n_modes } = problem.study.clone() else {
         return Err("mode analysis needs a Modes study".into());
@@ -491,17 +531,18 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
                     || p.profile != femcore::props::PmlProfile::KappaPolynomial { kappa_max: 1.0 })
         });
     let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
-    let modes = if needs_quad_pml {
-        let asm = assemble_modes_complex_quad_pml(mesh, problem, freq, &pml_table)?;
-        solve_mode_pairs_complex(&asm, target, n_modes)?
+    let has_pml = pml_table.has_any();
+    let asm = if needs_quad_pml {
+        assemble_modes_complex_quad_pml(mesh, problem, freq, &pml_table)?
     } else if problem.pec.is_empty()
         && problem.surface_impedance.is_empty()
         && problem.pmc.is_empty()
         && problem.symmetry == Symmetry::None
     {
-        solve_modes_complex(mesh, freq, &eps, &mu, target, n_modes, problem.order)?
+        let (ep_loc, mu_loc) = femcore::optical::cell_materials(mesh, &problem.materials)?;
+        assemble_modes_complex(mesh, freq, &ep_loc, &mu_loc, problem.order)?
     } else {
-        let asm = assemble_modes_complex_with_bcs_and_symmetry(
+        assemble_modes_complex_with_bcs_and_symmetry(
             mesh,
             freq,
             &eps,
@@ -511,12 +552,51 @@ pub fn solve_waveguide_complex(mesh: &Discretisation, problem: &Problem) -> Resu
             &problem.surface_impedance,
             &problem.pmc,
             problem.symmetry,
-        )?;
-        solve_mode_pairs_complex(&asm, target, n_modes)?
+        )?
     };
+    let n_ask = if has_pml && n_modes <= 4 && asm.a.nrows() <= 4_000 {
+        (n_modes + 4).min(asm.a.nrows().saturating_sub(1)).max(n_modes)
+    } else {
+        n_modes
+    };
+    let mut modes = solve_mode_pairs_complex(&asm, target, n_ask)?;
     let mut solutions = vec![];
     let mut scalars = vec![];
-    let mode_metrics = compute_waveguide_2d_metrics(mesh, problem, freq, &modes.neff, &modes.et, &modes.phi)?;
+    let mut mode_metrics = compute_waveguide_2d_metrics(mesh, problem, freq, &modes.neff, &modes.et, &modes.phi)?;
+    if has_pml && !modes.neff.is_empty() {
+        let mut keep: Vec<usize> =
+            (0..modes.neff.len()).filter(|&i| mode_metrics[i].layer_fraction < 0.25).take(n_modes).collect();
+        if keep.is_empty() && n_ask < n_modes + 4 && asm.a.nrows() > n_modes + 1 {
+            let n_retry = (n_modes + 4).min(asm.a.nrows().saturating_sub(1)).max(n_modes);
+            modes = solve_mode_pairs_complex(&asm, target, n_retry)?;
+            mode_metrics = compute_waveguide_2d_metrics(mesh, problem, freq, &modes.neff, &modes.et, &modes.phi)?;
+            keep = (0..modes.neff.len()).filter(|&i| mode_metrics[i].layer_fraction < 0.25).take(n_modes).collect();
+        }
+        if !keep.is_empty() {
+            modes.neff = keep.iter().map(|&i| modes.neff[i]).collect();
+            modes.et = keep.iter().map(|&i| modes.et[i].clone()).collect();
+            modes.phi = keep.iter().map(|&i| modes.phi[i].clone()).collect();
+            mode_metrics = keep
+                .into_iter()
+                .map(|i| {
+                    std::mem::replace(
+                        &mut mode_metrics[i],
+                        WaveguideModeMetrics {
+                            vg: 0.0,
+                            comp_shares: [0.0; 3],
+                            domain_shares: Vec::new(),
+                            layer_fraction: 1.0,
+                        },
+                    )
+                })
+                .collect();
+        } else {
+            modes.neff.truncate(n_modes);
+            modes.et.truncate(n_modes);
+            modes.phi.truncate(n_modes);
+            mode_metrics.truncate(n_modes);
+        }
+    }
     for j in 0..modes.neff.len() {
         let z = modes.neff[j];
         let txt = format!("{:.6} {:+.3e}i", z.re, z.im);
@@ -797,6 +877,12 @@ fn assemble_modes_complex_quad_pml(
     freq: f64,
     pml: &EmPmlTable,
 ) -> Result<ModeAssemblyC, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex 2D complex mode kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     if mesh.dim != 2 {
         return Err("mode analysis needs a 2D cross-section mesh".into());
     }
@@ -984,11 +1070,60 @@ pub fn solve_waveguide_complex_mixed(
     }
     let (asm, ned, phi_map) = assemble_modes_complex_mixed(mixed, problem, freq)?;
     let target = if evanescent { c(0.0, n_target) } else { c(n_target, 0.0) };
-    let modes = solve_mode_pairs_complex(&asm, target, n_modes)?;
+    let has_pml = problem.materials.has_pml();
+    let n_ask = if has_pml && n_modes <= 4 && asm.a.nrows() <= 4_000 {
+        (n_modes + 4).min(asm.a.nrows().saturating_sub(1)).max(n_modes)
+    } else {
+        n_modes
+    };
+    let mut modes = solve_mode_pairs_complex(&asm, target, n_ask)?;
 
     let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
-    let mode_metrics =
+    let mut mode_metrics =
         compute_waveguide_2d_metrics_mixed(mixed, &ned, &phi_map, problem, freq, &modes.neff, &modes.et, &modes.phi)?;
+    if has_pml && !modes.neff.is_empty() {
+        let mut keep: Vec<usize> =
+            (0..modes.neff.len()).filter(|&i| mode_metrics[i].layer_fraction < 0.25).take(n_modes).collect();
+        if keep.is_empty() && n_ask < n_modes + 4 && asm.a.nrows() > n_modes + 1 {
+            let n_retry = (n_modes + 4).min(asm.a.nrows().saturating_sub(1)).max(n_modes);
+            modes = solve_mode_pairs_complex(&asm, target, n_retry)?;
+            mode_metrics = compute_waveguide_2d_metrics_mixed(
+                mixed,
+                &ned,
+                &phi_map,
+                problem,
+                freq,
+                &modes.neff,
+                &modes.et,
+                &modes.phi,
+            )?;
+            keep = (0..modes.neff.len()).filter(|&i| mode_metrics[i].layer_fraction < 0.25).take(n_modes).collect();
+        }
+        if !keep.is_empty() {
+            modes.neff = keep.iter().map(|&i| modes.neff[i]).collect();
+            modes.et = keep.iter().map(|&i| modes.et[i].clone()).collect();
+            modes.phi = keep.iter().map(|&i| modes.phi[i].clone()).collect();
+            mode_metrics = keep
+                .into_iter()
+                .map(|i| {
+                    std::mem::replace(
+                        &mut mode_metrics[i],
+                        WaveguideModeMetrics {
+                            vg: 0.0,
+                            comp_shares: [0.0; 3],
+                            domain_shares: Vec::new(),
+                            layer_fraction: 1.0,
+                        },
+                    )
+                })
+                .collect();
+        } else {
+            modes.neff.truncate(n_modes);
+            modes.et.truncate(n_modes);
+            modes.phi.truncate(n_modes);
+            mode_metrics.truncate(n_modes);
+        }
+    }
 
     let mut solutions = Vec::with_capacity(modes.neff.len());
     let mut scalars = Vec::new();

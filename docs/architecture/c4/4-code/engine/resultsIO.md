@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the container **nyx-engine** (crate `nyx_engine`). [Component view of the container](../../3-components/engine.md) · [All code pages](../README.md)
 
-> HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results.
+> HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description (`CurvedEdgesIgnored` R32 note), and opening a results file as a project with its results.
 
-**Decisions:** [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md), [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md)  
-**Size:** 3 files, 1735 lines.
+**Decisions:** [ADR 62](../../../adr/0062-results-are-stored-in-hdf5.md), [ADR 63](../../../adr/0063-the-format-key-and-no-json-for-bulk-data.md), [ADR 99](../../../adr/0099-figures-of-modes-and-one-node-order-in-the-results-file.md), [ADR 107](../../../adr/0107-pure-rust-hdf5-storage-and-packed-lzf-layout.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 3 files, 1744 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **Results files** (`engine.resultsIO`) in the
 |---|---:|---|
 | `crates/nyx-engine/src/h5io.rs` | 1379 |  |
 | `crates/nyx-engine/src/results_file.rs` | 205 |  |
-| `crates/nyx-engine/src/xdmf.rs` | 151 |  |
+| `crates/nyx-engine/src/xdmf.rs` | 160 |  |
 
 ## What it uses
 

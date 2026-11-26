@@ -1498,6 +1498,7 @@ fn check_static_mech_support(spec: &Problem, has_exp_robin: bool) -> Result<(), 
 
 /// Assembles Stage 1 static coupled piezoelectric problem on [`SimplexMesh`].
 pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoStaticAssembly, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     if !matches!(spec.study, Study::Static) {
         return Err("assemble_piezo_static requires Study::Static".into());
     }
@@ -2160,6 +2161,7 @@ pub(crate) fn sub_csr<T: femcore::linalg::scalar::Scalar>(
 
 /// Assembles Stage 1 eigenfrequency coupled piezoelectric problem on [`SimplexMesh`].
 pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoEigenAssembly, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let Study::Eigenfrequency { n_modes, f_search } = spec.study else {
         return Err("assemble_piezo_eigen requires Study::Eigenfrequency".into());
     };
@@ -2525,6 +2527,7 @@ pub(crate) struct PiezoDrivenFull {
 
 /// Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` on [`SimplexMesh`].
 pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoDrivenFull, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     let f_ref = spec.study.reference_freq();
     check_labels_simplex(mesh, spec)?;
 

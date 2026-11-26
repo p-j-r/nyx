@@ -38,6 +38,12 @@ pub fn solve_optical(mesh: &Discretisation, problem: &Problem) -> Result<Optical
 
 /// Like `solve_optical` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
 pub fn solve_optical_wafer(mesh: &Discretisation, problem: &Problem, prop_sign: f64) -> Result<OpticalSet, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex optical mode kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     let Study::Modes { freq, n_target, evanescent, n_modes } = problem.study.clone() else {
         return Err("the optical problem needs a Modes study".into());
     };

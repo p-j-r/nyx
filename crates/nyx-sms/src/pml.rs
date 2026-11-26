@@ -1139,6 +1139,7 @@ pub struct PmlSolve {
 }
 
 pub fn assemble_solid_pml(mesh: &Discretisation, spec: &Problem) -> Result<PmlAssembly, String> {
+    check_simplex_straight(mesh)?;
     let order = spec.order;
     let mut st = setup(mesh, spec)?;
     let (d, n1) = (st.d, st.n1);

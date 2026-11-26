@@ -2,23 +2,23 @@
 
 C4 level 4 (code) of the component **Meshing facade** (`femcore.meshing`) in the container **femcore** (crate `femcore`). [Component view of the container](../../3-components/femcore.md) · [All code pages](../README.md)
 
-> MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core.
+> MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, 2D triangulation core (`R29` slanted wall splitting), and periodic twin curved-arc/QP sync (`R33`).
 
-**Decisions:** [ADR 6](../../../adr/0006-one-meshing-interface.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md)  
-**Size:** 9 files, 5994 lines.
+**Decisions:** [ADR 6](../../../adr/0006-one-meshing-interface.md), [ADR 17](../../../adr/0017-physics-driven-mesh-sizing.md), [ADR 54](../../../adr/0054-mesh-request-and-report-as-data.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 9 files, 6265 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/femcore/src/meshing/geomdrive.rs` | 524 | From a `geom` model to a mesh and to the integers the solvers take, in the wafer frame throughout: x lateral, y the direction of propagation, z the surface normal. A 2D model is the x-z cross-section and its mesh has the columns `(x, z)`... |
-| `crates/femcore/src/meshing/mesher.rs` | 1590 | The triangulation core shared by the geom path (`geomdrive`): chains of boundary points become a constrained Delaunay triangulation with Ruppert refinement (via the `spade` crate), cells labelled by a domain function; and the sweep of a ... |
+| `crates/femcore/src/meshing/geomdrive.rs` | 597 | From a `geom` model to a mesh and to the integers the solvers take, in the wafer frame throughout: x lateral, y the direction of propagation, z the surface normal. A 2D model is the x-z cross-section and its mesh has the columns `(x, z)`... |
+| `crates/femcore/src/meshing/mesher.rs` | 1627 | The triangulation core shared by the geom path (`geomdrive`): chains of boundary points become a constrained Delaunay triangulation with Ruppert refinement (via the `spade` crate), cells labelled by a domain function; and the sweep of a ... |
 | `crates/femcore/src/meshing/mod.rs` | 924 | The one way to mesh a `geom` model: a `MeshPlan` says how fine and with which mesher, `mesh_model` returns a `MeshedGeom` with the names, labels and exact geometry of the model, whichever mesher made the cells. |
 | `crates/femcore/src/meshing/physics_size.rs` | 585 | Element sizes from the physics: how fine a mesh must be for the waves the study looks for, before any solution exists. The core takes the neutral `meshing::Sizing` a physics reports (`cell_sizes_for`, `vertex_sizes_for`, `metrics_for`, `... |
-| `crates/femcore/src/meshing/request.rs` | 763 |  |
+| `crates/femcore/src/meshing/request.rs` | 742 |  |
 | `crates/femcore/src/meshing/sheet3d_amr.rs` | 361 |  |
-| `crates/femcore/src/meshing/sheet3d_curve.rs` | 512 |  |
-| `crates/femcore/src/meshing/singularity.rs` | 642 |  |
+| `crates/femcore/src/meshing/sheet3d_curve.rs` | 611 |  |
+| `crates/femcore/src/meshing/singularity.rs` | 725 |  |
 | `crates/femcore/src/meshing/sizing.rs` | 93 | The neutral request a physics makes of the mesher: what to resolve, with no knowledge of any physics or of `ProblemSpec`. |
 
 ## What it uses
@@ -28,10 +28,10 @@ C4 level 4 (code) of the component **Meshing facade** (`femcore.meshing`) in the
 | [container `geom` (geom)](../../3-components/geom.md) | complex, curve, diff, eval, labels, math, model, query +2 | Aabb, ChangeKind, Complex, Curve, DiscretizeOpts, EdgeGeom, EntityKind, Evaluated, Evaluator, FaceGeom +13 |
 | [Adaptation drivers](./adaptdrive.md) | adapt::drive, adapt::drive3, adapt::geom | AdaptOptions, AdaptReport, Geometry2, PolylineGeometry, adapt2_with, adapt3 |
 | [Adaptation operators](./adaptops.md) | adapt::ops3, adapt::topo, adapt::topo3 | AdaptOptions3, Sig, TopoOptions3, Work2 |
-| [Finite-element basics](./fem.md) | fem, props | CurvedTet, Pml, PmlCoord, PmlDir, quad_rule_collapsed |
+| [Finite-element basics](./fem.md) | fem, props | CurvedTet, Pml, PmlCoord, PmlDir |
 | [Material specification](./material.md) | material | M3, M6 |
 | [Mesh](./mesh.md) | mesh, mesh::cells, mesh::exchange, mesh::mixed | CellType, Mesh, MixedDiscretisation, SimplexMesh |
-| [3D meshing](./meshing3d.md) | meshing::adapt3d, meshing::curve3, meshing::geomdrive3, meshing::mesher3d, meshing::sheet3d | CurveReport, Domain3, EdgeNodes, GeomDomain3, Sizes3, adapt_to_metrics3, apply_sheet_post_enrichment, build_sized_overlay_mesh_2d, extrude_overlay_2d, extrude_overlay_2d_with_plan +3 |
+| [3D meshing](./meshing3d.md) | meshing::adapt3d, meshing::curve3, meshing::geomdrive3, meshing::mesher3d, meshing::sheet3d | CurveReport, Domain3, EdgeNodes, GeomDomain3, Sizes3, adapt_to_metrics3, apply_sheet_post_enrichment, build_sized_overlay_mesh_2d, extrude_overlay_2d, extrude_overlay_2d_with_plan +7 |
 | [Metric fields](./metric.md) | adapt, adapt::field, adapt::field3, adapt::metric, adapt::work | BackgroundMetric2, BackgroundMetric3, MetricField, SimplexMesh, Sym, bbox_of, intersect, isotropic, simplex_from_adapt, simplex_to_adapt +1 |
 | [Runtime services](./runtime.md) | progress | note |
 | [Structured absorbing layers](./structpml.md) | meshing::pml_geom | PmlMode, PmlReport, mixed_cell_scaled_jacobian_min, structured_pml, structured_pml_native_with_curved, structured_pml_with_curved |
@@ -383,6 +383,7 @@ classDiagram
         <<module meshing/sheet3d_curve.rs>>
         +relax_edge_nodes(pos, cells, cand) tuple
         +project_sheet3d_curved_edges(cx, m2, bnd_edges2, z_planes, used_v, slab_layer, level_of_zp, transitions, mesh) CurveReport
+        +project_sheet3d_curved_edges_periodic(cx, m2, bnd_edges2, z_planes, used_v, slab_layer, level_of_zp, transitions, periodic, mesh) CurveReport
         +apply_sheet3d_curved_edges(g) CurveReport
     }
   }
@@ -419,7 +420,7 @@ classDiagram
         +measure_overlay_sheet_corners(cx, z_s) Vec
         +collect_overlay_sheet_corners(cx, z_s, ov_edge_h, eps_ratio) Vec~SheetCorner~
         +analytical_qp_jacobian_ratio(n_rim_in_tet, lam_out, xi_qp) f64
-        +more_2_functions()
+        +more_3_functions()
         +DEFAULT_QUARTER_POINT_XI const
         +CORNER_GRADING_P const
         +CORNER_RADIUS_FACTOR const
@@ -465,12 +466,12 @@ classDiagram
 | fn | `size_map_with_skip` | `meshing/geomdrive.rs:272` | `pub(crate) fn size_map_with_skip(ev: &Evaluated, h: f64, skip: &[bool]) -> SizeMap` |
 | fn | `mesh_geom_2d` | `meshing/geomdrive.rs:300` | `pub fn mesh_geom_2d(ev: Evaluated, opts: &GeomMeshOpts) -> Result<MeshedGeom, String>` —  Meshes a 2D model (the x-z cross-section) with triangles. |
 | fn | `mesh_geom_2d_with_skip` | `meshing/geomdrive.rs:306` | `pub fn mesh_geom_2d_with_skip( ev: Evaluated, opts: &GeomMeshOpts, skip: &[bool], ) -> Result<MeshedGeom, String>` —  Meshes a 2D model (the x-z cross-section) with triangles, leaving out any regions marked in `skip` |
-| fn | `select_labels` | `meshing/geomdrive.rs:442` | `pub fn select_labels(ev: &Evaluated, labels: &LabelMap, selector: &str) -> Result<Vec<i32>, String>` —  Labels of whatever a selector text picks in an evaluated model: boundary labels for edges, domain labels for regions. |
-| struct | `Plate` | `meshing/geomdrive.rs:459` | fields: `mesh`, `domain`, `xmin`, `xmax`, `zmin`, `zmax` —  A rectangle `[0, lx] x [0, lz]` of the x-z plane as one domain, meshed with element size `h`, with the boundary labels of its four sides |
-| fn | `plate` | `meshing/geomdrive.rs:468` | `pub fn plate(lx: f64, lz: f64, h: f64) -> Result<Plate, String>` |
-| struct | `Block` | `meshing/geomdrive.rs:481` | fields: `mesh`, `domain`, `xmin`, `xmax`, `zmin`, `zmax`, `ymin`, `ymax` —  A box `[0, lx] x [0, ly] x [0, lz]`: the plate swept along y through `ny` layers (`extrude_y`). The vertices of the section are put in coordinate order first (`sort_nodes`), so that opposite side walls can be paired by a Floquet condition. The side walls keep the labels of the |
-| fn | `block` | `meshing/geomdrive.rs:492` | `pub fn block(lx: f64, ly: f64, lz: f64, h: f64, ny: usize) -> Result<Block, String>` |
-| fn | `sort_nodes` | `meshing/geomdrive.rs:503` | `pub fn sort_nodes(m: &SimplexMesh) -> SimplexMesh` —  The mesh with its vertices renumbered in the order of their coordinates (x first, then the second axis, equal to a tolerance of |
+| fn | `select_labels` | `meshing/geomdrive.rs:515` | `pub fn select_labels(ev: &Evaluated, labels: &LabelMap, selector: &str) -> Result<Vec<i32>, String>` —  Labels of whatever a selector text picks in an evaluated model: boundary labels for edges, domain labels for regions. |
+| struct | `Plate` | `meshing/geomdrive.rs:532` | fields: `mesh`, `domain`, `xmin`, `xmax`, `zmin`, `zmax` —  A rectangle `[0, lx] x [0, lz]` of the x-z plane as one domain, meshed with element size `h`, with the boundary labels of its four sides |
+| fn | `plate` | `meshing/geomdrive.rs:541` | `pub fn plate(lx: f64, lz: f64, h: f64) -> Result<Plate, String>` |
+| struct | `Block` | `meshing/geomdrive.rs:554` | fields: `mesh`, `domain`, `xmin`, `xmax`, `zmin`, `zmax`, `ymin`, `ymax` —  A box `[0, lx] x [0, ly] x [0, lz]`: the plate swept along y through `ny` layers (`extrude_y`). The vertices of the section are put in coordinate order first (`sort_nodes`), so that opposite side walls can be paired by a Floquet condition. The side walls keep the labels of the |
+| fn | `block` | `meshing/geomdrive.rs:565` | `pub fn block(lx: f64, ly: f64, lz: f64, h: f64, ny: usize) -> Result<Block, String>` |
+| fn | `sort_nodes` | `meshing/geomdrive.rs:576` | `pub fn sort_nodes(m: &SimplexMesh) -> SimplexMesh` —  The mesh with its vertices renumbered in the order of their coordinates (x first, then the second axis, equal to a tolerance of |
 | fn | `GeomMeshOpts::new` | `meshing/geomdrive.rs:62` | `pub fn new(h: f64) -> Self` |
 | fn | `MeshedGeom::into_exchange_mesh` | `meshing/geomdrive.rs:101` | `pub fn into_exchange_mesh(&self) -> Result<Mesh, String>` —  Returns the uncut mixed-cell exchange [`Mesh`] (`CellMesh<2>` or `CellMesh<3>`) when available, |
 | fn | `MeshedGeom::domain` | `meshing/geomdrive.rs:109` | `pub fn domain(&self, region: &str) -> Option<i32>` —  The domain label of a region. |
@@ -487,10 +488,10 @@ classDiagram
 | struct | `SheetChainExtras` | `meshing/mesher.rs:81` | fields: `gap_seeds`, `chain_owner`, `dielectric_domains`, `ref_frame` —  Optional 3D sheet-stack extras passed by `sheet3d`: deterministic gap-centerline seeds, |
 | fn | `mesh_chains` | `meshing/mesher.rs:377` | `pub(crate) fn mesh_chains( chains: &[Chain], fills: &[Fill], mp: &MeshParams, domain_at: &dyn Fn([f64; 2]) -> Option<i32>, ) -> Result<(SimplexMesh, MeshChainsReport), String>` —  The shared tail of the meshers: constrained Delaunay triangulation of the chains (conforming, labelled), lattice points, Ruppert refinement, |
 | fn | `mesh_chains_with_seeds` | `meshing/mesher.rs:388` | `pub(crate) fn mesh_chains_with_seeds( chains: &[Chain], fills: &[Fill], mp: &MeshParams, domain_at: &dyn Fn([f64; 2]) -> Option<i32>, extras: Option<&SheetChainExtras<'_>>, ) -> Result<(SimplexMesh, MeshChainsReport), String>` —  Extended entry point for `sheet3d` supporting deterministic gap-centerline seeds, cross-terminal |
-| type | `RemappedLayer` | `meshing/mesher.rs:910` |  A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer. |
-| fn | `extrude_y` | `meshing/mesher.rs:916` | `pub fn extrude_y(m2: &SimplexMesh, layers: &[Layer], y0: f64) -> Result<SimplexMesh, String>` —  Sweeps the x-z cross-section of the wafer frame (a 2D mesh with the columns `(x, z)`) along the propagation axis y through the given |
-| fn | `extrude_y_with_remap` | `meshing/mesher.rs:923` | `pub fn extrude_y_with_remap( m2: &SimplexMesh, layers: &[RemappedLayer], y0: f64, ) -> Result<SimplexMesh, String>` —  Like [`extrude_y`], with an optional per-layer domain map `(source_domain -> target_domain)` applied when `l.fill` is `None`. |
-| fn | `sweep_model_3d` | `meshing/mesher.rs:1018` | `pub fn sweep_model_3d( ev: &geom::eval::Evaluated, labels: &geom::labels::LabelMap, h_global: f64, max_dev: Option<f64>, min_angle_deg: f64, sizes: &crate::meshing::geomdrive3::Sizes3, layers: &[RemappedLayer], ) -> Result<SimplexMesh, String>` —  Sweeps a 3D `geom` model along the propagation axis `y` through `layers`: extracts the combined 2D `(x, z)` cross-section |
+| type | `RemappedLayer` | `meshing/mesher.rs:947` |  A sweep [`Layer`] paired with an optional domain-label remap `(source_domain -> target_domain)` for that layer. |
+| fn | `extrude_y` | `meshing/mesher.rs:953` | `pub fn extrude_y(m2: &SimplexMesh, layers: &[Layer], y0: f64) -> Result<SimplexMesh, String>` —  Sweeps the x-z cross-section of the wafer frame (a 2D mesh with the columns `(x, z)`) along the propagation axis y through the given |
+| fn | `extrude_y_with_remap` | `meshing/mesher.rs:960` | `pub fn extrude_y_with_remap( m2: &SimplexMesh, layers: &[RemappedLayer], y0: f64, ) -> Result<SimplexMesh, String>` —  Like [`extrude_y`], with an optional per-layer domain map `(source_domain -> target_domain)` applied when `l.fill` is `None`. |
+| fn | `sweep_model_3d` | `meshing/mesher.rs:1055` | `pub fn sweep_model_3d( ev: &geom::eval::Evaluated, labels: &geom::labels::LabelMap, h_global: f64, max_dev: Option<f64>, min_angle_deg: f64, sizes: &crate::meshing::geomdrive3::Sizes3, layers: &[RemappedLayer], ) -> Result<SimplexMesh, String>` —  Sweeps a 3D `geom` model along the propagation axis `y` through `layers`: extracts the combined 2D `(x, z)` cross-section |
 | struct | `Adaptive` | `meshing/mod.rs:61` | fields: `scale`, `grade`, `max_cells` —  Settings of the adaptive mesher. |
 | enum | `Mesher` | `meshing/mod.rs:79` | variants: `Simple`, `Adaptive` —  Which mesher makes the cells. |
 | struct | `MeshPlan` | `meshing/mod.rs:86` | fields: `opts`, `mesher`, `pml` —  How a model is meshed: the sizes (as for `mesh_geom_2d`) and the mesher. |
@@ -545,10 +546,10 @@ classDiagram
 | struct | `MeshReport` | `meshing/request.rs:239` | fields: `dim`, `vertices`, `cells`, `facets`, `element_counts`, `domains`, `adaptation`, `structured_layers`, `min_pml_scaled_jacobian`, `pml_warnings`, `curved`, `warnings` —  A mesh reported. |
 | struct | `CurvedSummary` | `meshing/request.rs:270` | fields: `edges`, `cells`, `min_scaled_jacobian` —  The curved geometry of a 3D mesh (ADR 82). |
 | fn | `summarise_native_mesh` | `meshing/request.rs:333` | `pub(crate) fn summarise_native_mesh( mesh: &Mesh, labels: &LabelMap, eval: &Evaluated, plan: &MeshPlan, adapt: Option<&AdaptReport>, pml_rep: Option<&PmlReport>, sizes: &[Option<f64>], base_warnings: &[String], ) -> MeshReport` |
-| fn | `mesh_request` | `meshing/request.rs:566` | `pub fn mesh_request(list: &FeatureList, req: &MeshRequest) -> Result<(MeshedGeom, MeshReport), String>` —  Meshes `list` as `req` asks (any dimension) and reports what came out. |
-| fn | `mesh_request_native` | `meshing/request.rs:618` | `pub fn mesh_request_native(list: &FeatureList, req: &MeshRequest) -> Result<NativeMeshTuple, String>` —  Meshes `list` as `req` asks directly into an uncut mixed-cell [`Mesh`] (`Quad`, `Prism`, and `Hex` |
-| fn | `request_schema` | `meshing/request.rs:642` | `pub fn request_schema() -> Value` —  JSON Schema of [`MeshRequest`]. |
-| fn | `report_schema` | `meshing/request.rs:719` | `pub fn report_schema() -> Value` —  JSON Schema of [`MeshReport`]. |
+| fn | `mesh_request` | `meshing/request.rs:545` | `pub fn mesh_request(list: &FeatureList, req: &MeshRequest) -> Result<(MeshedGeom, MeshReport), String>` —  Meshes `list` as `req` asks (any dimension) and reports what came out. |
+| fn | `mesh_request_native` | `meshing/request.rs:597` | `pub fn mesh_request_native(list: &FeatureList, req: &MeshRequest) -> Result<NativeMeshTuple, String>` —  Meshes `list` as `req` asks directly into an uncut mixed-cell [`Mesh`] (`Quad`, `Prism`, and `Hex` |
+| fn | `request_schema` | `meshing/request.rs:621` | `pub fn request_schema() -> Value` —  JSON Schema of [`MeshRequest`]. |
+| fn | `report_schema` | `meshing/request.rs:698` | `pub fn report_schema() -> Value` —  JSON Schema of [`MeshReport`]. |
 | fn | `MeshRequest::resolved_pml_mode` | `meshing/request.rs:173` | `pub fn resolved_pml_mode(&self) -> PmlModeRequest` —  Resolves effective [`PmlModeRequest`], honoring legacy `structured_pml: Some(true \| false)` when |
 | fn | `MeshRequest::plan` | `meshing/request.rs:182` | `pub fn plan(&self) -> MeshPlan` —  The plan this request names. |
 | fn | `CurvedSummary::from_mesh` | `meshing/request.rs:283` | `pub fn from_mesh(m: &crate::mesh::SimplexMesh) -> Option<Self>` —  Summarizes the curved and/or quarter-point geometry of a 3D mesh, evaluating quarter-point cells |
@@ -566,7 +567,8 @@ classDiagram
 | struct | `Sheet3dTransitionRef` | `meshing/sheet3d_curve.rs:42` | fields: `map_v`, `rank` —  Borrowed transition mapping for one 2D vertical coarsening step `M_m -> M_{m+1}` in `sheet3d`. |
 | fn | `relax_edge_nodes` | `meshing/sheet3d_curve.rs:50` | `pub fn relax_edge_nodes( pos: &(dyn Fn(u32) -> [f64; 3] + Sync), cells: &[[u32; 4]], mut cand: EdgeNodes, ) -> (EdgeNodes, CurveReport)` —  Validates and relaxes candidate mid-edge geometry nodes `cand` (sorted by `[u32; 2]` vertex pair) |
 | fn | `project_sheet3d_curved_edges` | `meshing/sheet3d_curve.rs:65` | `pub fn project_sheet3d_curved_edges( cx: &Complex, m2: &SimplexMesh, bnd_edges2: &[(u32, u32, u32)], z_planes: &[f64], used_v: &[u32], slab_layer: &[Option<usize>], level_of_zp: &[usize], transitions: &[Sheet3dTransitionRef<'_>], mesh: &mut SimplexMesh, ) -> CurveReport` —  Projects midpoints of 2D boundary/interface edges `bnd_edges2` lying on `Curve::Circle` or |
-| fn | `apply_sheet3d_curved_edges` | `meshing/sheet3d_curve.rs:239` | `pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport` —  Reconstructs the prismatic 2D column/slab topology of the physical interior of a `MeshedGeom` |
+| fn | `project_sheet3d_curved_edges_periodic` | `meshing/sheet3d_curve.rs:93` | `pub fn project_sheet3d_curved_edges_periodic( cx: &Complex, m2: &SimplexMesh, bnd_edges2: &[(u32, u32, u32)], z_planes: &[f64], used_v: &[u32], slab_layer: &[Option<usize>], level_of_zp: &[usize], transitions: &[Sheet3dTransitionRef<'_>], periodic: &[(Vec<i32>, Vec<i32>, [f64; 3])], mesh: &mut SimplexMesh, ) -> CurveReport` —  Like [`project_sheet3d_curved_edges`], synchronizing curved mid-edge nodes and relaxation levels |
+| fn | `apply_sheet3d_curved_edges` | `meshing/sheet3d_curve.rs:318` | `pub fn apply_sheet3d_curved_edges(g: &mut MeshedGeom) -> CurveReport` —  Reconstructs the prismatic 2D column/slab topology of the physical interior of a `MeshedGeom` |
 | const | `DEFAULT_QUARTER_POINT_XI` | `meshing/singularity.rs:29` | `f64` —  Default Barsoum quarter-point parameter (`0.25` from the singular rim vertex). |
 | const | `CORNER_GRADING_P` | `meshing/singularity.rs:32` | `f64` —  Polynomial degree `p = 2` for Babuska corner grading (`p + 0.5 = 2.5`). |
 | const | `CORNER_RADIUS_FACTOR` | `meshing/singularity.rs:35` | `f64` —  Corner grading influence radius `R_c / h_edge = 2.0`. |
@@ -586,6 +588,7 @@ classDiagram
 | fn | `sheet_rim_vertices` | `meshing/singularity.rs:399` | `pub fn sheet_rim_vertices(mesh: &SimplexMesh, sheet_labels: &[i32]) -> Vec<bool>` —  Identifies all 1D open perimeter vertices (`rim_verts[v] == true`) of interior conductive sheet facets |
 | struct | `QuarterPointReport` | `meshing/singularity.rs:428` | fields: `rim_vertices`, `shifted_edges`, `qp_cells`, `clamped_curved_edges`, `unshifted_edges`, `min_interior_jacobian_ratio` —  Summary report returned by [`apply_quarter_point_nodes`]. |
 | fn | `apply_quarter_point_nodes` | `meshing/singularity.rs:470` | `pub fn apply_quarter_point_nodes( mesh: &mut SimplexMesh, rim_verts: &[bool], xi_qp: f64, curved_rim_edges: &BTreeSet<[u32; 2]>, ) -> QuarterPointReport` —  Applies 3D Barsoum quarter-point mid-edge geometry nodes (`EdgeNodes`) to `mesh`: |
+| fn | `apply_quarter_point_nodes_periodic` | `meshing/singularity.rs:482` | `pub fn apply_quarter_point_nodes_periodic( mesh: &mut SimplexMesh, rim_verts: &[bool], xi_qp: f64, curved_rim_edges: &BTreeSet<[u32; 2]>, periodic: &[(Vec<i32>, Vec<i32>, [f64; 3])], ) -> QuarterPointReport` —  Periodic-aware [`apply_quarter_point_nodes`], synchronizing quarter-point parameter clamping, |
 | fn | `SheetCorner::is_sharp` | `meshing/singularity.rs:147` | `pub fn is_sharp(&self) -> bool` —  True when the interior angle deviates genuinely from a smooth `180 deg` straight or filleted edge |
 | fn | `SheetCorner::h_at` | `meshing/singularity.rs:152` | `pub fn h_at(&self, p: [f64; 2]) -> f64` —  Graded element size `h(d)` at point `p` induced by this corner. |
 | fn | `SheetCorner::h_min` | `meshing/singularity.rs:158` | `pub fn h_min(&self) -> f64` —  Minimum floor size `h_min = 0.05 * h_edge` at the corner apex (`d = 0`). |

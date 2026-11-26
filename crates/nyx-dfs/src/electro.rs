@@ -4,9 +4,10 @@
 //! charged ones. Three stages (ADR 9): `assemble_electrostatics`, `solve_potential`, `electrostatics_fields`; `solve_electrostatics` runs them.
 
 use crate::common::{
-    assemble_boundary_load_mixed, assemble_farfield_robin_mixed, assemble_ie_outer_robin_mixed,
-    assemble_laplace_ie_mixed, assemble_source_mixed, cell_gradient, cell_tensor_mixed, cell_values_mixed,
-    check_boundary_labels_mixed, classify_ie_outer_facets_mixed, components, farfield_centroid_mixed,
+    assemble_boundary_load_field, assemble_boundary_load_mixed, assemble_boundary_mass_curved_aware,
+    assemble_farfield_robin_mixed, assemble_ie_outer_robin_mixed, assemble_laplace_ie_mixed, assemble_source_field,
+    assemble_source_mixed, cell_gradient, cell_tensor_mixed, cell_values_mixed, check_boundary_labels_mixed,
+    classify_ie_outer_facets_mixed, components, dirichlet_constraints_field, farfield_centroid_mixed,
     farfield_positive_measure_mixed, minmax, norm_of, plane_tensors, plane_tensors_mixed, resolve_ie_domains_mixed,
     sample_mixed_gradients_on_simplex, solve_spd_mixed,
 };
@@ -19,6 +20,7 @@ use femcore::linalg::driver::{dense_eigh, DirectSolver};
 use femcore::material::{self, M3};
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::props::{LinearSolver, TensorKind};
+use femcore::vvuq::{SourceField, UniformSource};
 use nyx_physics::{
     cell_fields_of, discretise, discretise_mixed, CapacitanceMatrixData, Discretisation, ElectroAmrData, Field, Mesh,
     MixedToSimplexProjector, Scalar, Solution, SolveResult, TlsMeta,
@@ -422,14 +424,23 @@ fn assemble_open_robin(
     Ok(coo.to_csr())
 }
 
-fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
+fn assemble_electrostatics_on_work_mesh_with_source<const D: usize, S: SourceField<D>>(
+    m_work: &Discretisation,
+    spec: &Problem,
+    source: &S,
+    robin_bcs: &[(Vec<i32>, f64)],
+) -> Result<ElectroAssembly, String> {
+    if !source.is_uniform() && m_work.dim != D {
+        return Err(format!("SourceField<{D}> called on {}D mesh", m_work.dim));
+    }
     let order = spec.order;
     check_boundary_labels(
         m_work,
         spec.bcs
             .iter()
             .filter(|b| !matches!(b.kind, BcKind::InfiniteElement(_)))
-            .flat_map(|b| b.labels.iter().copied()),
+            .flat_map(|b| b.labels.iter().copied())
+            .chain(robin_bcs.iter().flat_map(|(labs, _)| labs.iter().copied())),
     )?;
     let eps = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
     let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
@@ -474,8 +485,18 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
         assemble_laplace(m_work, order, &coeff)
     };
     let n = k.nrows();
-    let mut f = if rho.iter().any(|&r| r != 0.0) { assemble_source(m_work, order, &rho) } else { vec![0.0; n] };
+    let mut f = if source.is_uniform() {
+        if rho.iter().any(|&r| r != 0.0) {
+            assemble_source(m_work, order, &rho)
+        } else {
+            vec![0.0; n]
+        }
+    } else {
+        let extra = rho.iter().any(|&r| r != 0.0).then_some(rho.as_slice());
+        assemble_source_field::<D, S>(m_work, order, source, 0.0, extra)?
+    };
     let mut volt: BTreeMap<i32, f64> = BTreeMap::new();
+    let mut dirichlet_labels: BTreeSet<i32> = BTreeSet::new();
     let (lo, hi) = m_work.bbox();
     let default_origin = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])];
     let mut open_origins: BTreeMap<i32, [f64; 3]> = BTreeMap::new();
@@ -497,15 +518,18 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
             match &bc.kind {
                 BcKind::Potential(v) => {
                     volt.insert(lab, *v);
+                    dirichlet_labels.insert(lab);
                 }
                 BcKind::Ground => {
                     volt.insert(lab, 0.0);
+                    dirichlet_labels.insert(lab);
                 }
                 BcKind::Terminal(name) => {
                     if name.trim().is_empty() {
                         return Err("terminal condition requires a non-empty 'name'".into());
                     }
                     volt.entry(lab).or_insert(0.0);
+                    dirichlet_labels.insert(lab);
                 }
                 BcKind::Open { origin } => {
                     if m_work.dim != 3 {
@@ -520,8 +544,13 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
                     open_origins.insert(lab, r0);
                 }
                 BcKind::SurfaceCharge(s) => {
-                    if *s != 0.0 {
-                        let l = assemble_boundary_load(m_work, &[lab], *s, order);
+                    if source.is_uniform() {
+                        if *s != 0.0 {
+                            let l = assemble_boundary_load(m_work, &[lab], *s, order);
+                            f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                        }
+                    } else {
+                        let l = assemble_boundary_load_field::<D, S>(m_work, &[lab], order, source, 0.0)?;
                         f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
                     }
                 }
@@ -534,6 +563,17 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
     if !open_origins.is_empty() {
         let k_open = assemble_open_robin(m_work, order, &open_origins, tensor_perm.as_deref(), &coeff)?;
         k = k.add_scaled(&k_open, 1.0);
+    }
+    for (labs, alpha) in robin_bcs {
+        if *alpha != 0.0 {
+            has_open = true;
+            let k_rob = assemble_boundary_mass_curved_aware(m_work, labs, order, *alpha);
+            k = k.add_scaled(&k_rob, 1.0);
+        }
+        if !source.is_uniform() {
+            let l = assemble_boundary_load_field::<D, S>(m_work, labs, order, source, 0.0)?;
+            f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+        }
     }
     if volt.is_empty() && !has_open {
         return Err("electrostatics needs at least one potential, ground or terminal boundary".into());
@@ -553,6 +593,10 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
                 let k_far =
                     assemble_farfield_robin(m_work, &ff_labs, order, eff_ff_order, *decay_power, c, EPS0, eps_ff);
                 k = k.add_scaled(&k_far, 1.0);
+                if !source.is_uniform() {
+                    let l = assemble_boundary_load_field::<D, S>(m_work, &ff_labs, order, source, 0.0)?;
+                    f.iter_mut().zip(&l).for_each(|(a, b)| *a += b);
+                }
             }
         }
     }
@@ -563,7 +607,11 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
             has_open = true;
         }
     }
-    let (mut fixed, mut vals) = dirichlet_constraints(m_work, &volt, order);
+    let (mut fixed, mut vals) = if source.is_uniform() {
+        dirichlet_constraints(m_work, &volt, order)
+    } else {
+        dirichlet_constraints_field::<D, S>(m_work, &dirichlet_labels, order, source, 0.0)
+    };
     if !ie_rat_facets.is_empty() {
         if let (Some(mixed), Some(dof_map)) = (&mixed_opt, &dof_map_opt) {
             let fixed_set: BTreeSet<usize> = fixed.iter().copied().collect();
@@ -591,10 +639,24 @@ fn assemble_electrostatics_on_work_mesh(m_work: &Discretisation, spec: &Problem)
     Ok(ElectroAssembly { k, f, fixed, vals, volt, has_open })
 }
 
+pub fn assemble_electrostatics_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<ElectroAssembly, String> {
+    let (qp_mesh, _) = prepare_electro_mesh(mesh, spec);
+    let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
+    assemble_electrostatics_on_work_mesh_with_source::<D, S>(m_work, spec, source, &[])
+}
+
 pub fn assemble_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<ElectroAssembly, String> {
     let (qp_mesh, _) = prepare_electro_mesh(mesh, spec);
     let m_work = qp_mesh.as_ref().map_or(mesh, |(m, _, _)| m);
-    assemble_electrostatics_on_work_mesh(m_work, spec)
+    match m_work.dim {
+        2 => assemble_electrostatics_on_work_mesh_with_source::<2, UniformSource>(m_work, spec, &UniformSource, &[]),
+        3 => assemble_electrostatics_on_work_mesh_with_source::<3, UniformSource>(m_work, spec, &UniformSource, &[]),
+        d => Err(format!("unsupported mesh dimension {d} in electrostatics")),
+    }
 }
 
 /// Stage 2: the potential at every dof (and the note of the linear solver, if it has one). The backend is the one
@@ -1054,11 +1116,37 @@ fn compute_amr_indicators_on_work_mesh(
 }
 
 pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult, String> {
+    match mesh.dim {
+        2 => solve_electrostatics_with_source_and_robin::<2, UniformSource>(mesh, spec, &UniformSource, &[]),
+        3 => solve_electrostatics_with_source_and_robin::<3, UniformSource>(mesh, spec, &UniformSource, &[]),
+        d => Err(format!("unsupported mesh dimension {d} in electrostatics")),
+    }
+}
+
+pub fn solve_electrostatics_with_source<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+) -> Result<SolveResult, String> {
+    solve_electrostatics_with_source_and_robin::<D, S>(mesh, spec, source, &[])
+}
+
+pub fn solve_electrostatics_with_source_and_robin<const D: usize, S: SourceField<D>>(
+    mesh: &Discretisation,
+    spec: &Problem,
+    source: &S,
+    robin_bcs: &[(Vec<i32>, f64)],
+) -> Result<SolveResult, String> {
     match spec.formulation.as_str() {
         "" | "volumetric_fem" => {}
-        "planar_bem" => return crate::planar_bem::solve_planar_bem(mesh, spec),
+        "planar_bem" => {
+            if !source.is_uniform() || !robin_bcs.is_empty() {
+                return Err("planar_bem does not support volumetric SourceField or explicit Robin BCs".into());
+            }
+            return crate::planar_bem::solve_planar_bem(mesh, spec);
+        }
         "auto" => {
-            if crate::planar_bem::can_use_planar_bem(mesh, spec) {
+            if source.is_uniform() && robin_bcs.is_empty() && crate::planar_bem::can_use_planar_bem(mesh, spec) {
                 return crate::planar_bem::solve_planar_bem(mesh, spec);
             }
         }
@@ -1078,7 +1166,7 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
         let rho = spec.materials.cell_values(m_work, "rho_v", Some(0.0))?;
         let has_sigma_s = spec.bcs.iter().any(|bc| matches!(bc.kind, BcKind::SurfaceCharge(s) if s.abs() > 0.0));
-        if rho.iter().any(|&x| x.abs() > 0.0) || has_sigma_s {
+        if rho.iter().any(|&x| x.abs() > 0.0) || has_sigma_s || !source.is_uniform() {
             return Err(
                 "flux_bounds / prager_synge requires source-free electrostatics (rho_v == 0 and surface_charge == 0)"
                     .into(),
@@ -1086,7 +1174,7 @@ pub fn solve_electrostatics(mesh: &Discretisation, spec: &Problem) -> Result<Sol
         }
     }
 
-    let asm = assemble_electrostatics_on_work_mesh(m_work, spec)?;
+    let asm = assemble_electrostatics_on_work_mesh_with_source::<D, S>(m_work, spec, source, robin_bcs)?;
     let eps_rel = spec.materials.cell_values(m_work, "eps_r", Some(1.0))?;
     let eps_tensors_rel: Option<Vec<M3>> = if spec.materials.has_tensor(TensorKind::Permittivity) {
         Some(plane_tensors(m_work, spec.materials.cell_tensor(m_work, TensorKind::Permittivity, Some(1.0))?))

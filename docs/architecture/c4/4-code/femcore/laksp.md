@@ -32,6 +32,7 @@ C4 level 4 (code) of the component **Krylov solvers** (`femcore.laksp`) in the c
 | Component | Modules | Items |
 |---|---|---|
 | [ems: Native mixed-cell EM](../ems/mixed.md) | linalg::ksp, linalg::ksp::gmres | Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances |
+| [Direct solvers](./ladirect.md) | linalg::ksp, linalg::ksp::gmres | Gmres, GmresOptions, PcSide, Tolerances |
 | [Linear algebra driver](./ladriver.md) | linalg::ksp, linalg::ksp::gmres | Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances |
 | [Eigensolvers](./laeigen.md) | linalg::ksp, linalg::ksp::gmres | Gmres, GmresOptions, Tolerances |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::ksp, linalg::ksp::gmres | ConvergedReason, Gmres, GmresOptions, PcSide, Tolerances |

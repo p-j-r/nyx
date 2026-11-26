@@ -2,16 +2,16 @@
 
 C4 level 4 (code) of the component **Queries and selectors** (`geom.queries`) in the container **geom** (crate `geom`). [Component view of the container](../../3-components/geom.md) · [All code pages](../README.md)
 
-> Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data.
+> Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, flat 2D BVH with depth spill stack, and simulation operations as data.
 
-**Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md)  
-**Size:** 5 files, 2999 lines.
+**Decisions:** [ADR 2](../../../adr/0002-geometry-as-named-feature-list.md), [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 7](../../../adr/0007-metric-adaptation-and-structured-pml.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 5 files, 2976 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/geom/src/bvh.rs` | 269 |  |
+| `crates/geom/src/bvh.rs` | 246 |  |
 | `crates/geom/src/labels.rs` | 254 | `LabelMap`: the compiled, deterministic mapping between names and the integer labels the solvers consume. Domain label = region (1-based in overlay order, pins honoured and checked); boundary label = one per facet (ordered by provenance,... |
 | `crates/geom/src/query.rs` | 405 | Exact queries on an evaluated 2D model: measures, curve evaluation with first and second derivatives, curvature radii, chord / facet deviation, edge discretisation by deviation and size, midpoint projection (where a quadratic element put... |
 | `crates/geom/src/select.rs` | 1145 | Selectors: small serialisable rules that resolve against an evaluated complex to typed entity sets (regions, facets, vertices). The text form (`name(core.top) \| interface(Si, BOX)`) parses to the serde form and prints back deterministica... |
@@ -300,7 +300,7 @@ classDiagram
 | struct | `Bbox2` | `bvh.rs:12` | fields: `lo`, `hi` —  2D axis-aligned bounding box in the planar curve `(u, v)` frame. |
 | struct | `BvhNode2` | `bvh.rs:97` | fields: `bbox`, `left_or_start`, `right`, `count` —  One node in a flat `Vec`-backed 2D AABB BVH. |
 | struct | `AabbBvh2` | `bvh.rs:110` | fields: `nodes`, `items`, `item_boxes` —  Flat, deterministic 2D AABB bounding volume hierarchy. |
-| struct | `ComplexBvh` | `bvh.rs:262` | fields: `regions`, `loops`, `edges`, `loop_edge_bvhs` —  Spatial acceleration hierarchy attached to a 2D [`crate::complex::Complex`] (in the 2D curve `(u, v)` frame). |
+| struct | `ComplexBvh` | `bvh.rs:239` | fields: `regions`, `loops`, `edges`, `loop_edge_bvhs` —  Spatial acceleration hierarchy attached to a 2D [`crate::complex::Complex`] (in the 2D curve `(u, v)` frame). |
 | fn | `Bbox2::new` | `bvh.rs:21` | `pub fn new(lo: V2, hi: V2) -> Self` |
 | fn | `Bbox2::from_aabb_xy` | `bvh.rs:26` | `pub fn from_aabb_xy(b: &Aabb) -> Self` |
 | fn | `Bbox2::is_empty` | `bvh.rs:35` | `pub fn is_empty(&self) -> bool` |
@@ -313,9 +313,9 @@ classDiagram
 | fn | `Bbox2::center` | `bvh.rs:90` | `pub fn center(&self) -> V2` |
 | fn | `AabbBvh2::build` | `bvh.rs:118` | `pub fn build(item_boxes: Vec<Bbox2>) -> Self` —  Builds a deterministic top-down median-split 2D BVH over `item_boxes`. |
 | fn | `AabbBvh2::is_empty` | `bvh.rs:165` | `pub fn is_empty(&self) -> bool` |
-| fn | `AabbBvh2::query_point` | `bvh.rs:171` | `pub fn query_point(&self, p: V2, pad: f64, mut visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB (padded by `pad`) contains `p`. |
-| fn | `AabbBvh2::query_box` | `bvh.rs:201` | `pub fn query_box(&self, target: &Bbox2, pad: f64, mut visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB overlaps `target` within `pad`. |
-| fn | `AabbBvh2::query_ray_x` | `bvh.rs:231` | `pub fn query_ray_x(&self, p: V2, pad: f64, mut visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB overlaps the horizontal ray `[p[0], +inf) x {p[1]}` within `pad`. |
+| fn | `AabbBvh2::query_point` | `bvh.rs:220` | `pub fn query_point(&self, p: V2, pad: f64, visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB (padded by `pad`) contains `p`. |
+| fn | `AabbBvh2::query_box` | `bvh.rs:226` | `pub fn query_box(&self, target: &Bbox2, pad: f64, visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB overlaps `target` within `pad`. |
+| fn | `AabbBvh2::query_ray_x` | `bvh.rs:232` | `pub fn query_ray_x(&self, p: V2, pad: f64, visit: impl FnMut(u32))` —  Visits all item indices whose 2D AABB overlaps the horizontal ray `[p[0], +inf) x {p[1]}` within `pad`. |
 | struct | `DomainLabel` | `labels.rs:12` | fields: `id`, `name`, `region`, `kind`, `pinned` |
 | struct | `BoundaryLabel` | `labels.rs:21` | fields: `id`, `name`, `entities`, `pinned` |
 | struct | `Group` | `labels.rs:31` | fields: `name`, `rule`, `labels` —  A named group of boundary labels and the rule that produced it. |

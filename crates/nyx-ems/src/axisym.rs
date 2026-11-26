@@ -27,8 +27,7 @@ use femcore::linalg::csr::{c, CCoo, CCsr, C};
 use femcore::linalg::driver::eigs_complex;
 use femcore::mesh::mixed::MixedDiscretisation;
 use femcore::optical::{fine_rule, EPS0, MU0};
-use femcore::pml::{radial_coordinate, stretch};
-use femcore::props::{Materials, Pml, PmlDir, TensorKind};
+use femcore::props::{Materials, Pml, TensorKind};
 use femcore::section::plane_tensor;
 use nyx_physics::{
     cell_fields_of, Discretisation, Field, Mesh, MixedToSimplexProjector, Scalar, Solution, SolveResult,
@@ -99,44 +98,12 @@ impl AxiMaterial {
         Ok(AxiMaterial { eps, mu, eps_c3, mu_inv_c3, pml })
     }
 
-    /// Legacy cell-centroid Cartesian `r`/`z` stretch helper retained for callers constructing `AxiMaterial` manually.
+    /// Attaches a curvilinear/Cartesian PML table (`EmPmlTable`) so assembly and field evaluation
+    /// sample `s_theta = r_tilde / r` at Gauss quadrature points (R6d).
     pub fn with_pml(mut self, mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> AxiMaterial {
-        let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
-        for ci in 0..mesh.n_cells() {
-            let l = mesh.cell_labels[ci];
-            if pml.get(&l).is_some_and(|p| p.x != PmlDir::Off || p.z != PmlDir::Off) {
-                let e = boxes.entry(l).or_insert(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]));
-                for &v in mesh.cell(ci) {
-                    let pt = mesh.point(v as usize);
-                    for k in 0..2 {
-                        e.0[k] = e.0[k].min(pt[k]);
-                        e.1[k] = e.1[k].max(pt[k]);
-                    }
-                }
-            }
-        }
-        for ci in 0..mesh.n_cells() {
-            let l = mesh.cell_labels[ci];
-            let (Some(p), Some((lo, hi))) = (pml.get(&l), boxes.get(&l)) else { continue };
-            let mut cen = [0.0; 2];
-            for &v in mesh.cell(ci) {
-                for k in 0..2 {
-                    cen[k] += mesh.point(v as usize)[k] / 3.0;
-                }
-            }
-            let (sr, sz) = stretch(p, [p.x, p.z], cen, *lo, *hi);
-            let r = cen[0].max(1e-30);
-            let rt = radial_coordinate(p, r, lo[0], hi[0]);
-            let st = rt / r;
-            let lam = [st * sz / sr, sr * st / sz, sr * sz / st];
-            for k in 0..3 {
-                self.eps[ci][k] *= lam[k];
-                self.mu[ci][k] *= lam[k];
-            }
-            self.eps_c3[ci] = diag_to_c3(self.eps[ci]);
-            self.mu_inv_c3[ci] = inv_diag_to_c3(self.mu[ci]);
-        }
-        self.pml = None;
+        let m = Materials { pml: pml.clone(), ..Default::default() };
+        let table = EmPmlTable::from_simplex(mesh, &m, 1e9, true, false);
+        self.pml = table.has_any().then_some(table);
         self
     }
 }
@@ -345,6 +312,12 @@ pub fn assemble_axisym_with_bcs(
     ibc_bcs: &[SurfaceImpedanceBc],
     pmc_labels: &[i32],
 ) -> Result<AxiAssembly, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex axisymmetric kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     if mesh.dim != 2 {
         return Err("an axisymmetric problem needs a 2D mesh in (r, z)".into());
     }
@@ -596,6 +569,12 @@ pub fn axisym_fields_cells(
 
 /// Solves an `AxisymmetricModes` study on a `SimplexMesh` (`Discretisation`).
 pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<SolveResult, String> {
+    if mesh.has_curved() {
+        return Err(
+            "curved meshes are not supported by simplex axisymmetric kernels; use mixed/isoparametric path or a straight mesh"
+                .into(),
+        );
+    }
     let t0 = Instant::now();
     let Study::AxisymmetricModes { f_search, azimuthal_order, n_modes } = problem.study.clone() else {
         return Err("an axisymmetric problem needs an AxisymmetricModes study".into());

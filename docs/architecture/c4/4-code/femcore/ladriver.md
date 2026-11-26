@@ -44,6 +44,7 @@ C4 level 4 (code) of the component **Linear algebra driver** (`femcore.ladriver`
 | [ems: Complex-mode kernel](../ems/modescx.md) | linalg::driver | eigs_complex |
 | [engine: Job runner and queue](../engine/jobs.md) | linalg::driver | dense_eigh |
 | [Finite-element basics](./fem.md) | linalg::driver | DirectSolver, dense_eigh |
+| [Direct solvers](./ladirect.md) | linalg::pc | Jacobi |
 | [Eigensolvers](./laeigen.md) | linalg::driver | DirectSolver |
 | [Time, nonlinear, sweeps](./laother.md) | linalg::driver | DirectSolver, thin_svd_c64 |
 | [Preconditioners](./laprecond.md) | linalg::driver | DirectSolver |

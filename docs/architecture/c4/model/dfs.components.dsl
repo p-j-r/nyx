@@ -3,7 +3,7 @@ adapter = component "Physics adapter" "The Physics implementation of dfs: descri
     properties {
         "adr" "41, 25, 103"
         "code" "crates/nyx-dfs/src: lib.rs"
-        "lines" "632"
+        "lines" "652"
         "codeDiagram" "4-code/dfs/adapter.md"
     }
 }
@@ -15,35 +15,35 @@ problem = component "Typed problem" "The typed dfs problem the kernels read, dec
         "codeDiagram" "4-code/dfs/problem.md"
     }
 }
-heat = component "Heat kernel" "Heat transfer on P1/P2 simplices, stationary and transient." "Rust modules" {
+heat = component "Heat kernel" "Heat transfer on P1/P2 simplices, stationary and transient (`SourceField` MMS, BDF2 time-varying forcing, R32 curved guard)." "Rust modules" {
     properties {
-        "adr" "41, 9"
+        "adr" "41, 9, 132"
         "code" "crates/nyx-dfs/src: heat.rs"
-        "lines" "712"
+        "lines" "987"
         "codeDiagram" "4-code/dfs/heat.md"
     }
 }
-electro = component "Electrostatics kernel" "Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions." "Rust modules" {
+electro = component "Electrostatics kernel" "Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, `SourceField` MMS, and multi-RHS terminal conditions." "Rust modules" {
     properties {
-        "adr" "41, 9, 103"
+        "adr" "41, 9, 103, 132"
         "code" "crates/nyx-dfs/src: ac_loss.rs, electro.rs, planar_bem.rs"
-        "lines" "3979"
+        "lines" "4067"
         "codeDiagram" "4-code/dfs/electro.md"
     }
 }
-magneto = component "Magnetostatics kernel" "Gauge-stabilized London magnetostatics (2D cross-section, planar stream function, mixed 3D A-phi) and inductance matrix extraction." "Rust modules" {
+magneto = component "Magnetostatics kernel" "Gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`), `SourceField` MMS, R32 guard, and inductance matrix extraction." "Rust modules" {
     properties {
-        "adr" "103"
+        "adr" "103, 132"
         "code" "crates/nyx-dfs/src: magneto.rs"
-        "lines" "2123"
+        "lines" "2492"
         "codeDiagram" "4-code/dfs/magneto.md"
     }
 }
-common = component "Shared helpers" "Per-cell gradients and values shared by the heat and electrostatics kernels." "Rust modules" {
+common = component "Shared helpers" "Per-cell gradients, curved helpers, and values shared by the heat and electrostatics kernels." "Rust modules" {
     properties {
-        "adr" "41"
+        "adr" "41, 132"
         "code" "crates/nyx-dfs/src: common.rs"
-        "lines" "1596"
+        "lines" "2061"
         "codeDiagram" "4-code/dfs/common.md"
     }
 }

@@ -973,6 +973,23 @@ pub fn eval_facet_tangential_basis_3d_mixed(
     Ok((ci, area, n_out, bnd_dofs, pts_x, weights, psi_q))
 }
 
+fn facet_is_curved_mixed(mesh: &MixedDiscretisation, f: usize) -> bool {
+    if !mesh.has_curved() {
+        return false;
+    }
+    let fv = mesh.facet(f);
+    let le: &[(usize, usize)] = match mesh.facet_type(f) {
+        FacetType::Edge2 => &[(0, 1)],
+        FacetType::Tri3 => &TRI_EDGES,
+        FacetType::Quad4 => &QUAD_EDGES,
+    };
+    if le.iter().any(|&(i, j)| mesh.edge_index(fv[i], fv[j]).is_some_and(|e| mesh.edge_node(e).is_some())) {
+        return true;
+    }
+    mesh.facet_type(f) == FacetType::Quad4
+        && mesh.quad_face_index([fv[0], fv[1], fv[2], fv[3]]).is_some_and(|qf| mesh.quad_face_node(qf).is_some())
+}
+
 fn facet_tri_decomposition(fv: &[u32]) -> Vec<[u32; 3]> {
     if fv.len() == 3 {
         vec![sorted3(fv[0], fv[1], fv[2])]
@@ -1557,6 +1574,16 @@ pub fn assemble_waveports_3d_mixed(
         }
         if p_facets.is_empty() {
             return Err(format!("waveport '{}' selects no exterior facets", bc.name));
+        }
+        for &f in &p_facets {
+            let fv = mesh.facet(f);
+            let ci = face_to_cell[&MixedFaceKey::from_slice(fv)];
+            if facet_is_curved_mixed(mesh, f) || mesh.cell_is_curved(ci) {
+                return Err(format!(
+                    "waveport '{}' does not support curved port facets or adjacent curved cells",
+                    bc.name
+                ));
+            }
         }
 
         // Compute port plane frame `(u_hat, v_hat, n_out)`

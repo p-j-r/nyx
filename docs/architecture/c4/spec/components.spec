@@ -52,7 +52,7 @@ apiref    | API reference | apiref.rs | 89, 57 | One Markdown page per engine co
 meshing   | Meshing seam | meshing.rs pml.rs preview.rs amr.rs | 54, 50, 92 | MeshRequest to MeshedModel (mesh, names, label resolver); the only caller of the femcore mesher; absorbing layers across the two halves of a project; trial meshes and edit checks for the feedback while editing (ADR 92).
 materials | Materials | materials.rs material_fetch.rs | 58, 104 | The material library plus the materials a project carries, resolved at the study wavelength or BCS superconducting operating point.
 analyse   | Analyses | analyse.rs figure.rs | 56, 99, 103, 105 | Runs the analyses of nyx-analysis on the latest result of a physics, and draws its modes as a figure (SVG or PNG).
-resultsIO | Results files | h5io.rs xdmf.rs results_file.rs | 62, 63, 99, 107 | HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description, and opening a results file as a project with its results.
+resultsIO | Results files | h5io.rs xdmf.rs results_file.rs | 62, 63, 99, 107, 132 | HDF5 results via pure-Rust hdf5-pure and nyx-storage (packed 5D Shuffle+LZF layout L2 and per-solution datasets), the XDMF description (`CurvedEdgesIgnored` R32 note), and opening a results file as a project with its results.
 storeLink | Store link | store_link.rs | 39, 59, 130 | Binds the project to a workflow of the workspace, commits versions, records runs (card with swept 3D detection and metrics made here).
 registry  | Registry and facade | lib.rs | 25 | The physics compiled in (cargo features dfs, sms, ems) and the facade that re-exports what a front-end draws with.
 edge engine.project -> @projectFile | Saves and loads
@@ -70,34 +70,34 @@ testsupport  | Test support | testkit.rs contract.rs | 10, 19 | The golden-file 
 [dfs | nyx-dfs | nyx_dfs]
 adapter  | Physics adapter | lib.rs | 41, 25, 103 | The Physics implementation of dfs: descriptors, validation, solve entry.
 problem  | Typed problem | problem.rs | 41, 103 | The typed dfs problem the kernels read, decoded from the ProblemSpec envelope.
-heat     | Heat kernel | heat.rs | 41, 9 | Heat transfer on P1/P2 simplices, stationary and transient.
-electro  | Electrostatics kernel | electro.rs ac_loss.rs planar_bem.rs | 41, 9, 103 | Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, and multi-RHS terminal conditions.
-magneto  | Magnetostatics kernel | magneto.rs | 103 | Gauge-stabilized London magnetostatics (2D cross-section, planar stream function, mixed 3D A-phi) and inductance matrix extraction.
-common   | Shared helpers | common.rs | 41 | Per-cell gradients and values shared by the heat and electrostatics kernels.
+heat     | Heat kernel | heat.rs | 41, 9, 132 | Heat transfer on P1/P2 simplices, stationary and transient (`SourceField` MMS, BDF2 time-varying forcing, R32 curved guard).
+electro  | Electrostatics kernel | electro.rs ac_loss.rs planar_bem.rs | 41, 9, 103, 132 | Electrostatics on P1/P2 simplices with fixed-potential, surface-charge, `SourceField` MMS, and multi-RHS terminal conditions.
+magneto  | Magnetostatics kernel | magneto.rs | 103, 132 | Gauge-stabilized London magnetostatics (`cross_section`, `planar_stream`, `mixed_3d`), `SourceField` MMS, R32 guard, and inductance matrix extraction.
+common   | Shared helpers | common.rs | 41, 132 | Per-cell gradients, curved helpers, and values shared by the heat and electrostatics kernels.
 
 [sms | nyx-sms | nyx_sms]
-adapter       | Physics adapter | lib.rs | 42, 25, 68, 101, 129 | The Physics implementation of sms with five studies (static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, driven frequency sweep): descriptors, validation, solve entry.
-problem       | Typed problem | problem.rs | 42, 68, 101, 129 | The typed sms problem the kernels read, decoded from the envelope.
-solid         | Solid kernel | solid.rs | 42, 9 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra and MixedDiscretisation: static solve and eigenfrequencies.
-piezo         | Piezoelectric kernel | piezo.rs piezo_mat.rs piezo_asm.rs piezo_driven.rs | 129, 106, 128 | Coupled piezoelectric `(u, phi)` 2D/3D static, eigenfrequency (Schur Krylov-Schur & damped QEP), Schur-AMG Right-FGMRES 3D static, and driven frequency-domain multi-port `Y`/`Z`/`S` PROM kernels on `SimplexMesh` and `MixedDiscretisation`.
-crosssection  | Cross-section study kernel | cross_section.rs | 43, 68, 69, 80, 101, 129 | Cross-section study kernel (`axisymmetric_eigenfrequency` on the (r, z) half plane and 2.5D `modes` on the (x, z) cross-section): elastic and coupled piezoelectric constraints, axis and periodic conditions, absorbing layers, complex eigensolve and fields.
-axisym        | Axisymmetric kernel | axisym.rs | 43, 69, 80, 129 | Elastic and `6mm`/`inf m` piezoelectric modes of a body of revolution on its half-plane cross-section, with axis regularity (`phi = 0` at `|m| >= 1`), rotational invariance check, cylindrical PML stretch, and energy weights.
-waveguide     | Waveguide kernel | waveguide.rs | 101, 129 | Elastic and coupled piezoelectric `(u_x, u_z, u_y, phi)` modes of a 2.5D waveguide on its 2D (x, z) cross-section (`exp(-i q y)`), with full 3D anisotropic orientation and planar PML stretching.
-floquet       | Floquet kernel | floquet.rs | 42 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals).
-pml           | Absorbing-layer kernel | pml.rs | 42, 101 | Eigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries.
-lrb           | Low-reflecting boundary | lrb.rs | 42 | Low-reflecting boundaries for solid mechanics.
+adapter       | Physics adapter | lib.rs | 42, 25, 68, 101, 129, 132 | The Physics implementation of sms with five studies (static, eigenfrequency, axisymmetric eigenfrequency, waveguide modes, driven frequency sweep): descriptors, validation, R32 curved guard, solve entry.
+problem       | Typed problem | problem.rs | 42, 68, 101, 129, 132 | The typed sms problem the kernels read, decoded from the envelope, with straight-simplex checks.
+solid         | Solid kernel | solid.rs | 42, 9, 132 | Linear elastic solid mechanics on P1/P2 triangles and tetrahedra and MixedDiscretisation: static (`SourceField` MMS) solve and eigenfrequencies.
+piezo         | Piezoelectric kernel | piezo.rs piezo_mat.rs piezo_asm.rs piezo_driven.rs | 129, 106, 128, 132 | Coupled piezoelectric `(u, phi)` constitutive condensation, simplex/mixed assembly, equilibrated direct / Schur Krylov-Schur / QEP / Schur-AMG Right-FGMRES static/eigen solvers, and driven multi-port `Y`/`Z`/`S` PROM sweep on `SimplexMesh` and `MixedDiscretisation`.
+crosssection  | Cross-section study kernel | cross_section.rs | 43, 68, 69, 80, 101, 129, 132 | Cross-section study kernel (`axisymmetric_eigenfrequency` on the (r, z) half plane and 2.5D `modes` on the (x, z) cross-section): elastic and coupled piezoelectric constraints (`R6a` MPC), axis and periodic conditions, absorbing layers, complex eigensolve and fields.
+axisym        | Axisymmetric kernel | axisym.rs | 43, 69, 80, 129, 132 | Elastic and `6mm`/`inf m` piezoelectric modes of a body of revolution on its half-plane cross-section, with exact `m=±1` axis MPC (`R6a`), rotational invariance check, cylindrical PML stretch (`R6d`), and energy weights.
+waveguide     | Waveguide kernel | waveguide.rs | 101, 129, 132 | Elastic and coupled piezoelectric `(u_x, u_z, u_y, phi)` modes of a 2.5D waveguide on its 2D (x, z) cross-section (`exp(-i q y)`), with full 3D anisotropic orientation and planar PML stretching.
+floquet       | Floquet kernel | floquet.rs | 42, 132 | Eigenfrequencies of a solid with Floquet-periodic boundaries (phononic crystals).
+pml           | Absorbing-layer kernel | pml.rs | 42, 101, 132 | Eigenfrequencies of elastic bodies with perfectly matched layers and optional Floquet-periodic boundaries.
+lrb           | Low-reflecting boundary | lrb.rs | 42, 132 | Low-reflecting boundaries for solid mechanics (with `r`-weighted axisymmetric `damping_matrix`, R6b).
 
 [ems | nyx-ems | nyx_ems]
 adapter   | Physics adapter | lib.rs | 45, 25, 104, 106 | The Physics implementation of ems: descriptors, validation, solve entry.
 problem   | Typed problem | problem.rs | 45, 104, 106 | The typed ems problem the kernels read, decoded from the envelope.
-modes     | Mode kernel | modes.rs | 45, 9 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed).
-modescx   | Complex-mode kernel | modes_complex.rs | 45 | Complex-valued mode analysis: lossy media and perfectly matched layers.
-axisym    | Axisymmetric kernel | axisym.rs | 46 | Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities).
-cavity    | 3D cavity kernel | cavity.rs bloch.rs | 45, 104 | Electromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export.
-ibc       | Thin-film IBC and Josephson ROM | ibc.rs rom.rs | 104 | Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata.
-driven    | Driven frequency-domain and PROM | driven.rs ports.rs | 106 | Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations and Hermite Tangential Galerkin PROM sweep acceleration.
-mixed     | Native mixed-cell EM | mixed_ops.rs | 128, 45 | Native mixed-cell Maxwell assemblers, Gauss-point curvilinear PML pullbacks, mixed ports/IBC/ROM, and Ams/AmsP2 curl-curl drivers.
-optical   | Optical mode sets | optical.rs | 45, 21 | The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields.
+modes     | Mode kernel | modes.rs | 45, 9, 132 | Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed, R32 straight-mesh check).
+modescx   | Complex-mode kernel | modes_complex.rs | 45, 132 | Complex-valued mode analysis: lossy media and perfectly matched layers (`+4` Krylov + `layer_fraction` filter, R32 check).
+axisym    | Axisymmetric kernel | axisym.rs | 46, 132 | Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities, `R6d` quadrature `s_theta`).
+cavity    | 3D cavity kernel | cavity.rs bloch.rs | 45, 104, 132 | Electromagnetic eigenmodes of 3D cavities (`SourceField` MMS, R34 curved post-integrals) and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export.
+ibc       | Thin-film IBC and Josephson ROM | ibc.rs rom.rs | 104, 132 | Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid, curved Jacobian integrals), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata.
+driven    | Driven frequency-domain and PROM | driven.rs ports.rs | 106, 132 | Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations (curved 2D port integrals), curvilinear PML power `P_pml`, and Hermite Tangential Galerkin PROM sweep acceleration.
+mixed     | Native mixed-cell EM | mixed_ops.rs | 128, 45, 132 | Native mixed-cell Maxwell assemblers, Gauss-point curvilinear PML pullbacks, mixed ports/IBC/ROM, and Ams/AmsP2 curl-curl drivers.
+optical   | Optical mode sets | optical.rs | 45, 21, 132 | The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields.
 
 [analysis | nyx-analysis | nyx_analysis]
 api           | Analysis API | lib.rs | 56, 103, 105 | The entry points an engine calls: an analysis is a function of a SolveResult and its mesh.
@@ -134,9 +134,9 @@ edge storage.xdmf -> @resultsFile | Writes .xdmf index
 [geom | geom | geom]
 featurelist  | Feature list | model.rs expr.rs print.rs error.rs lib.rs gds.rs | 2, 3, 63 | The serialisable feature list (single source of truth for code and GUI), its operations and validation, parameter expressions, printing as Rust builder calls, and the error type.
 evaluation   | Evaluation | eval.rs diff.rs scene.rs | 2, 6 | The Evaluator turns a feature list into an evaluated model at a chosen tier with a cache; scenes instantiate profiles with transforms and patterns; change detection between evaluations for sweeps.
-kernel2d     | 2D kernel | prim.rs curve.rs arrange.rs complex.rs poly_batch.rs | 3, 18, 102 | Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification.
-kernel3d     | 3D kernel | stack.rs planar.rs topo3.rs | 3, 1 | Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model.
-queries      | Queries and selectors | query.rs select.rs labels.rs sim.rs bvh.rs | 2, 3, 7, 18 | Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data.
+kernel2d     | 2D kernel | prim.rs curve.rs arrange.rs complex.rs poly_batch.rs | 3, 18, 102, 132 | Primitives, planar curves, the planar arrangement of all boundary pieces (`Verts::cluster`, exact conic ray crossing), the evaluated region complex (`check3` quadric flux), and batch polygon ring cleanup with shared-corner-pinned RDP simplification.
+kernel3d     | 3D kernel | stack.rs planar.rs topo3.rs | 3, 1, 132 | Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model (shell edge pairing).
+queries      | Queries and selectors | query.rs select.rs labels.rs sim.rs bvh.rs | 2, 3, 7, 18, 132 | Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, flat 2D BVH with depth spill stack, and simulation operations as data.
 tessellation | Display tessellation | tess.rs | 3 | Tessellation for the viewport and picking only, never for meshing.
 math         | Math helpers | math.rs | 3 | Small vector, box and similarity-transform helpers.
 
@@ -144,8 +144,8 @@ math         | Math helpers | math.rs | 3 | Small vector, box and similarity-tra
 mesh        | Mesh | mesh/mod.rs mesh/cells.rs mesh/mixed.rs mesh/exchange.rs mesh/view.rs mesh/quality.rs | 4, 5, 32, 128 | The native mixed-cell mesh, MixedDiscretisation, the exchange mesh the physics take, simplex meshes with their numbering of unknowns, draw-only meshes and quality statistics.
 meshio      | Mesh files | mesh/io/ | 16 | The compact lossless .fmsh format for meshes and results and its entropy coder.
 fixtures    | Fixtures and test kit | mesh/fixtures.rs testkit/ | 41, 10, 60 | Test meshes and the SOI wire cross-section used by the tests of every physics crate.
-meshing     | Meshing facade | meshing/mod.rs meshing/request.rs meshing/sizing.rs meshing/physics_size.rs meshing/geomdrive.rs meshing/mesher.rs meshing/sheet3d_amr.rs meshing/sheet3d_curve.rs meshing/singularity.rs | 6, 17, 54 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core.
-meshing3d   | 3D meshing | meshing/mesher3d.rs meshing/refine3d.rs meshing/geomdrive3.rs meshing/adapt3d.rs meshing/curve3.rs meshing/sheet3d.rs | 40, 50, 51, 55, 82, 83, 102 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing.
+meshing     | Meshing facade | meshing/mod.rs meshing/request.rs meshing/sizing.rs meshing/physics_size.rs meshing/geomdrive.rs meshing/mesher.rs meshing/sheet3d_amr.rs meshing/sheet3d_curve.rs meshing/singularity.rs | 6, 17, 54, 132 | MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, 2D triangulation core (`R29` slanted wall splitting), and periodic twin curved-arc/QP sync (`R33`).
+meshing3d   | 3D meshing | meshing/mesher3d.rs meshing/refine3d.rs meshing/geomdrive3.rs meshing/adapt3d.rs meshing/curve3.rs meshing/sheet3d.rs | 40, 50, 51, 55, 82, 83, 102, 132 | The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model (`R33` crease projection), adaptive meshing driven by exact faces, face sizes and max_dev, Bernstein/`q8` curved Jacobian certification & periodic mid-edge sync, and conformal 3D sheet-stack meshing.
 structpml   | Structured absorbing layers | meshing/pml_box.rs meshing/pml_geom.rs meshing/pml_geom3.rs meshing/pml3.rs meshing/pml_cyl.rs meshing/pml_sphere.rs | 7, 52, 5, 128 | Structured PML around a box-shaped, cylindrical, spherical, or geom-model mesh: prisms, hexahedra, quads, labels.
 meshcheck   | Meshing validation harness | meshing/validate/ | 7 | A small independent scalar Helmholtz solver with PML used to validate meshes.
 metric      | Metric fields | adapt/mod.rs adapt/metric.rs adapt/field.rs adapt/field3.rs adapt/work.rs adapt/timer.rs | 7, 5 | Riemannian metrics in 2D and 3D, metric fields, the simplex working mesh and per-phase timers.
@@ -154,7 +154,7 @@ adaptdrive  | Adaptation drivers | adapt/drive.rs adapt/drive3.rs adapt/geom.rs 
 estimators  | Error estimators | adapt/estimate.rs adapt/estimate3.rs adapt/maxwell.rs adapt/electro.rs | 7, 17, 53 | Error estimation and the solve-estimate-adapt loop; the Maxwell residual estimator for edge elements.
 lacore      | Matrices and vectors | linalg/mod.rs linalg/csr.rs linalg/csr/ linalg/bsr.rs linalg/basis.rs linalg/vecops.rs linalg/scalar.rs linalg/kernels.rs linalg/par.rs linalg/rng.rs linalg/linop.rs linalg/mm.rs linalg/bundle.rs linalg/dense/ linalg/faer_glue.rs linalg/maxwell.rs linalg/equilibrate.rs | 33, 8, 11, 129 | The one matrix type Csr over a generic scalar, block storage, multivector kernels, operator interfaces, dense helpers, Matrix Market, symmetric Ruiz equilibration, problem bundles and test-problem generators.
 ladriver    | Linear algebra driver | linalg/driver.rs linalg/problem.rs linalg/pc.rs | 33 | The door the physics kernels use: a direct solve, eigenpairs near a shift, and the solver interface for models.
-ladirect    | Direct solvers | linalg/direct.rs linalg/sparse_lu.rs linalg/blr.rs linalg/lowrank.rs linalg/mixed.rs linalg/ordering.rs | 33, 8 | Shifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection.
+ladirect    | Direct solvers | linalg/direct.rs linalg/sparse_lu.rs linalg/blr.rs linalg/lowrank.rs linalg/mixed.rs linalg/ordering.rs | 33, 8, 132 | Shifted sparse direct solves with symbolic reuse, `R31` pivot/inertia diagnostics & shift/Krylov recovery, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection.
 laksp       | Krylov solvers | linalg/ksp/ | 33, 8 | CG, MINRES, GMRES, BiCGStab, COCR, QMR, IDR(s), GCRO-DR for real and complex systems.
 laeigen     | Eigensolvers | linalg/eps/ linalg/lobpcg.rs linalg/jd.rs linalg/toar.rs linalg/nep.rs linalg/nleigs.rs linalg/chebfsi.rs linalg/contour.rs linalg/arnoldi_real.rs linalg/sens.rs | 33, 8, 11 | Krylov-Schur, LOBPCG, Jacobi-Davidson, quadratic and nonlinear eigenproblems, contour integral, Chebyshev filtering, real Arnoldi for the 2D modes, sensitivities.
 laprecond   | Preconditioners | linalg/amg.rs linalg/amg_elastic/ linalg/ams.rs linalg/ads.rs linalg/schwarz.rs linalg/fieldsplit.rs linalg/ilu.rs | 33, 8 | Smoothed-aggregation multigrid (scalar and elastic), auxiliary-space Maxwell and divergence solvers, Schwarz, field-split and incomplete factorisations.

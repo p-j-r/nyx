@@ -10,12 +10,15 @@
 //!   isolated disk `C = 8 eps0 eps_eff R` (`< 0.5%`), and `< 2%` agreement with 3D `volumetric_fem`.
 
 use femcore::fem::{quad_rule_collapsed, CurvedTet};
+use femcore::linalg::driver::dense_eigh;
 use femcore::meshing::geomdrive::{evaluate, mesh_geom_2d, GeomMeshOpts, MeshedGeom};
 use femcore::meshing::{mesh_model, MeshPlan};
 use femcore::props::LinearSolver;
+use femcore::vvuq::assert_convergence_rate;
 use geom::expr::Expr;
 use geom::model::{Model, RegionKind};
 use geom::select::Selector;
+use nyx_dfs::ac_loss::solve_electrostatics_with_ac_loss;
 use nyx_dfs::electro::enrich_quarter_point_mesh;
 use nyx_dfs::planar_bem::{layered_greens_function, solve_planar_bem_with_stack, LayeredStack};
 use nyx_dfs::{solve_electrostatics, Bc, BcKind, Dfs, Problem, Study, EPS0};
@@ -654,6 +657,32 @@ fn test_fr19_3d_isolated_disk_open_robin_bc_vs_analytic() {
     assert!(err_2d.contains("3D"), "expected 2D rejection error mentioning 3D, got: {err_2d}");
 }
 
+fn assert_maxwell_spd_sym_rowsum(label: &str, c: &[Vec<f64>]) {
+    let n = c.len();
+    assert!(n >= 3, "{label}: expected at least 3 terminals, got {n}");
+    let mut frob2 = 0.0_f64;
+    let mut max_asym = 0.0_f64;
+    let mut flat = vec![0.0_f64; n * n];
+    for i in 0..n {
+        assert_eq!(c[i].len(), n);
+        let row_sum: f64 = c[i].iter().sum();
+        for j in 0..n {
+            frob2 += c[i][j] * c[i][j];
+            max_asym = max_asym.max((c[i][j] - c[j][i]).abs());
+            flat[i * n + j] = 0.5 * (c[i][j] + c[j][i]);
+        }
+        assert!(row_sum >= -1.0e-12 * frob2.sqrt().max(1e-30), "{label}: row {i} sum negative ({row_sum:e})");
+    }
+    let frob = frob2.sqrt().max(1e-30);
+    assert!(max_asym / frob < 1.0e-12, "{label}: symmetry rel err {:e} >= 1e-12", max_asym / frob);
+    let (eigs, _) = dense_eigh(&flat, n).expect("dense_eigh must succeed on symmetric Maxwell C");
+    assert!(eigs[0] > 0.0, "{label}: expected strictly positive lambda_min > 0, got {:e}", eigs[0]);
+    for (i, row) in c.iter().enumerate() {
+        let row_sum: f64 = row.iter().sum();
+        assert!(row_sum >= -1.0e-12 * frob, "{label}: row {i} sum {row_sum:e} violated lower bound");
+    }
+}
+
 #[test]
 fn test_fr19_and_fr23_raw_asymmetry_scalar_and_silicon_4k_tls_interfaces() {
     // 1. Multi-terminal P2 AMG-PCG solve emits "maxwell_raw_asymmetry_rel" < 1e-7
@@ -662,6 +691,8 @@ fn test_fr19_and_fr23_raw_asymmetry_scalar_and_silicon_4k_tls_interfaces() {
     prob_amg.tol = 1e-10;
     prob_amg.amg_line_smooth = true;
     let res_amg = solve_electrostatics(&g.mesh, &prob_amg).unwrap();
+    let cap_amg = CapacitanceMatrixData::of(&res_amg).expect("3-terminal AMG must attach CapacitanceMatrixData");
+    assert_maxwell_spd_sym_rowsum("FR-19 P2 AMG-PCG 3-terminal", &cap_amg.maxwell_matrix_f);
     let raw_asym = res_amg
         .scalar("maxwell_raw_asymmetry_rel")
         .expect("multi-terminal electrostatic solve must emit maxwell_raw_asymmetry_rel");
@@ -709,6 +740,8 @@ fn test_fr19_and_fr23_raw_asymmetry_scalar_and_silicon_4k_tls_interfaces() {
 
     let ex_mesh = Mesh::from_solver_mesh(&g.mesh).unwrap();
     let res = Dfs.solve(&ex_mesh, &spec, &mut ctx).unwrap();
+    let cap_fem = CapacitanceMatrixData::of(&res).expect("3-terminal FEM Dfs::solve must attach CapacitanceMatrixData");
+    assert_maxwell_spd_sym_rowsum("Dfs::solve FEM 3-terminal", &cap_fem.maxwell_matrix_f);
     let tls = TlsMeta::of(&res).expect("TlsMeta must be attached to SolveResult::scalars");
     let ifaces = tls.interfaces.expect("TlsMeta::interfaces must be auto-populated from silicon_4k.toml");
     let ms = ifaces.ms.expect("silicon_4k must populate [interfaces.ms]");
@@ -720,10 +753,182 @@ fn test_fr19_and_fr23_raw_asymmetry_scalar_and_silicon_4k_tls_interfaces() {
     assert!((sa.eps_r - 3.9).abs() < 1e-12);
     assert!((sa.tan_delta - 1.5e-3).abs() < 1e-12);
 
-    // Also verify planar_bem populates TlsMeta::interfaces with BcKind::Open present:
+    // Also verify planar_bem populates TlsMeta::interfaces and produces SPD symmetric Maxwell C with BcKind::Open present:
     spec.study.params = json!({ "formulation": "planar_bem" });
     let res_bem = Dfs.solve(&ex_mesh, &spec, &mut ctx).unwrap();
+    let cap_bem = CapacitanceMatrixData::of(&res_bem).expect("3-terminal planar_bem must attach CapacitanceMatrixData");
+    assert_maxwell_spd_sym_rowsum("Dfs::solve planar_bem 3-terminal", &cap_bem.maxwell_matrix_f);
     let tls_bem = TlsMeta::of(&res_bem).expect("planar_bem TlsMeta must be attached");
     assert_eq!(tls_bem.interfaces.as_ref().and_then(|i| i.ms.clone()), Some(ms));
     assert_eq!(tls_bem.interfaces.as_ref().and_then(|i| i.sa.clone()), Some(sa));
+}
+
+fn elliptic_k(k: f64) -> f64 {
+    let mut a = 1.0_f64;
+    let mut b = (1.0 - k * k).sqrt();
+    for _ in 0..16 {
+        let an = 0.5 * (a + b);
+        let bn = (a * b).sqrt();
+        a = an;
+        b = bn;
+        if (a - b).abs() < 1e-15 {
+            break;
+        }
+    }
+    0.5 * PI / a
+}
+
+#[test]
+fn test_planar_bem_panel_refinement_and_coplanar_strip_elliptic() {
+    // 1. Panel refinement order p_obs in [0.85, 1.25] (w_1 = 2.0) and Richardson error < 0.5 * err_fine
+    let radius = 100.0e-6;
+    let c_disk_exact = 8.0 * EPS0 * radius;
+    let stack_vac =
+        LayeredStack { eps_top: 1.0, eps_sub: 1.0, eps_bot: 1.0, t_sub: f64::INFINITY, grounded_backplane: false };
+
+    let solve_disk = |edge_h: f64, richardson: bool| -> f64 {
+        let mut m = Model::new_2d();
+        let disk = m.circle("disk", (0.0, 0.0), radius);
+        m.overlay_full(&[("disk", disk, RegionKind::Material, None)], &[]);
+        let mut opts = GeomMeshOpts::new(edge_h);
+        opts.max_dev = Some(edge_h / 60.0);
+        let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &opts).unwrap();
+        let disk_labs = g.mesh.boundary_labels();
+        let mut prob = Problem::new(Study::Electrostatic, 1).with_formulation("planar_bem").with_richardson(richardson);
+        prob.bcs = vec![Bc { labels: disk_labs, kind: BcKind::Terminal("disk".into()) }];
+        let res = solve_planar_bem_with_stack(&g.mesh, &prob, Some(stack_vac)).unwrap();
+        CapacitanceMatrixData::of(&res).unwrap().maxwell_matrix_f[0][0]
+    };
+
+    let hs = [24.0e-6, 12.0e-6, 6.0e-6];
+    let errs: Vec<f64> = hs.iter().map(|&h| ((solve_disk(h, false) - c_disk_exact) / c_disk_exact).abs()).collect();
+    let rep = assert_convergence_rate(&hs, &errs, 1.0, (0.85, 1.25));
+    eprintln!(
+        "planar_bem panel refinement: asymptotic_slope = {:.3}, ols = {:.3}, errs = {errs:?}",
+        rep.asymptotic_slope, rep.ols_slope
+    );
+
+    // Subdividing a single mesh 1 -> 4 at h = 12 um uses 12 um -> 6 um panel refinement with w_1 = 2.0
+    let c_rich = solve_disk(12.0e-6, true);
+    let err_rich = ((c_rich - c_disk_exact) / c_disk_exact).abs();
+    let err_fine = errs[2];
+    eprintln!("planar_bem Richardson w1=2.0: err_rich = {err_rich:.5}, err_fine = {err_fine:.5}");
+    assert!(
+        err_rich < 0.5 * err_fine,
+        "Richardson error {err_rich:.5} must be < 0.5 * fine error ({:.5})",
+        0.5 * err_fine
+    );
+
+    // 2. Analytic elliptic-integral coplanar strips: C' = eps0 * eps_eff * K(k') / K(k) (< 2%)
+    // Two long symmetric coplanar strips in x in [-b, -a] and [a, b] on Si/Vac half-space (eps_eff = (1 + 11.45)/2).
+    let a = 10.0e-6;
+    let b = 30.0e-6;
+    let length = 1400.0e-6;
+    let eps_sub = 11.45;
+    let eps_eff = 0.5 * (1.0 + eps_sub);
+    let k: f64 = a / b;
+    let kp = (1.0_f64 - k * k).sqrt();
+    let c_prime_exact = EPS0 * eps_eff * elliptic_k(kp) / elliptic_k(k);
+
+    let mut m = Model::new_2d();
+    let s1 = m.rect("s1", (-b, -0.5 * length), (-a, 0.5 * length));
+    let s2 = m.rect("s2", (a, -0.5 * length), (b, 0.5 * length));
+    m.overlay_full(&[("s1", s1, RegionKind::Material, None), ("s2", s2, RegionKind::Material, None)], &[]);
+    let g = mesh_geom_2d(evaluate(&m.list).unwrap(), &GeomMeshOpts::new(8.0e-6)).unwrap();
+    let mut s1_labs = Vec::new();
+    let mut s2_labs = Vec::new();
+    for f in 0..g.mesh.n_facets() {
+        let fv = g.mesh.facet(f);
+        let xm = 0.5 * (g.mesh.point(fv[0] as usize)[0] + g.mesh.point(fv[1] as usize)[0]);
+        let lab = g.mesh.facet_labels[f];
+        if xm < 0.0 {
+            if !s1_labs.contains(&lab) {
+                s1_labs.push(lab);
+            }
+        } else if !s2_labs.contains(&lab) {
+            s2_labs.push(lab);
+        }
+    }
+    let mut prob = Problem::new(Study::Electrostatic, 2).with_formulation("planar_bem").with_richardson(false);
+    prob.bcs = vec![
+        Bc { labels: s1_labs, kind: BcKind::Terminal("s1".into()) },
+        Bc { labels: s2_labs, kind: BcKind::Terminal("s2".into()) },
+    ];
+    let stack_half =
+        LayeredStack { eps_top: 1.0, eps_sub, eps_bot: eps_sub, t_sub: f64::INFINITY, grounded_backplane: false };
+    let res_cpw = solve_planar_bem_with_stack(&g.mesh, &prob, Some(stack_half)).unwrap();
+    let cmat = CapacitanceMatrixData::of(&res_cpw).unwrap().maxwell_matrix_f;
+    let c_diff_per_m = 0.5 * (cmat[0][0] - cmat[0][1]) / length;
+    let rel_err = (c_diff_per_m - c_prime_exact).abs() / c_prime_exact;
+    eprintln!(
+        "coplanar strips elliptic integral: C'_num = {c_diff_per_m:.6e} F/m, C'_exact = {c_prime_exact:.6e} F/m, rel_err = {:.3}%",
+        rel_err * 100.0
+    );
+    assert!(rel_err < 0.02, "coplanar strip C' relative error {:.3}% exceeds 2%", rel_err * 100.0);
+}
+
+#[test]
+fn test_ac_loss_rotated_anisotropic_invariance() {
+    type AcLossMatrices = (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<Vec<Option<f64>>>, Vec<Vec<f64>>);
+    fn run_rotated(euler: Option<[f64; 3]>) -> AcLossMatrices {
+        let mut mesh = femcore::testkit::block(1.0, 0.8, 0.5, 3, 3, 3);
+        let dom = mesh.cell_labels[0];
+        if let Some(ang) = euler {
+            let r = femcore::material::rotation(ang);
+            let pts: Vec<f64> = mesh
+                .points
+                .chunks(3)
+                .flat_map(|p| {
+                    [
+                        r[0][0] * p[0] + r[0][1] * p[1] + r[0][2] * p[2],
+                        r[1][0] * p[0] + r[1][1] * p[1] + r[1][2] * p[2],
+                        r[2][0] * p[0] + r[2][1] * p[1] + r[2][2] * p[2],
+                    ]
+                })
+                .collect();
+            let bnd = mesh.facets.clone();
+            let blab = mesh.facet_labels.clone();
+            mesh = femcore::mesh::SimplexMesh::new(3, pts, mesh.cells.clone(), mesh.cell_labels.clone(), bnd, blab);
+        }
+        let mut prob = Problem::new(Study::Electrostatic, 2).with_freq(10.0e9);
+        let mut an = femcore::material::Anisotropy {
+            permittivity: Some(femcore::material::Tensor::Diagonal { x: 9.4, y: 10.2, z: 11.6 }),
+            permittivity_im: Some(femcore::material::Tensor::Diagonal {
+                x: 9.4 * 0.02,
+                y: 10.2 * 0.035,
+                z: 11.6 * 0.05,
+            }),
+            conductivity: Some(femcore::material::Tensor::Diagonal { x: 1.0e-3, y: 2.5e-3, z: 4.0e-3 }),
+            euler_deg: euler.unwrap_or([0.0; 3]),
+            ..Default::default()
+        };
+        if let Some(ang) = euler {
+            an.euler_deg = ang;
+        }
+        prob.materials.aniso.insert(dom, an);
+        // Bottom face label 5, top face label 6 on testkit::block
+        prob.bcs = vec![
+            Bc { labels: vec![5], kind: BcKind::Terminal("bot".into()) },
+            Bc { labels: vec![6], kind: BcKind::Terminal("top".into()) },
+        ];
+        let (_res, ac) = solve_electrostatics_with_ac_loss(&mesh, &prob, Some(10.0e9)).unwrap();
+        (
+            ac.corrected_maxwell_matrix_f,
+            ac.conductance_matrix_s.unwrap(),
+            ac.q_dielectric_matrix.unwrap(),
+            ac.delta_c_second_order_f.unwrap(),
+        )
+    }
+    let (c0, g0, q0, dc0) = run_rotated(None);
+    let (cr, gr, qr, dcr) = run_rotated(Some([35.0, 48.0, 22.0]));
+    for i in 0..2 {
+        for j in 0..2 {
+            assert!(((cr[i][j] - c0[i][j]) / c0[i][j].abs().max(1e-30)).abs() < 1e-10);
+            assert!(((gr[i][j] - g0[i][j]) / g0[i][j].abs().max(1e-30)).abs() < 1e-10);
+            assert!(((dcr[i][j] - dc0[i][j]) / dc0[i][j].abs().max(1e-30)).abs() < 1e-10);
+            if let (Some(a), Some(b)) = (q0[i][j], qr[i][j]) {
+                assert!(((b - a) / a.abs().max(1e-30)).abs() < 1e-10);
+            }
+        }
+    }
 }

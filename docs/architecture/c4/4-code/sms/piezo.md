@@ -2,17 +2,17 @@
 
 C4 level 4 (code) of the component **Piezoelectric kernel** (`sms.piezo`) in the container **nyx-sms** (crate `nyx_sms`). [Component view of the container](../../3-components/sms.md) · [All code pages](../README.md)
 
-> Coupled piezoelectric `(u, phi)` 2D/3D static, eigenfrequency (Schur Krylov-Schur & damped QEP), Schur-AMG Right-FGMRES 3D static, and driven frequency-domain multi-port `Y`/`Z`/`S` PROM kernels on `SimplexMesh` and `MixedDiscretisation`.
+> Coupled piezoelectric `(u, phi)` constitutive condensation, simplex/mixed assembly, equilibrated direct / Schur Krylov-Schur / QEP / Schur-AMG Right-FGMRES static/eigen solvers, and driven multi-port `Y`/`Z`/`S` PROM sweep on `SimplexMesh` and `MixedDiscretisation`.
 
-**Decisions:** [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md), [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md), [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md)  
-**Size:** 4 files, 6047 lines.
+**Decisions:** [ADR 129](../../../adr/0129-coupled-piezoelectric-fem-in-nyx-sms.md), [ADR 106](../../../adr/0106-driven-frequency-domain-waveports-and-hermite-prom.md), [ADR 128](../../../adr/0128-structured-curvilinear-pml-and-open-boundaries.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 4 files, 6050 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
 | `crates/nyx-sms/src/piezo.rs` | 2032 |  |
-| `crates/nyx-sms/src/piezo_asm.rs` | 2775 |  |
+| `crates/nyx-sms/src/piezo_asm.rs` | 2778 |  |
 | `crates/nyx-sms/src/piezo_driven.rs` | 678 |  |
 | `crates/nyx-sms/src/piezo_mat.rs` | 562 |  |
 
@@ -25,7 +25,7 @@ C4 level 4 (code) of the component **Piezoelectric kernel** (`sms.piezo`) in the
 | [Floquet kernel](./floquet.md) | floquet | mixed_nodal_relations |
 | [Low-reflecting boundary](./lrb.md) | lrb | AMPLIFYING_IM_TOL, damping_matrix, damping_matrix_mixed |
 | [Absorbing-layer kernel](./pml.md) | pml | ResolvedPmlDomains, b_matrix_c, outer_clamped_dofs_mixed, outer_clamped_dofs_simplex, push_pml_mode_scalars_and_label, real_quad_norm, simplex_barycentric |
-| [Typed problem](./problem.md) | problem | BcKind, ConductorRole, Plane, Problem, Study, ThermalSource |
+| [Typed problem](./problem.md) | problem | BcKind, ConductorRole, Plane, Problem, Study, ThermalSource, check_simplex_straight |
 | [Solid kernel](./solid.md) | crate root, solid | ResolvedIeDomains, Thermal, add_boundary_load_mixed, assemble_exponential_ie_robin, assemble_solid, assemble_solid_mixed, b_matrix, collect_exponential_ie_faces, eval_raw_face_jacobian, lap +6 |
 
 ## Used by
@@ -273,13 +273,13 @@ classDiagram
 | fn | `assemble_piezo_real_simplex` | `piezo_asm.rs:1011` | `pub fn assemble_piezo_real_simplex( mesh: &SimplexMesh, mats: &[PiezoCellMat], order: usize, plane: Plane, thickness: f64, ) -> RCsr` —  Deterministic chunked parallel real coupled matrix assembly on [`SimplexMesh`]. |
 | fn | `assemble_piezo_real_mixed` | `piezo_asm.rs:1096` | `pub(crate) fn assemble_piezo_real_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, mats: &[PiezoCellMat], plane: Plane, thickness: f64, ie_domains: &ResolvedIeDomains, inactive: &[i32], conductor_domains: &[i32], ) -> RCsr` —  Deterministic chunked parallel real coupled matrix assembly on [`MixedDiscretisation`] |
 | fn | `assemble_piezo_static_simplex` | `piezo_asm.rs:1500` | `pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoStaticAssembly, String>` —  Assembles Stage 1 static coupled piezoelectric problem on [`SimplexMesh`]. |
-| fn | `assemble_piezo_static_mixed` | `piezo_asm.rs:1604` | `pub fn assemble_piezo_static_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoStaticAssembly, String>` —  Assembles Stage 1 static coupled piezoelectric problem natively on [`MixedDiscretisation`]. |
-| fn | `sub_csr` | `piezo_asm.rs:2134` | `pub(crate) fn sub_csr<T: femcore::linalg::scalar::Scalar>( a: &femcore::linalg::csr::Csr<T>, r_start: usize, r_end: usize, c_start: usize, c_end: usize, ) -> femcore::linalg::csr::Csr<T>` —  Extracts a sub-block CSR `a[rows, cols]` where `rows`, `cols` are ascending local indices. |
-| fn | `assemble_piezo_eigen_simplex` | `piezo_asm.rs:2162` | `pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoEigenAssembly, String>` —  Assembles Stage 1 eigenfrequency coupled piezoelectric problem on [`SimplexMesh`]. |
-| fn | `assemble_piezo_eigen_mixed` | `piezo_asm.rs:2327` | `pub fn assemble_piezo_eigen_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoEigenAssembly, String>` —  Assembles Stage 1 eigenfrequency coupled piezoelectric problem natively on [`MixedDiscretisation`]. |
-| struct | `PiezoDrivenFull` | `piezo_asm.rs:2511` | fields: `constraints`, `k_full`, `m_uu_full`, `c_uu_full`, `resolved_pml`, `m1_phys_all`, `m1_phys_pml`, `is_complex`, `has_pml`, `has_damping`, `has_interior`, `diagnostics` —  Unreduced full complex operators for Stage 1 of the coupled piezoelectric driven frequency solver. |
-| fn | `assemble_piezo_driven_simplex` | `piezo_asm.rs:2527` | `pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoDrivenFull, String>` —  Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` on [`SimplexMesh`]. |
-| fn | `assemble_piezo_driven_mixed` | `piezo_asm.rs:2646` | `pub(crate) fn assemble_piezo_driven_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoDrivenFull, String>` —  Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` natively on [`MixedDiscretisation`]. |
+| fn | `assemble_piezo_static_mixed` | `piezo_asm.rs:1605` | `pub fn assemble_piezo_static_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoStaticAssembly, String>` —  Assembles Stage 1 static coupled piezoelectric problem natively on [`MixedDiscretisation`]. |
+| fn | `sub_csr` | `piezo_asm.rs:2135` | `pub(crate) fn sub_csr<T: femcore::linalg::scalar::Scalar>( a: &femcore::linalg::csr::Csr<T>, r_start: usize, r_end: usize, c_start: usize, c_end: usize, ) -> femcore::linalg::csr::Csr<T>` —  Extracts a sub-block CSR `a[rows, cols]` where `rows`, `cols` are ascending local indices. |
+| fn | `assemble_piezo_eigen_simplex` | `piezo_asm.rs:2163` | `pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoEigenAssembly, String>` —  Assembles Stage 1 eigenfrequency coupled piezoelectric problem on [`SimplexMesh`]. |
+| fn | `assemble_piezo_eigen_mixed` | `piezo_asm.rs:2329` | `pub fn assemble_piezo_eigen_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoEigenAssembly, String>` —  Assembles Stage 1 eigenfrequency coupled piezoelectric problem natively on [`MixedDiscretisation`]. |
+| struct | `PiezoDrivenFull` | `piezo_asm.rs:2513` | fields: `constraints`, `k_full`, `m_uu_full`, `c_uu_full`, `resolved_pml`, `m1_phys_all`, `m1_phys_pml`, `is_complex`, `has_pml`, `has_damping`, `has_interior`, `diagnostics` —  Unreduced full complex operators for Stage 1 of the coupled piezoelectric driven frequency solver. |
+| fn | `assemble_piezo_driven_simplex` | `piezo_asm.rs:2529` | `pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) -> Result<PiezoDrivenFull, String>` —  Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` on [`SimplexMesh`]. |
+| fn | `assemble_piezo_driven_mixed` | `piezo_asm.rs:2649` | `pub(crate) fn assemble_piezo_driven_mixed( mixed: &MixedDiscretisation, dof_map: &MixedLagrangeDofMap, spec: &Problem, ) -> Result<PiezoDrivenFull, String>` —  Assembles full coupled operators (`K`, `M_uu`, `C_uu`) and terminal constraints for `Study::Driven` natively on [`MixedDiscretisation`]. |
 | struct | `PiezoDrivenAssembly` | `piezo_driven.rs:78` | fields: `constraints`, `nred`, `f_min`, `f_max`, `n_points`, `freqs_hz`, `prom_tol`, `max_hdm_solves`, `strict_prom_tol`, `seed_freqs_hz`, `solver`, `blr_tol`, ... —  Reduced equilibrated affine piezoelectric frequency-domain problem ready for PROM or HDM sweeps. |
 | fn | `solve_piezo_driven` | `piezo_driven.rs:619` | `pub fn solve_piezo_driven(mesh: &SimplexMesh, spec: &Problem) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric `Study::Driven` frequency sweep on [`SimplexMesh`]. |
 | fn | `solve_piezo_driven_mixed` | `piezo_driven.rs:649` | `pub fn solve_piezo_driven_mixed( raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Problem, ) -> Result<SolveResult, String>` —  Solves a coupled piezoelectric `Study::Driven` frequency sweep natively on [`MixedDiscretisation`]. |

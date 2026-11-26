@@ -15,27 +15,27 @@ evaluation = component "Evaluation" "The Evaluator turns a feature list into an 
         "codeDiagram" "4-code/geom/evaluation.md"
     }
 }
-kernel2d = component "2D kernel" "Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification." "Rust modules" {
+kernel2d = component "2D kernel" "Primitives, planar curves, the planar arrangement of all boundary pieces (`Verts::cluster`, exact conic ray crossing), the evaluated region complex (`check3` quadric flux), and batch polygon ring cleanup with shared-corner-pinned RDP simplification." "Rust modules" {
     properties {
-        "adr" "3, 18, 102"
+        "adr" "3, 18, 102, 132"
         "code" "crates/geom/src: arrange.rs, complex.rs, curve.rs, poly_batch.rs, prim.rs"
-        "lines" "4357"
+        "lines" "4803"
         "codeDiagram" "4-code/geom/kernel2d.md"
     }
 }
-kernel3d = component "3D kernel" "Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model." "Rust modules" {
+kernel3d = component "3D kernel" "Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model (shell edge pairing)." "Rust modules" {
     properties {
-        "adr" "3, 1"
+        "adr" "3, 1, 132"
         "code" "crates/geom/src: planar.rs, stack.rs, topo3.rs"
-        "lines" "2766"
+        "lines" "3107"
         "codeDiagram" "4-code/geom/kernel3d.md"
     }
 }
-queries = component "Queries and selectors" "Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, and simulation operations as data." "Rust modules" {
+queries = component "Queries and selectors" "Exact queries on an evaluated model, serialisable selectors, the LabelMap between names and the integer labels solvers consume, flat 2D BVH with depth spill stack, and simulation operations as data." "Rust modules" {
     properties {
-        "adr" "2, 3, 7, 18"
+        "adr" "2, 3, 7, 18, 132"
         "code" "crates/geom/src: bvh.rs, labels.rs, query.rs, select.rs, sim.rs"
-        "lines" "2999"
+        "lines" "2976"
         "codeDiagram" "4-code/geom/queries.md"
     }
 }

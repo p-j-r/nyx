@@ -77,6 +77,7 @@ pub fn assemble_stiffness_waveguide(
     q: f64,
     stretch: Option<&[[C; 3]]>,
 ) -> Result<CCsr, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     if mesh.dim != 2 {
         return Err("a waveguide cross-section model needs a 2D mesh".into());
     }

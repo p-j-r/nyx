@@ -41,6 +41,7 @@ C4 level 4 (code) of the component **Preconditioners** (`femcore.laprecond`) in 
 | [ems: Native mixed-cell EM](../ems/mixed.md) | linalg::ams | Ams, AmsOptions |
 | [Finite-element basics](./fem.md) | linalg::amg_elastic, linalg::ams | Amg, AmgOptions, AmsP2Topology, block_pcg, pcg |
 | [Matrices and vectors](./lacore.md) | linalg::ams | Ams, AmsFgmresOptions, AmsFgmresSolver, AmsFgmresStats, AmsOptions, AmsP2, AmsP2Options, AmsP2Topology +3 |
+| [Direct solvers](./ladirect.md) | linalg::ilu | Ilu |
 | [Linear algebra driver](./ladriver.md) | linalg::ams | AmsP2, AmsP2Options, AmsP2Topology |
 | [sms: Piezoelectric kernel](../sms/piezo.md) | linalg::amg_elastic | AmgOptions |
 | [sms: Solid kernel](../sms/solid.md) | linalg::amg_elastic | Amg, AmgOptions, pcg |

@@ -23,19 +23,19 @@ fixtures = component "Fixtures and test kit" "Test meshes and the SOI wire cross
         "codeDiagram" "4-code/femcore/fixtures.md"
     }
 }
-meshing = component "Meshing facade" "MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, and the 2D triangulation core." "Rust modules" {
+meshing = component "Meshing facade" "MeshPlan and mesh_model (the one way to mesh a geom model), the serialisable request and report, sizing from the physics, 2D triangulation core (`R29` slanted wall splitting), and periodic twin curved-arc/QP sync (`R33`)." "Rust modules" {
     properties {
-        "adr" "6, 17, 54"
+        "adr" "6, 17, 54, 132"
         "code" "crates/femcore/src: meshing/geomdrive.rs, meshing/mesher.rs, meshing/mod.rs, meshing/physics_size.rs, meshing/request.rs, meshing/sheet3d_amr.rs, ... (9 files)"
-        "lines" "5994"
+        "lines" "6265"
         "codeDiagram" "4-code/femcore/meshing.md"
     }
 }
-meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model, adaptive meshing driven by exact faces, face sizes and max_dev, curved boundary edges, and conformal 3D sheet-stack meshing." "Rust modules" {
+meshing3d = component "3D meshing" "The lattice tetrahedral mesher on Domain3, Rivara refinement, the adapter from a 3D geom model (`R33` crease projection), adaptive meshing driven by exact faces, face sizes and max_dev, Bernstein/`q8` curved Jacobian certification & periodic mid-edge sync, and conformal 3D sheet-stack meshing." "Rust modules" {
     properties {
-        "adr" "40, 50, 51, 55, 82, 83, 102"
+        "adr" "40, 50, 51, 55, 82, 83, 102, 132"
         "code" "crates/femcore/src: meshing/adapt3d.rs, meshing/curve3.rs, meshing/geomdrive3.rs, meshing/mesher3d.rs, meshing/refine3d.rs, meshing/sheet3d.rs"
-        "lines" "6858"
+        "lines" "7505"
         "codeDiagram" "4-code/femcore/meshing3d.md"
     }
 }
@@ -103,11 +103,11 @@ ladriver = component "Linear algebra driver" "The door the physics kernels use: 
         "codeDiagram" "4-code/femcore/ladriver.md"
     }
 }
-ladirect = component "Direct solvers" "Shifted sparse direct solves with symbolic reuse, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection." "Rust modules" {
+ladirect = component "Direct solvers" "Shifted sparse direct solves with symbolic reuse, `R31` pivot/inertia diagnostics & shift/Krylov recovery, LU with a user ordering, block low-rank factorisation, mixed precision, nested dissection." "Rust modules" {
     properties {
-        "adr" "33, 8"
+        "adr" "33, 8, 132"
         "code" "crates/femcore/src: linalg/blr.rs, linalg/direct.rs, linalg/lowrank.rs, linalg/mixed.rs, linalg/ordering.rs, linalg/sparse_lu.rs"
-        "lines" "5128"
+        "lines" "6115"
         "codeDiagram" "4-code/femcore/ladirect.md"
     }
 }
@@ -183,11 +183,11 @@ expr = component "Expressions" "A small safe expression evaluator for user input
         "codeDiagram" "4-code/femcore/expr.md"
     }
 }
-runtime = component "Runtime services" "The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), and refusal of NaN and infinity." "Rust modules" {
+runtime = component "Runtime services" "The shared worker pool, stage log and cancel, the warm-start context of the shift-and-invert eigensolvers (ADR 96), refusal of NaN and infinity, and shared VVUQ MMS/convergence helpers." "Rust modules" {
     properties {
-        "adr" "9, 11, 96"
-        "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, warm.rs"
-        "lines" "852"
+        "adr" "9, 11, 96, 132"
+        "code" "crates/femcore/src: lib.rs, par.rs, progress.rs, validate.rs, vvuq.rs, warm.rs"
+        "lines" "1078"
         "codeDiagram" "4-code/femcore/runtime.md"
     }
 }

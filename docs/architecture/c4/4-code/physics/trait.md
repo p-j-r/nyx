@@ -37,7 +37,7 @@ C4 level 4 (code) of the component **Physics trait and registry** (`physics.trai
 | [analysis: Piezo resonator analysis](../analysis/piezo.md) | crate root, error | Error, Mesh |
 | [analysis: Field samples](../analysis/samples.md) | crate root, error | Error, Mesh, discretise |
 | [dfs: Physics adapter](../dfs/adapter.md) | crate root |  |
-| [dfs: Shared helpers](../dfs/common.md) | crate root | Discretisation |
+| [dfs: Shared helpers](../dfs/common.md) | crate root | Discretisation, Mesh |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | crate root | Discretisation, Mesh, discretise, discretise_mixed |
 | [dfs: Heat kernel](../dfs/heat.md) | crate root | Discretisation, Mesh, discretise, discretise_mixed |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | crate root | Discretisation, Mesh, discretise, discretise_mixed |

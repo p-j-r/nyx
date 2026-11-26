@@ -2457,7 +2457,6 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                 // `faer` partial-pivoting LU returns `Ok` even when a column pivot is numerically 0
                 // (`0.recip() -> inf`); guard via a deterministic probe residual before accepting.
                 let solve_par = self.threads.solve.par();
-                let mut probe_err = 0.0f64;
                 let probe_ok = if n == 0 {
                     true
                 } else {
@@ -2482,8 +2481,14 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     } else {
                         let mut r = vec![T::ZERO; n];
                         csc_residual_vals(n, &full.col_ptr, &full.row_idx, full_vals, &p, &x, &mut r);
-                        probe_err = vecops::norm2(&r) / p_norm;
-                        probe_err.is_finite() && probe_err <= 1e-3
+                        let r_norm = vecops::norm2(&r);
+                        let x_norm = vecops::norm2(&x);
+                        let rel_err = r_norm / p_norm;
+                        let bw_err = r_norm / (scale * x_norm + p_norm).max(1e-300);
+                        bw_err.is_finite()
+                            && rel_err.is_finite()
+                            && bw_err <= 1e-6
+                            && !(rel_err > 1e-2 && (scale * x_norm) / p_norm > 1e14)
                     }
                 };
                 if !probe_ok {
@@ -2493,7 +2498,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
                     return Err(SolverError::Singular);
                 }
                 self.sigma = sigma;
-                self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq || probe_err > 1e-11;
+                self.refine_solves = n > PAR_FACTOR_MIN_N || par != Par::Seq;
                 self.have = Used::Lu;
                 self.active = ActiveFactor::ColamdLu;
                 self.stats.used = Used::Lu;

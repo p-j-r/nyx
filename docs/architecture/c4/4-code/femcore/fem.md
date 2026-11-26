@@ -41,13 +41,13 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [analysis: Capacitance and inductance matrices](../analysis/capacitance.md) | fem | geometry, quad_rule, shape |
 | [analysis: cQED quantization and TLS participation](../analysis/cqed.md) | fem | facet_rule, geometry, quad_rule, shape |
 | [analysis: Field samples](../analysis/samples.md) | fem, fields | geometry, local_bary, quad_rule, shape |
-| [dfs: Shared helpers](../dfs/common.md) | farfield, fem, fem_mixed, fields, pml, props | FarFieldPermittivity, IsoparametricCell, JacobianEval, LagrangeSpace, LinearSolver, Materials, MixedLagrangeDofMap, Pml +14 |
+| [dfs: Shared helpers](../dfs/common.md) | farfield, fem, fem_mixed, fields, pml, props | CurvedTet, FarFieldPermittivity, IsoparametricCell, JacobianEval, LagrangeSpace, LinearSolver, Materials, MixedLagrangeDofMap +20 |
 | [dfs: Electrostatics kernel](../dfs/electro.md) | fem, fem_mixed, fields, props, rt | CellFields, CellPermittivity, EquilibratedFluxResult, LagrangeSpace, LinearSolver, MixedLagrangeDofMap, RobinBoundary, TensorKind +5 |
 | [dfs: Heat kernel](../dfs/heat.md) | fem, fem_mixed, fields, props | AmgSystem, CellFields, LagrangeSpace, LinearSolver, MixedLagrangeDofMap, TensorKind, amg_wanted, assemble_mass_mixed +1 |
 | [dfs: Magnetostatics kernel](../dfs/magneto.md) | edge_mixed, fem, fem_mixed, fields, props | CellFields, IsoparametricCell, LagrangeSpace, LinearSolver, MixedLagrangeDofMap, NedEvalScratch, NedMixed, cell_corner_ref_coords +7 |
 | [dfs: Typed problem](../dfs/problem.md) | props | LinearSolver, Materials, PmlDir |
 | [ems: Physics adapter](../ems/adapter.md) | props | PmlDir |
-| [ems: Axisymmetric kernel](../ems/axisym.md) | edge, edge_mixed, fem, fem_mixed, fields, pml +1 | CellData, CellFields, IsoparametricCell, LagrangeSpace, Materials, MixedLagrangeDofMap, NedEvalScratch, NedMixed +14 |
+| [ems: Axisymmetric kernel](../ems/axisym.md) | edge, edge_mixed, fem, fem_mixed, fields, props | CellData, CellFields, IsoparametricCell, LagrangeSpace, Materials, MixedLagrangeDofMap, NedEvalScratch, NedMixed +11 |
 | [ems: 3D cavity kernel](../ems/cavity.md) | edge_mixed, fem, fem_mixed, fields, periodic, props | CellFields, CurvedTet, IsoparametricCell, Match, NedEvalScratch, NedMixed, PmlCoord, PmlDir +17 |
 | [ems: Driven frequency-domain and PROM](../ems/driven.md) | edge, edge_mixed, fem, fem_mixed, fields, periodic | CellFields, CurvedTet, Geometry, IsoparametricCell, Match, NedEvalScratch, NedMixed, Reduction +14 |
 | [ems: Thin-film IBC and Josephson ROM](../ems/ibc.md) | edge, edge_mixed, fem, fem_mixed, periodic | CurvedTet, Geometry, IsoparametricCell, LagrangeSpace, MixedLagrangeDofMap, NedEvalScratch, NedMixed, Reduction +19 |
@@ -61,7 +61,7 @@ C4 level 4 (code) of the component **Finite-element basics** (`femcore.fem`) in 
 | [engine: Registry and facade](../engine/registry.md) | fields | Display |
 | [Error estimators](./estimators.md) | fem | CurvedTet, TET_EDGES, build_face_to_cells_3d, facet_rule, geometry, quad_rule, quad_rule_collapsed, shape |
 | [Matrices and vectors](./lacore.md) | fem | quad_rule |
-| [Meshing facade](./meshing.md) | fem, props | CurvedTet, Pml, PmlCoord, PmlDir, quad_rule_collapsed |
+| [Meshing facade](./meshing.md) | fem, props | CurvedTet, Pml, PmlCoord, PmlDir |
 | [3D meshing](./meshing3d.md) | fem | CurvedTet, quad_rule_collapsed |
 | [Optical mode sets](./optical.md) | edge, fem, pml, props | CellData, cell_data, edge_basis, stretch, tri_g |
 | [Frame and sections](./section.md) | props |  |

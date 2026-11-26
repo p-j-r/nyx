@@ -2,16 +2,16 @@
 
 C4 level 4 (code) of the component **Thin-film IBC and Josephson ROM** (`ems.ibc`) in the container **nyx-ems** (crate `nyx_ems`). [Component view of the container](../../3-components/ems.md) · [All code pages](../README.md)
 
-> Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata.
+> Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid, curved Jacobian integrals), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata.
 
-**Decisions:** [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md)  
-**Size:** 2 files, 3134 lines.
+**Decisions:** [ADR 104](../../../adr/0104-bcs-surface-impedance-and-lumped-josephson-ports.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 2 files, 3222 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/nyx-ems/src/ibc.rs` | 1670 |  |
+| `crates/nyx-ems/src/ibc.rs` | 1758 |  |
 | `crates/nyx-ems/src/rom.rs` | 1464 |  |
 
 ## What it uses
@@ -31,7 +31,7 @@ C4 level 4 (code) of the component **Thin-film IBC and Josephson ROM** (`ems.ibc
 |---|---|---|
 | [Physics adapter](./adapter.md) | rom | rom_complex_eigenfrequencies, rom_eigenfrequencies |
 | [Axisymmetric kernel](./axisym.md) | ibc | add_ibc_2d_axisym, add_ibc_2d_axisym_mixed, pec_edges_and_nodes_2d |
-| [3D cavity kernel](./cavity.md) | ibc, rom | AssembledJjPort, EPS0, MU0, PerturbativeIbcEvaluator, PerturbativeIbcTri, SheetCellKind, assemble_ibc_and_jj_3d, assemble_ibc_and_jj_3d_cavity +9 |
+| [3D cavity kernel](./cavity.md) | ibc, rom | AssembledJjPort, EPS0, MU0, PerturbativeIbcEvaluator, PerturbativeIbcTri, SheetCellKind, assemble_ibc_and_jj_3d, assemble_ibc_and_jj_3d_cavity +10 |
 | [Driven frequency-domain and PROM](./driven.md) | crate root, ibc, rom | AssembledJjPort, MU0, SheetCellKind, assemble_ibc_and_jj_3d, build_face_to_cell_3d, build_tls_meta, reduce_real_csr, reduce_real_vec +1 |
 | [Native mixed-cell EM](./mixed.md) | ibc | AssembledJjPort, ETA0, IbcJjAssembly3D, MU0, PerturbativeIbcTri, SheetCellKind, ibc_parallel_params, jj_inv_l_tot +1 |
 | [Mode kernel](./modes.md) | ibc | add_ibc_2d_waveguide, add_ibc_2d_waveguide_mixed, pec_edges_and_nodes_2d, pec_edges_and_nodes_2d_mixed |
@@ -143,19 +143,19 @@ classDiagram
 | struct | `IbcJjAssembly3D` | `ibc.rs:157` | fields: `pec_tris`, `ibc_tris`, `pert_ibc_tris`, `direct_ibc_labels`, `jj_tris`, `k_ibc_full`, `c_ibc_full`, `kc_ibc_full`, `k_jj_full`, `m_jj_full`, `jj_ports`, `cell_sheet`, ... —  Combined 3D assembly of `pec`, `surface_impedance`, and `lumped_jj` boundary conditions. |
 | fn | `build_face_to_cells_3d` | `ibc.rs:190` | `pub fn build_face_to_cells_3d(mesh: &Discretisation) -> HashMap<[u32` —  Maps each sorted 3D triangle `[v0, v1, v2]` to all adjacent tetrahedra `(ci, lf)` (1 for exterior faces, |
 | struct | `PerturbativeIbcEvaluator` | `ibc.rs:209` |  Precomputed quadrature-point surface-current basis on perturbative `surface_impedance` triangles (FR-30). |
-| fn | `assemble_ibc_and_jj_3d` | `ibc.rs:608` | `pub fn assemble_ibc_and_jj_3d( mesh: &Discretisation, ned: &Ned3, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], jj_bcs: &[LumpedJjBc], f0: f64, ) -> Result<IbcJjAssembly3D, String>` —  Deduplicates and assembles all 3D `pec`, `surface_impedance`, and `lumped_jj` boundary conditions |
-| fn | `assemble_ibc_and_jj_3d_cavity` | `ibc.rs:621` | `pub fn assemble_ibc_and_jj_3d_cavity( mesh: &Discretisation, ned: &Ned3, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], jj_bcs: &[LumpedJjBc], f0: f64, ) -> Result<IbcJjAssembly3D, String>` —  Deduplicates and assembles all 3D `pec`, `surface_impedance`, and `lumped_jj` boundary conditions |
-| fn | `reduce_real_csr` | `ibc.rs:1000` | `pub fn reduce_real_csr(red: &femcore::periodic::Reduction, pmat: &CCsr, a: &RCsr) -> RCsr` —  Real congruence transform `P^H A P` for a real matrix `A` under a periodic/Dirichlet reduction `red`. |
-| fn | `reduce_real_vec` | `ibc.rs:1008` | `pub fn reduce_real_vec(red: &femcore::periodic::Reduction, b_full: &[f64]) -> Vec<f64>` —  Restricts a full real load vector `b_full` (`n`) to the reduced space `b_red = P^T b_full` (`nred`). |
-| fn | `ruiz_equilibrate` | `ibc.rs:1024` | `pub fn ruiz_equilibrate(kc: &CCsr, mc: &CCsr, g_red: &CCsr, sigma: f64) -> (Vec<f64>, CCsr, CCsr, CCsr, CCsr)` —  Computes iterative symmetric Ruiz diagonal scaling factors `d` on `\|K\| + sigma \|M\|`, |
-| fn | `ruiz_unscale_and_rayleigh` | `ibc.rs:1123` | `pub fn ruiz_unscale_and_rayleigh(d: &[f64], y: &[C], kc: &CCsr, mc: &CCsr) -> (Vec<C>, C)` —  Unscales a Ruiz-equilibrated eigenvector `x = D y` and computes its exact Rayleigh-quotient |
-| fn | `ruiz_unscale_and_rayleigh_damped` | `ibc.rs:1139` | `pub fn ruiz_unscale_and_rayleigh_damped( d: &[f64], y: &[C], kc_no_damp: &CCsr, c_damp: &RCsr, mc: &CCsr, ) -> (Vec<C>, C)` —  Unscales a Ruiz-equilibrated eigenvector `x = D y` and evaluates the mode-exact damped Rayleigh quotient |
-| fn | `pec_edges_and_nodes_2d` | `ibc.rs:1202` | `pub fn pec_edges_and_nodes_2d( mesh: &Discretisation, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], pmc_labels: &[i32], ) -> (Vec<usize>, Vec<usize>)` —  Collects PEC boundary edge indices `be` and vertex indices `bn` for a 2D mesh, honoring explicit `pec` |
-| fn | `add_ibc_2d_waveguide` | `ibc.rs:1233` | `pub fn add_ibc_2d_waveguide( mesh: &Discretisation, order: usize, freq: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, b_coo: &mut CCoo, ) -> Result<(), String>` —  Assembles 2D `surface_impedance` contributions into `(a_coo, b_coo)` for `modes` / `modes_complex`. |
-| fn | `add_ibc_2d_axisym` | `ibc.rs:1331` | `pub fn add_ibc_2d_axisym( mesh: &Discretisation, order: usize, f_search: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, ) -> Result<(), String>` —  Assembles 2D `surface_impedance` contributions into `a_coo` for `axisymmetric_modes` (`(r, z)` half-plane). |
-| fn | `pec_edges_and_nodes_2d_mixed` | `ibc.rs:1432` | `pub fn pec_edges_and_nodes_2d_mixed( mesh: &MixedDiscretisation, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], pmc_labels: &[i32], symmetry: Symmetry, ) -> Result<(Vec<usize>, Vec<usize>), String>` |
-| fn | `add_ibc_2d_waveguide_mixed` | `ibc.rs:1479` | `pub fn add_ibc_2d_waveguide_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, phi_map: &MixedLagrangeDofMap, freq: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, b_coo: &mut CCoo, ) -> Result<(), String>` |
-| fn | `add_ibc_2d_axisym_mixed` | `ibc.rs:1575` | `pub fn add_ibc_2d_axisym_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, phi_map: &MixedLagrangeDofMap, f_search: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, ) -> Result<(), String>` |
+| fn | `assemble_ibc_and_jj_3d` | `ibc.rs:703` | `pub fn assemble_ibc_and_jj_3d( mesh: &Discretisation, ned: &Ned3, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], jj_bcs: &[LumpedJjBc], f0: f64, ) -> Result<IbcJjAssembly3D, String>` —  Deduplicates and assembles all 3D `pec`, `surface_impedance`, and `lumped_jj` boundary conditions |
+| fn | `assemble_ibc_and_jj_3d_cavity` | `ibc.rs:716` | `pub fn assemble_ibc_and_jj_3d_cavity( mesh: &Discretisation, ned: &Ned3, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], jj_bcs: &[LumpedJjBc], f0: f64, ) -> Result<IbcJjAssembly3D, String>` —  Deduplicates and assembles all 3D `pec`, `surface_impedance`, and `lumped_jj` boundary conditions |
+| fn | `reduce_real_csr` | `ibc.rs:1086` | `pub fn reduce_real_csr(red: &femcore::periodic::Reduction, pmat: &CCsr, a: &RCsr) -> RCsr` —  Real congruence transform `P^H A P` for a real matrix `A` under a periodic/Dirichlet reduction `red`. |
+| fn | `reduce_real_vec` | `ibc.rs:1094` | `pub fn reduce_real_vec(red: &femcore::periodic::Reduction, b_full: &[f64]) -> Vec<f64>` —  Restricts a full real load vector `b_full` (`n`) to the reduced space `b_red = P^T b_full` (`nred`). |
+| fn | `ruiz_equilibrate` | `ibc.rs:1110` | `pub fn ruiz_equilibrate(kc: &CCsr, mc: &CCsr, g_red: &CCsr, sigma: f64) -> (Vec<f64>, CCsr, CCsr, CCsr, CCsr)` —  Computes iterative symmetric Ruiz diagonal scaling factors `d` on `\|K\| + sigma \|M\|`, |
+| fn | `ruiz_unscale_and_rayleigh` | `ibc.rs:1209` | `pub fn ruiz_unscale_and_rayleigh(d: &[f64], y: &[C], kc: &CCsr, mc: &CCsr) -> (Vec<C>, C)` —  Unscales a Ruiz-equilibrated eigenvector `x = D y` and computes its exact Rayleigh-quotient |
+| fn | `ruiz_unscale_and_rayleigh_damped` | `ibc.rs:1225` | `pub fn ruiz_unscale_and_rayleigh_damped( d: &[f64], y: &[C], kc_no_damp: &CCsr, c_damp: &RCsr, mc: &CCsr, ) -> (Vec<C>, C)` —  Unscales a Ruiz-equilibrated eigenvector `x = D y` and evaluates the mode-exact damped Rayleigh quotient |
+| fn | `pec_edges_and_nodes_2d` | `ibc.rs:1288` | `pub fn pec_edges_and_nodes_2d( mesh: &Discretisation, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], pmc_labels: &[i32], ) -> (Vec<usize>, Vec<usize>)` —  Collects PEC boundary edge indices `be` and vertex indices `bn` for a 2D mesh, honoring explicit `pec` |
+| fn | `add_ibc_2d_waveguide` | `ibc.rs:1319` | `pub fn add_ibc_2d_waveguide( mesh: &Discretisation, order: usize, freq: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, b_coo: &mut CCoo, ) -> Result<(), String>` —  Assembles 2D `surface_impedance` contributions into `(a_coo, b_coo)` for `modes` / `modes_complex`. |
+| fn | `add_ibc_2d_axisym` | `ibc.rs:1417` | `pub fn add_ibc_2d_axisym( mesh: &Discretisation, order: usize, f_search: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, ) -> Result<(), String>` —  Assembles 2D `surface_impedance` contributions into `a_coo` for `axisymmetric_modes` (`(r, z)` half-plane). |
+| fn | `pec_edges_and_nodes_2d_mixed` | `ibc.rs:1518` | `pub fn pec_edges_and_nodes_2d_mixed( mesh: &MixedDiscretisation, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], pmc_labels: &[i32], symmetry: Symmetry, ) -> Result<(Vec<usize>, Vec<usize>), String>` |
+| fn | `add_ibc_2d_waveguide_mixed` | `ibc.rs:1565` | `pub fn add_ibc_2d_waveguide_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, phi_map: &MixedLagrangeDofMap, freq: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, b_coo: &mut CCoo, ) -> Result<(), String>` |
+| fn | `add_ibc_2d_axisym_mixed` | `ibc.rs:1662` | `pub fn add_ibc_2d_axisym_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, phi_map: &MixedLagrangeDofMap, f_search: f64, pec_labels: &[i32], ibc_bcs: &[SurfaceImpedanceBc], a_coo: &mut CCoo, ) -> Result<(), String>` |
 | fn | `PerturbativeIbcEvaluator::new` | `ibc.rs:215` | `pub fn new( mesh: &Discretisation, ned: &Ned3, geo: &femcore::fem::Geometry, mur_phys: &[f64], pert_tris: &[PerturbativeIbcTri], ) -> Result<Self, String>` |
 | fn | `PerturbativeIbcEvaluator::new_mixed` | `ibc.rs:317` | `pub fn new_mixed( mesh: &MixedDiscretisation, ned: &NedMixed, mur_phys: &[f64], pert_tris: &[PerturbativeIbcTri], ) -> Result<Self, String>` —  Mixed-cell (`Tet + Prism + Hex`) constructor for perturbative `surface_impedance` triangles. |
 | fn | `PerturbativeIbcEvaluator::eval_mode` | `ibc.rs:452` | `pub fn eval_mode(&self, x_full: &[C]) -> (f64, f64)` —  Evaluates `(sum_T (L_k_sq / mu_0) int_T \|K_tilde\|^2 dS, sum_T R_s int_T \|K_tilde\|^2 dS)` |

@@ -279,6 +279,7 @@ pub fn assemble_floquet(
     n_modes: usize,
     f_search: f64,
 ) -> Result<FloquetAssembly, String> {
+    check_simplex_straight(mesh)?;
     let (d, n1) = (st.d, st.n1);
     let n = d * n1;
     let order = spec.order;

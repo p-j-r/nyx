@@ -59,17 +59,44 @@ pub fn damping_matrix(
     order: usize,
     ncomp: usize,
 ) -> Csr {
+    damping_matrix_impl(mesh, c6, rho, labels, order, ncomp, false)
+}
+
+/// Axisymmetric real symmetric damping matrix `C` with the radial Jacobian weight `r`
+/// (quadrature-point `int N^T D N r ds`, matching `axisym`'s `r dr dz` weak form, `R6b`).
+pub fn damping_matrix_axisym(
+    mesh: &Discretisation,
+    c6: &[M6],
+    rho: &[f64],
+    labels: &[i32],
+    order: usize,
+    ncomp: usize,
+) -> Csr {
+    damping_matrix_impl(mesh, c6, rho, labels, order, ncomp, true)
+}
+
+fn damping_matrix_impl(
+    mesh: &Discretisation,
+    c6: &[M6],
+    rho: &[f64],
+    labels: &[i32],
+    order: usize,
+    ncomp: usize,
+    radial_weight: bool,
+) -> Csr {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);
     let fd = d - 1;
     let rule = facet_rule(fd);
     let nloc = if order == 1 { d } else { d + d * (d - 1) / 2 };
-    let mut me = vec![0.0; nloc * nloc];
-    for (q, lam) in rule.lam.iter().enumerate() {
-        let (nv, _) = shape(lam, order);
-        for a in 0..nloc {
-            for b in 0..nloc {
-                me[a * nloc + b] += rule.w[q] * nv[a] * nv[b];
+    let shapes_q: Vec<Vec<f64>> = rule.lam.iter().map(|lam| shape(lam, order).0).collect();
+    let mut me_const = vec![0.0; nloc * nloc];
+    if !radial_weight {
+        for (q, nv) in shapes_q.iter().enumerate() {
+            for a in 0..nloc {
+                for b in 0..nloc {
+                    me_const[a * nloc + b] += rule.w[q] * nv[a] * nv[b];
+                }
             }
         }
     }
@@ -94,6 +121,7 @@ pub fn damping_matrix(
     let n = ncomp * n1;
     let mut coo = Coo::new(n, n);
     let mut dofs = Vec::new();
+    let mut me_r = vec![0.0; nloc * nloc];
     for f in facets_with(mesh, labels) {
         let fv = mesh.facet(f);
         let ci = cell_of[&key(fv)];
@@ -116,6 +144,22 @@ pub fn damping_matrix(
         let len = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt().max(1e-300);
         let nn = [nrm[0] / len, nrm[1] / len, nrm[2] / len];
         let area = facet_measure(mesh, f);
+        let me: &[f64] = if radial_weight {
+            me_r.fill(0.0);
+            for (q, lam) in rule.lam.iter().enumerate() {
+                let rq: f64 = (0..fv.len()).map(|i| lam[i] * mesh.point(fv[i] as usize)[0]).sum();
+                let w = rule.w[q] * rq;
+                let nv = &shapes_q[q];
+                for a in 0..nloc {
+                    for b in 0..nloc {
+                        me_r[a * nloc + b] += w * nv[a] * nv[b];
+                    }
+                }
+            }
+            &me_r
+        } else {
+            &me_const
+        };
         mesh.facet_dofs(f, order, &mut dofs);
         for i in 0..ncomp {
             for j in 0..ncomp {
@@ -143,6 +187,20 @@ pub(crate) fn damping_matrix_mixed(
     labels: &[i32],
     ncomp: usize,
     thickness_2d: f64,
+) -> Csr {
+    damping_matrix_mixed_weighted(mixed, dof_map, c6, rho, labels, ncomp, thickness_2d, false)
+}
+
+/// Low-reflecting damping matrix on a [`MixedDiscretisation`] with optional radial Jacobian weight `r` (`R6b`).
+pub(crate) fn damping_matrix_mixed_weighted(
+    mixed: &MixedDiscretisation,
+    dof_map: &MixedLagrangeDofMap,
+    c6: &[M6],
+    rho: &[f64],
+    labels: &[i32],
+    ncomp: usize,
+    thickness_2d: f64,
+    radial_weight: bool,
 ) -> Csr {
     let d = mixed.dim;
     let n1 = dof_map.n_dofs;
@@ -176,7 +234,7 @@ pub(crate) fn damping_matrix_mixed(
         }
     }
 
-    let deg = 2 * dof_map.space.order() + 2;
+    let deg = 2 * dof_map.space.order() + if radial_weight { 4 } else { 2 };
     let mut coo = Coo::new(n, n);
     let mut dofs = Vec::new();
     for f in 0..mixed.n_facets() {
@@ -199,12 +257,13 @@ pub(crate) fn damping_matrix_mixed(
 
         let mut blocks = vec![vec![0.0; nloc * nloc]; ncomp * ncomp];
         for (xi, &wq) in rule.pts.iter().zip(&rule.w) {
-            let (_x, ds, n_hat) = eval_facet_jacobian(mixed, f, xi);
+            let (xq, ds, n_hat) = eval_facet_jacobian(mixed, f, xi);
             if ds <= 0.0 {
                 continue;
             }
             let (nv, _) = facet_lagrange_shape(ft, dof_map.space, xi);
-            let w_ds = wq * ds * thk;
+            let rq = if radial_weight { xq[0] } else { 1.0 };
+            let w_ds = wq * ds * thk * rq;
             for i in 0..ncomp {
                 for j in 0..ncomp {
                     let ni = if i < d { n_hat[i] } else { 0.0 };
@@ -247,8 +306,18 @@ pub type QuadraticModes = (Vec<C>, Vec<Vec<C>>, bool, usize);
 /// Eigenpairs `omega` (complex, rad/s) near `omega_s` of `(K + i omega C - omega^2 M) u = 0` over the free
 /// dofs; also returns the displacement vectors, whether all converged and the Krylov dimension.
 pub fn quadratic_modes(kf: &CCsr, mf: &CCsr, cf: &Csr, omega_s: f64, nev: usize) -> Result<QuadraticModes, String> {
+    quadratic_modes_complex(kf, mf, &to_complex(cf), omega_s, nev)
+}
+
+/// Complex damping variant of [`quadratic_modes`] (supports congruence-reduced complex LRB matrices).
+pub(crate) fn quadratic_modes_complex(
+    kf: &CCsr,
+    mf: &CCsr,
+    cc: &CCsr,
+    omega_s: f64,
+    nev: usize,
+) -> Result<QuadraticModes, String> {
     let n = kf.nrows();
-    let cc = to_complex(cf);
     // A = [[0, I], [-K, -C]], B = [[I, 0], [0, M]]
     let mut a = CCoo::new(2 * n, 2 * n);
     let mut b = CCoo::new(2 * n, 2 * n);
@@ -439,6 +508,7 @@ pub fn assemble_lrb(
     n_modes: usize,
     f_search: f64,
 ) -> Result<LrbAssembly, String> {
+    crate::problem::check_simplex_straight(mesh)?;
     if f_search <= 0.0 {
         return Err(
             "low-reflecting boundaries need a search frequency (the problem is quadratic in the frequency)".into()

@@ -177,6 +177,7 @@ pub fn eval_triangle_tangential_basis_ordered(
     let mut psi_q = Vec::with_capacity(nq);
     let (mut w, mut cu) = (Vec::new(), Vec::new());
 
+    let (mut area_acc, mut n_acc) = (0.0_f64, [0.0_f64; 3]);
     for q in 0..nq {
         let l2 = &quad2.lam[q];
         let mut lam4 = [0.0; 4];
@@ -211,11 +212,19 @@ pub fn eval_triangle_tangential_basis_ordered(
             let wn = dot3(ws, n_q);
             row.push([ws[0] - wn * n_q[0], ws[1] - wn * n_q[1], ws[2] - wn * n_q[2]]);
         }
-        weights.push(quad2.w[q] * area_q);
+        let wq = quad2.w[q] * area_q;
+        area_acc += wq;
+        n_acc[0] += wq * n_q[0];
+        n_acc[1] += wq * n_q[1];
+        n_acc[2] += wq * n_q[2];
+        weights.push(wq);
         psi_q.push(row);
     }
+    let n_len_acc = norm3(n_acc);
+    let n_out_curved =
+        if n_len_acc > 1e-30 { [n_acc[0] / n_len_acc, n_acc[1] / n_len_acc, n_acc[2] / n_len_acc] } else { n_out };
 
-    Ok((ci, area, n_out, bnd_dofs, weights, psi_q))
+    Ok((ci, area_acc, n_out_curved, bnd_dofs, weights, psi_q))
 }
 
 /// Partitions a slice of boundary triangles into vertex-connected components, ordered deterministically.
@@ -917,14 +926,29 @@ pub fn assemble_waveports_3d(
         }
 
         // Evaluate 3D tangential basis and outward normals on every triangle of the waveport
+        let curved_edge_set: BTreeSet<[u32; 2]> = if mesh.has_curved() {
+            mesh.edge_node_list().into_iter().map(|(pr, _)| [pr[0].min(pr[1]), pr[0].max(pr[1])]).collect()
+        } else {
+            BTreeSet::new()
+        };
         let mut tri_evals = Vec::with_capacity(port_tris.len());
         let mut n_acc = [0.0; 3];
         let mut verts_set = BTreeSet::new();
         for &tri in &port_tris {
+            if !curved_edge_set.is_empty()
+                && [(tri[0], tri[1]), (tri[1], tri[2]), (tri[0], tri[2])]
+                    .iter()
+                    .any(|&(a, b)| curved_edge_set.contains(&[a.min(b), a.max(b)]))
+            {
+                return Err(format!("waveport '{}' does not support curved port facets", bc.name));
+            }
             for v in tri {
                 verts_set.insert(v);
             }
             let eval = eval_triangle_tangential_basis_ordered(mesh, ned, &geo, &face_to_cell, tri)?;
+            if mesh.cell_is_curved(eval.0) {
+                return Err(format!("waveport '{}' does not support curved adjacent cells", bc.name));
+            }
             let area = eval.1;
             let n_tri = eval.2;
             n_acc[0] += area * n_tri[0];

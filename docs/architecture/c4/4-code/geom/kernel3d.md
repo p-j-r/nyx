@@ -2,10 +2,10 @@
 
 C4 level 4 (code) of the component **3D kernel** (`geom.kernel3d`) in the container **geom** (crate `geom`). [Component view of the container](../../3-components/geom.md) · [All code pages](../README.md)
 
-> Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model.
+> Prismatic models as a layer stack, general planar-faced solids, and the edges and vertices of a 3D model (shell edge pairing).
 
-**Decisions:** [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 1](../../../adr/0001-one-public-wafer-frame.md)  
-**Size:** 3 files, 2766 lines.
+**Decisions:** [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 1](../../../adr/0001-one-public-wafer-frame.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 3 files, 3107 lines.
 
 ## Files
 
@@ -13,7 +13,7 @@ C4 level 4 (code) of the component **3D kernel** (`geom.kernel3d`) in the contai
 |---|---:|---|
 | `crates/geom/src/planar.rs` | 1182 | General planar-faced solids: convex polyhedra (boxes in any orientation, tapered extrusions, half-space cuts at any angle) combined by Booleans. Used when a model is not a stack of z-prisms (a rotation about x or y, a tapered extrusion, ... |
 | `crates/geom/src/stack.rs` | 1294 | Prismatic 3D models as a *layer stack*: the model is cut at every z level where a solid starts or ends; each layer is a 2D arrangement of the solids active in it, and the *overlay* is the common refinement of all layers (every layer boun... |
-| `crates/geom/src/topo3.rs` | 290 | Edges and vertices of a 3D (layer stack) model, derived from its face fragments so that the topology is closed and checkable. |
+| `crates/geom/src/topo3.rs` | 631 | Edges and vertices of a 3D (layer stack) model, derived from its face fragments so that the topology is closed and checkable. |
 
 ## What it uses
 
@@ -129,4 +129,4 @@ classDiagram
 | fn | `build` | `topo3.rs:17` | `pub fn build(cx: &Complex) -> (Vec<Edge3>, Vec<Vertex>)` |
 | fn | `Complex::edge3_point` | `topo3.rs:165` | `pub fn edge3_point(&self, e: u32, u: f64) -> V3` —  Point of a 3D edge at fraction `u` of its parameter range. |
 | fn | `Complex::edge3_closest` | `topo3.rs:192` | `pub fn edge3_closest(&self, e: u32, p: V3) -> (V3, f64)` —  Closest point of a 3D edge to `p`, with its fraction. |
-| fn | `Complex::check_topology3` | `topo3.rs:225` | `pub(crate) fn check_topology3(&self) -> Result<(), String>` —  Topology checks of a 3D complex: every edge is shared by at least two distinct faces, and the edges around every face add up to |
+| fn | `Complex::check_topology3` | `topo3.rs:226` | `pub(crate) fn check_topology3(&self) -> Result<(), String>` —  Topology checks of a 3D complex: every edge is shared by at least two distinct faces (except free rims of open sheets), |

@@ -68,7 +68,8 @@ C4 level 4 (code) of the component **Mesh** (`femcore.mesh`) in the container **
 | [sms: Low-reflecting boundary](../sms/lrb.md) | mesh::cells, mesh::mixed | FacetType, MixedDiscretisation, canonical_quad_face, cell_local_edges, cell_local_quad_faces, cell_local_tri_faces, sorted_tri_face |
 | [sms: Piezoelectric kernel](../sms/piezo.md) | mesh, mesh::mixed | MixedDiscretisation, SimplexMesh |
 | [sms: Absorbing-layer kernel](../sms/pml.md) | mesh::cells, mesh::mixed | FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES, canonical_quad_face, cell_local_edges, cell_local_quad_faces, cell_local_tri_faces +1 |
-| [sms: Solid kernel](../sms/solid.md) | mesh::cells, mesh::mixed | FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES, canonical_quad_face, cell_local_edges, cell_local_quad_faces, cell_local_tri_faces +1 |
+| [sms: Typed problem](../sms/problem.md) | mesh | SimplexMesh |
+| [sms: Solid kernel](../sms/solid.md) | mesh::cells, mesh::mixed | CellType, FacetType, MixedDiscretisation, QUAD_EDGES, TRI_EDGES, canonical_quad_face, cell_local_edges, cell_local_quad_faces +2 |
 | [sms: Waveguide kernel](../sms/waveguide.md) | mesh::mixed | MixedDiscretisation |
 
 ## Class diagram

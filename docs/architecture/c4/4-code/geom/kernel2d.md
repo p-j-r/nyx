@@ -2,20 +2,20 @@
 
 C4 level 4 (code) of the component **2D kernel** (`geom.kernel2d`) in the container **geom** (crate `geom`). [Component view of the container](../../3-components/geom.md) · [All code pages](../README.md)
 
-> Primitives, planar curves, the planar arrangement of all boundary pieces, the evaluated region complex, and batch polygon ring cleanup with shared-corner-pinned RDP simplification.
+> Primitives, planar curves, the planar arrangement of all boundary pieces (`Verts::cluster`, exact conic ray crossing), the evaluated region complex (`check3` quadric flux), and batch polygon ring cleanup with shared-corner-pinned RDP simplification.
 
-**Decisions:** [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md)  
-**Size:** 5 files, 4357 lines.
+**Decisions:** [ADR 3](../../../adr/0003-geom-is-a-lean-separate-kernel.md), [ADR 18](../../../adr/0018-curved-elements-deferred.md), [ADR 102](../../../adr/0102-conformal-interior-sheets-and-batch-polygons.md), [ADR 132](../../../adr/0132-vvuq-asme-six-pillar-code-verification.md)  
+**Size:** 5 files, 4803 lines.
 
 ## Files
 
 | File | Lines | What it says about itself |
 |---|---:|---|
-| `crates/geom/src/arrange.rs` | 1175 | The planar arrangement: all primitive boundary pieces are interned onto shared curves, split at every crossing and touching point, identical pieces merge (keeping every origin), each piece is classified on both sides with the painter rul... |
-| `crates/geom/src/complex.rs` | 828 | The evaluated region complex of a 2D model: regions (planar faces, possibly with holes), the edges that separate them (each used by exactly two region sides, one of which may be the void), vertices, and the closed boundary loops of every... |
+| `crates/geom/src/arrange.rs` | 1563 | The planar arrangement: all primitive boundary pieces are interned onto shared curves, split at every crossing and touching point, identical pieces merge (keeping every origin), each piece is classified on both sides with the painter rul... |
+| `crates/geom/src/complex.rs` | 853 | The evaluated region complex of a 2D model: regions (planar faces, possibly with holes), the edges that separate them (each used by exactly two region sides, one of which may be the void), vertices, and the closed boundary loops of every... |
 | `crates/geom/src/curve.rs` | 439 | Planar curves of the 2D kernel: lines, circles and ellipses in one canonical parametrisation each (so that coincident curves compare equal), with evaluation, tangent, curvature, closest point, bounding boxes, length, the Green-theorem bo... |
 | `crates/geom/src/poly_batch.rs` | 871 | Batch polygon preprocessing for `Op::Polygons`: closed-ring Ramer-Douglas-Peucker (RDP) simplification with cross-ring shared-vertex pinning and minimum-hole-area filtering. |
-| `crates/geom/src/prim.rs` | 1044 | 2D primitives in the world frame: a local shape (rectangle, rounded rectangle, circle, ellipse, polygon), the similarity transform that placed it, its directed boundary pieces with role names (interior always on the left), an exact signe... |
+| `crates/geom/src/prim.rs` | 1077 | 2D primitives in the world frame: a local shape (rectangle, rounded rectangle, circle, ellipse, polygon), the similarity transform that placed it, its directed boundary pieces with role names (interior always on the left), an exact signe... |
 
 ## What it uses
 
@@ -281,11 +281,11 @@ classDiagram
         +volume() f64
         +area() f64
         +perimeter() f64
+        +area_vector() V3
+        +volume_flux(p0) f64
         +bbox() Aabb
         ~seg(q, a, b) tuple
-        +sdf(p) f64
-        +project(p) V3
-        +more_5_methods()
+        +more_7_methods()
     }
     class Revolved {
         <<struct>>
@@ -366,11 +366,11 @@ classDiagram
 |---|---|---|---|
 | const | `GRAZE_K` | `arrange.rs:21` | `f64` —  Width of the "undecidable" band around the tolerance, in units of `tol`. |
 | struct | `PairRes` | `arrange.rs:25` | fields: `hits`, `graze`, `near` —  Raw curve-curve intersection of two pieces (cached by the content hash of both). |
-| fn | `arrange` | `arrange.rs:311` | `pub fn arrange(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex>` —  Builds the region complex of a scene. |
-| type | `Classify` | `arrange.rs:316` | `<'a>` —  Classifier of a side: the region index (any numbering) for a set of inside bits, `None` for the void. |
-| fn | `arrange_with` | `arrange.rs:320` | `pub fn arrange_with( scene: &Scene, cache: &mut Cache, classify: Classify, regions: &dyn Fn() -> Vec<RegionX>, ) -> GeomResult<Complex>` —  The arrangement with a caller-supplied classifier (the layer stack uses composite classes for the common refinement); |
-| fn | `edge_crosses_ray_x` | `arrange.rs:1147` | `pub(crate) fn edge_crosses_ray_x(ed: &Edge, curves: &[Curve], fwd: bool, p: V2) -> bool` —  Parity of crossings of one directed edge against the horizontal ray `[p[0], +inf) x {p[1]}`. |
-| fn | `point_in_loop` | `arrange.rs:1166` | `pub(crate) fn point_in_loop(l: &Loop, edges: &[Edge], curves: &[Curve], p: V2) -> bool` —  Even-odd test of `p` against a loop flattened to chords (used only to decide which outer loop a hole belongs to). |
+| fn | `arrange` | `arrange.rs:494` | `pub fn arrange(scene: &Scene, cache: &mut Cache) -> GeomResult<Complex>` —  Builds the region complex of a scene. |
+| type | `Classify` | `arrange.rs:499` | `<'a>` —  Classifier of a side: the region index (any numbering) for a set of inside bits, `None` for the void. |
+| fn | `arrange_with` | `arrange.rs:503` | `pub fn arrange_with( scene: &Scene, cache: &mut Cache, classify: Classify, regions: &dyn Fn() -> Vec<RegionX>, ) -> GeomResult<Complex>` —  The arrangement with a caller-supplied classifier (the layer stack uses composite classes for the common refinement); |
+| fn | `edge_crosses_ray_x` | `arrange.rs:1374` | `pub(crate) fn edge_crosses_ray_x(ed: &Edge, curves: &[Curve], fwd: bool, p: V2) -> bool` —  Parity of crossings of one directed edge against the horizontal ray `[p[0], +inf) x {p[1]}`. |
+| fn | `point_in_loop` | `arrange.rs:1446` | `pub(crate) fn point_in_loop(l: &Loop, edges: &[Edge], curves: &[Curve], p: V2) -> bool` —  Even-odd test of `p` against a loop flattened to chords (used only to decide which outer loop a hole belongs to). |
 | struct | `Prov` | `complex.rs:15` | fields: `feature`, `instance`, `role` —  One origin of an edge: the feature (and pattern instance) whose boundary piece `role` produced it. |
 | struct | `Region` | `complex.rs:28` | fields: `name`, `kind`, `feature`, `pinned_id`, `scene_index`, `measure`, `bbox`, `loops`, `parent` |
 | struct | `Edge` | `complex.rs:44` | fields: `name`, `curve`, `t0`, `t1`, `v0`, `v1`, `left`, `right`, `prov`, `owner_prims`, `length`, `bbox` |
@@ -418,12 +418,12 @@ classDiagram
 | fn | `Complex::facet_project` | `complex.rs:531` | `pub fn facet_project(&self, i: u32, p: V3) -> V3` —  The point of the facet closest to `p`. |
 | fn | `Complex::facet_samples` | `complex.rs:569` | `pub fn facet_samples(&self, i: u32) -> Vec<V3>` —  Representative points of the facet (corners, edge middles, an interior point), used for congruence checks. |
 | fn | `Complex::plane_lift` | `complex.rs:632` | `pub fn plane_lift(&self, plane: u32, q: V2) -> V3` |
-| fn | `Complex::point_in_loop_idx` | `complex.rs:700` | `pub(crate) fn point_in_loop_idx(&self, l_idx: usize, p: V2) -> bool` |
-| fn | `Complex::locate` | `complex.rs:733` | `pub fn locate(&self, p: V2) -> Option<u32>` —  Region containing `p` by testing the boundary loops (chord-flattened); agrees with `Evaluated::classify` away from the boundary. |
-| fn | `Complex::region_area` | `complex.rs:749` | `pub fn region_area(&self, r: u32) -> f64` |
-| fn | `Complex::interface_length` | `complex.rs:754` | `pub fn interface_length(&self, a: u32, b: u32) -> f64` —  Total length of the interface between two regions. |
-| fn | `Complex::edge_green` | `complex.rs:765` | `pub fn edge_green(&self, e: u32) -> f64` —  Twice-signed-area integral of one edge in its canonical direction. |
-| fn | `Complex::check` | `complex.rs:773` | `pub fn check(&self) -> Result<(), String>` —  Always-on self-checks (cheap): every edge separates two different sides, loops are closed and consistently oriented, |
+| fn | `Complex::point_in_loop_idx` | `complex.rs:725` | `pub(crate) fn point_in_loop_idx(&self, l_idx: usize, p: V2) -> bool` |
+| fn | `Complex::locate` | `complex.rs:758` | `pub fn locate(&self, p: V2) -> Option<u32>` —  Region containing `p` by testing the boundary loops (chord-flattened); agrees with `Evaluated::classify` away from the boundary. |
+| fn | `Complex::region_area` | `complex.rs:774` | `pub fn region_area(&self, r: u32) -> f64` |
+| fn | `Complex::interface_length` | `complex.rs:779` | `pub fn interface_length(&self, a: u32, b: u32) -> f64` —  Total length of the interface between two regions. |
+| fn | `Complex::edge_green` | `complex.rs:790` | `pub fn edge_green(&self, e: u32) -> f64` —  Twice-signed-area integral of one edge in its canonical direction. |
+| fn | `Complex::check` | `complex.rs:798` | `pub fn check(&self) -> Result<(), String>` —  Always-on self-checks (cheap): every edge separates two different sides, loops are closed and consistently oriented, |
 | enum | `Curve` | `curve.rs:11` | variants: `Line`, `Circle`, `Ellipse` |
 | struct | `Hit` | `curve.rs:19` | fields: `p`, `ta`, `tb` —  One intersection point with its parameter on each curve. |
 | struct | `Inter` | `curve.rs:28` | fields: `hits`, `graze`, `near` —  Result of intersecting two curves. `graze` lists tangent contacts (grazing within the tolerance band), `near` is set when |
@@ -462,12 +462,12 @@ classDiagram
 | struct | `Poly3` | `prim.rs:52` | fields: `faces` —  A convex polyhedron: planar faces whose rings are counter-clockwise seen from outside. |
 | struct | `PFace` | `prim.rs:57` | fields: `ring`, `role`, `n`, `d` |
 | enum | `Body` | `prim.rs:118` | variants: `Sphere`, `Torus`, `Cone`, `ConeSide`, `Disk`, `CylSide`, `Annulus` —  A curved solid and the curved faces it is made of: sphere and torus (one closed face, no edges), a cone frustum along z, and the |
-| struct | `Revolved` | `prim.rs:444` | fields: `c`, `pts`, `roles` —  A solid of revolution: a closed counter-clockwise profile in the `(rho, z)` half plane (`rho >= 0`) turned once about the axis through |
-| struct | `RevFace` | `prim.rs:452` | fields: `role`, `body`, `seg` —  One face of a revolved solid: its role, geometry, and the profile corner (index) at its end. |
-| enum | `Style` | `prim.rs:544` | variants: `Plain`, `Box`, `Cylinder`, `Extrude` —  How the boundary pieces are named in 3D: a rectangle read as a box, a circle read as a cylinder, any profile extruded, or plain 2D. |
-| struct | `Prim` | `prim.rs:552` | fields: `rev`, `poly`, `body`, `z`, `caps`, `feature`, `name`, `shape`, `xf`, `segs`, `bbox`, `aux`, ... |
-| fn | `ccw_polygon` | `prim.rs:1030` | `pub fn ccw_polygon(pts: &[V2], names: &[String]) -> (Vec<V2>, Vec<String>)` —  Counter-clockwise copy of a polygon with the edge names reordered to match. |
-| fn | `polygon_area` | `prim.rs:1041` | `pub fn polygon_area(p: &[V2]) -> f64` |
+| struct | `Revolved` | `prim.rs:477` | fields: `c`, `pts`, `roles` —  A solid of revolution: a closed counter-clockwise profile in the `(rho, z)` half plane (`rho >= 0`) turned once about the axis through |
+| struct | `RevFace` | `prim.rs:485` | fields: `role`, `body`, `seg` —  One face of a revolved solid: its role, geometry, and the profile corner (index) at its end. |
+| enum | `Style` | `prim.rs:577` | variants: `Plain`, `Box`, `Cylinder`, `Extrude` —  How the boundary pieces are named in 3D: a rectangle read as a box, a circle read as a cylinder, any profile extruded, or plain 2D. |
+| struct | `Prim` | `prim.rs:585` | fields: `rev`, `poly`, `body`, `z`, `caps`, `feature`, `name`, `shape`, `xf`, `segs`, `bbox`, `aux`, ... |
+| fn | `ccw_polygon` | `prim.rs:1063` | `pub fn ccw_polygon(pts: &[V2], names: &[String]) -> (Vec<V2>, Vec<String>)` —  Counter-clockwise copy of a polygon with the edge names reordered to match. |
+| fn | `polygon_area` | `prim.rs:1074` | `pub fn polygon_area(p: &[V2]) -> f64` |
 | fn | `Poly3::new` | `prim.rs:67` | `pub fn new(rings: Vec<(Vec<V3>, String)>) -> Poly3` —  Builds a polyhedron from face rings in any orientation; each ring is turned to point away from the centroid. |
 | fn | `Poly3::bbox` | `prim.rs:95` | `pub fn bbox(&self) -> Aabb` |
 | fn | `Poly3::sdf` | `prim.rs:101` | `pub fn sdf(&self, p: V3) -> f64` —  Largest signed plane distance: exact inside, a lower bound of the distance outside. |
@@ -476,29 +476,31 @@ classDiagram
 | fn | `Body::volume` | `prim.rs:174` | `pub fn volume(&self) -> f64` |
 | fn | `Body::area` | `prim.rs:183` | `pub fn area(&self) -> f64` |
 | fn | `Body::perimeter` | `prim.rs:196` | `pub fn perimeter(&self) -> f64` —  Total length of the circle edges around a face. |
-| fn | `Body::bbox` | `prim.rs:205` | `pub fn bbox(&self) -> Aabb` |
-| fn | `Body::seg` | `prim.rs:224` | `pub(crate) fn seg(q: V2, a: V2, b: V2) -> (f64, V2)` —  Distance from `q = (rho, z)` to the segment `a -> b`, and the nearest point. |
-| fn | `Body::sdf` | `prim.rs:232` | `pub fn sdf(&self, p: V3) -> f64` —  Signed distance of a solid (negative inside); infinite for face-only variants. |
-| fn | `Body::project` | `prim.rs:257` | `pub fn project(&self, p: V3) -> V3` —  Closest point of the surface (of the face, for the face-only variants). |
-| fn | `Body::normal` | `prim.rs:322` | `pub fn normal(&self, p: V3) -> V3` —  Outward unit normal (outward from the solid) at the surface point nearest `p`. |
-| fn | `Body::point_at` | `prim.rs:354` | `pub fn point_at(&self, u: f64, v: f64) -> V3` —  Point at the fractions `(u, v)`. |
-| fn | `Body::fractions` | `prim.rs:379` | `pub fn fractions(&self, p: V3) -> (f64, f64)` —  Fractions of the surface point nearest `p`. |
-| fn | `Body::radius_of_curvature` | `prim.rs:407` | `pub fn radius_of_curvature(&self) -> f64` |
-| fn | `Body::key` | `prim.rs:416` | `pub fn key(&self, h: &mut Hasher64)` |
-| fn | `Revolved::volume` | `prim.rs:460` | `pub fn volume(&self) -> f64` |
-| fn | `Revolved::bbox` | `prim.rs:470` | `pub fn bbox(&self) -> Aabb` |
-| fn | `Revolved::sdf` | `prim.rs:479` | `pub fn sdf(&self, p: V3) -> f64` —  Signed distance (negative inside) to the surface, ignoring the segments on the axis. |
-| fn | `Revolved::faces` | `prim.rs:500` | `pub fn faces(&self) -> Vec<RevFace>` —  The faces (profile segments off the axis). |
-| fn | `Revolved::surface_point` | `prim.rs:525` | `pub fn surface_point(&self) -> V3` —  A point on the surface away from the edges (the middle of the longest segment off the axis). |
-| fn | `Revolved::key` | `prim.rs:534` | `pub fn key(&self, h: &mut Hasher64)` |
-| fn | `DGeom::curve_range` | `prim.rs:784` | `pub fn curve_range(&self) -> (Curve, f64, f64)` |
-| fn | `Prim::new` | `prim.rs:823` | `pub fn new(feature: u32, name: String, shape: LShape, xf: Xf2, aux: bool) -> GeomResult<Prim>` |
-| fn | `Prim::new_styled` | `prim.rs:828` | `pub fn new_styled( feature: u32, name: String, shape: LShape, xf: Xf2, aux: bool, style: Style, z: (f64, f64), axis: usize, ) -> GeomResult<Prim>` |
-| fn | `Prim::new_body` | `prim.rs:910` | `pub fn new_body(feature: u32, name: String, body: Body) -> Prim` |
-| fn | `Prim::new_revolved` | `prim.rs:932` | `pub fn new_revolved(feature: u32, name: String, rev: Revolved) -> Prim` |
-| fn | `Prim::is_curved_solid` | `prim.rs:955` | `pub fn is_curved_solid(&self) -> bool` —  True for solids that take no part in the planar / prismatic arrangement (bodies and solids of revolution). |
-| fn | `Prim::new_poly` | `prim.rs:959` | `pub fn new_poly(feature: u32, name: String, poly: Poly3, aux: bool) -> Prim` |
-| fn | `Prim::bbox3` | `prim.rs:982` | `pub fn bbox3(&self) -> Aabb` —  Bounding box including the z interval. |
-| fn | `Prim::sdf3` | `prim.rs:987` | `pub fn sdf3(&self, p: V3, reach: f64) -> f64` —  Signed distance estimate of the prism in 3D (negative inside). |
-| fn | `Prim::sdf` | `prim.rs:1010` | `pub fn sdf(&self, p: V2) -> f64` —  Signed distance estimate in world units (negative inside); exact for polygons, rectangles and circles. |
-| fn | `Prim::sdf_near` | `prim.rs:1015` | `pub fn sdf_near(&self, p: V2, reach: f64) -> f64` —  Signed distance, skipping the evaluation when `p` is farther than `reach` from the bounding box. |
+| fn | `Body::area_vector` | `prim.rs:206` | `pub fn area_vector(&self) -> V3` —  Analytic integral of the outward unit normal over the surface (`\iint_S n dA`) in the internal frame. |
+| fn | `Body::volume_flux` | `prim.rs:222` | `pub fn volume_flux(&self, p0: V3) -> f64` —  Analytic divergence-theorem volume integral `\frac{1}{3} \iint_S (p - p0) \cdot n \, dA` in the internal frame. |
+| fn | `Body::bbox` | `prim.rs:238` | `pub fn bbox(&self) -> Aabb` |
+| fn | `Body::seg` | `prim.rs:257` | `pub(crate) fn seg(q: V2, a: V2, b: V2) -> (f64, V2)` —  Distance from `q = (rho, z)` to the segment `a -> b`, and the nearest point. |
+| fn | `Body::sdf` | `prim.rs:265` | `pub fn sdf(&self, p: V3) -> f64` —  Signed distance of a solid (negative inside); infinite for face-only variants. |
+| fn | `Body::project` | `prim.rs:290` | `pub fn project(&self, p: V3) -> V3` —  Closest point of the surface (of the face, for the face-only variants). |
+| fn | `Body::normal` | `prim.rs:355` | `pub fn normal(&self, p: V3) -> V3` —  Outward unit normal (outward from the solid) at the surface point nearest `p`. |
+| fn | `Body::point_at` | `prim.rs:387` | `pub fn point_at(&self, u: f64, v: f64) -> V3` —  Point at the fractions `(u, v)`. |
+| fn | `Body::fractions` | `prim.rs:412` | `pub fn fractions(&self, p: V3) -> (f64, f64)` —  Fractions of the surface point nearest `p`. |
+| fn | `Body::radius_of_curvature` | `prim.rs:440` | `pub fn radius_of_curvature(&self) -> f64` |
+| fn | `Body::key` | `prim.rs:449` | `pub fn key(&self, h: &mut Hasher64)` |
+| fn | `Revolved::volume` | `prim.rs:493` | `pub fn volume(&self) -> f64` |
+| fn | `Revolved::bbox` | `prim.rs:503` | `pub fn bbox(&self) -> Aabb` |
+| fn | `Revolved::sdf` | `prim.rs:512` | `pub fn sdf(&self, p: V3) -> f64` —  Signed distance (negative inside) to the surface, ignoring the segments on the axis. |
+| fn | `Revolved::faces` | `prim.rs:533` | `pub fn faces(&self) -> Vec<RevFace>` —  The faces (profile segments off the axis). |
+| fn | `Revolved::surface_point` | `prim.rs:558` | `pub fn surface_point(&self) -> V3` —  A point on the surface away from the edges (the middle of the longest segment off the axis). |
+| fn | `Revolved::key` | `prim.rs:567` | `pub fn key(&self, h: &mut Hasher64)` |
+| fn | `DGeom::curve_range` | `prim.rs:817` | `pub fn curve_range(&self) -> (Curve, f64, f64)` |
+| fn | `Prim::new` | `prim.rs:856` | `pub fn new(feature: u32, name: String, shape: LShape, xf: Xf2, aux: bool) -> GeomResult<Prim>` |
+| fn | `Prim::new_styled` | `prim.rs:861` | `pub fn new_styled( feature: u32, name: String, shape: LShape, xf: Xf2, aux: bool, style: Style, z: (f64, f64), axis: usize, ) -> GeomResult<Prim>` |
+| fn | `Prim::new_body` | `prim.rs:943` | `pub fn new_body(feature: u32, name: String, body: Body) -> Prim` |
+| fn | `Prim::new_revolved` | `prim.rs:965` | `pub fn new_revolved(feature: u32, name: String, rev: Revolved) -> Prim` |
+| fn | `Prim::is_curved_solid` | `prim.rs:988` | `pub fn is_curved_solid(&self) -> bool` —  True for solids that take no part in the planar / prismatic arrangement (bodies and solids of revolution). |
+| fn | `Prim::new_poly` | `prim.rs:992` | `pub fn new_poly(feature: u32, name: String, poly: Poly3, aux: bool) -> Prim` |
+| fn | `Prim::bbox3` | `prim.rs:1015` | `pub fn bbox3(&self) -> Aabb` —  Bounding box including the z interval. |
+| fn | `Prim::sdf3` | `prim.rs:1020` | `pub fn sdf3(&self, p: V3, reach: f64) -> f64` —  Signed distance estimate of the prism in 3D (negative inside). |
+| fn | `Prim::sdf` | `prim.rs:1043` | `pub fn sdf(&self, p: V2) -> f64` —  Signed distance estimate in world units (negative inside); exact for polygons, rectangles and circles. |
+| fn | `Prim::sdf_near` | `prim.rs:1048` | `pub fn sdf_near(&self, p: V2, reach: f64) -> f64` —  Signed distance, skipping the evaluation when `p` is farther than `reach` from the bounding box. |

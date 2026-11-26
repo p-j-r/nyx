@@ -15,67 +15,67 @@ problem = component "Typed problem" "The typed ems problem the kernels read, dec
         "codeDiagram" "4-code/ems/problem.md"
     }
 }
-modes = component "Mode kernel" "Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed)." "Rust modules" {
+modes = component "Mode kernel" "Full-vector mode analysis of a 2D waveguide cross-section (inhomogeneous media allowed, R32 straight-mesh check)." "Rust modules" {
     properties {
-        "adr" "45, 9"
+        "adr" "45, 9, 132"
         "code" "crates/nyx-ems/src: modes.rs"
-        "lines" "850"
+        "lines" "862"
         "codeDiagram" "4-code/ems/modes.md"
     }
 }
-modescx = component "Complex-mode kernel" "Complex-valued mode analysis: lossy media and perfectly matched layers." "Rust modules" {
+modescx = component "Complex-mode kernel" "Complex-valued mode analysis: lossy media and perfectly matched layers (`+4` Krylov + `layer_fraction` filter, R32 check)." "Rust modules" {
     properties {
-        "adr" "45"
+        "adr" "45, 132"
         "code" "crates/nyx-ems/src: modes_complex.rs"
-        "lines" "1422"
+        "lines" "1557"
         "codeDiagram" "4-code/ems/modescx.md"
     }
 }
-axisym = component "Axisymmetric kernel" "Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities)." "Rust modules" {
+axisym = component "Axisymmetric kernel" "Electromagnetic eigenmodes of a body of revolution (rings, disks, coaxial cavities, `R6d` quadrature `s_theta`)." "Rust modules" {
     properties {
-        "adr" "46"
+        "adr" "46, 132"
         "code" "crates/nyx-ems/src: axisym.rs"
-        "lines" "979"
+        "lines" "958"
         "codeDiagram" "4-code/ems/axisym.md"
     }
 }
-cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export." "Rust modules" {
+cavity = component "3D cavity kernel" "Electromagnetic eigenmodes of 3D cavities (`SourceField` MMS, R34 curved post-integrals) and resonators, with superconducting thin-film IBC, lumped Josephson junctions, and physical H/K export." "Rust modules" {
     properties {
-        "adr" "45, 104"
+        "adr" "45, 104, 132"
         "code" "crates/nyx-ems/src: bloch.rs, cavity.rs"
-        "lines" "3716"
+        "lines" "4247"
         "codeDiagram" "4-code/ems/cavity.md"
     }
 }
-ibc = component "Thin-film IBC and Josephson ROM" "Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata." "Rust modules" {
+ibc = component "Thin-film IBC and Josephson ROM" "Superconducting thin-film surface impedance boundary condition (Leontovich/two-fluid, curved Jacobian integrals), rank-1 lumped Josephson port contribution, passive CircuitRom, and TLS metadata." "Rust modules" {
     properties {
-        "adr" "104"
+        "adr" "104, 132"
         "code" "crates/nyx-ems/src: ibc.rs, rom.rs"
-        "lines" "3134"
+        "lines" "3222"
         "codeDiagram" "4-code/ems/ibc.md"
     }
 }
-driven = component "Driven frequency-domain and PROM" "Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations and Hermite Tangential Galerkin PROM sweep acceleration." "Rust modules" {
+driven = component "Driven frequency-domain and PROM" "Driven 3D frequency-domain curl-curl solver with lumped/waveport excitations (curved 2D port integrals), curvilinear PML power `P_pml`, and Hermite Tangential Galerkin PROM sweep acceleration." "Rust modules" {
     properties {
-        "adr" "106"
+        "adr" "106, 132"
         "code" "crates/nyx-ems/src: driven.rs, ports.rs"
-        "lines" "2979"
+        "lines" "3003"
         "codeDiagram" "4-code/ems/driven.md"
     }
 }
 mixed = component "Native mixed-cell EM" "Native mixed-cell Maxwell assemblers, Gauss-point curvilinear PML pullbacks, mixed ports/IBC/ROM, and Ams/AmsP2 curl-curl drivers." "Rust modules" {
     properties {
-        "adr" "128, 45"
+        "adr" "128, 45, 132"
         "code" "crates/nyx-ems/src: mixed_ops.rs"
-        "lines" "2112"
+        "lines" "2139"
         "codeDiagram" "4-code/ems/mixed.md"
     }
 }
 optical = component "Optical mode sets" "The mode solvers' results as an OpticalSet, with the material data needed to evaluate their fields." "Rust modules" {
     properties {
-        "adr" "45, 21"
+        "adr" "45, 21, 132"
         "code" "crates/nyx-ems/src: optical.rs"
-        "lines" "95"
+        "lines" "101"
         "codeDiagram" "4-code/ems/optical.md"
     }
 }
