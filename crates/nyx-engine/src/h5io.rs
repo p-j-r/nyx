@@ -42,10 +42,10 @@ use hdf5_pure::{
     make_f64_type, make_i32_type, make_u32_type, make_u8_type, AttrValue, Dataset, DatasetBuilder, DeflateLevel, File,
     FileBuilder, Group,
 };
-use nyx_physics::{CellField, Field, Scalar, Solution, SolveResult};
+use nyx_physics::{CellField, Field, NumericalErrorBudget, Scalar, Solution, SolveResult, SolverDiagnostics};
 pub use nyx_storage::{FieldStorageLayout, PackedComponentMeta, ReadBudgetConfig};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 pub(crate) fn e<T: std::fmt::Display>(what: &str) -> impl Fn(T) -> String + '_ {
@@ -347,9 +347,29 @@ pub fn write_results_mode(
     mesh: &SimplexMesh,
     results: &[(String, &SolveResult)],
 ) -> Result<bool, String> {
+    write_results_mode_with_provenance(path, mode, project, mesh, results, None)
+}
+
+/// Like [`write_results_mode`], additionally storing `checks` (`Engine::checks`) at `/provenance/validated_json`.
+pub fn write_results_mode_with_provenance(
+    path: &Path,
+    mode: H5Mode,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+    checks: Option<&BTreeMap<String, crate::validated::Check>>,
+) -> Result<bool, String> {
     match mode {
         H5Mode::Serial => {
-            write_results_with_layout(path, project, mesh, results, FieldStorageLayout::L2ShuffleLzfPacked)?;
+            write_results_with_provenance(
+                path,
+                project,
+                mesh,
+                results,
+                FieldStorageLayout::L2ShuffleLzfPacked,
+                true,
+                checks,
+            )?;
             Ok(true)
         }
         H5Mode::Parallel => Err(NO_PARALLEL.into()),
@@ -377,6 +397,20 @@ pub fn write_results_with_options(
     layout: FieldStorageLayout,
     save_fields: bool,
 ) -> Result<(), String> {
+    write_results_with_provenance(path, project, mesh, results, layout, save_fields, None)
+}
+
+/// Writes `results` solved on `mesh` for `project` into `path` using `layout`, optionally persisting `checks` at
+/// `/provenance/validated_json` and omitting mesh/field arrays when `save_fields` is `false`.
+pub fn write_results_with_provenance(
+    path: &Path,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+    layout: FieldStorageLayout,
+    save_fields: bool,
+    checks: Option<&BTreeMap<String, crate::validated::Check>>,
+) -> Result<(), String> {
     let mut fb = FileBuilder::new();
     fb.set_attr("writer", text_attr("serial")?);
     fb.set_attr("processes", AttrValue::I64(1));
@@ -390,6 +424,11 @@ pub fn write_results_with_options(
     }
     let proj_json = project.to_json();
     fill_u8(fb.create_dataset("project"), proj_json.as_bytes(), layout);
+    let empty_checks = BTreeMap::new();
+    let validated_bytes = serde_json::to_vec(checks.unwrap_or(&empty_checks)).map_err(|x| x.to_string())?;
+    let mut prov = fb.create_group("provenance");
+    fill_u8(prov.create_dataset("validated_json"), &validated_bytes, layout);
+    fb.add_group(prov.finish());
 
     let d = mesh.dim;
     if save_fields {
@@ -450,6 +489,10 @@ pub fn write_results_with_options(
         fill_u8(g.create_dataset("scalars"), scalars_text.as_bytes(), layout);
         let log_text = serde_json::to_string(&r.log).map_err(|x| x.to_string())?;
         fill_u8(g.create_dataset("log"), log_text.as_bytes(), layout);
+        let diag_bytes = serde_json::to_vec(&r.diagnostics).map_err(|x| x.to_string())?;
+        fill_u8(g.create_dataset("diagnostics_json"), &diag_bytes, layout);
+        let budget_bytes = serde_json::to_vec(&r.error_budget).map_err(|x| x.to_string())?;
+        fill_u8(g.create_dataset("error_budget_json"), &budget_bytes, layout);
 
         let m_sol = r.solutions.len();
         if m_sol == 0 {
@@ -652,6 +695,22 @@ fn read_text(g: &Group, name: &str, budget: &ReadBudgetConfig, total: &mut u64) 
     String::from_utf8(bytes).map_err(|x| format!("HDF5 {name}: {x}"))
 }
 
+fn read_optional_json<T: serde::de::DeserializeOwned>(
+    g: &Group,
+    name: &str,
+    budget: &ReadBudgetConfig,
+    total: &mut u64,
+) -> Result<Option<T>, String> {
+    let Ok(ds) = g.dataset(name) else {
+        return Ok(None);
+    };
+    check_budget(&ds, 1, budget, name)?;
+    let bytes = ds.read_u8().map_err(e(name))?;
+    add_total_bytes(total, bytes.len() as u64, budget, name)?;
+    let text = String::from_utf8(bytes).map_err(|x| format!("HDF5 {name}: {x}"))?;
+    serde_json::from_str::<Option<T>>(&text).map_err(|x| format!("HDF5 {name}: {x}"))
+}
+
 fn attr_f64(attrs: &HashMap<String, AttrValue>, name: &str) -> Option<f64> {
     attrs.get(name).and_then(AttrValue::as_f64)
 }
@@ -718,6 +777,8 @@ pub struct PhysicsSummary {
     pub seconds: f64,
     pub solutions: usize,
     pub scalars: Vec<(String, Scalar)>,
+    pub diagnostics: Option<SolverDiagnostics>,
+    pub error_budget: Option<NumericalErrorBudget>,
 }
 
 /// Lightweight metadata summary of a results file (`results_file_info`), read via streaming metadata only.
@@ -765,6 +826,9 @@ pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
         let g = res_root.group(&name).map_err(e("physics group"))?;
         let g_attrs = g.attrs().map_err(e("physics attributes"))?;
         let scalars = parse_scalars(&read_text(&g, "scalars", &budget, &mut total_bytes)?);
+        let diagnostics = read_optional_json::<SolverDiagnostics>(&g, "diagnostics_json", &budget, &mut total_bytes)?;
+        let error_budget =
+            read_optional_json::<NumericalErrorBudget>(&g, "error_budget_json", &budget, &mut total_bytes)?;
         let n_solutions = attr_nonneg_usize(&g_attrs, "n_solutions")?;
         if n_solutions > budget.max_solutions {
             return Err(format!("HDF5 {name}: n_solutions {n_solutions} exceeds read budget {}", budget.max_solutions));
@@ -778,6 +842,8 @@ pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
             seconds: attr_f64(&g_attrs, "seconds").unwrap_or(0.0),
             solutions: n_solutions,
             scalars,
+            diagnostics,
+            error_budget,
         };
         results.push((name, summary));
     }
@@ -793,6 +859,8 @@ pub struct Stored {
     pub results: Vec<(String, SolveResult)>,
     /// false when the file was written with `save_fields == false` (mesh and solution field datasets omitted)
     pub fields_saved: bool,
+    /// persisted convergence checks read from `/provenance/validated_json` (empty on legacy files)
+    pub validated_checks: BTreeMap<String, crate::validated::Check>,
 }
 
 /// Reads a results file back using `File::open_streaming` and [`ReadBudgetConfig::from_env()`].
@@ -882,6 +950,10 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
         let scalars = parse_scalars(&read_text(&g, "scalars", &budget, &mut total_read_bytes)?);
         let log: Vec<String> =
             serde_json::from_str(&read_text(&g, "log", &budget, &mut total_read_bytes)?).unwrap_or_default();
+        let diagnostics =
+            read_optional_json::<SolverDiagnostics>(&g, "diagnostics_json", &budget, &mut total_read_bytes)?;
+        let error_budget =
+            read_optional_json::<NumericalErrorBudget>(&g, "error_budget_json", &budget, &mut total_read_bytes)?;
         let mut r = SolveResult {
             physics: attr_str(&g_attrs, "physics").unwrap_or_else(|| name.clone()),
             study: attr_str(&g_attrs, "study").unwrap_or_default(),
@@ -892,7 +964,8 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
             scalars,
             log,
             solutions: Vec::with_capacity(sol_cap),
-            ..Default::default()
+            diagnostics,
+            error_budget,
         };
 
         let packed_cf = if g_fields_saved {
@@ -1034,7 +1107,18 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
         }
         results.push((name, r));
     }
-    Ok(Stored { mesh, project, results, fields_saved })
+    let validated_checks = if let Ok(pg) = file.group("provenance") {
+        read_optional_json::<BTreeMap<String, crate::validated::Check>>(
+            &pg,
+            "validated_json",
+            &budget,
+            &mut total_read_bytes,
+        )?
+        .unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
+    Ok(Stored { mesh, project, results, fields_saved, validated_checks })
 }
 
 /// The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON.

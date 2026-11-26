@@ -109,6 +109,21 @@ pub struct MeshSettings {
     /// 3D sheet stack (`sheet3d`): radical Morrison-Lewis corner grading toward sharp 2D sheet corners (default `false`)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub corner_grading: bool,
+    /// target discretization tolerance used to certify error bounds (e.g. Prager–Synge `flux_bounds`) when no `convergence_check` ran
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_tol: Option<f64>,
+    /// number of goal-oriented AMR passes for `ems::cavity` or `sms` studies (`None` or `1` disables outer AMR loop)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapt_passes: Option<usize>,
+    /// relative convergence tolerance between consecutive outer AMR passes for `ems::cavity` / `sms`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapt_rel_tol: Option<f64>,
+    /// cell growth factor per outer AMR pass for `ems::cavity` / `sms` (`> 1.0`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapt_growth: Option<f64>,
+    /// retain transient cellwise `ElectroAmrData` indicators on `SolveResult` instead of stripping them after solve
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retain_amr_data: bool,
 }
 
 impl Default for MeshSettings {
@@ -136,6 +151,11 @@ impl Default for MeshSettings {
             singular_edges: None,
             quarter_point_xi: None,
             corner_grading: false,
+            target_tol: None,
+            adapt_passes: None,
+            adapt_rel_tol: None,
+            adapt_growth: None,
+            retain_amr_data: false,
         }
     }
 }

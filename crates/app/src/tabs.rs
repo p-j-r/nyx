@@ -1165,6 +1165,30 @@ impl App {
             num_id(ui, "conv_tol", &mut self.conv_tol);
             start = ui.add_enabled(self.job_kind != Some(crate::app::JobKind::Open), egui::Button::new(if self.busy.is_some() { "Queue convergence check" } else { "Check convergence" })).clicked();
         });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("grids");
+            ui.selectable_value(&mut self.conv_grids, 2, "2");
+            ui.selectable_value(&mut self.conv_grids, 3, "3 (GCI)");
+            ui.label("match");
+            egui::ComboBox::from_id_salt("conv_match")
+                .selected_text(self.conv_match.as_str())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.conv_match, "index".into(), "index");
+                    ui.selectable_value(&mut self.conv_match, "nearest".into(), "nearest");
+                });
+            ui.label("extrapolate");
+            egui::ComboBox::from_id_salt("conv_extrap")
+                .selected_text(self.conv_extrapolate.as_str())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.conv_extrapolate, "none".into(), "none");
+                    ui.selectable_value(&mut self.conv_extrapolate, "richardson_log_spd".into(), "richardson_log_spd");
+                    ui.selectable_value(&mut self.conv_extrapolate, "richardson_linear".into(), "richardson_linear");
+                });
+        });
+        ui.horizontal(|ui| {
+            ui.label("quantities");
+            ui.add(egui::TextEdit::singleline(&mut self.conv_quantities).hint_text("optional comma filter, e.g. C*, eigenvalue*"));
+        });
         self.conv_factor = self.conv_factor.clamp(0.1, 0.95);
         if start {
             self.check_convergence();
@@ -1172,19 +1196,55 @@ impl App {
         if self.convergence_running() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("two solves are running (the toolbar shows the stage; Cancel stops it)...");
+                ui.label(if self.conv_grids >= 3 {
+                    "3-grid GCI solves are running (the toolbar shows the stage; Cancel stops it)..."
+                } else {
+                    "two solves are running (the toolbar shows the stage; Cancel stops it)..."
+                });
             });
         }
         if let Some(c) = &self.convergence {
             let ok = c["converged"] == true;
-            ui.colored_label(if ok { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) }, format!("{} (worst relative difference {:.2e}; {} to {} cells, {:.1} s)", if ok { "converged" } else { "NOT converged" }, c["worst_relative"].as_f64().unwrap_or(f64::NAN), c["cells"]["coarse"], c["cells"]["refined"], c["seconds"].as_f64().unwrap_or(0.0)));
-            egui::Grid::new("conv_rows").num_columns(4).striped(true).show(ui, |ui| {
+            let cells_desc = if c["cells"].get("medium").and_then(Value::as_u64).is_some() {
+                format!("{} -> {} -> {} cells", c["cells"]["coarse"], c["cells"]["medium"], c["cells"]["refined"])
+            } else {
+                format!("{} to {} cells", c["cells"]["coarse"], c["cells"]["refined"])
+            };
+            ui.colored_label(
+                if ok { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) },
+                format!(
+                    "{} (worst relative {:.2e}; {cells_desc}, {:.1} s)",
+                    if ok { "converged" } else { "NOT converged" },
+                    c["worst_relative"].as_f64().unwrap_or(f64::NAN),
+                    c["seconds"].as_f64().unwrap_or(0.0)
+                ),
+            );
+            if let Some(gci) = c.get("gci").filter(|v| v.is_object()) {
+                let obs = gci["observed_order"].as_f64().map_or("--".into(), |p| format!("{p:.2}"));
+                let g21 = gci["gci_21"].as_f64().unwrap_or(f64::NAN);
+                let reff = gci["r_eff"].as_f64().unwrap_or(f64::NAN);
+                let reg = gci["regime"].as_str().unwrap_or("--");
+                ui.weak(format!("GCI: regime={reg}, r_eff={reff:.2}, p_obs={obs}, GCI_21={g21:.2e}"));
+            }
+            for w in c["warnings"].as_array().into_iter().flatten() {
+                let code = w["code"].as_str().unwrap_or("warning");
+                let msg = w["message"].as_str().unwrap_or("");
+                ui.colored_label(crate::theme::activity_text(ui.ctx()), format!("[{code}] {msg}"));
+            }
+            let has_med = c["grids"].as_u64().unwrap_or(2) >= 3;
+            egui::Grid::new("conv_rows").num_columns(if has_med { 6 } else { 4 }).striped(true).show(ui, |ui| {
                 for r in c["rows"].as_array().into_iter().flatten().take(40) {
                     ui.label(r["quantity"].as_str().unwrap_or(""));
                     ui.monospace(format!("{:.6e}", r["coarse"].as_f64().unwrap_or(f64::NAN)));
+                    if has_med {
+                        ui.monospace(format!("{:.6e}", r["medium"].as_f64().unwrap_or(f64::NAN)));
+                    }
                     ui.monospace(format!("{:.6e}", r["refined"].as_f64().unwrap_or(f64::NAN)));
                     let pass = r["converged"] == true;
                     ui.colored_label(if pass { crate::theme::success(ui.ctx()) } else { crate::theme::activity_text(ui.ctx()) }, format!("{:.1e}", r["relative"].as_f64().unwrap_or(f64::NAN)));
+                    if has_med {
+                        ui.monospace(format!("{:.1e}", r["gci_21"].as_f64().unwrap_or(f64::NAN)));
+                    }
                     ui.end_row();
                 }
             });
@@ -1341,6 +1401,39 @@ impl App {
             }
         });
         ui.weak(format!("{} unknowns, solved in {:.2} s", rv.result.dofs, rv.result.seconds));
+        if let Some(diag) = &rv.result.diagnostics {
+            ui.horizontal_wrapped(|ui| {
+                let status_color = if diag.converged { theme::success(ui.ctx()) } else { theme::danger(ui.ctx()) };
+                ui.colored_label(status_color, if diag.converged { "solver converged" } else { "solver NOT converged" });
+                ui.weak(format!("({}) | algebraic res {:.2e}", diag.solver_kind, diag.max_algebraic_residual));
+            });
+            for w in &diag.warnings {
+                let col = match w.severity {
+                    nyx_engine::facade::physics::DiagnosticSeverity::Error => theme::danger(ui.ctx()),
+                    nyx_engine::facade::physics::DiagnosticSeverity::Warning => theme::activity_text(ui.ctx()),
+                    nyx_engine::facade::physics::DiagnosticSeverity::Info => theme::muted(ui.ctx()),
+                };
+                ui.colored_label(col, format!("[{}] {}", w.code, w.message));
+            }
+        }
+        if let Some(eb) = &rv.result.error_budget {
+            let comb = eb.combined_num_uncertainty_rel.map_or("--".into(), |v| format!("{v:.2e}"));
+            let mut line = format!("Error budget: combined {comb}, algebraic {:.2e}", eb.algebraic_rel);
+            if let Some(sp) = &eb.spatial_discretization {
+                let kind = if sp.is_epistemic_bound { "bound" } else { "est" };
+                line.push_str(&format!(", spatial {} {:.2e} ({kind})", sp.method, sp.rel_bound));
+                if sp.extrapolated_scalars_only == Some(true) {
+                    line.push_str(" [extrapolated scalars only]");
+                }
+            }
+            if let Some(t) = eb.temporal_rel {
+                line.push_str(&format!(", temporal {t:.2e}"));
+            }
+            if let Some(m) = eb.model_truncation_rel {
+                line.push_str(&format!(", truncation {m:.2e}"));
+            }
+            ui.weak(line);
+        }
         crate::spans::span("solver_log", || {
             // closed until opened: drawing eleven short monospace lines for the first time cost 14 ms in the frame after a result arrives (P3
             // frame log; neither one label for the whole log nor laying the glyphs out beforehand made it cheaper), and the header says how many

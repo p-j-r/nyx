@@ -333,6 +333,7 @@ impl App {
         let mut check = false;
         ui.horizontal_wrapped(|ui| {
             kit::status(ui, state, state.word());
+            ui.monospace(RichText::new(format!("[{}]", v.tier.as_str())).small().color(theme::muted(&ctx)));
             ui.label(RichText::new(v.reason.clone()).color(theme::muted(&ctx)));
             if can_check {
                 let label = format!("Check convergence (x{}, tolerance {:e})", self.conv_factor, self.conv_tol);

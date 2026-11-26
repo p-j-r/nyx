@@ -65,6 +65,8 @@ pub struct Opened {
     /// one result per physics of the file
     pub results: Vec<(String, SolveResult)>,
     pub path: String,
+    /// convergence checks stored in `/provenance/validated_json`, keyed by problem key
+    pub checks: BTreeMap<String, crate::validated::Check>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

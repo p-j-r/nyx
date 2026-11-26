@@ -948,3 +948,132 @@ fn results_h5_is_byte_deterministic_and_guards_forged_n_solutions() {
     assert!(err.contains("exceeds read budget") || err.contains("n_solutions"), "{err}");
     let _ = std::fs::remove_file(&forged);
 }
+
+#[test]
+fn diagnostics_error_budget_and_provenance_round_trip_through_h5_open_results_and_worker() {
+    use nyx_physics::{
+        DiagnosticSeverity, DiagnosticWarning, NumericalErrorBudget, SolverDiagnostics, SpatialErrorEstimate,
+    };
+
+    let mut e = Engine::new();
+    e.call("project_open", &json!({ "path": example("02_cantilever") })).unwrap();
+    e.call("solve_run", &json!({})).unwrap();
+    e.call("convergence_check", &json!({ "physics": "sms", "factor": 0.6, "tolerance": 0.5 })).unwrap();
+    let orig_info = e.call("result_info", &json!({ "physics": "sms" })).unwrap();
+    assert_eq!(orig_info[0]["validated"]["state"], "checked");
+    assert!(orig_info[0].get("diagnostics").is_some(), "diagnostics key always surfaced");
+    assert!(orig_info[0].get("error_budget").is_some(), "error_budget key always surfaced");
+
+    let h5_path = tmp("vvuq-provenance.h5");
+    e.call("export_results", &json!({ "path": h5_path.to_str().unwrap() })).unwrap();
+    let f_info = e.call("results_file_info", &json!({ "path": h5_path.to_str().unwrap() })).unwrap();
+    assert!(f_info["results"][0].get("diagnostics").is_some());
+    assert!(f_info["results"][0].get("error_budget").is_some());
+
+    // Open in fresh Engine: restored checks make validated state checked, and project_new clears checks.
+    let mut f = Engine::new();
+    let opened = f.call("open_results", &json!({ "path": h5_path.to_str().unwrap() })).unwrap();
+    assert_eq!(opened["results"][0]["validated"]["state"], "checked", "{opened}");
+    assert_eq!(f.call("result_info", &json!({ "physics": "sms" })).unwrap()[0]["validated"]["state"], "checked");
+    f.call("project_new", &json!({})).unwrap();
+    assert!(f.call("result_info", &json!({})).is_err());
+
+    // Direct write_results_with_provenance with populated SolverDiagnostics & NumericalErrorBudget round-trips cleanly,
+    // including zero created_utc and legacy compatibility without diagnostics_json / error_budget_json / provenance.
+    let mesh = e.model().unwrap().solver_mesh();
+    let mut res = e.result("sms").unwrap().0.as_ref().clone();
+    res.diagnostics = Some(SolverDiagnostics {
+        solver_kind: "direct_cholesky".into(),
+        converged: true,
+        iterations: None,
+        restarts: None,
+        max_algebraic_residual: 1.5e-14,
+        per_mode_residuals: vec![],
+        rcond_estimate: Some(4.2e-5),
+        cholesky_fallbacks: 0,
+        warnings: vec![DiagnosticWarning {
+            code: "test_warn".into(),
+            severity: DiagnosticSeverity::Warning,
+            message: "synthetic check warning".into(),
+        }],
+    });
+    res.error_budget = Some(NumericalErrorBudget {
+        algebraic_rel: 1.5e-14,
+        spatial_discretization: Some(SpatialErrorEstimate {
+            method: "roache_gci".into(),
+            rel_bound: 1.2e-3,
+            is_epistemic_bound: false,
+            observed_order: Some(2.0),
+            refinement_ratio: Some(1.67),
+            safety_factor: Some(1.25),
+            extrapolated_scalars_only: Some(true),
+        }),
+        temporal_rel: None,
+        model_truncation_rel: Some(0.0),
+        combined_num_uncertainty_rel: Some(1.2e-3),
+        alg_below_disc_ratio: Some(1.25e-11),
+    });
+
+    let pop_path = tmp("vvuq-populated.h5");
+    nyx_engine::h5io::write_results_with_provenance(
+        &pop_path,
+        e.project(),
+        &mesh,
+        &[("sms".to_string(), &res)],
+        FieldStorageLayout::L2ShuffleLzfPacked,
+        true,
+        None,
+    )
+    .unwrap();
+    let stored = nyx_engine::h5io::read_results(&pop_path).unwrap();
+    assert_eq!(stored.results[0].1.diagnostics, res.diagnostics);
+    assert_eq!(stored.results[0].1.error_budget, res.error_budget);
+    let summary = nyx_engine::h5io::read_results_summary(&pop_path).unwrap();
+    assert_eq!(summary.results[0].1.diagnostics, res.diagnostics);
+    assert_eq!(summary.results[0].1.error_budget, res.error_budget);
+
+    // Worker round-trip check
+    let mut w = Engine::new();
+    w.call("project_open", &json!({ "path": example("02_cantilever") })).unwrap();
+    w.set_worker(PathBuf::from(env!("CARGO_BIN_EXE_nyx-worker")), false);
+    let w_rep = w.call("solve_run", &json!({ "isolate": true })).unwrap();
+    assert!(w_rep["worker"].is_object());
+    assert!(w_rep["results"][0].get("diagnostics").is_some());
+    assert!(w_rep["results"][0].get("error_budget").is_some());
+
+    // Legacy v4 HDF5 lacking diagnostics_json, error_budget_json, and /provenance still reads cleanly.
+    let legacy = tmp("legacy-no-vvuq.h5");
+    let mut fb = FileBuilder::new();
+    fb.set_attr("writer", AttrValue::VarLenString("serial".into()));
+    fb.set_attr("processes", AttrValue::I64(1));
+    fb.set_attr("format", AttrValue::VarLenString("nyx-results".into()));
+    fb.set_attr("version", AttrValue::I32(4));
+    fb.set_attr("fields_saved", AttrValue::I64(0));
+    let proj = e.project().to_json();
+    fb.create_dataset("project").with_u8_data(proj.as_bytes()).with_shape(&[proj.len() as u64]);
+    let mut root = fb.create_group("results");
+    let mut g = root.create_group("sms");
+    g.set_attr("physics", AttrValue::VarLenString("sms".into()));
+    g.set_attr("study", AttrValue::VarLenString("static".into()));
+    g.set_attr("order", AttrValue::I64(2));
+    g.set_attr("dim", AttrValue::I64(2));
+    g.set_attr("dofs", AttrValue::I64(12));
+    g.set_attr("seconds", AttrValue::F64(0.05));
+    g.set_attr("n_solutions", AttrValue::I64(0));
+    g.create_dataset("scalars").with_u8_data(b"[]").with_shape(&[2]);
+    g.create_dataset("log").with_u8_data(b"[]").with_shape(&[2]);
+    root.add_group(g.finish());
+    fb.add_group(root.finish());
+    fb.write(&legacy).unwrap();
+    let leg_stored = nyx_engine::h5io::read_results(&legacy).unwrap();
+    assert!(leg_stored.validated_checks.is_empty());
+    assert!(leg_stored.results[0].1.diagnostics.is_none());
+    assert!(leg_stored.results[0].1.error_budget.is_none());
+    let leg_sum = nyx_engine::h5io::read_results_summary(&legacy).unwrap();
+    assert!(leg_sum.results[0].1.diagnostics.is_none());
+
+    let _ = std::fs::remove_file(&h5_path);
+    let _ = std::fs::remove_file(h5_path.with_extension("xdmf"));
+    let _ = std::fs::remove_file(&pop_path);
+    let _ = std::fs::remove_file(&legacy);
+}

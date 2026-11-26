@@ -2295,15 +2295,184 @@ impl Prep {
         }
         unreachable!("local node {a} of a cell with {} nodes", self.nloc)
     }
+}
+
+/// Result of [`Prep::extremum_with_interior`]: nodal extremum and optional strict P2 interior refinement.
+struct ExtremumSearch {
+    nodal: (f64, usize, usize),
+    interior: Option<(f64, usize, Vec<f64>)>,
+}
+
+/// Evaluates whether a formula is an exact polynomial of degree <= 4 under the quadrature rule.
+fn expr_poly_degree(tree: &Tree, prep: &Prep) -> Option<usize> {
+    match tree {
+        Tree::Num(_) => Some(0),
+        Tree::Leaf(i) => match prep.leaves.get(*i).map(|l| &l.kind) {
+            Some(Kind::Const(_) | Kind::Normal(_)) => Some(0),
+            Some(Kind::Coord(_)) => Some(1),
+            Some(Kind::Cell(_) | Kind::Dof(_)) => Some(prep.order),
+            None => None,
+        },
+        Tree::Neg(a) | Tree::Call(Fun::Re | Fun::Im | Fun::Conj, a) => expr_poly_degree(a, prep),
+        Tree::Call(Fun::Abs2, a) => expr_poly_degree(a, prep).map(|d| d.saturating_mul(2)),
+        Tree::Bin(Op::Add | Op::Sub, a, b) => Some(expr_poly_degree(a, prep)?.max(expr_poly_degree(b, prep)?)),
+        Tree::Bin(Op::Mul, a, b) => Some(expr_poly_degree(a, prep)?.saturating_add(expr_poly_degree(b, prep)?)),
+        Tree::Bin(Op::Div, a, b) => {
+            if expr_poly_degree(b, prep) == Some(0) {
+                expr_poly_degree(a, prep)
+            } else {
+                None
+            }
+        }
+        Tree::Pow(a, n) => expr_poly_degree(a, prep).map(|d| d.saturating_mul(*n as usize)),
+        Tree::Bin(Op::And | Op::Or, _, _)
+        | Tree::Call(_, _)
+        | Tree::Call2(_, _, _)
+        | Tree::Cmp(_, _, _)
+        | Tree::Where(_, _, _) => None,
+    }
+}
+
+fn quadrature_warnings(trees: &[Tree], prep: &Prep, revolution: bool) -> Vec<nyx_physics::DiagnosticWarning> {
+    let extra = usize::from(revolution);
+    let mut needs_warn = false;
+    let mut max_deg: Option<usize> = Some(0);
+    for t in trees {
+        match expr_poly_degree(t, prep).map(|d| d + extra) {
+            Some(d) if d <= 4 => {
+                if let Some(cur) = max_deg {
+                    max_deg = Some(cur.max(d));
+                }
+            }
+            Some(d) => {
+                needs_warn = true;
+                max_deg = max_deg.map(|cur| cur.max(d));
+            }
+            None => {
+                needs_warn = true;
+                max_deg = None;
+            }
+        }
+    }
+    if !needs_warn {
+        return Vec::new();
+    }
+    let detail = match max_deg {
+        Some(d) => format!("integrand polynomial degree (~{d}) exceeds the degree-4 quadrature rule"),
+        None => "non-polynomial integrand (e.g., sqrt, abs, trig/exp, where, or non-constant quotient) evaluated with degree-4 quadrature".to_string(),
+    };
+    vec![nyx_physics::DiagnosticWarning {
+        code: "low_quadrature_order_for_formula".into(),
+        severity: nyx_physics::DiagnosticSeverity::Warning,
+        message: format!("{detail}; single-pass integral carries quadrature truncation error"),
+    }]
+}
+
+fn attach_quadrature_warnings(out: &mut Value, warnings: Vec<nyx_physics::DiagnosticWarning>) {
+    if warnings.is_empty() {
+        return;
+    }
+    if out.get("note").is_none() {
+        out["note"] = json!(warnings[0].message);
+    }
+    out["warnings"] = json!(warnings);
+}
+
+fn project_simplex_step(base: &[f64], delta: &[f64], alpha: f64, dim: usize) -> Option<Vec<f64>> {
+    let mut lam = vec![0.0_f64; dim + 1];
+    let mut sum_tail = 0.0;
+    for k in 0..dim {
+        let v = (base[k + 1] + alpha * delta[k]).clamp(0.0, 1.0);
+        lam[k + 1] = v;
+        sum_tail += v;
+    }
+    if sum_tail > 1.0 {
+        for k in 0..dim {
+            lam[k + 1] /= sum_tail;
+        }
+        lam[0] = 0.0;
+    } else {
+        lam[0] = 1.0 - sum_tail;
+    }
+    lam.iter().all(|x| x.is_finite()).then_some(lam)
+}
+
+fn solve_small_sym(n: usize, a: &[[f64; 3]; 3], rhs: &[f64; 3]) -> Option<[f64; 3]> {
+    let mut m = [[0.0_f64; 4]; 3];
+    for i in 0..n {
+        for j in 0..n {
+            m[i][j] = a[i][j];
+        }
+        m[i][n] = rhs[i];
+    }
+    for col in 0..n {
+        let piv = (col..n).max_by(|&i, &j| m[i][col].abs().total_cmp(&m[j][col].abs()))?;
+        if m[piv][col].abs() <= 1e-18 {
+            return None;
+        }
+        m.swap(col, piv);
+        let (head, tail) = m.split_at_mut(col + 1);
+        let pivot_row = &head[col];
+        for row in tail.iter_mut().take(n - col - 1) {
+            let f = row[col] / pivot_row[col];
+            for (dst, &src) in row[col..=n].iter_mut().zip(&pivot_row[col..=n]) {
+                *dst -= f * src;
+            }
+        }
+    }
+    let mut x = [0.0_f64; 3];
+    for i in (0..n).rev() {
+        let mut s = m[i][n];
+        for j in (i + 1)..n {
+            s -= m[i][j] * x[j];
+        }
+        x[i] = s / m[i][i];
+        if !x[i].is_finite() {
+            return None;
+        }
+    }
+    Some(x)
+}
+
+impl Prep {
+    /// Physical coordinates at barycentric coordinate `lam` inside `cell` (using linear simplex vertices).
+    fn bary_point(&self, cell: usize, lam: &[f64]) -> Vec<f64> {
+        let dim = self.mesh.dim;
+        let v = self.mesh.cell(cell);
+        let mut pt = vec![0.0_f64; dim];
+        for (i, &vi) in v.iter().take(dim + 1).enumerate() {
+            let p = self.mesh.point(vi as usize);
+            for d in 0..dim {
+                pt[d] += lam[i] * p[d];
+            }
+        }
+        pt
+    }
 
     /// The largest or smallest value at the nodes of the cells of the region: (value, cell, local node).
+    #[allow(dead_code)]
     fn extremum(&self, tree: &Tree, region: &Region, max: bool) -> Result<(f64, usize, usize), Error> {
+        Ok(self.extremum_with_interior(tree, region, max)?.nodal)
+    }
+
+    /// Finds the nodal extremum and, for P2 fields (`order == 2`), searches peak candidate cells via
+    /// barycentric sub-sampling and damped Newton refinement for interior extrema.
+    fn extremum_with_interior(&self, tree: &Tree, region: &Region, max: bool) -> Result<ExtremumSearch, Error> {
         self.reject_normal()?;
         let nloc = self.nloc;
+        let dim = self.mesh.dim;
         let nb = self.mesh.n_cells().div_ceil(BLOCK);
         let better = |a: f64, b: f64| if max { a > b } else { a < b };
-        let block = |b: usize| -> Option<(f64, usize, usize)> {
+        const CAND_CAP: usize = 32;
+
+        struct BlockOut {
+            best: Option<(f64, usize, usize)>,
+            cands: Vec<(f64, usize)>,
+        }
+
+        let block = |b: usize| -> BlockOut {
             let mut best: Option<(f64, usize, usize)> = None;
+            let mut cands: Vec<(f64, usize)> = Vec::new();
             let mut loc = vec![C::new(0.0, 0.0); self.leaves.len() * nloc];
             let mut dofs = vec![];
             let mut at = vec![C::new(0.0, 0.0); self.leaves.len()];
@@ -2312,32 +2481,195 @@ impl Prep {
                     continue;
                 }
                 self.gather(c, &mut dofs, &mut loc);
+                let mut cell_best: Option<f64> = None;
                 for a in 0..nloc {
                     for (i, x) in at.iter_mut().enumerate() {
                         *x = loc[i * nloc + a];
                     }
                     let v = tree.eval(&at).re;
                     if v.is_nan() {
-                        return Some((f64::NAN, c, a));
+                        return BlockOut { best: Some((f64::NAN, c, a)), cands: vec![] };
+                    }
+                    if cell_best.is_none_or(|cv| better(v, cv)) {
+                        cell_best = Some(v);
                     }
                     if best.is_none_or(|(bv, _, _)| better(v, bv)) {
                         best = Some((v, c, a));
                     }
                 }
+                if self.order == 2 {
+                    if let Some(cv) = cell_best {
+                        if cands.len() < CAND_CAP || cands.last().is_some_and(|&(w, _)| better(cv, w)) {
+                            cands.push((cv, c));
+                            cands.sort_by(|x, y| if max { y.0.total_cmp(&x.0) } else { x.0.total_cmp(&y.0) });
+                            if cands.len() > CAND_CAP {
+                                cands.truncate(CAND_CAP);
+                            }
+                        }
+                    }
+                }
             }
-            best
+            BlockOut { best, cands }
         };
-        let parts: Vec<Option<(f64, usize, usize)>> = (0..nb).into_par_iter().map(block).collect();
+        let parts: Vec<BlockOut> = (0..nb).into_par_iter().map(block).collect();
         let mut best: Option<(f64, usize, usize)> = None;
-        for p in parts.into_iter().flatten() {
-            if p.0.is_nan() {
-                return Err(Error::NonFinite("the expression is NaN at a node".into()));
+        let mut all_cands: Vec<(f64, usize)> = Vec::new();
+        for part in parts {
+            if let Some(p) = part.best {
+                if p.0.is_nan() {
+                    return Err(Error::NonFinite("the expression is NaN at a node".into()));
+                }
+                if best.is_none_or(|(bv, _, _)| better(p.0, bv)) {
+                    best = Some(p);
+                }
             }
-            if best.is_none_or(|(bv, _, _)| better(p.0, bv)) {
-                best = Some(p);
+            all_cands.extend(part.cands);
+        }
+        let nodal = best.ok_or_else(|| Error::invalid("there is nothing to compare"))?;
+
+        let mut interior: Option<(f64, usize, Vec<f64>)> = None;
+        if self.order == 2 && !all_cands.is_empty() {
+            all_cands.sort_by(|x, y| if max { y.0.total_cmp(&x.0) } else { x.0.total_cmp(&y.0) });
+            all_cands.truncate(CAND_CAP);
+
+            let mut seeds: Vec<Vec<f64>> = Vec::new();
+            if dim == 2 {
+                const M: usize = 6;
+                for i in 0..=M {
+                    for j in 0..=(M - i) {
+                        let k = M - i - j;
+                        seeds.push(vec![i as f64 / M as f64, j as f64 / M as f64, k as f64 / M as f64]);
+                    }
+                }
+            } else {
+                const M: usize = 4;
+                for i in 0..=M {
+                    for j in 0..=(M - i) {
+                        for k in 0..=(M - i - j) {
+                            let l = M - i - j - k;
+                            seeds.push(vec![
+                                i as f64 / M as f64,
+                                j as f64 / M as f64,
+                                k as f64 / M as f64,
+                                l as f64 / M as f64,
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            let mut loc = vec![C::new(0.0, 0.0); self.leaves.len() * nloc];
+            let mut dofs = vec![];
+            let mut work = vec![C::new(0.0, 0.0); self.leaves.len()];
+
+            for (_, c) in all_cands {
+                self.gather(c, &mut dofs, &mut loc);
+                let mut eval_lam = |lam: &[f64]| -> Option<f64> {
+                    let (n, _) = shape(lam, self.order);
+                    let v = self.at_point(tree, &loc, &n, None, &mut work).re;
+                    v.is_finite().then_some(v)
+                };
+
+                let mut cur: Option<(f64, Vec<f64>)> = None;
+                for s in &seeds {
+                    if let Some(v) = eval_lam(s) {
+                        if cur.as_ref().is_none_or(|(bv, _)| better(v, *bv)) {
+                            cur = Some((v, s.clone()));
+                        }
+                    }
+                }
+                let Some((mut cur_v, mut cur_lam)) = cur else { continue };
+
+                // Damped Newton / steepest-ascent refinement in the `dim` independent barycentric coords `lam[1..=dim]`.
+                let h = 1.0e-5;
+                for _iter in 0..8 {
+                    let mut g = [0.0_f64; 3];
+                    let mut hess = [[0.0_f64; 3]; 3];
+                    for k in 0..dim {
+                        let mut dk = [0.0_f64; 3];
+                        dk[k] = 1.0;
+                        let vp = project_simplex_step(&cur_lam, &dk, h, dim).and_then(|l| eval_lam(&l));
+                        let vm = project_simplex_step(&cur_lam, &dk, -h, dim).and_then(|l| eval_lam(&l));
+                        match (vp, vm) {
+                            (Some(vp), Some(vm)) => {
+                                g[k] = (vp - vm) / (2.0 * h);
+                                hess[k][k] = (vp - 2.0 * cur_v + vm) / (h * h);
+                            }
+                            (Some(vp), None) => g[k] = (vp - cur_v) / h,
+                            (None, Some(vm)) => g[k] = (cur_v - vm) / h,
+                            (None, None) => {}
+                        }
+                    }
+                    for k1 in 0..dim {
+                        for k2 in (k1 + 1)..dim {
+                            let (mut dpp, mut dpm, mut dmp, mut dmm) = ([0.0; 3], [0.0; 3], [0.0; 3], [0.0; 3]);
+                            dpp[k1] = 1.0;
+                            dpp[k2] = 1.0;
+                            dpm[k1] = 1.0;
+                            dpm[k2] = -1.0;
+                            dmp[k1] = -1.0;
+                            dmp[k2] = 1.0;
+                            dmm[k1] = -1.0;
+                            dmm[k2] = -1.0;
+                            if let (Some(fpp), Some(fpm), Some(fmp), Some(fmm)) = (
+                                project_simplex_step(&cur_lam, &dpp, h, dim).and_then(|l| eval_lam(&l)),
+                                project_simplex_step(&cur_lam, &dpm, h, dim).and_then(|l| eval_lam(&l)),
+                                project_simplex_step(&cur_lam, &dmp, h, dim).and_then(|l| eval_lam(&l)),
+                                project_simplex_step(&cur_lam, &dmm, h, dim).and_then(|l| eval_lam(&l)),
+                            ) {
+                                let mix = (fpp - fpm - fmp + fmm) / (4.0 * h * h);
+                                hess[k1][k2] = mix;
+                                hess[k2][k1] = mix;
+                            }
+                        }
+                    }
+                    let mut dirs: Vec<[f64; 3]> = Vec::with_capacity(2);
+                    let neg_g = [-g[0], -g[1], -g[2]];
+                    if let Some(step) = solve_small_sym(dim, &hess, &neg_g) {
+                        let norm2: f64 = (0..dim).map(|k| step[k] * step[k]).sum();
+                        if norm2.is_finite() && norm2 > 0.0 && norm2 <= 16.0 {
+                            dirs.push(step);
+                        }
+                    }
+                    let g_norm = (0..dim).map(|k| g[k] * g[k]).sum::<f64>().sqrt();
+                    if g_norm > 1.0e-18 {
+                        let sign = if max { 1.0 } else { -1.0 };
+                        dirs.push(std::array::from_fn(|k| sign * 0.25 * g[k] / g_norm));
+                    }
+                    let mut improved = false;
+                    for dir in dirs {
+                        let mut alpha = 1.0;
+                        for _ in 0..8 {
+                            if let Some(cand_lam) = project_simplex_step(&cur_lam, &dir, alpha, dim) {
+                                if let Some(cand_v) = eval_lam(&cand_lam) {
+                                    if better(cand_v, cur_v) {
+                                        cur_v = cand_v;
+                                        cur_lam = cand_lam;
+                                        improved = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            alpha *= 0.5;
+                        }
+                        if improved {
+                            break;
+                        }
+                    }
+                    if !improved {
+                        break;
+                    }
+                }
+
+                let margin = 1.0e-11 * (1.0 + nodal.0.abs());
+                let beats_nodal = if max { cur_v > nodal.0 + margin } else { cur_v < nodal.0 - margin };
+                if beats_nodal && interior.as_ref().is_none_or(|(iv, _, _)| better(cur_v, *iv)) {
+                    interior = Some((cur_v, c, cur_lam));
+                }
             }
         }
-        best.ok_or_else(|| Error::invalid("there is nothing to compare"))
+
+        Ok(ExtremumSearch { nodal, interior })
     }
 }
 
@@ -2566,6 +2898,7 @@ impl Engine {
                 "measure": s.measure, "cells": region.cells, "revolution": rev, "region": Self::region_arg(args),
             });
             self.axisym_note(&p, rev, &mut out);
+            attach_quadrature_warnings(&mut out, quadrature_warnings(std::slice::from_ref(&tree), &p, rev));
             self.decorate(&mut out, &p);
             return Ok(out);
         }
@@ -2665,6 +2998,7 @@ impl Engine {
             }
         }
         self.axisym_note(&p, rev, &mut out);
+        attach_quadrature_warnings(&mut out, quadrature_warnings(&trees, &p, rev));
         self.decorate(&mut out, &p);
         Ok(out)
     }
@@ -2681,6 +3015,7 @@ impl Engine {
             "normal": "nx, ny, nz: the unit normal in wafer axes, out of the cell each facet is read in",
         });
         self.axisym_note(p, rev, &mut out);
+        attach_quadrature_warnings(&mut out, quadrature_warnings(std::slice::from_ref(tree), p, rev));
         self.decorate(&mut out, p);
         Ok(out)
     }
@@ -2755,6 +3090,7 @@ impl Engine {
             }
         }
         self.axisym_note(p, rev, &mut out);
+        attach_quadrature_warnings(&mut out, quadrature_warnings(trees, p, rev));
         self.decorate(&mut out, p);
         Ok(out)
     }
@@ -2803,12 +3139,51 @@ impl Engine {
         if op != "max" && op != "min" {
             return invalid("`op` is \"max\" or \"min\"");
         }
+        let use_interior = match args.get("interior") {
+            None | Some(Value::Null) => false,
+            Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`interior` must be true or false"))?,
+        };
         let region = p.region(Self::region_arg(args))?;
-        let (v, c, a) = p.extremum(&tree, &region, op == "max")?;
+        let found = p.extremum_with_interior(&tree, &region, op == "max")?;
+        let (v, c, a) = found.nodal;
         let mut out = json!({
             "op": op, "value": v, "cell": c, "node": a, "point": p.node_point(c, a), "region": Self::region_arg(args),
             "at": "the nodes of the cells (not between them)",
         });
+        if let Some((iv, ic, ilam)) = found.interior {
+            let ipoint = p.bary_point(ic, &ilam);
+            let rel_diff = (iv - v).abs() / iv.abs().max(v.abs()).max(1.0e-30);
+            if use_interior {
+                out["nodal_value"] = json!(v);
+                out["value"] = json!(iv);
+                out["cell"] = json!(ic);
+                out["node"] = Value::Null;
+                out["point"] = json!(ipoint);
+                out["barycentric"] = json!(ilam);
+                out["at"] = json!("P2 interior (sub-sampled and Newton-refined over candidate cells)");
+            } else {
+                out["interior_extremum"] = json!({
+                    "value": iv,
+                    "cell": ic,
+                    "barycentric": ilam,
+                    "point": ipoint,
+                    "rel_diff": rel_diff,
+                });
+                let sev = if rel_diff > 1.0e-4 {
+                    nyx_physics::DiagnosticSeverity::Warning
+                } else {
+                    nyx_physics::DiagnosticSeverity::Info
+                };
+                out["warnings"] = json!([nyx_physics::DiagnosticWarning {
+                    code: "p2_interior_extremum_exceeds_nodal".into(),
+                    severity: sev,
+                    message: format!(
+                        "P2 interior {op} ({iv:.6e} in cell {ic}) exceeds nodal extremum ({v:.6e}) by {:.2e} relative; pass `interior: true` to promote it",
+                        rel_diff
+                    ),
+                }]);
+            }
+        }
         self.decorate(&mut out, &p);
         Ok(out)
     }

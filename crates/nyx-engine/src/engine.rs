@@ -521,8 +521,7 @@ impl Engine {
         let library = s.library()?;
         // a point of a sweep has its own geometry and mesh settings: it never takes the mesh this engine holds;
         // an AMR solve (`adapt_passes > 1`) also starts from the unadapted initial mesh rather than a prior adapted one
-        let cached = if matches!(purpose, Purpose::Current) && !crate::amr::project_uses_electro_amr(&project, &targets)
-        {
+        let cached = if matches!(purpose, Purpose::Current) && !crate::amr::project_uses_amr(&project, &targets) {
             s.model().filter(|m| !m.is_amr_adapted()).cloned()
         } else {
             None
@@ -552,6 +551,7 @@ impl Engine {
         }
         let chain = targets.clone();
         let save_fields = opts.save_fields;
+        let retain_amr_data = opts.retain_amr_data || project.mesh.retain_amr_data;
         let post_analyses = opts.post_analyses.clone();
         // in a worker process (P4)? the library the worker is given is the one this job would have used
         // asked for in the request, it must be possible or the request fails with the reason; only by the engine's default, a solve that cannot
@@ -576,6 +576,7 @@ impl Engine {
                     warm: None,
                     save_fields,
                     post_analyses: post_analyses.clone(),
+                    retain_amr_data,
                 }),
                 (Some(why), _) if explicit => return Err(Error::invalid(format!("`isolate` is not possible: {why}"))),
                 _ => None,
@@ -656,25 +657,27 @@ impl Engine {
                         let (next_model, mut r, f) = match &resolved {
                             Some(rs) => {
                                 let (out, wd) = crate::reuse::with_context(rs, || {
-                                    crate::solve::run_chain_partial_amr(
+                                    crate::solve::run_chain_partial_amr_with(
                                         &registry,
                                         &project,
                                         model.clone(),
                                         &chain,
                                         &library,
                                         progress,
+                                        retain_amr_data,
                                     )
                                 });
                                 warm_done = Some(wd);
                                 out
                             }
-                            None => crate::solve::run_chain_partial_amr(
+                            None => crate::solve::run_chain_partial_amr_with(
                                 &registry,
                                 &project,
                                 model.clone(),
                                 &chain,
                                 &library,
                                 progress,
+                                retain_amr_data,
                             ),
                         };
                         model = next_model;
@@ -762,7 +765,7 @@ impl Engine {
                         if done.fields_saved {
                             if let Some(m) = &done.mesh {
                                 if !crate::worker::same_mesh(m, &model.solver_mesh()) {
-                                    if crate::amr::project_uses_electro_amr(&project, &chain)
+                                    if crate::amr::project_uses_amr(&project, &chain)
                                         && m.dim == model.solver_mesh().dim
                                     {
                                         model = Arc::new(
@@ -884,6 +887,7 @@ impl Engine {
             warm: None,
             save_fields: opts.save_fields,
             post_analyses: opts.post_analyses.clone(),
+            retain_amr_data: opts.retain_amr_data || self.project.mesh.retain_amr_data,
         };
         let item = crate::shared_queue::NewItem {
             owner: self.owner.clone(),
@@ -970,6 +974,8 @@ impl Engine {
         let mut job = self.convergence_job().with_limits(limits);
         // the coarse solve of the check is the solve of this physics alone on the present mesh: its key is the problem key and that chain
         job.reuse = self.problem_key(physics).map(|k| (self.stages.clone(), solve_key(&k, &[physics.to_string()])));
+        job.present_residual =
+            self.results.get(physics).and_then(|s| s.result.diagnostics.as_ref().map(|d| d.max_algebraic_residual));
         let (physics, matching) = (physics.to_string(), matching.clone());
         let key = self.problem_key(&physics).unwrap_or_default();
         let submit =
@@ -1117,6 +1123,7 @@ impl Engine {
                     summary.push(json!({
                         "physics": r.physics, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(),
                         "scalars": r.scalars, "current": current, "stored": replace,
+                        "diagnostics": r.diagnostics, "error_budget": r.error_budget,
                     }));
                 }
                 let mut log = self.jobs.log(id);
@@ -1168,10 +1175,29 @@ impl Engine {
                 self.apply_point(id, sweep, index, *project, outcome)
             }
             (Pending::Convergence { physics, key }, Ok(JobOutput::Convergence(v))) => {
-                if crate::convergence::should_apply_extrapolated(&v) {
-                    if let Some(cap) = crate::convergence::extrapolated_capacitance(&v) {
-                        if let Some(stored) = self.results.get_mut(&physics).filter(|s| s.key == key) {
-                            crate::convergence::apply_extrapolated_capacitance(Arc::make_mut(&mut stored.result), &cap);
+                let apply_ext = crate::convergence::should_apply_extrapolated(&v);
+                let ext_cap = if apply_ext { crate::convergence::extrapolated_capacitance(&v) } else { None };
+                let sp_est = crate::convergence::spatial_error_estimate(&v);
+                if let Some(stored) = self.results.get_mut(&physics).filter(|s| s.key == key) {
+                    if ext_cap.is_some() || sp_est.is_some() {
+                        let res = Arc::make_mut(&mut stored.result);
+                        if let Some(cap) = ext_cap {
+                            crate::convergence::apply_extrapolated_capacitance(res, &cap);
+                        }
+                        if let Some(mut sp) = sp_est {
+                            if apply_ext {
+                                sp.extrapolated_scalars_only = Some(true);
+                            }
+                            let alg_rel = res.diagnostics.as_ref().map(|d| d.max_algebraic_residual).unwrap_or(0.0);
+                            let rel = sp.rel_bound;
+                            let budget = res.error_budget.get_or_insert_with(|| nyx_physics::NumericalErrorBudget {
+                                algebraic_rel: alg_rel,
+                                ..Default::default()
+                            });
+                            budget.algebraic_rel = alg_rel;
+                            budget.alg_below_disc_ratio = if rel > 0.0 { Some(alg_rel / rel) } else { None };
+                            budget.combined_num_uncertainty_rel = Some((alg_rel * alg_rel + rel * rel).sqrt());
+                            budget.spatial_discretization = Some(sp);
                         }
                     }
                 }
@@ -1179,24 +1205,22 @@ impl Engine {
             }
             (Pending::Export, Ok(JobOutput::Exported(v))) => Ok(v),
             (Pending::Open, Ok(JobOutput::Opened(o))) => {
-                let Opened { project, model, results, path } = *o;
+                let Opened { project, model, results, path, checks } = *o;
                 // the file's project replaces the present one (that is what opening means); the results are stored under the keys of the new project
                 self.set_project(project);
+                self.checks = checks;
                 let key = self.mesh_key();
                 let cells = model.mesh().n_cells();
                 self.model = Some((key, model.clone()));
                 let keys = self.problem_keys();
                 let mut physics = vec![];
                 for (code, r) in results {
-                    physics.push(json!({
-                        "physics": code, "study": r.study, "dofs": r.dofs, "seconds": r.seconds, "solutions": r.solutions.len(),
-                        "scalars": r.scalars, "current": true, "stored": true,
-                    }));
                     let k = keys.get(&code).cloned().unwrap_or_default();
+                    let arc = Arc::new(r);
                     self.results.insert(
-                        code,
+                        code.clone(),
                         Stored {
-                            result: Arc::new(r),
+                            result: arc.clone(),
                             key: k,
                             job: id,
                             at: Instant::now(),
@@ -1204,6 +1228,12 @@ impl Engine {
                             run: None,
                         },
                     );
+                    physics.push(json!({
+                        "physics": code, "study": arc.study, "dofs": arc.dofs, "seconds": arc.seconds, "solutions": arc.solutions.len(),
+                        "scalars": arc.scalars, "current": true, "stored": true,
+                        "validated": self.validated_json(&code),
+                        "diagnostics": arc.diagnostics, "error_budget": arc.error_budget,
+                    }));
                 }
                 Ok(json!({ "title": self.project.title, "path": path, "cells": cells, "results": physics }))
             }

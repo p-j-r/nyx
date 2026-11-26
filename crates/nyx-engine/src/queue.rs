@@ -39,6 +39,8 @@ pub struct QueueOpts {
     pub post_analyses: Vec<Value>,
     /// maximum seconds to wait for free RAM during admission (`None` defers to `NYX_MEMORY_WAIT_TIMEOUT_S` and `Engine::memory_wait_timeout`)
     pub memory_wait_timeout_s: Option<f64>,
+    /// keep transient cellwise `ElectroAmrData` indicators on `SolveResult` instead of stripping them after solve
+    pub retain_amr_data: bool,
 }
 
 impl Default for QueueOpts {
@@ -54,6 +56,7 @@ impl Default for QueueOpts {
             save_fields: true,
             post_analyses: Vec::new(),
             memory_wait_timeout_s: None,
+            retain_amr_data: false,
         }
     }
 }
@@ -180,6 +183,13 @@ pub(crate) fn save_fields_of(args: &Value) -> Result<bool, Error> {
     match args.get("save_fields") {
         None | Some(Value::Null) => Ok(true),
         Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`save_fields` must be true or false")),
+    }
+}
+
+pub(crate) fn retain_amr_data_of(args: &Value) -> Result<bool, Error> {
+    match args.get("retain_amr_data") {
+        None | Some(Value::Null) => Ok(false),
+        Some(v) => v.as_bool().ok_or_else(|| Error::invalid("`retain_amr_data` must be true or false")),
     }
 }
 
@@ -447,6 +457,7 @@ impl Engine {
                     save_fields: save_fields_of(args)?,
                     post_analyses: post_analyses_of(args)?,
                     memory_wait_timeout_s: memory_wait_timeout_of(args)?,
+                    retain_amr_data: retain_amr_data_of(args)?,
                 };
                 let physics = args.get("physics").and_then(Value::as_str);
                 let job = match args.get("kind").and_then(Value::as_str).unwrap_or("solve") {
@@ -468,11 +479,15 @@ impl Engine {
                     "convergence" => {
                         let physics = physics.ok_or_else(|| Error::invalid("a convergence check needs `physics`"))?;
                         let factor = args.get("factor").and_then(Value::as_f64).unwrap_or(0.6);
-                        self.start_convergence_with(
+                        let matching = crate::convergence::Matching::from_args(args)?;
+                        let limits = crate::convergence::Limits::from_args(args)?;
+                        self.start_convergence_limited(
                             physics,
                             factor,
                             args.get("tolerance").and_then(Value::as_f64),
+                            &matching,
                             &opts,
+                            limits,
                         )?
                     }
                     other => {
