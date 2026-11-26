@@ -11,7 +11,7 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 pub use reader::{fuzz_walk_untrusted, NyxReader, NyxSolutionData, NyxV3Summary};
-pub use sweep::{atomic_rename, atomic_write_bytes, SweepCheckpoint, SweepPoint};
+pub use sweep::{atomic_rename, atomic_write_bytes, SkippedSweepPoint, SweepCheckpoint, SweepPoint};
 pub use writer::{append_solved_mode_in_place, init_nyx_packed_streaming, write_nyx_packed, write_nyx_v3};
 pub use xdmf::{generate_direct_xdmf, viz_link_name, write_direct_xdmf};
 
@@ -84,10 +84,8 @@ impl ReadBudgetConfig {
     /// (and clamping `max_dataset_bytes` to `max_total_result_bytes` when `max_dataset_bytes > max_total_result_bytes`).
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Some(limit) = std::env::var("NYX_H5_MAX_BYTES")
-            .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .filter(|&n| n > 0)
+        if let Some(limit) =
+            std::env::var("NYX_H5_MAX_BYTES").ok().and_then(|s| s.trim().parse::<u64>().ok()).filter(|&n| n > 0)
         {
             cfg.max_total_result_bytes = limit;
             if cfg.max_dataset_bytes > limit {

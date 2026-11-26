@@ -5,9 +5,9 @@
 
 use crate::engine::Engine;
 use nyx_analysis::{
-    tls_participation_quasi_electrostatic, Analysis, CapacitanceMatrixAnalysis, EprAnalysis, HamiltonianAnalysis,
-    InductanceMatrixAnalysis, ModeAnalysis, NetworkAnalysis, PiezoResonatorAnalysis, PolarizationAnalysis,
-    TlsParticipationAnalysis,
+    tls_participation_quasi_electrostatic, uq_cqed_with_companion_and_params, Analysis, CapacitanceMatrixAnalysis,
+    EprAnalysis, HamiltonianAnalysis, InductanceMatrixAnalysis, ModeAnalysis, NetworkAnalysis, PiezoResonatorAnalysis,
+    PolarizationAnalysis, TlsParticipationAnalysis, UqCqedAnalysis,
 };
 use nyx_physics::{CapacitanceMatrixData, CircuitRom, Error};
 use serde_json::{json, Value};
@@ -23,6 +23,7 @@ pub fn analyses() -> Vec<Box<dyn Analysis>> {
         Box::new(TlsParticipationAnalysis),
         Box::new(NetworkAnalysis),
         Box::new(PiezoResonatorAnalysis),
+        Box::new(UqCqedAnalysis),
     ]
 }
 
@@ -383,6 +384,36 @@ impl Engine {
                 || params.get("modal_voltages").is_some_and(|v| !v.is_null()))
         {
             return self.run_hybrid_quasi_electrostatic_tls(physics, &model, &result, params);
+        }
+        if analysis == "uq_cqed"
+            && params
+                .get("electrostatic_physics")
+                .or_else(|| params.get("electro_physics"))
+                .is_some_and(|v| !v.is_null())
+        {
+            let ep_val = params.get("electrostatic_physics").or_else(|| params.get("electro_physics")).unwrap();
+            let ep =
+                ep_val.as_str().map(str::trim).filter(|s| !s.is_empty()).ok_or_else(|| {
+                    Error::invalid("parameter 'electrostatic_physics' must be a non-empty physics code")
+                })?;
+            let (em, er) = self.analysis_inputs(ep)?;
+            let mut v = uq_cqed_with_companion_and_params(Some(model.mesh()), &result, Some((em.mesh(), &er)), params)?
+                .to_json();
+            let combined_stale = self.is_stale(physics) || (ep != physics && self.is_stale(ep));
+            let validated = if ep != physics {
+                self.validated_of(&[physics.to_string(), ep.to_string()])
+            } else {
+                self.validated_json(physics)
+            };
+            if let Some(o) = v.as_object_mut() {
+                o.insert("analysis".into(), json!(analysis));
+                o.insert("physics".into(), json!(physics));
+                o.insert("electrostatic_physics".into(), json!(ep));
+                o.insert("stale".into(), json!(combined_stale));
+                o.insert("age_s".into(), json!(self.result_age(physics)));
+                o.insert("validated".into(), validated);
+            }
+            return Ok(v);
         }
         if !a.applies_to(&result) {
             return Err(Error::invalid(format!(

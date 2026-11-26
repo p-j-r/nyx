@@ -42,6 +42,7 @@ pub mod pml;
 pub mod preview;
 pub mod process;
 pub mod project;
+pub mod qmc;
 pub mod queue;
 pub mod reduce;
 pub mod results_file;
