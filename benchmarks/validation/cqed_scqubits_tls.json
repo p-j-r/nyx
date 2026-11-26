@@ -1,0 +1,154 @@
+{
+  "benchmark_suite": "cqed_scqubits_tls",
+  "version": "1.0.0",
+  "citations": [
+    "J. Koch et al., Phys. Rev. A 76, 042319 (2007) — Charge-insensitive transmon Cooper-pair box spectrum",
+    "P. Groszkowski and J. Koch, Quantum 5, 583 (2021) — scqubits Python package harmonic-oscillator & charge-basis spectra",
+    "G. Calusine et al., Appl. Phys. Lett. 112, 062601 (2018); W. Woods et al., Phys. Rev. Applied 12, 014012 (2019); A. P. M. Place et al., Nature Commun. 12, 1779 (2021)"
+  ],
+  "methodology": "Frozen high-cutoff scqubits reference spectra compared against nyx-analysis Craig-Bampton 3D Fluxonium+resonator and Cooper-pair-box solvers; 3D matched-asymptotic TLS interface participation validated against resolved 2 nm oxide 2D reference and substrate trench monotonicity.",
+  "frozen_scqubits_fluxonium": {
+    "ec_hz": 1.0e9,
+    "el_hz": 1.0e9,
+    "ej_hz": 4.0e9,
+    "f_r_hz": 7.0e9,
+    "flux_points": [
+      {
+        "phi_ext_over_phi0": 0.0,
+        "targets": [
+          {
+            "id": "scq_flux0_f01",
+            "description": "Bare Fluxonium (EC=EL=1 GHz, EJ=4 GHz) f01 at Phi_ext = 0",
+            "quantity": "f_01",
+            "unit": "Hz",
+            "reference_value": 5.423392e9,
+            "u_input": 2.0e6,
+            "u_d": 5.0e5,
+            "tol_rel": 0.005,
+            "tol_abs": 0.0,
+            "coverage_k": 2.0
+          },
+          {
+            "id": "scq_flux0_f02",
+            "description": "Bare Fluxonium f02 at Phi_ext = 0",
+            "quantity": "f_02",
+            "unit": "Hz",
+            "reference_value": 9.721834e9,
+            "u_input": 4.0e6,
+            "u_d": 1.0e6,
+            "tol_rel": 0.005,
+            "tol_abs": 0.0,
+            "coverage_k": 2.0
+          }
+        ]
+      },
+      {
+        "phi_ext_over_phi0": 0.25,
+        "targets": [
+          {
+            "id": "scq_flux025_f01",
+            "description": "Bare Fluxonium f01 at Phi_ext = 0.25 Phi_0",
+            "quantity": "f_01",
+            "unit": "Hz",
+            "reference_value": 4.922216e9,
+            "u_input": 2.0e6,
+            "u_d": 5.0e5,
+            "tol_rel": 0.005,
+            "tol_abs": 0.0,
+            "coverage_k": 2.0
+          },
+          {
+            "id": "scq_flux025_f02",
+            "description": "Bare Fluxonium f02 at Phi_ext = 0.25 Phi_0",
+            "quantity": "f_02",
+            "unit": "Hz",
+            "reference_value": 7.024157e9,
+            "u_input": 3.0e6,
+            "u_d": 8.0e5,
+            "tol_rel": 0.005,
+            "tol_abs": 0.0,
+            "coverage_k": 2.0
+          }
+        ]
+      },
+      {
+        "phi_ext_over_phi0": 0.5,
+        "targets": [
+          {
+            "id": "scq_flux05_f01",
+            "description": "Bare Fluxonium f01 at half-flux sweet spot Phi_ext = 0.5 Phi_0",
+            "quantity": "f_01",
+            "unit": "Hz",
+            "reference_value": 0.581849e9,
+            "u_input": 5.0e5,
+            "u_d": 1.0e5,
+            "tol_rel": 0.005,
+            "tol_abs": 0.0,
+            "coverage_k": 2.0
+          },
+          {
+            "id": "scq_flux05_f12",
+            "description": "Bare Fluxonium f12 at half-flux sweet spot Phi_ext = 0.5 Phi_0",
+            "quantity": "f_12",
+            "unit": "Hz",
+            "reference_value": 3.388587e9,
+            "u_input": 1.5e6,
+            "u_d": 3.0e5,
+            "tol_rel": 0.005,
+            "tol_abs": 0.0,
+            "coverage_k": 2.0
+          }
+        ]
+      }
+    ]
+  },
+  "frozen_scqubits_transmon": {
+    "ec_hz": 0.30e9,
+    "ej_hz": 18.0e9,
+    "targets": [
+      {
+        "id": "scq_transmon_f01",
+        "description": "Exact Cooper-pair-box Transmon f01 (EC=0.30 GHz, EJ=18.0 GHz)",
+        "quantity": "f_01",
+        "unit": "Hz",
+        "reference_value": 6.256996e9,
+        "u_input": 1.0e6,
+        "u_d": 5.0e5,
+        "tol_rel": 0.0005,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "scq_transmon_alpha",
+        "description": "Exact Cooper-pair-box Transmon anharmonicity alpha (EC=0.30 GHz, EJ=18.0 GHz)",
+        "quantity": "alpha",
+        "unit": "Hz",
+        "reference_value": -0.339523e9,
+        "u_input": 1.0e5,
+        "u_d": 5.0e4,
+        "tol_rel": 0.0005,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ]
+  },
+  "cryogenic_q_tls_cpw": {
+    "geometry": {
+      "w_trace_m": 10.0e-6,
+      "g_gap_m": 6.0e-6,
+      "d_film_m": 100.0e-9,
+      "t_ox_m": 2.0e-9,
+      "eps_si": 11.45,
+      "eps_sapphire_place": 10.2,
+      "eps_ox": 10.0,
+      "tan_delta": 1.0e-3,
+      "edge_cutoff_m": 1.5e-6
+    },
+    "tolerances": {
+      "interface_rel": 0.03,
+      "u_input_rel": 0.015,
+      "u_d_rel": 0.01,
+      "trench_depths_m": [0.0, 100.0e-9, 500.0e-9]
+    }
+  }
+}

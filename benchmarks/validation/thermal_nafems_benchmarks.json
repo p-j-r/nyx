@@ -1,0 +1,130 @@
+{
+  "benchmark_suite": "thermal_nafems_benchmarks",
+  "version": "1.0.0",
+  "citations": [
+    "NAFEMS Publication TNSB Rev. 3, The Standard NAFEMS Benchmarks: Tests T1 (Membrane with Hot-Spot), T2 (1D Radiation), T3 (1D Transient Conduction), T4 (2D Steady Convection)",
+    "S. Timoshenko, Analysis of bi-metal thermostats, J. Opt. Soc. Am. 11, 233-255 (1925)"
+  ],
+  "methodology": "Point/transient/steady NAFEMS thermal targets and coupled thermomechanical bimetallic deflection/stress validated using ASME V&V 20 explicit AND rule with 3-grid GCI / 2-grid refinement u_num.",
+  "nafems_t1_hotspot": {
+    "plate_quarter_m": 0.01,
+    "hotspot_radius_m": 0.001,
+    "e_pa": 100.0e9,
+    "nu": 0.3,
+    "alpha_per_k": 1.0e-5,
+    "delta_t_k": 100.0,
+    "probe_point_d_m": [0.00105, 0.0],
+    "targets": [
+      {
+        "id": "nafems_t1_sigma_yy_d",
+        "description": "NAFEMS T1 hoop/direct stress sigma_zz at outer hot-spot boundary Point D (finite-plate b/a=10 Lame = 50.50 MPa; NAFEMS infinite target = 50.0 MPa)",
+        "quantity": "sigma_zz_D",
+        "unit": "Pa",
+        "reference_value": 50.50e6,
+        "u_input": 1.5e5,
+        "u_d": 5.0e5,
+        "tol_rel": 0.025,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "nafems_t1_sigma_interior",
+        "description": "NAFEMS T1 compressive biaxial stress inside hot spot r < a (-50.0 MPa infinite; -49.50 MPa finite b/a=10)",
+        "quantity": "sigma_xx_in",
+        "unit": "Pa",
+        "reference_value": -49.50e6,
+        "u_input": 1.5e5,
+        "u_d": 5.0e5,
+        "tol_rel": 0.025,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ]
+  },
+  "nafems_t2_radiation": {
+    "length_m": 0.1,
+    "width_m": 0.01,
+    "k_w_mk": 55.6,
+    "t_a_k": 1000.0,
+    "t_inf_k": 300.0,
+    "emissivity": 0.98,
+    "sigma_sb": 5.67e-8,
+    "target": {
+      "id": "nafems_t2_t_b",
+      "description": "NAFEMS T2 radiating tip temperature T_B solved via Newton linearized convection in dfs::heat",
+      "quantity": "T_B",
+      "unit": "K",
+      "reference_value": 927.007606,
+      "u_input": 0.25,
+      "u_d": 0.5,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  },
+  "nafems_t3_transient": {
+    "length_m": 0.1,
+    "width_m": 0.01,
+    "k_w_mk": 35.0,
+    "rho_kg_m3": 7200.0,
+    "cp_j_kgk": 440.5,
+    "t_end_s": 32.0,
+    "period_half_s": 40.0,
+    "amp_c": 100.0,
+    "probe_x_m": 0.08,
+    "target": {
+      "id": "nafems_t3_x008_t32",
+      "description": "NAFEMS T3 Rev. 3 temperature at x=0.08 m, t=32 s (exact Duhamel series 36.6030 C)",
+      "quantity": "T(0.08, 32)",
+      "unit": "degC",
+      "reference_value": 36.603045,
+      "u_input": 0.05,
+      "u_d": 0.05,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  },
+  "nafems_t4_convection": {
+    "width_m": 0.6,
+    "height_m": 1.0,
+    "k_w_mk": 52.0,
+    "t_base_c": 100.0,
+    "h_w_m2k": 750.0,
+    "t_ext_c": 0.0,
+    "probe_e_m": [0.6, 0.2],
+    "target": {
+      "id": "nafems_t4_point_e",
+      "description": "NAFEMS T4 steady 2D convective plate temperature at E=(0.6, 0.2) m (Fourier series 18.2538 C; NAFEMS 18.3 C)",
+      "quantity": "T_E(0.6, 0.2)",
+      "unit": "degC",
+      "reference_value": 18.253757,
+      "u_input": 0.03,
+      "u_d": 0.05,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  },
+  "coupled_bimorph_si_al": {
+    "length_m": 0.02,
+    "h_si_m": 0.5e-3,
+    "h_al_m": 0.5e-3,
+    "si": { "e_pa": 160.0e9, "nu": 0.22, "alpha": 2.6e-6, "k": 148.0 },
+    "al": { "e_pa": 70.0e9, "nu": 0.33, "alpha": 23.0e-6, "k": 237.0 },
+    "t_ref_k": 293.15,
+    "t_hot_k": 393.15,
+    "target": {
+      "id": "bimorph_tip_deflection",
+      "description": "Timoshenko (1925) coupled Si/Al bimorph tip deflection w(L) at deltaT=100 K (kappa=2.927667/m -> 0.585533 mm)",
+      "quantity": "u_z(L)",
+      "unit": "m",
+      "reference_value": 5.855334e-4,
+      "u_input": 2.0e-6,
+      "u_d": 5.0e-7,
+      "tol_rel": 0.01,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  }
+}

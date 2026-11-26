@@ -1,0 +1,109 @@
+{
+  "benchmark_suite": "solid_mems_piezo_benchmarks",
+  "version": "1.0.0",
+  "citations": [
+    "D. S. Bindel and S. Govindjee, Elastic PMLs for resonator anchor loss simulation, Int. J. Numer. Meth. Engng. 64, 789-818 (2005)",
+    "Z. Hao, A. Erbil, F. Ayazi, An analytical model for support loss in micromachined beam resonators, Sensors Actuators A 109, 156 (2003)",
+    "K. Tsubouchi and N. Mikoshiba, Zero-temperature-coefficient SAW delay line on AlN epitaxial films, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985)",
+    "IEEE Std 176-1987, Standard on Piezoelectricity (Mason 1D BAW electromechanical coupling k_t^2)"
+  ],
+  "methodology": "Axisymmetric PML MEMS anchor loss Q, Kelvin-Voigt/Akhiezer viscoelastic Q_m, and coupled 3D/2D piezoelectric AlN BAW FBAR validation using ASME V&V 20 explicit AND rule with GCI/refinement u_num.",
+  "disk_anchor_loss": {
+    "geometry": {
+      "r_disk_m": 6.0e-6,
+      "h_disk_m": 1.0e-6,
+      "r_post_m": 0.8e-6,
+      "h_post_m": 0.5e-6,
+      "e_pa": 160.0e9,
+      "nu": 0.22,
+      "rho_kg_m3": 2330.0,
+      "bessel_root_nu_022": 1.99765060
+    },
+    "targets": [
+      {
+        "id": "disk_contour_f0",
+        "description": "Polysilicon radial-contour free-disk closed-form frequency (lambda*c/(2*pi*R), lambda=1.99765060)",
+        "quantity": "f_0",
+        "unit": "Hz",
+        "reference_value": 4.50155249e8,
+        "u_input": 2.0e6,
+        "u_d": 5.0e5,
+        "tol_rel": 0.01,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ],
+    "anchor_q_pml_invariance_tol_rel": 0.10
+  },
+  "akhiezer_viscoelastic": {
+    "cantilever_tau_1us": {
+      "l_m": 1.0,
+      "h_m": 0.1,
+      "e_pa": 100.0e9,
+      "nu": 0.0,
+      "rho_kg_m3": 2500.0,
+      "tau_s": 1.0e-6,
+      "qm_tol_rel": 0.05
+    },
+    "aln_dielectric_tan_delta": 1.0e-3,
+    "qm_tol_rel": 0.05
+  },
+  "aln_baw_piezoelectric": {
+    "geometry": {
+      "lx_m": 0.4e-6,
+      "ly_m": 0.4e-6,
+      "thickness_m": 2.0e-6
+    },
+    "material_tsubouchi_1985": {
+      "c11_pa": 410.0e9,
+      "c12_pa": 149.0e9,
+      "c13_pa": 99.0e9,
+      "c33_pa": 389.0e9,
+      "c44_pa": 125.0e9,
+      "e31": -0.58,
+      "e33": 1.55,
+      "e15": -0.48,
+      "eps11_s": 9.21,
+      "eps33_s": 10.12,
+      "rho_kg_m3": 3260.0
+    },
+    "targets": [
+      {
+        "id": "aln_baw_fp",
+        "description": "1D AlN BAW open-circuit anti-resonant (parallel) frequency f_p = sqrt(c33^D/rho)/(2d)",
+        "quantity": "f_p",
+        "unit": "Hz",
+        "reference_value": 2.823449e9,
+        "u_input": 5.0e6,
+        "u_d": 2.0e6,
+        "tol_rel": 0.01,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "aln_baw_fs",
+        "description": "1D AlN BAW short-circuit series resonant frequency f_s from Mason tan(phi)/phi = 1/kt^2",
+        "quantity": "f_s",
+        "unit": "Hz",
+        "reference_value": 2.747672e9,
+        "u_input": 5.0e6,
+        "u_d": 2.0e6,
+        "tol_rel": 0.01,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "aln_baw_kt2",
+        "description": "1D AlN BAW electromechanical coupling factor k_t^2 = e33^2/(c33^D * eps33^S)",
+        "quantity": "k_t2",
+        "unit": "1",
+        "reference_value": 0.06448175,
+        "u_input": 8.0e-4,
+        "u_d": 4.0e-4,
+        "tol_rel": 0.03,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ]
+  }
+}

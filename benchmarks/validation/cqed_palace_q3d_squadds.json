@@ -1,0 +1,112 @@
+{
+  "benchmark_suite": "cqed_palace_q3d_squadds",
+  "version": "1.0.0",
+  "citations": [
+    "AWS Center for Quantum Computing, Palace (PArallel LArge-scale Computational Electromagnetics), examples/coax & examples/cylinder (2024)",
+    "SQuADDS_DB (commit 0e25705f) & Ansys Q3D/HFSS benchmarks q3d_cap_0554 (Xmon) & q3d_cap_0470 (TransmonPocket), arXiv:2312.13483"
+  ],
+  "methodology": "Epistemic/aleatoric separation: Prager-Synge dual flux bounds [S_low, S_up] checked against cross-code/analytical D without folding delta_ep into Gaussian variance; eigenmode and S21 driven benchmarks checked via ASME V&V 20 AND rule.",
+  "coax_cylinder_electrostatic": {
+    "geometry": {
+      "a_m": 10.0e-6,
+      "b_m": 30.0e-6,
+      "length_m": 100.0e-6,
+      "eps_r": 11.7
+    },
+    "target": {
+      "id": "coax_c_exact",
+      "description": "Exact cylindrical coaxial capacitance 2*pi*eps0*eps_r*L / ln(b/a) with Prager-Synge dual flux bounds",
+      "quantity": "C_coax",
+      "unit": "F",
+      "reference_value": 5.924749696966e-14,
+      "u_input": 5.0e-17,
+      "u_d": 5.0e-17,
+      "tol_rel": 0.015,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  },
+  "planar_gds_pocket_cross_code": {
+    "description": "3-terminal GDSII TransmonPocket + readout claw on 180 um Si (eps_r=11.45), cross-checking 3D volumetric FEM Prager-Synge bounds vs independent 2D layered Green-function planar_bem solver",
+    "geometry": {
+      "pad_half_x_m": 65.0e-6,
+      "pad_y_lo_m": 12.0e-6,
+      "pad_y_hi_m": 68.0e-6,
+      "claw_x_m": 55.0e-6,
+      "claw_y_lo_m": 86.0e-6,
+      "claw_y_hi_m": 98.0e-6,
+      "pocket_x_m": 110.0e-6,
+      "pocket_y_m": 130.0e-6,
+      "gnd_outer_m": 220.0e-6,
+      "t_sub_m": 180.0e-6,
+      "eps_r_si": 11.45
+    },
+    "tol_rel": 0.02,
+    "u_input_rel": 0.005,
+    "u_d_rel": 0.005
+  },
+  "squadds_q3d_reduction": {
+    "xmon_q3d_cap_0554": {
+      "terminals": ["c0", "c1", "c2"],
+      "maxwell_matrix_f": [
+        [266.2751602122418e-15, -67.06011354094588e-15, -172.31834463911892e-15],
+        [-67.06011354094588e-15, 69.17479232898475e-15, -1.983533590526942e-15],
+        [-172.31834463911892e-15, -1.983533590526942e-15, 175.60664203508705e-15]
+      ],
+      "e_j_hz": 15.0e9,
+      "f_r_hz": 6.5e9,
+      "z0_ohm": 50.0,
+      "target_ec_hz": {
+        "id": "squadds_0554_ec",
+        "description": "SQuADDS q3d_cap_0554 Xmon Eq. (17) charging energy E_C",
+        "quantity": "E_C",
+        "unit": "Hz",
+        "reference_value": 1.10305299505e8,
+        "u_input": 5.0e4,
+        "u_d": 5.0e4,
+        "tol_rel": 0.005,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    }
+  },
+  "cavity_3d_eigen_and_driven": {
+    "description": "3D lossy rectangular microwave cavity (a=40mm, c=30mm, b=20mm, sigma=5.8e7 S/m copper IBC) TE101 eigenmode f_0, wall-loss Q_0, and 2-port driven S21 parity",
+    "geometry": {
+      "a_m": 0.04,
+      "b_m": 0.02,
+      "c_m": 0.03,
+      "sigma_cu_s_per_m": 5.8e7
+    },
+    "targets": [
+      {
+        "id": "cavity_te101_freq",
+        "description": "TE101 rectangular cavity fundamental frequency c0/2 * sqrt(1/a^2 + 1/c^2)",
+        "quantity": "f_TE101",
+        "unit": "Hz",
+        "reference_value": 6.245676208333e9,
+        "u_input": 1.0e5,
+        "u_d": 1.0e5,
+        "tol_rel": 0.01,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "cavity_te101_q0",
+        "description": "TE101 rectangular copper cavity unloaded surface-loss quality factor Q_0 (Pozar Eq. 6.51)",
+        "quantity": "Q0_TE101",
+        "unit": "1",
+        "reference_value": 10806.04,
+        "u_input": 120.0,
+        "u_d": 80.0,
+        "tol_rel": 0.05,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ],
+    "driven_s21_clt_tolerances": {
+      "f_r_tol_rel": 0.005,
+      "q_l_tol_rel": 0.05
+    }
+  }
+}

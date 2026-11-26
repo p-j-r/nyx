@@ -1,0 +1,151 @@
+{
+  "benchmark_suite": "cqed_park2026",
+  "version": "1.0.0",
+  "citation": {
+    "authors": "S. Park et al.",
+    "title": "Experimental and electromagnetic modeling of kinetic-inductance disordered Nb superconducting resonators and transmon qubits on sapphire",
+    "journal": "npj Quantum Information",
+    "year": 2026,
+    "notes": "Fig. 1d-e (100 nm Nb CPW on 500 um Si) and Table 1 (35 nm disordered Nb Q1+R1 transmon-resonator on sapphire)"
+  },
+  "methodology": "ASME V&V 20 explicit AND rule: |E| <= tol_rel*|D| + tol_abs AND |E| <= 2*u_val where u_val = sqrt(u_num^2 + u_input^2 + u_D^2).",
+  "cpw_100nm_nb": {
+    "geometry": {
+      "w_trace_m": 49.3e-6,
+      "s_gap_m": 28.95e-6,
+      "w_box_m": 297.0e-6,
+      "l_res_m": 8.080e-3,
+      "h_sub_m": 500.0e-6,
+      "h_air_m": 500.0e-6,
+      "eps_r_si": 11.45,
+      "film_thickness_m": 100.0e-9
+    },
+    "bcs_material": {
+      "name": "nb_park2026",
+      "tc_k": 9.2,
+      "gap_0_j": 2.23503640443e-22,
+      "lambda_l_m": 33.3e-9,
+      "xi_0_m": 39.0e-9,
+      "sigma_n_s_per_m": 5.5e7,
+      "f_ref_hz": 7.064e9,
+      "film_model": "kerr"
+    },
+    "t_over_tc_sweep": [0.01, 0.25, 0.50, 0.65, 0.75, 0.85],
+    "targets": [
+      {
+        "id": "park2026_cpw_f_pec",
+        "description": "100 nm Nb CPW resonator lossless PEC reference frequency (Fig. 1d)",
+        "quantity": "f_PEC",
+        "unit": "Hz",
+        "reference_value": 7.064e9,
+        "u_input": 2.8e7,
+        "u_d": 1.0e7,
+        "tol_rel": 0.015,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "park2026_cpw_f_10mk",
+        "description": "100 nm Nb CPW resonator at T = 10 mK with BCS kinetic inductance (Fig. 1d)",
+        "quantity": "f_0(10mK)",
+        "unit": "Hz",
+        "reference_value": 6.910e9,
+        "u_input": 2.8e7,
+        "u_d": 1.0e7,
+        "tol_rel": 0.015,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "park2026_cpw_df_kin",
+        "description": "Kinetic inductance frequency pull f_0(10mK) - f_PEC (Fig. 1d)",
+        "quantity": "delta_f_kin",
+        "unit": "Hz",
+        "reference_value": -1.54e8,
+        "u_input": 6.0e6,
+        "u_d": 4.0e6,
+        "tol_rel": 0.10,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ]
+  },
+  "q1_r1_35nm_disordered_nb": {
+    "geometry": {
+      "w_box_m": 1.6e-3,
+      "l_box_m": 11.4e-3,
+      "h_sub_m": 330.0e-6,
+      "h_air_m": 450.0e-6,
+      "eps_r_sapphire": 10.2,
+      "film_thickness_m": 35.0e-9,
+      "pad_1_box_m": [-136.5e-6, -4.230e-3, 136.5e-6, -3.96e-3],
+      "pad_2_box_m": [-136.5e-6, -3.88e-3, 136.5e-6, -3.626e-3],
+      "jj_box_m": [-25.0e-6, -3.96e-3, 25.0e-6, -3.88e-3],
+      "res_1_box_m": [-100.0e-6, -3.578e-3, 100.0e-6, 5.290e-3],
+      "e_j_hz": 10.60e9,
+      "c_j_f": 8.40e-15,
+      "fock_trunc": [7, 5]
+    },
+    "bcs_material": {
+      "name": "nb_disordered_park2026",
+      "tc_k": 8.4,
+      "gap_0_j": 2.11487315688e-22,
+      "lambda_l_m": 47.0e-9,
+      "xi_0_m": 38.0e-9,
+      "mean_free_path_m": 2.0e-9,
+      "sigma_n_s_per_m": 7.5e6,
+      "f_ref_hz": 5.5e9,
+      "film_model": "kerr"
+    },
+    "targets": [
+      {
+        "id": "park2026_q1_f01",
+        "description": "Disordered 35 nm Nb Q1 transmon dressed transition frequency (Table 1)",
+        "quantity": "f_Q1",
+        "unit": "Hz",
+        "reference_value": 4.7595e9,
+        "u_input": 3.5e7,
+        "u_d": 2.0e6,
+        "tol_rel": 0.015,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "park2026_q1_alpha",
+        "description": "Disordered 35 nm Nb Q1 transmon anharmonicity (Table 1)",
+        "quantity": "alpha_1",
+        "unit": "Hz",
+        "reference_value": -342.3e6,
+        "u_input": 3.0e6,
+        "u_d": 5.0e5,
+        "tol_rel": 0.015,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "park2026_r1_freq",
+        "description": "Disordered 35 nm Nb R1 readout resonator dressed frequency (Table 1)",
+        "quantity": "f_R1",
+        "unit": "Hz",
+        "reference_value": 6.6571e9,
+        "u_input": 4.5e7,
+        "u_d": 2.0e6,
+        "tol_rel": 0.015,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      },
+      {
+        "id": "park2026_chi_q1r1",
+        "description": "Disordered 35 nm Nb Q1-R1 state-dependent dispersive shift (Table 1)",
+        "quantity": "chi_Q1R1",
+        "unit": "Hz",
+        "reference_value": -3.6e6,
+        "u_input": 2.5e5,
+        "u_d": 1.0e5,
+        "tol_rel": 0.10,
+        "tol_abs": 0.0,
+        "coverage_k": 2.0
+      }
+    ]
+  }
+}
