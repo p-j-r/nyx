@@ -39,3 +39,6 @@ phdf5 = ["hdf5"]
 bolero = "0.13"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+[build-dependencies]
+blake3 = "1"
+

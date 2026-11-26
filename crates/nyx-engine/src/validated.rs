@@ -142,12 +142,32 @@ impl Check {
     }
 
     pub fn to_record(&self) -> nyx_store::runs::Convergence {
+        let tier = if self.gci_regime.as_deref() == Some("non_convergent") {
+            ValidationTier::NonConvergent
+        } else if self.passed
+            && self.r_eff.is_none_or(|r| r >= 1.3)
+            && self.max_algebraic_residual.is_none_or(|a| a <= 0.01 * self.tolerance)
+        {
+            if self.grids >= 3 && self.gci_21.is_some() {
+                ValidationTier::GciVerified
+            } else {
+                ValidationTier::TwoGridChecked
+            }
+        } else {
+            ValidationTier::Exploratory
+        };
         nyx_store::runs::Convergence {
             factor: self.factor,
             tolerance: self.tolerance,
             observable: self.observable(),
             passed: self.passed,
             worst_relative: self.worst_relative,
+            grids: Some(self.grids),
+            r_eff: self.r_eff,
+            gci_fine: self.gci_21,
+            gci_p_obs: self.observed_order,
+            gci_regime: self.gci_regime.clone(),
+            tier: Some(tier.as_str().to_string()),
         }
     }
 }

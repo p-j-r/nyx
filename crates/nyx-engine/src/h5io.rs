@@ -9,8 +9,11 @@
 //! are still read):
 //!
 //! ```text
-//! /                          attrs: format = "nyx-results", version = 4 (i32), writer, processes
+//! /                          attrs: format = "nyx-results", version = 4 (i32), writer, processes,
+//!                                   nyx_version, git_commit, rustc_version, nyx_threads, nyx_factor_threads
+//!                                   (strictly NO `created_utc`: repeated identical runs are 0-byte-diff)
 //! /project                   the project as JSON text (u8 dataset)
+//! /provenance                validated_json, materials_json (UTF-8 JSON u8 datasets)
 //! /mesh/points               [n_points, dim] f64         /mesh/cells        [n_cells, dim+1] u32
 //! /mesh/cell_labels          [n_cells] i32               /mesh/facets       [n_facets, dim] u32
 //! /mesh/facet_labels         [n_facets] i32
@@ -57,6 +60,19 @@ fn text_attr(s: &str) -> Result<AttrValue, String> {
         return Err("text could not be stored (it contains a NUL character)".into());
     }
     Ok(AttrValue::VarLenString(s.to_string()))
+}
+
+fn set_deterministic_root_attrs(fb: &mut FileBuilder, writer: &str, processes: i64) -> Result<(), String> {
+    fb.set_attr("writer", text_attr(writer)?);
+    fb.set_attr("processes", AttrValue::I64(processes));
+    fb.set_attr("format", text_attr("nyx-results")?);
+    fb.set_attr("version", AttrValue::I32(4));
+    fb.set_attr("nyx_version", text_attr(env!("CARGO_PKG_VERSION"))?);
+    fb.set_attr("git_commit", text_attr(env!("NYX_BUILD_GIT_COMMIT"))?);
+    fb.set_attr("rustc_version", text_attr(env!("NYX_BUILD_RUSTC_VERSION"))?);
+    fb.set_attr("nyx_threads", AttrValue::I64(crate::provenance::resolved_nyx_threads() as i64));
+    fb.set_attr("nyx_factor_threads", AttrValue::I64(crate::provenance::resolved_nyx_factor_threads() as i64));
+    Ok(())
 }
 
 fn chunk_dims(rows: usize, cols: usize) -> Vec<u64> {
@@ -359,9 +375,22 @@ pub fn write_results_mode_with_provenance(
     results: &[(String, &SolveResult)],
     checks: Option<&BTreeMap<String, crate::validated::Check>>,
 ) -> Result<bool, String> {
+    write_results_mode_with_full_provenance(path, mode, project, mesh, results, checks, None)
+}
+
+/// Like [`write_results_mode_with_provenance`], additionally accepting pre-resolved material provenance for `/provenance/materials_json`.
+pub fn write_results_mode_with_full_provenance(
+    path: &Path,
+    mode: H5Mode,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+    checks: Option<&BTreeMap<String, crate::validated::Check>>,
+    materials: Option<&BTreeMap<String, crate::provenance::MaterialProvenance>>,
+) -> Result<bool, String> {
     match mode {
         H5Mode::Serial => {
-            write_results_with_provenance(
+            write_results_with_full_provenance(
                 path,
                 project,
                 mesh,
@@ -369,6 +398,7 @@ pub fn write_results_mode_with_provenance(
                 FieldStorageLayout::L2ShuffleLzfPacked,
                 true,
                 checks,
+                materials,
             )?;
             Ok(true)
         }
@@ -411,11 +441,24 @@ pub fn write_results_with_provenance(
     save_fields: bool,
     checks: Option<&BTreeMap<String, crate::validated::Check>>,
 ) -> Result<(), String> {
+    write_results_with_full_provenance(path, project, mesh, results, layout, save_fields, checks, None)
+}
+
+/// Writes `results` solved on `mesh` for `project` into `path` using `layout`, persisting `checks` at
+/// `/provenance/validated_json` and resolved material provenance at `/provenance/materials_json` without any timestamp attributes.
+#[allow(clippy::too_many_arguments)]
+pub fn write_results_with_full_provenance(
+    path: &Path,
+    project: &Project,
+    mesh: &SimplexMesh,
+    results: &[(String, &SolveResult)],
+    layout: FieldStorageLayout,
+    save_fields: bool,
+    checks: Option<&BTreeMap<String, crate::validated::Check>>,
+    materials: Option<&BTreeMap<String, crate::provenance::MaterialProvenance>>,
+) -> Result<(), String> {
     let mut fb = FileBuilder::new();
-    fb.set_attr("writer", text_attr("serial")?);
-    fb.set_attr("processes", AttrValue::I64(1));
-    fb.set_attr("format", text_attr("nyx-results")?);
-    fb.set_attr("version", AttrValue::I32(4));
+    set_deterministic_root_attrs(&mut fb, "serial", 1)?;
     if !save_fields {
         fb.set_attr("fields_saved", AttrValue::I64(0));
         fb.set_attr("mesh_dim", AttrValue::I64(mesh.dim as i64));
@@ -426,8 +469,18 @@ pub fn write_results_with_provenance(
     fill_u8(fb.create_dataset("project"), proj_json.as_bytes(), layout);
     let empty_checks = BTreeMap::new();
     let validated_bytes = serde_json::to_vec(checks.unwrap_or(&empty_checks)).map_err(|x| x.to_string())?;
+    let owned_materials;
+    let resolved_materials = match materials {
+        Some(m) => m,
+        None => {
+            owned_materials = crate::provenance::resolve_materials_for_project(project, None);
+            &owned_materials
+        }
+    };
+    let materials_bytes = serde_json::to_vec(resolved_materials).map_err(|x| x.to_string())?;
     let mut prov = fb.create_group("provenance");
     fill_u8(prov.create_dataset("validated_json"), &validated_bytes, layout);
+    fill_u8(prov.create_dataset("materials_json"), &materials_bytes, layout);
     fb.add_group(prov.finish());
 
     let d = mesh.dim;
@@ -789,6 +842,7 @@ pub struct ResultsFileInfo {
     pub points: usize,
     pub cells: usize,
     pub results: Vec<(String, PhysicsSummary)>,
+    pub materials: BTreeMap<String, crate::provenance::MaterialProvenance>,
 }
 
 /// Reads the header summary of a results file via `File::open_streaming` without loading mesh or field arrays.
@@ -847,7 +901,18 @@ pub fn read_results_summary(path: &Path) -> Result<ResultsFileInfo, String> {
         };
         results.push((name, summary));
     }
-    Ok(ResultsFileInfo { project, dim, points, cells, results })
+    let materials = if let Ok(pg) = file.group("provenance") {
+        read_optional_json::<BTreeMap<String, crate::provenance::MaterialProvenance>>(
+            &pg,
+            "materials_json",
+            &budget,
+            &mut total_bytes,
+        )?
+        .unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
+    Ok(ResultsFileInfo { project, dim, points, cells, results, materials })
 }
 
 /// What a results file holds.
@@ -861,6 +926,8 @@ pub struct Stored {
     pub fields_saved: bool,
     /// persisted convergence checks read from `/provenance/validated_json` (empty on legacy files)
     pub validated_checks: BTreeMap<String, crate::validated::Check>,
+    /// persisted material provenance read from `/provenance/materials_json` (empty on legacy files)
+    pub materials: BTreeMap<String, crate::provenance::MaterialProvenance>,
 }
 
 /// Reads a results file back using `File::open_streaming` and [`ReadBudgetConfig::from_env()`].
@@ -1107,18 +1174,26 @@ pub fn read_results_with_budget(path: &Path, budget: ReadBudgetConfig) -> Result
         }
         results.push((name, r));
     }
-    let validated_checks = if let Ok(pg) = file.group("provenance") {
-        read_optional_json::<BTreeMap<String, crate::validated::Check>>(
+    let (validated_checks, materials) = if let Ok(pg) = file.group("provenance") {
+        let checks = read_optional_json::<BTreeMap<String, crate::validated::Check>>(
             &pg,
             "validated_json",
             &budget,
             &mut total_read_bytes,
         )?
-        .unwrap_or_default()
+        .unwrap_or_default();
+        let mats = read_optional_json::<BTreeMap<String, crate::provenance::MaterialProvenance>>(
+            &pg,
+            "materials_json",
+            &budget,
+            &mut total_read_bytes,
+        )?
+        .unwrap_or_default();
+        (checks, mats)
     } else {
-        BTreeMap::new()
+        (BTreeMap::new(), BTreeMap::new())
     };
-    Ok(Stored { mesh, project, results, fields_saved, validated_checks })
+    Ok(Stored { mesh, project, results, fields_saved, validated_checks, materials })
 }
 
 /// The size of a results file in bytes and how it divides: for the Share screen and the tests that compare with JSON.
@@ -1239,17 +1314,18 @@ mod tests {
         let curved = mesh.edge_node_list();
         let n_cells = mesh.n_cells();
 
+        let resolved_materials = crate::provenance::resolve_materials_for_project(project, None);
+        let materials_bytes = serde_json::to_vec(&resolved_materials).map_err(|x| x.to_string())?;
+
         if part.rank == 0 {
             let mut fb = FileBuilder::new();
-            fb.set_attr("writer", text_attr("parallel")?);
-            fb.set_attr("processes", AttrValue::I64(part.size as i64));
-            fb.set_attr("format", text_attr("nyx-results")?);
-            fb.set_attr("version", AttrValue::I32(4));
+            set_deterministic_root_attrs(&mut fb, "parallel", part.size as i64)?;
             fill_u8(fb.create_dataset("project"), &vec![0u8; proj_json.len()], layout);
             let empty_checks: BTreeMap<String, crate::validated::Check> = BTreeMap::new();
             let validated_bytes = serde_json::to_vec(&empty_checks).map_err(|x| x.to_string())?;
             let mut prov = fb.create_group("provenance");
             fill_u8(prov.create_dataset("validated_json"), &vec![0u8; validated_bytes.len()], layout);
+            fill_u8(prov.create_dataset("materials_json"), &vec![0u8; materials_bytes.len()], layout);
             fb.add_group(prov.finish());
 
             let mut m = fb.create_group("mesh");
@@ -1352,6 +1428,7 @@ mod tests {
         let empty_checks: BTreeMap<String, crate::validated::Check> = BTreeMap::new();
         let validated_bytes = serde_json::to_vec(&empty_checks).map_err(|x| x.to_string())?;
         write_slice_u8(&session, "provenance/validated_json", &validated_bytes, part)?;
+        write_slice_u8(&session, "provenance/materials_json", &materials_bytes, part)?;
         write_slice_f64(&session, "mesh/points", &mesh.points, d, part)?;
         write_slice_u32(&session, "mesh/cells", &mesh.cells, d + 1, part)?;
         write_slice_i32(&session, "mesh/cell_labels", mesh.cell_labels.as_slice(), part)?;

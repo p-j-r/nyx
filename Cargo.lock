@@ -4320,6 +4320,7 @@ dependencies = [
 name = "nyx-engine"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "bolero",
  "femcore",
  "geom",

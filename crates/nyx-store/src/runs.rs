@@ -30,6 +30,69 @@ pub struct Artifact {
     pub bytes: u64,
 }
 
+/// Compile-time build and lockfile provenance for a run (`store_run` `1.1`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildProvenance {
+    #[serde(default)]
+    pub nyx_version: String,
+    #[serde(default)]
+    pub git_commit: String,
+    #[serde(default)]
+    pub git_dirty: bool,
+    #[serde(default)]
+    pub rustc_version: String,
+    #[serde(default)]
+    pub target_triple: String,
+    #[serde(default)]
+    pub profile: String,
+    #[serde(default)]
+    pub cargo_lock_blake3: String,
+}
+
+/// Execution environment provenance for a run (`store_run` `1.1`).
+/// `created_utc` belongs strictly in `RunRecord` and never in deterministic HDF5 outputs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeProvenance {
+    #[serde(default)]
+    pub os: String,
+    #[serde(default)]
+    pub cpu_arch: String,
+    #[serde(default)]
+    pub nyx_threads: usize,
+    #[serde(default)]
+    pub nyx_factor_threads: usize,
+    #[serde(default)]
+    pub created_utc: String,
+}
+
+/// Compact summary of solver diagnostics and warnings across a run's solved physics (`store_run` `1.1`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunDiagnosticsSummary {
+    #[serde(default)]
+    pub results_with_diagnostics: usize,
+    #[serde(default)]
+    pub all_converged: bool,
+    #[serde(default)]
+    pub info_count: usize,
+    #[serde(default)]
+    pub warning_count: usize,
+    #[serde(default)]
+    pub error_count: usize,
+    /// `"none"`, `"info"`, `"warning"`, or `"error"`
+    #[serde(default)]
+    pub worst_severity: String,
+    #[serde(default)]
+    pub max_algebraic_residual: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_rcond_estimate: Option<f64>,
+    #[serde(default)]
+    pub cholesky_fallbacks: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warning_codes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
 /// What a mesh-convergence check said about the problem a run solved (ADR 91, productivity plan P6). Plain data: the store knows nothing of a project.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Convergence {
@@ -44,6 +107,24 @@ pub struct Convergence {
     /// the largest relative difference found
     #[serde(default)]
     pub worst_relative: f64,
+    /// number of mesh levels compared (`2` or `3`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grids: Option<usize>,
+    /// effective grid refinement ratio `r_eff`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r_eff: Option<f64>,
+    /// 3-grid fine-grid Roache GCI estimate (`gci_21`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gci_fine: Option<f64>,
+    /// observed convergence order `p_obs`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gci_p_obs: Option<f64>,
+    /// 3-grid GCI regime (`"monotonic"`, `"oscillatory"`, `"non_convergent"`, `"low_refinement_ratio"`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gci_regime: Option<String>,
+    /// validation tier (`"bound_certified"`, `"gci_verified"`, `"two_grid_checked"`, `"exploratory"`, `"non_convergent"`, ...)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -77,6 +158,18 @@ pub struct RunRecord {
     /// restarts, and that the result is not confirmed until it is solved cold (optional: other runs carry none)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reuse: Option<serde_json::Value>,
+    /// compile-time build and lockfile provenance (`store_run` `1.1`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<BuildProvenance>,
+    /// execution environment provenance (`store_run` `1.1`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeProvenance>,
+    /// compact solver diagnostics and warning summary across the run (`store_run` `1.1`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<RunDiagnosticsSummary>,
+    /// BLAKE3 digests of resolved materials used by the project (`store_run` `1.1`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_hashes: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -433,7 +526,7 @@ mod tests {
         let path = dir.join("runs.jsonl");
         append(&path, &run("r0001_a", 5e-7, 2.4)).unwrap();
         append(&path, &run("r0002_b", 5e-7, 2.4)).unwrap();
-        let c = Convergence { factor: 0.6, tolerance: 1e-3, observable: "eigenvalues, matched by index".into(), passed: true, worst_relative: 2.5e-4 };
+        let c = Convergence { factor: 0.6, tolerance: 1e-3, observable: "eigenvalues, matched by index".into(), passed: true, worst_relative: 2.5e-4, ..Default::default() };
         append_patch(&path, "r0001_a", RunPatch { convergence: Some(c.clone()), ..Default::default() }).unwrap();
         // a later check of the same problem replaces the earlier verdict; a star patch afterwards leaves it alone
         let failed = Convergence { passed: false, worst_relative: 0.02, ..c.clone() };
@@ -447,7 +540,48 @@ mod tests {
         // a record without a verdict does not write the key, so every earlier line and exemplar is unchanged
         assert!(!serde_json::to_string(&runs[1]).unwrap().contains("convergence"));
         let old = r#"{"id":"r1","t":"2026-10-31T00:00:00Z","sec":1.0,"status":"ok","spec":"b3:1","femcore":"0.1.0","params":{},"metrics":{}}"#;
-        assert!(parse(old).0[0].convergence.is_none());
+        let parsed_old = &parse(old).0[0];
+        assert!(parsed_old.convergence.is_none());
+        assert!(parsed_old.build.is_none() && parsed_old.runtime.is_none() && parsed_old.diagnostics.is_none() && parsed_old.material_hashes.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn v1_1_provenance_round_trips_and_omits_unset_fields() {
+        let mut rec = run("r0009_prov", 5e-7, 2.4);
+        rec.build = Some(BuildProvenance {
+            nyx_version: "0.1.0".into(),
+            git_commit: "deadbeef1234".into(),
+            git_dirty: false,
+            rustc_version: "rustc 1.99.1".into(),
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            profile: "release".into(),
+            cargo_lock_blake3: "b3:0123".into(),
+        });
+        rec.runtime = Some(RuntimeProvenance {
+            os: "linux".into(),
+            cpu_arch: "x86_64".into(),
+            nyx_threads: 4,
+            nyx_factor_threads: 4,
+            created_utc: "2026-11-26T00:00:00Z".into(),
+        });
+        rec.diagnostics = Some(RunDiagnosticsSummary {
+            results_with_diagnostics: 1,
+            all_converged: true,
+            info_count: 0,
+            warning_count: 1,
+            error_count: 0,
+            worst_severity: "warning".into(),
+            max_algebraic_residual: 1.5e-14,
+            min_rcond_estimate: Some(1.0e-5),
+            cholesky_fallbacks: 0,
+            warning_codes: vec!["material_approximate".into()],
+            warnings: vec!["dfs: [material_approximate] approx".into()],
+        });
+        rec.material_hashes = Some([("silicon".into(), "b3:abcd".into())].into());
+        let line = serde_json::to_string(&rec).unwrap();
+        let (parsed, bad) = parse(&line);
+        assert_eq!(bad, 0);
+        assert_eq!(parsed[0], rec);
     }
 }

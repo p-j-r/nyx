@@ -228,7 +228,7 @@ fn serve_job(dir: &Path) -> Result<(), String> {
     let has_results = match e.results_snapshot() {
         Ok(s) => {
             let refs: Vec<(String, &SolveResult)> = s.results.iter().map(|(c, r)| (c.clone(), r.as_ref())).collect();
-            crate::h5io::write_results_with_provenance(
+            crate::h5io::write_results_with_full_provenance(
                 &dir.join("results.h5"),
                 &s.project,
                 &s.model.solver_mesh(),
@@ -236,6 +236,7 @@ fn serve_job(dir: &Path) -> Result<(), String> {
                 crate::h5io::FieldStorageLayout::L2ShuffleLzfPacked,
                 save_fields,
                 Some(&s.checks),
+                Some(&s.materials),
             )?;
             true
         }

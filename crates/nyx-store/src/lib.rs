@@ -20,4 +20,5 @@ pub mod workspace;
 
 pub use flow::WorkflowDir;
 pub use model::*;
+pub use runs::{BuildProvenance, RunDiagnosticsSummary, RuntimeProvenance};
 pub use workspace::{Entry, Sections, Settings, Workspace};
