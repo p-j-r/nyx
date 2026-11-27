@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: "nyx: Finite-Element Simulation for Photonics, Phononics, Piezoelectrics, and Superconducting Quantum Circuits"
+message: "If you use nyx in academic work, please cite it using the metadata from this file."
+type: software
+authors:
+  - given-names: "Paul Joseph"
+    family-names: "Robin"
+repository-code: "https://github.com/p-j-r/nyx"
+url: "https://github.com/p-j-r/nyx"
+license: AGPL-3.0-only
+license-url: "https://github.com/p-j-r/nyx/blob/main/NOTICE"
+version: "0.1.0"
+date-released: "2026-11-26"
+keywords:
+  - finite-element-method
+  - photonics
+  - phononics
+  - piezoelectricity
+  - superconducting-qubits
+  - circuit-qed
+  - electromagnetics
+  - rust

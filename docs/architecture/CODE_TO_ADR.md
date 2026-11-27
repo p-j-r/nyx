@@ -20,6 +20,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `NOTICE` | 100 | the dual licence and the parts that keep their own |
 | `CONTRIBUTING.md` | 13, 19, 100 | contributor workflow, VVUQ checks, and inbound contribution licence |
 | `SECURITY.md` | 93, 100, 131 | vulnerability reporting policy and security boundaries |
+| `CITATION.cff` | 13, 100 | Citation File Format metadata for academic attribution |
 | `.gitignore` | 13, 20 | `*.py` ignored on purpose |
 | `docs/architecture/adr/*` | 19 | the ADRs themselves |
 | `docs/architecture/contracts/*` | 19 | exemplars |
