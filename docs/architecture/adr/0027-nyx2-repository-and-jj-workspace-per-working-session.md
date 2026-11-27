@@ -12,7 +12,7 @@ The restructure changes the crate layout, the mesh type, the linear algebra, the
 
 ## Decision
 
-* `nyx2` (`C:\Users\robin-adm\Documents\opomech\nyx2`) is a colocated jj repository cloned from the `arch-model-adrs` tip of `nyx` (`f74c12ea`), **keeping the full history**: the goldens, the ports' provenance, the commit hashes quoted in the ADRs and `git blame` stay valid. Its remote was removed: nothing is pushed anywhere. Its `main` is that tip; nobody commits to it directly.
+* `nyx2` (`<parent folder>/nyx2`) is a colocated jj repository cloned from the `arch-model-adrs` tip of `nyx` (`f74c12ea`), **keeping the full history**: the goldens, the ports' provenance, the commit hashes quoted in the ADRs and `git blame` stay valid. Its remote was removed: nothing is pushed anywhere. Its `main` is that tip; nobody commits to it directly.
 * The tags `pre-restructure` and `sbs-last` both point at `f74c12ea` (code identical to `a047506`); `last-old-format` will be set in phase 8.
 * **One jj workspace per working session**, next to the main one: `jj workspace add ../nyx2-<name> -r <base>`, with its own bookmark `restructure-<n>-<name>`. The base is the bookmark of the phase it builds on (`restructure-foundation` after this phase). Workspace folders are siblings of `nyx2` and share its history and `.cargo/config.toml` build directory.
 * A finished phase bookmark is merged into the integration line by whoever coordinates, never by the phase's own session. Sessions do not push, do not move `main`, and update their own section of `docs/RESTRUCTURE_STATUS.md` before finishing.

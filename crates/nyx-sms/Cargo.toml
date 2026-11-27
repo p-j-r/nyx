@@ -4,13 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "The sms physics of nyx: typed problem, kernels (moved in from femcore in restructure phase 4) and descriptors"
 
 [dependencies]
 nyx-physics = { path = "../nyx-physics" }
 femcore = { path = "../femcore" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-rayon = "1"
 
 [dev-dependencies]
 geom = { path = "../geom" }

@@ -607,7 +607,7 @@ pub fn pullback_maxwell(
 }
 
 /// Computes closed-form dimensionless PML parameters jointly calibrated across a PML material group
-/// (`lambda_min <= lambda_max`) per `docs/PML_FEATURE_REQUEST.md` §2 Verdict 4:
+/// (`lambda_min <= lambda_max`) per `docs/history/PML_FEATURE_REQUEST.md` §2 Verdict 4:
 ///
 /// * `psi_max` and `kappa_max` calibrate to `lambda_max` (fastest wave / lowest refractive index)
 ///   so continuous reflection satisfies `R_cont <= target_r0` for every mode in the slab/shell.

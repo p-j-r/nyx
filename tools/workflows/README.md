@@ -2,11 +2,11 @@
 
 JSON-lines files of engine commands, replayed by `crates/nyx-engine/examples/workflow.rs` and checked by `crates/nyx-engine/tests/workflows.rs`.
 One line is `{"cmd": "<command of Engine::catalog()>", "args": {...}}`; the optional keys `note`, `job_arg`, `after_stage` and `expect_error`
-control the replay only (documented in the header of `workflow.rs`). The same files are the input of `nyx check` / `nyx run` when plan step S1 is built.
+control the replay only (documented in the header of `workflow.rs`). The same files are the input of `nyx check` / `nyx run` (`nyx check` / `nyx run` take scripts, `*.nys`, not these files; the replay program is the one that reads them).
 
 ```
 cargo build --release -p nyx-engine --examples
-target/release/examples/peakrun.exe target/release/examples/workflow.exe tools/workflows/w1_soi_width.jsonl   # from the repository root
+target/release/examples/peakrun target/release/examples/workflow tools/workflows/w1_soi_width.jsonl   # from the repository root; on Windows the programs end in .exe
 ```
 
 | File | What it times |

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-nyx-Commercial
 // Copyright (C) 2026 p-j-r
 //! Interface contracts of femcore (docs/architecture/adr/0019): what other crates, saved files and external hosts rely on, written down
-//! as tests that do not depend on frozen floating-point values (the golden files of `golden_frames.rs` do, see ADR 10).
+//! as tests that do not depend on frozen floating-point values (the golden files of `nyx-dfs`, `nyx-sms` and `nyx-ems` (`tests/golden`) do, see ADR 10).
 //!
 //! * `frames`: the constants and name tables of `section` (ADR 1).
 //! * `mesh`: label bases, node orders, no curved-node storage, the `.fmsh` version (ADRs 4, 5, 16, 18).

@@ -22,41 +22,43 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/architecture/adr/*` | 19 | the ADRs themselves |
 | `docs/architecture/contracts/*` | 19 | exemplars |
 | `docs/architecture/*` | 19, 20 | model, rough spots, indexes |
-| `docs/RESTRUCTURE_STATUS.md` | 20, 19 | handoff for the restructure plan |
-| `docs/UX_STATUS.md` | 20, 88 | handoff for the UX review and plan |
+| `docs/history/architecture/*` | 19, 20 | archived restructure plan, proposals and decision rounds |
+| `docs/history/README.md` | 20 | what the archive is |
+| `docs/README.md` | 20 | index of the docs folder |
+| `docs/history/RESTRUCTURE_STATUS.md` | 20, 19 | handoff for the restructure plan |
+| `docs/history/UX_STATUS.md` | 20, 88 | handoff for the UX review and plan |
 | `docs/HOST_SETUP.md` | 97, 98, 94 | what costs time when an AI host drives nyx, and what to set in the host and do in the agent |
-| `docs/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
-| `docs/ux/*` | 88, 123 | UX review, action plan, colour tokens, contrast script and screenshots of the window |
+| `docs/history/LATENCY_STATUS.md` | 97, 20 | handoff for the latency work L1 to L3 |
+| `docs/ux/*` | 88, 123 | colour tokens (`tokens.json`, compared with the app by a test) |
+| `docs/history/ux/*` | 88, 123 | archived UX review and plans |
 | `docs/vvuq/*` | 10, 19, 61, 91, 112, 120, 131 | ASME VVUQ & Rust formal verification plan and EGM-refined plan |
 | `benchmarks/validation/*` | 133 | ASME V&V 20 versioned validation datasets (Park 2026, Palace/Q3D/SQuADDS, `scqubits`/TLS, photonics, MEMS/piezo, NAFEMS T1–T4) |
-| `docs/FRAME_UNIFICATION_STATUS.md` | 1 | |
-| `docs/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
-| `docs/GEOMETRY_ARCHITECTURE.md` | 2, 3, 18 | historical |
-| `docs/GEOM_HANDOFF*.md` | 2, 3, 18 | historical |
-| `docs/geom_handoff.zip` | 2, 3 | |
-| `docs/GEOMETRY_GUI_PLAN.md` | 2, 23 | |
-| `docs/WORKFLOWS_DESIGN.md` | 14, 23 | |
-| `docs/MCP_ASSISTANT_PLAN.md` | 15 | |
-| `docs/SWEEP_CACHING_PROPOSAL.md` | 6 | proposal; historical |
-| `docs/PML_FEATURE_REQUEST.md` | 128, 5, 7, 52, 69, 82, 101, 120 | COMSOL-inspired structured/curvilinear PML & open-boundary specification (ADR 128) |
-| `docs/PML_IMPLEMENTATION_PLAN.md` | 128, 5, 7, 52, 69, 82, 101, 120 | implementation plan for native mixed-cell curvilinear PML/IE & physics scaling (ADR 128) |
+| `docs/history/FRAME_UNIFICATION_STATUS.md` | 1 | |
+| `docs/history/KERNEL_PORT_STATUS.md` | 1, 9, 10, 12 | |
+| `docs/history/GEOMETRY_ARCHITECTURE.md` | 2, 3, 18 | historical |
+| `docs/history/GEOM_HANDOFF*.md` | 2, 3, 18 | historical |
+| `docs/history/GEOMETRY_GUI_PLAN.md` | 2, 23 | |
+| `docs/history/WORKFLOWS_DESIGN.md` | 14, 23 | |
+| `docs/history/MCP_ASSISTANT_PLAN.md` | 15 | |
+| `docs/history/SWEEP_CACHING_PROPOSAL.md` | 6 | proposal; historical |
+| `docs/history/PML_FEATURE_REQUEST.md` | 128, 5, 7, 52, 69, 82, 101, 120 | COMSOL-inspired structured/curvilinear PML & open-boundary specification (ADR 128) |
+| `docs/history/PML_IMPLEMENTATION_PLAN.md` | 128, 5, 7, 52, 69, 82, 101, 120 | implementation plan for native mixed-cell curvilinear PML/IE & physics scaling (ADR 128) |
 | `docs/HOW_IT_WORKS.md` | 4, 9 | |
-| `docs/PLOTTING_PLAN.md` | 99 | design note of the mode figures (the script, the results layout, the stages) |
-| `docs/GDSFACTORY_INTEGRATION.md` | 57, 94 | design note: a gdsfactory plugin that drives the engine; not built |
-| `docs/MARKET_NOTE.md` | - | market note; no architecture decision |
-| `docs/results_format_measure.py.txt` | 62 | the measurement script of the results format study (`.py.txt`: `*.py` is git-ignored) |
-| `docs/RESULTS_FORMAT_STUDY.md` | 62, 99, 107 | study of the results file layout and pure-Rust `hdf5-pure` decision |
+| `docs/history/PLOTTING_PLAN.md` | 99 | design note of the mode figures (the script, the results layout, the stages) |
+| `docs/history/GDSFACTORY_INTEGRATION.md` | 57, 94 | design note: a gdsfactory plugin that drives the engine; not built |
+| `docs/history/RESULTS_FORMAT_STUDY.md` | 62, 99, 107 | study of the results file layout and pure-Rust `hdf5-pure` decision |
 | `docs/figures/example_modes_gallery.png` | 99 | example output of the `figure` command |
-| `docs/chip_report.md` | 22 | |
-| `docs/photonic_use_cases.md` | 21, 22 | |
+| `docs/history/chip_report.md` | 22 | |
+| `docs/history/photonic_use_cases.md` | 21, 22 | |
 | `docs/SQUADDS_BENCHMARK_REPORT.md` | 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 119, 120, 121 | SQuADDS cQED statistical parity, AF-1..AF-6 ablation, and cryogenic hardware validation report |
-| `docs/SQUADDS_BUG_FEATURE_REQUESTS.md` | 11, 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 120, 121, 125, 126, 127 | Post-SQuADDS benchmark bug-fix and solver/meshing feature requests (FR-25..FR-33) covering Core Bugs 1-5 and Limitations L1-L4 |
+| `docs/history/SQUADDS_BUG_FEATURE_REQUESTS.md` | 11, 102, 103, 104, 105, 106, 114, 115, 116, 117, 118, 120, 121, 125, 126, 127 | Post-SQuADDS benchmark bug-fix and solver/meshing feature requests (FR-25..FR-33) covering Core Bugs 1-5 and Limitations L1-L4 |
 | `docs/brand/*` | 23 | |
-| `docs/mockups/*` | 14, 23 | |
 | `docs/ports/README.md` | 5, 7, 8 | |
 | `docs/ports/NOTICES.md` | 7, 8 | licences |
 | `docs/ports/meshers/*` | 5, 7, 16, 17, 18 | |
+| `docs/history/ports/meshers/*` | 5, 7, 16, 17, 18 | archived staging notes of the femmesh port |
 | `docs/ports/solvers/*` | 8, 11 | |
+| `docs/history/ports/solvers/*` | 8, 11 | archived staging notes of the femsolve port |
 | `crates/geom/src/model.rs` | 2 | feature list |
 | `crates/geom/src/expr.rs` | 2, 3 | duplicate of femcore::expr (R06) |
 | `crates/geom/src/print.rs` | 2 | "Copy as Rust" |

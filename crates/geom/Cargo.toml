@@ -3,9 +3,10 @@ name = "geom"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "Lean CSG-over-B-rep geometry kernel for FEM: feature lists, named regions, selectors, exact projection oracles"
 license = "BSD-2-Clause"
-repository = "https://github.com/p-j-r/inspired-rust-port"
 
 [features]
 default = []

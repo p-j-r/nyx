@@ -1,6 +1,6 @@
 # nyx C4 set
 
-The full C4 model of nyx at the end of the restructure (phase 9, 2026-11-13): **context, containers (one per crate), components (every container) and code (every component)**, plus two dynamic views. Structurizr is the source for levels 1 to 3; level 4 is a class-diagram page per component generated from the Rust source. Short summary and findings: [MEMO.md](MEMO.md).
+The full C4 model of nyx at the end of the restructure (phase 9, 2026-11-13): **context, containers (one per crate), components (every container) and code (every component)**, plus two dynamic views. Structurizr is the source for levels 1 to 3; level 4 is a class-diagram page per component generated from the Rust source.
 
 | Level | Folder | What | Made from |
 |---|---|---|---|
@@ -12,10 +12,14 @@ The full C4 model of nyx at the end of the restructure (phase 9, 2026-11-13): **
 
 Other folders: `export/` (every Structurizr view as Mermaid, PlantUML and workspace JSON), `viewer/index.html` (all 110 diagrams in one page with a menu; opens in a browser, loads Mermaid from a CDN), `model/` (generated Structurizr fragments; in the standalone folder they are in `structurizr/model/`), `spec/` (the component spec), `tools/` (generator and build scripts), `reports/` (what the source scan found).
 
+**Generated output is not tracked.** `3-components/`, `4-code/`, `export/`, `viewer/` and `reports/` are written by `tools/build.sh` and are git-ignored; links into them from the tracked pages (`1-context`, `2-containers`, `5-dynamic`) work after a build. What is tracked is the hand-written input (`spec/`, `tools/`, `../workspace.dsl`) and the model fragments in `model/`, which the master workspace includes.
+
+The C4 set predates `nyx-install` (ADR 122): that crate is not in `spec/components.spec` yet, so the next build stops on its files until it is added.
+
 ## Where things are
 
 * **In the repository**: this folder is `docs/architecture/c4/`. The master workspace is [`../workspace.dsl`](../workspace.dsl) (it includes `model/`); the ADRs it links to are [`../adr/`](../adr/).
-* **Standalone copy**: `Documents\opomech\nyx-c4\` (same folders; master workspace `structurizr/workspace.dsl`, ADRs copied to `structurizr/adr/`). Made by `bash tools/make_standalone.sh`. It is a build output of this folder, not a second source: change the spec or the source, rebuild both.
+* **Standalone copy**: a folder outside the repository (same folders; master workspace `structurizr/workspace.dsl`, ADRs copied to `structurizr/adr/`). Made by `bash tools/make_standalone.sh`. It is a build output of this folder, not a second source: change the spec or the source, rebuild both.
 
 ## Viewing
 
@@ -49,4 +53,4 @@ What is hand-written: the people, systems, containers, container relationships a
 
 ## Keeping it true
 
-Rebuild after a change of crate layout or a new file (the build fails on a file that belongs to no component). Commit the generated files with the change, as `CODE_TO_ADR.md` is. A decision that changes the picture still gets an ADR (see `../README.md`).
+Rebuild after a change of crate layout or a new file (the build fails on a file that belongs to no component), and commit the changed `model/` fragments and the pages `1-context`, `2-containers`, `5-dynamic` with the change. A decision that changes the picture still gets an ADR (see `../README.md`).
