@@ -1,5 +1,7 @@
 # Rough spots: inconsistencies, duplication and coupling that the model shows
 
+> **Status: snapshot, not a current list.** Written 2026-11-03 against the layout before the restructure; later rows (up to R35) were added as work landed. Many rows name modules that no longer exist (`ai/`, `nyx-session`, `meshers/`, `solvers/`, `sbs`, `ems_pml`), and resolved items are not all marked. The `R<n>` ids are cited by code comments and by `docs/vvuq/`, which is why the file stays here. Where it disagrees with the code or an ADR (see ADR 32 and the later closures), the code and the ADRs are right.
+
 Found while building `workspace.dsl` (2026-11-03, against main `a047506`). Each item says what it is, where, why it matters, and what would fix it.
 Nothing here was changed in the code; items that need a decision from paul are marked **[decide]**. Severity: **H** will bite soon, **M** costs time, **L** tidiness.
 

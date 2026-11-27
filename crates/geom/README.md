@@ -4,7 +4,7 @@ A lean CSG-over-B-rep geometry kernel for FEM: a serialisable feature list (para
 named regions) is evaluated into a **region complex** with shared interface edges, provenance-based names, rule-based selectors and a
 compiled `LabelMap`. Code and GUI edit the same data. No meshing happens here.
 
-Status: **steps A and B (2D) are delivered; step C/D are delivered for prismatic, polyhedral and (clear-standing) curved 3D models; what is still refused is listed in `tests/refusals.rs` and in [`../docs/GEOMETRY_ARCHITECTURE.md`](../docs/GEOMETRY_ARCHITECTURE.md)**; formerly: prismatic 3D models (boxes, z-cylinders, extruded profiles, layer stacks); spheres, tori, cones, revolves and slanted or skew geometry are not (see `CHANGELOG.md`); see [`CHANGELOG.md`](CHANGELOG.md) and the brief in [`../docs/GEOM_HANDOFF.md`](../docs/GEOM_HANDOFF.md).
+Status: **2D (steps A and B) is delivered; 3D (steps C and D) is delivered for prismatic, polyhedral and curved models** (spheres, tori, revolves and tapered solids have goldens, e.g. `sphere_in_box`, `torus_in_box`, `revolved_bell`, `tapered_frustum`). What is still refused is listed in `tests/refusals.rs`; the history is in [`CHANGELOG.md`](CHANGELOG.md), and the original brief and architecture note are archived in [`../../docs/history/GEOM_HANDOFF.md`](../../docs/history/GEOM_HANDOFF.md) and [`../../docs/history/GEOMETRY_ARCHITECTURE.md`](../../docs/history/GEOMETRY_ARCHITECTURE.md) (they describe front-ends that no longer exist).
 
 ```bash
 cargo test --release -p geom

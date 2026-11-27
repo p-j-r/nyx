@@ -1,7 +1,7 @@
 # How nyx works, from a click on Compute to a picture
 
 This is a tour of what the program does, in the order it does it, with the name of the file in
-`crates/femcore/src` (the solver library) or `crates/app/src` (the window) that does each step. No
+`crates/femcore/src` (the shared FEM library), the physics crates `crates/nyx-dfs`, `nyx-sms` and `nyx-ems` (the kernels), `crates/nyx-engine` or `crates/app/src` (the window) that does each step. Section 14 is the module guide; file names in the earlier sections that predate the restructure (`sms.rs`, `ems.rs`, `dfs.rs`, `eigen.rs`, ...) are found there under their present names. No
 background in finite elements is assumed; every term is explained where it first appears. The numbers
 quoted were measured on the development machine (20 logical processors, 31 GB of memory); they are
 examples, not promises.
@@ -36,7 +36,7 @@ and the rest of the program is about building `K` and `M` quickly and solving th
 ## 2. What you give it: the problem (`problem.rs`)
 
 A **problem** (`ProblemSpec`) says: which physics (electrostatics, heat transfer, solid mechanics, EM
-waves, Brillouin scattering); the element order (1 = values at the corners, 2 = also at edge middles,
+waves); the element order (1 = values at the corners, 2 = also at edge middles,
 more accurate); the **materials** per domain (numbers such as Young's modulus E, or full 6×6 stiffness
 tables of a crystal with its orientation angles); the **boundary conditions** (which boundary is fixed,
 loaded, held at a potential, ...); and the **study** (static solve, eigenfrequencies, waveguide modes, a
@@ -137,7 +137,7 @@ conjugate-gradient iteration (`amg::pcg`), which typically converges in 15–30 
 1e-10 whatever the size. A 3.1-million-unknown block takes about 40 s in total, of which the multigrid set-up and the
 iterations are roughly 15 s each.
 
-*Auto* (the default) picks multigrid for static solves above about 30,000 unknowns in 3D (400,000 in 2D) and the
+*Auto* (the default) picks multigrid for static solves above about 25,000 unknowns in 3D (400,000 in 2D) and the
 factorisation otherwise; if multigrid does not converge it falls back to the factorisation and says so in the log.
 
 ## 7. Eigenproblems `K u = λ M u` (`eigen.rs`, `lobpcg.rs`, `csparse.rs`)
@@ -175,26 +175,9 @@ materials and PML are handled; `ems_axisym.rs` treats rings (azimuthal order `m`
 (`curl(1/μ curl E) = (2πf/c)² ε E`; the set of gradient fields, which has eigenvalue zero and is not physical, is
 projected out).
 
-## 9. Brillouin scattering (`sbs.rs`, `sbs_ring.rs`, `chips.rs`)
+## 9. Brillouin scattering (removed)
 
-Stimulated Brillouin scattering couples two light waves (pump and Stokes) and a sound wave. The chain for a
-waveguide cross-section:
-
-1. Solve the **optical modes** of the cross-section (§8) at the chosen wavelength: effective indices, fields E, D, H.
-2. For a chosen pump/Stokes pair, the sound wave must carry the momentum difference: its out-of-plane wave number is
-   `q = β_pump + β_Stokes` (backward scattering) or `β_pump − β_Stokes` (forward).
-3. Solve the **elastic modes** at that `q` (`sms_kz.rs`; frequencies are complex with PML in the substrate, the
-   imaginary part gives the radiation loss Q).
-4. Combine optical and elastic fields in two overlap integrals: the **photoelastic** one (the strain of the
-   sound wave changes the permittivity, which scatters light; `p:S` with the material's photoelastic tensor) and
-   the **moving-boundary** one (the displaced interface scatters light), each normalised by the optical powers.
-   With the conventions chosen for this project the strain is conjugated (`StrainConvention::Conjugate`, the
-   default; `AsIs` uses the strain as it is).
-5. The **gain** per mode follows from the overlaps, the mode's Q and group velocities. The report lists, per
-   elastic mode: frequency, Q, share of the energy in the body and in the PML, MB, PE and total gain, and g0.
-
-`chips.rs` builds the four ring-chip cross-sections (silicon rib on sapphire) and `sbs_ring.rs`
-does the same for whole rings (axisymmetric). Example 15 of the Examples menu is the 300TE chip.
+Stimulated Brillouin scattering and the ring-chip cross-sections built on it were removed in ADR 24; the last state with them is the tag `sbs-last`. The optical modes (§8) and the elastic modes with an out-of-plane wave number (`nyx-sms`, `cross_section.rs` and `waveguide.rs`) that it combined are still there as separate studies.
 
 ## 10. From the solution to the picture (`fields.rs`, `app/src/viewport.rs`, `scene.rs`)
 
@@ -226,7 +209,7 @@ solving Solid mechanics on a 3D mesh of 16464 cells: 7.40 s       <- the whole s
     iteration 10: worst residual of the 6 wanted modes 6.0e-5 (goal 1e-8)
 ```
 
-And from the Brillouin example (excerpt; the full log is 60 lines): the dominating costs are the factorisations
+And from an early optical-plus-elastic example (excerpt of an older log; the lines are still the ones the solvers write): the dominating costs are the factorisations
 (`factorising the complex matrix (161625 unknowns); this cannot be interrupted: 4-10 s`), one per optical
 solve and one for the elastic solve; the tilted-crystal refinement now stops after one step:
 
@@ -273,61 +256,52 @@ or "LOBPCG stalled" mean a fallback to the direct method happened.
   and renamed when complete.
 * **Windows power throttling**: at start-up the window, `nyx --batch` and the MCP server ask Windows not to put the process in efficiency mode (`nyx_engine::process`). Without it a solve in a background or hidden process is moved to the efficiency cores after its first seconds and every later solve is 2 to 3 times slower on a hybrid processor. Timing only; the numbers do not change.
 * **Cancel** (toolbar button or Esc): the solver checks a flag at the top of every iteration, every multigrid level, every
-  refinement step and every Brillouin pair and then returns "cancelled"; earlier results stay. Assembly of a matrix and a
+  refinement step and then returns "cancelled"; earlier results stay. Assembly of a matrix and a
   started factorisation finish first. Only one job runs at a time; mesh builds and file opens requested meanwhile wait.
-* Diagnostics: `NYX_PROFILE=1` echoes the log to the console as it is written; `NYX_FRAME_LOG=1` prints the
-  time of every window frame and which drawing passes ran (with `NYX_FRAME_LOG=frames.csv`, a name ending in `.csv`, the same frames are also
-  written as one CSV row each: wall time since the previous row, layout and viewport milliseconds, whether a job runs, its kind, stage and seconds); `NYX_LOBPCG_TRACE=1` and `NYX_AMG_*` (see `amg.rs`) are for solver work.
+* Diagnostics: `NYX_PROFILE=1` echoes the log to the console as it is written; `NYX_FRAME_LOG=frames.csv` (it only has an effect with a name ending in `.csv`)
+  writes the time of every window frame, one CSV row each: wall time since the previous row, layout and viewport milliseconds, whether a job runs, its kind, stage and seconds); `NYX_AMG_*` (see `femcore/src/linalg/amg.rs`) are for solver work.
 * **Input checks** (`validate.rs`): NaN or infinite numbers in materials, coordinates, boundary values or study
   parameters are refused with a message naming the item; a solution containing NaN/infinity is refused too.
 
-## 14. Module guide (crates/femcore/src)
+## 14. Module guide
+
+The physics kernels are in `crates/nyx-dfs`, `nyx-sms` and `nyx-ems` (since restructure phase 4); the library they share is `crates/femcore/src`. Every source file starts with a short comment saying what it does; this table names the main ones.
+
+**`crates/femcore/src`**
 
 | file | what it does |
 |---|---|
-| `solve.rs` | the one entry point; checks, dispatches to the physics, renames fields, adds the log |
-| `problem.rs` | problem and result types (see §2) |
-| `validate.rs` | refuses NaN/infinity before and after a solve |
-| `progress.rs` | cancel flag, current stage, stage log (thread-local, so solver functions keep their signatures) |
-| `par.rs` | the shared thread pool and the factorisation pool |
-| `mesh/mod.rs` | simplex meshes (the solver view), unknown numbering, structured generators, relabelling by boxes |
-| `meshing/mesher.rs` | 2D shapes → triangles (constrained Delaunay + Ruppert refinement), extrusion to 3D |
-| `tests/common/solid3d` | (test fixture) 3D solids → tetrahedra (isosurface stuffing; fitted interfaces and edges; bisection refinement) |
-| `mesh/view.rs` | surface of any mesh for drawing, including cells the solvers cannot use |
-| `mesh/cells.rs` | the one mesh model: mixed cells (triangles, quadrilaterals, tetrahedra, prisms, hexahedra), cut into simplices for the solvers; `adapt/` holds the metric adaptation |
-| `fem.rs` | quadrature, shape functions, scalar matrices, constraints, direct-vs-multigrid choice |
-| `fields.rs` | gradients at nodes, node averaging, plotting surface |
-| `material.rs` | anisotropic stiffness/permittivity/conductivity/expansion tensors, crystal rotation |
-| `expr.rs` | the small expression language for initial temperatures |
-| `sparse.rs`, `csparse.rs` | real and complex sparse matrices, complex Arnoldi eigensolver |
-| `linalg.rs` | sparse Cholesky/LU, dense eigensolvers |
-| `amg.rs` | smoothed-aggregation multigrid and preconditioned conjugate gradients |
-| `eigen.rs`, `lobpcg.rs` | shift-and-invert Krylov eigensolvers; multigrid LOBPCG with stall guard |
-| `dfs.rs` | electrostatics and heat transfer (stationary, transient: exact for small systems, BDF2 for large) |
-| `sms.rs` | linear elasticity: static, eigenfrequencies, stresses, thermal expansion |
-| `sms_kz.rs`, `sms_axisym.rs` | elastic modes with out-of-plane wave number; bodies of revolution |
-| `sms_pml.rs`, `sms_lrb.rs` | anchor loss through PML; low-reflecting boundaries (quadratic eigenproblem) |
-| `sms_floquet.rs`, `periodic.rs` | periodic cells (phononic crystals), Floquet constraints |
-| `ems.rs`, `ems_pml.rs` | 2D waveguide modes; complex modes, PML, tilted crystals |
-| `ems_axisym.rs`, `ems3d.rs` | ring resonator modes; 3D cavities |
-| `sbs.rs`, `sbs_ring.rs`, `chips.rs` | Brillouin overlaps and gain; rings; the four chips |
-| `xmlio.rs`, `h5io.rs` | project XML; HDF5/XDMF results |
+| `progress.rs`, `par.rs`, `validate.rs` | cancel flag and stage log (thread-local); the shared thread pool and the factorisation pool; refuses NaN/infinity |
+| `mesh/` | the exchange mesh: simplex and mixed cells, unknown numbering, structured generators, relabelling, the surface used for drawing |
+| `meshing/` | 2D shapes to triangles (constrained Delaunay + Ruppert refinement), the 3D lattice mesher (isosurface stuffing), mixed cells, PML meshing; `adapt/` is the metric adaptation |
+| `fem.rs`, `fem_mixed.rs` | quadrature, shape functions, scalar and mixed-cell (`Tri`, `Quad`, `Tet`, `Prism`, `Hex`) elements, constraints, the direct-vs-multigrid choice (`AMG_THRESHOLD*`) |
+| `edge.rs`, `edge_mixed.rs` | Nedelec edge elements for the wave solvers, 2D and on mixed 3D cells |
+| `pml.rs`, `periodic.rs`, `farfield.rs` | perfectly matched layers, periodic (Floquet) pairs, open-boundary Robin conditions |
+| `props.rs`, `material/` | materials per domain; the material specification, TOML reader and library, tensors and crystal rotation |
+| `fields.rs`, `fieldexpr.rs`, `formula.rs`, `expr.rs` | derived fields, node averaging; typed expressions and text formulas over fields; the small expression language for initial values |
+| `section.rs`, `optical.rs` | the wafer-frame axes of a cross-section; optical modes as an evaluable set |
+| `linalg/` | the linear algebra: sparse formats, direct solvers (`faer`), Krylov and eigensolvers (`driver.rs`, `lobpcg.rs`, `jd.rs`, `contour.rs`, ...), multigrid (`amg.rs`, `amg_elastic/`, `ams.rs`, `ads.rs`), preconditioners, time steppers |
+| `rt.rs`, `warm.rs`, `vvuq.rs` | flux equilibration (Raviart-Thomas) for error estimates; warm starts of eigensolvers in sweeps (ADR 96); verification primitives |
 
-Window crate (crates/app/src): `main.rs` (command line), `app.rs` (state, jobs, layout), `tabs.rs` (inspector),
-`state.rs` (project), `worker.rs` (background jobs), `viewport.rs` + `scene.rs` (drawing and picking),
-`examples.rs`, `batch.rs`, `script.rs` (scripted runs), `colormap.rs`, `theme.rs`.
+**`crates/nyx-dfs/src`**: `electro.rs` (electrostatics), `heat.rs` (heat transfer, stationary and transient: exact for small systems, BDF2 for large), `magneto.rs` (magnetostatics and inductance), `ac_loss.rs`, `planar_bem.rs`, `common.rs`.
+
+**`crates/nyx-sms/src`**: `solid.rs` (linear elasticity: static, eigenfrequencies, stresses, thermal expansion), `waveguide.rs` and `cross_section.rs` (elastic modes with an out-of-plane wave number), `axisym.rs` (bodies of revolution), `pml.rs` and `lrb.rs` (anchor loss through PML; low-reflecting boundaries), `floquet.rs` (phononic crystals), `piezo*.rs` (piezoelectric coupling, static and driven).
+
+**`crates/nyx-ems/src`**: `modes.rs` and `modes_complex.rs` (2D waveguide modes; complex modes, PML, tilted crystals), `axisym.rs` (ring resonator modes), `cavity.rs` (3D cavities), `bloch.rs` (periodic structures), `driven.rs`, `ports.rs`, `rom.rs`, `ibc.rs` (driven multi-port studies, ports, reduced-order models, surface impedance).
+
+**Results files**: `crates/nyx-storage` (the pure-Rust HDF5 engine) and `crates/nyx-engine/src/h5io.rs` (HDF5/XDMF results of a project). Projects are JSON (ADR 63).
+
+**Window crate (`crates/app/src`)**: `main.rs` (command line), `app.rs` and `shell.rs` (state, jobs, layout), `forms.rs` and `tabs.rs` (the Study, Physics and Materials tabs drawn from the physics descriptors), `state.rs` (project), `viewport.rs` and `scene.rs` (drawing and picking), `script.rs` (scripted runs of the window), `examples.rs`, `batch.rs`, `colormap.rs`, `theme.rs` and `tokens.rs`.
 
 ## 15. Running the tests and the benchmarks
 
 ```
-cargo test --release --workspace                 # about 160 tests, ~25 s
-cargo test --release --workspace -- --ignored    # 7 slow Brillouin tests, ~70 s
+cargo test --release --workspace                 # the whole suite (several minutes)
+cargo test --release --workspace -- --ignored    # the slow tests
 cargo clippy --release --workspace --all-targets -- -D warnings
 ```
 
-Examples (`cargo run --release -p femcore --example NAME`; `stage_log` and `bench` are in `nyx-engine`, since they drive every physics): `stage_log` (the logs quoted above), `bench` (timings on larger
-models), `profile3d` (stage times of a 3D static solve), `mem_profile` (peak memory by stage), `pool_bench` (matrix-vector
-product and multigrid iteration cost), `lu_scaling` (factorisation speed against threads), `eig_beam` (eigenfrequencies of a
-beam with each solver), `chip_report` / `chip_digits` (the Brillouin chips; `chip_digits` prints 12 digits for before/after
-comparisons). `nyx --size 1400x860 --script "example 1;
+Examples (`cargo run --release -p nyx-engine --example NAME` for the ones that drive a physics, `-p femcore --example NAME` for the solver studies): `stage_log` (the logs quoted above), `bench` (timings on larger
+models), `profile3d` (stage times of a 3D static solve), `mem_profile` (peak memory by stage), `eig_beam` (eigenfrequencies of a
+beam with each solver); `crates/femcore/examples` also holds solver benchmarks and studies (`mesh3d_bench`, `ts_bench`, `spmv_formats`, ...; their header comments say what each measures). `nyx --size 1400x860 --script "example 1;
 compute; shot out.png; quit"` drives the window (commands in `script.rs`).

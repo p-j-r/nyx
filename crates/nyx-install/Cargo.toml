@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "Cross-platform pure-Rust installer, packager, updater, doctor, and uninstaller for nyx (ADR 122)"
 
 [lib]

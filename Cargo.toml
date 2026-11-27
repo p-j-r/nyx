@@ -23,6 +23,9 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.99"
 license = "AGPL-3.0-only OR LicenseRef-nyx-Commercial"
+repository = "https://github.com/p-j-r/nyx"
+# nothing in this workspace is meant for crates.io
+publish = false
 
 [profile.dev]
 opt-level = 1            # solvers are unusably slow at opt-level 0

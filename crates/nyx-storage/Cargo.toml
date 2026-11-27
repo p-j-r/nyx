@@ -4,10 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "Pure-Rust HDF5 storage engine, packed 5D Shuffle+LZF layout, streaming reader/writer, XDMF generator, and parameter-sweep appender for nyx"
 
 [dependencies]
 hdf5-pure.workspace = true
+# not used by the code of this crate: it keeps flate2 on the pure-Rust zlib-rs backend (workspace.dependencies) for hdf5-pure
 flate2.workspace = true
 anyhow.workspace = true
 rayon.workspace = true

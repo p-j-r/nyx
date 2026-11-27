@@ -81,7 +81,7 @@ Executed via `squadds_bench gate --runs results/benchmark_runs.jsonl --gate all 
 
 ## 4. Suite 1 & `Ref.0` (`QCap`) Electrostatics Results
 
-![Suite 1 & QCap Electrostatics Parity](fig1_suite1_electro_parity.png)
+*Figure not included in the repository: Suite 1 & QCap Electrostatics Parity (`fig1_suite1_electro_parity.png`).*
 
 ### 4.1 Phase 2 Core Electrostatics (`suite_electro_core.jsonl` & `suite_electro_qcap.jsonl`)
 All `100/100` SQuADDS Suite 1 designs ran with `dfs::electrostatic` (`order = 2`, `qp_graded`: `AF-2` `quarter_point` + `corner_grading` + `AF-3` `far_field(l=2)` + `gap_cells = 1.05`, `10` threads). Because Core Bug 1 suppresses `FR-11` on finite-die stacks (`fr11_bug1_error` recorded on each run), reported numbers reflect unmodified zero-thickness P2 sheets:
@@ -100,7 +100,7 @@ All `100/100` SQuADDS Suite 1 designs ran with `dfs::electrostatic` (`order = 2`
 
 ### 4.2 `AF-1..AF-6` & `QFR-4` (`planar_bem`) Ablation & Certified Prager–Synge Bounds
 
-![Electrostatic AF Ablation, Prager-Synge Bounds & GCI](fig2_af_ablation_bounds.png)
+*Figure not included in the repository: Electrostatic AF Ablation, Prager-Synge Bounds & GCI (`fig2_af_ablation_bounds.png`).*
 
 Across `12` stratified designs (`3` per `S1.1–S1.4`, `84` runs in `suite_electro_ablation.jsonl`):
 
@@ -119,7 +119,7 @@ Across `12` stratified designs (`3` per `S1.1–S1.4`, `84` runs in `suite_elect
 
 ## 5. Suite 2 Resonators, `S3.1` Driven Capacitance & `S3.4` 3D CPW Airbridges
 
-![Suite 2 Resonators, S3.4 Airbridges & EM GCI](fig3_suite2_resonators_parity.png)
+*Figure not included in the repository: Suite 2 Resonators, S3.4 Airbridges & EM GCI (`fig3_suite2_resonators_parity.png`).*
 
 All `88/88` runs in `suite_em_core.jsonl` completed with `status = "ok"` (`0` solver failures, `0` invariant violations, max peak commit `19.71 GiB`):
 
@@ -144,7 +144,7 @@ All `88/88` runs in `suite_em_core.jsonl` completed with `status = "ok"` (`0` so
 
 ## 6. Phase 1 Cryogenic Multi-Qubit Hardware Validation (`S4.1–S4.3`)
 
-![Phase 1 Cryogenic Hardware Validation](fig4_hardware_wm1_muninn_dissipator.png)
+*Figure not included in the repository: Phase 1 Cryogenic Hardware Validation (`fig4_hardware_wm1_muninn_dissipator.png`).*
 
 ### 6.1 `S4.1` `WM1` 6-Qubit Multiplexed Chip (`24/24 ok` across `W0, W1, W2, W3`)
 | Variant / Reference | `f_r` RMSRE | `f_01` RMSRE | `alpha` RMSRE | `g` RMSRE | `chi` RMSRE | Physical Mechanism & Diagnostic Decomposition |
@@ -171,7 +171,7 @@ All `88/88` runs in `suite_em_core.jsonl` completed with `status = "ok"` (`0` so
 
 ## 7. Unified `QubitCavity` (`S2.3 + S3.2`) 4-Way Equivalence & Pareto Frontier
 
-![Unified QubitCavity M1-M4 Equivalence, Pareto Frontier & Thread Determinism](fig5_unified_qubit_cavity_and_pareto.png)
+*Figure not included in the repository: Unified QubitCavity M1-M4 Equivalence, Pareto Frontier & Thread Determinism (`fig5_unified_qubit_cavity_and_pareto.png`).*
 
 On `12` coupled transmon+resonator chips (`6` $\lambda/4$ `CLT` + `6` $\lambda/2$ `NCap`, `suite_qc_equiv.jsonl`), all four cQED formulations (`M1` closed `craig_bampton`, `M2` passive-port QEP + `craig_bampton`, `M3` 3-port `ems::driven` Schur BBQ + exact two-pole Kubo `Y_Kubo^(e)`, and `M4` hybrid) were evaluated on **identical 3D meshes** (`149.8k–221.8k` tets, `82.0–145.4 s`, `10.53–19.14 GiB`):
 

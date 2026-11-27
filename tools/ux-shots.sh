@@ -2,11 +2,11 @@
 # Scripted screenshots of the window in both looks and two sizes, and a smoke test of the whole shell (ADR 88; docs/ux/UX_MERGED_PLAN.md, U0).
 # Usage (from the workspace root):   bash tools/ux-shots.sh [output-dir]       default <target dir>/ux-shots
 # It builds the release binary, then drives `nyx --script` for every view x light/dark x size, ALWAYS in a scratch NYX_WORKSPACE that is
-# deleted afterwards: the first run of the UX review wrote into the real workspace (docs/UX_STATUS.md), so this script refuses to run without
+# deleted afterwards: the first run of the UX review wrote into the real workspace (docs/history/UX_STATUS.md), so this script refuses to run without
 # one. It fails when a run exits non-zero or a shot is missing or empty.
 # The shots of the build view include the other canvas, an isolated legend row and colouring by region (plan U4), and a job that waits with the queue popover open (plan U5), and a sweep of one parameter with its running points, queue, table and chart (plan U5).
 # UX_SHOTS_FAST=1 skips the views that need a solve (results, analysis). The shots show example data and the home path of the machine:
-# do not commit them (docs/ux/shots holds the few that were reviewed).
+# do not commit them (the reviewed shots are in the git history).
 set -eu
 target=${CARGO_TARGET_DIR:-target}
 out=${1:-$target/ux-shots}

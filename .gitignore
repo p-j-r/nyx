@@ -9,11 +9,32 @@
 *.hdf5
 *.xdmf
 temp_untitled_*
-# no Python files are shipped (the app's optional "Python (optional)" menu runs a script of the user's own)
+# nothing Python ships with the product; the one tracked exception is the CI telemetry script
 *.py
+!/tools/vvuq_telemetry.py
+*.tmp
 
 # outputs of the photonic example programs (run from the repository folder)
 /soi_modes.csv
 /soi_poincare.svg
 /bragg_*_poincare.svg
 /runs/
+
+# local packaging output of tools/package_dist.sh and nyx-pack
+/release-out/
+/dmg-staging/
+*.nyxpack
+
+# editor and OS files, local jj workspaces
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+/.jj-workspaces/
+
+# C4 pages generated from the source by docs/architecture/c4/tools/build.sh (the spec, the model fragments and the tools stay tracked)
+/docs/architecture/c4/3-components/
+/docs/architecture/c4/4-code/
+/docs/architecture/c4/export/
+/docs/architecture/c4/viewer/
+/docs/architecture/c4/reports/

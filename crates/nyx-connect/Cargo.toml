@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "One-click connection of nyx-mcp to AI hosts (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Antigravity): detect, write the config entry with a backup, remove, test. Used by the app's Connect menu, the nyx-connect command and (later) the engine"
 
 [lib]

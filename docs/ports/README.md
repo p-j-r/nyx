@@ -1,19 +1,19 @@
 # Ported solver and mesher libraries
 
-`femcore::solvers` and `femcore::meshers` come from the `inspired-rust-port` repository (two staging crates, `femsolve` and
-`femmesh`, written by separate working sessions without access to nyx). They were moved into `femcore` as modules; this folder keeps
-their documentation, provenance and licence texts.
+The solver and mesher code of `femcore` (today `femcore::linalg`, `femcore::meshing` and `femcore::adapt`) comes from two staging crates, `femsolve` and
+`femmesh`, written by separate working sessions without access to nyx. This folder keeps the provenance and licence texts; their staging notes (status, handoff, integration plans, measurements) are archived in [`../history/ports/`](../history/ports) and describe modules under their old names (`femcore::solvers`, `femcore::meshers`).
 
 | Folder | Module | Start here |
 |---|---|---|
-| [`solvers/`](solvers/) | `femcore::solvers` | `STATUS.md` (what was done and measured), `EXPLAINER.md`, `NYX_INTEGRATION.md` (the author's plan for swapping the solvers into the physics), `PROVENANCE.md` |
-| [`meshers/`](meshers/) | `femcore::meshers` | `HANDOFF.md`, `STATUS.md`, `PROVENANCE.md` |
+| [`solvers/`](solvers/) | `femcore::linalg` | `PROVENANCE.md`, `THIRD_PARTY_NOTICES.md`, `LICENSE` |
+| [`meshers/`](meshers/) | `femcore::meshing`, `femcore::adapt` | `PROVENANCE.md`, `REFERENCES.md`, `THIRD_PARTY_NOTICES.md`, `LICENSE` |
 
 [`NOTICES.md`](NOTICES.md) is the repository-wide origin and licence summary. **Both ports are BSD-2-Clause**; the licence files and the
-PETSc/SLEPc notices are next to the provenance files. Whether that is compatible with nyx's own licence has not been checked by
-anyone; do that before publishing.
+PETSc/SLEPc notices are next to the provenance files. `README.md` and `NOTICE` state the carve-out (these parts keep BSD-2-Clause and are not relicensed); whether that is compatible with nyx's own dual licence has not been reviewed by a lawyer, so do that before a commercial release.
 
-## What changed in the move
+## What changed in the move (as of the merge; module names then)
+
+*Historical: the sections below describe the merge when it happened, with the module names of that time.*
 
 * Paths: `crate::x` became `crate::solvers::x` / `crate::meshers::x`; the tests became `tests/solvers/*` (one test binary) and
   `tests/meshers.rs`; the studies and the Matrix Market command-line tools (`fs_eps`, `fs_gen`, `fs_ksp`, `fs_contour`, `fs_snes`) are

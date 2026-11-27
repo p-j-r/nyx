@@ -1,27 +1,25 @@
 # nyx architecture
 
-Written 2026-11-03 against main `a047506`; brought up to date at the end of the restructure (phase 9, 2026-11-13: `workspace.dsl`, `diagrams.md`, ADRs 24 to 65 and 68, 69, `CODE_TO_ADR.md`, `ROUGH_SPOTS.md`). The ADRs of the early days describe the structure before the restructure; those that no longer hold say so in their Status line and point to the one that replaced them (ADR 65).
+Written 2026-11-03; brought up to date at the end of the restructure (phase 9, 2026-11-13). Since then the ADRs (now up to 133) and `CODE_TO_ADR.md` have been kept current; `workspace.dsl`, `diagrams.md` and the C4 spec predate the installer crate `nyx-install` (ADR 122), which they do not model yet. The ADRs of the early days describe the structure before the restructure; those that no longer hold say so in their Status line and point to the one that replaced them (ADR 65).
 
 **Validated** on 2026-11-13 with the Structurizr CLI (the release zip, run with Java: `java -cp "<cli>/lib/*" com.structurizr.cli.StructurizrCliApplication validate -workspace workspace.dsl`; it exits 0 and prints nothing when the DSL is valid, and names the line of an error otherwise). The export to Mermaid (`-format mermaid`) writes the six views. `diagrams.md` stays hand-written, because the export has no colour classes or notes; keep the two in step.
 
 | What | Where |
 |---|---|
-| **Full C4 set**: context, 12 containers, 91 components, code pages per component, exports, a browser viewer, a standalone copy; components and code read from the Rust source ([README](c4/README.md), [memo](c4/MEMO.md)) | [`c4/`](c4/README.md) |
+| **Full C4 set**: context, containers, components and code pages per component, exports and a browser viewer, read from the Rust source. The spec, model fragments and tools are tracked; the generated pages are not (see its README) | [`c4/`](c4/README.md) |
 | Master Structurizr model (people, systems, containers, container relationships, two dynamic views; includes the generated components of `c4/`) as Structurizr DSL | [`workspace.dsl`](workspace.dsl) |
-| Rough spots the model showed (28 items, with evidence, severity and a fix direction; the resolutions are at the end) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
-| Decisions found in the history, docs and code (82 ADRs here, Nygard format; the first 23 written retrospectively; 84 to 96 are the productivity line) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
+| Rough spots the model showed on 2026-11-03 (a snapshot against the old layout, partly overtaken; ids cited in code comments as `R<n>`) | [`ROUGH_SPOTS.md`](ROUGH_SPOTS.md) |
+| Decisions found in the history, docs and code (119 ADRs, Nygard format, numbered up to 133 with some numbers reserved; the first 23 were written retrospectively) | [`adr/`](adr/), index in [`ADR_INDEX.md`](ADR_INDEX.md) |
 | Every file of the repository mapped to the ADRs that cover it | [`CODE_TO_ADR.md`](CODE_TO_ADR.md), checked by `check_code_to_adr.sh` |
 | Interface contracts: exemplar files and the tests that pin them | [`contracts/`](contracts/README.md) |
 | Mermaid diagrams of the final structure (hand-written, render on GitHub or mermaid.live) | [`diagrams.md`](diagrams.md) |
-| **The restructure plan** (authoritative, self-contained, for the next working session); status in `docs/RESTRUCTURE_STATUS.md` | [`RESTRUCTURE_PLAN.md`](RESTRUCTURE_PLAN.md) |
-| Rationale behind it (earlier proposals and decision rounds, superseded as plans) | [`PROPOSED_STRUCTURE.md`](PROPOSED_STRUCTURE.md), [`PROPOSED_STRUCTURE_2.md`](PROPOSED_STRUCTURE_2.md) |
-| Decision rounds 2 and 3 (explanations: sbs removal, multiphysics, materials, plug-ins, goldens, crate cost, dispersion) | [`DECISIONS_ROUND_2.md`](DECISIONS_ROUND_2.md), [`DECISIONS_ROUND_3.md`](DECISIONS_ROUND_3.md) |
+| The restructure plan (executed, phases 0 to 9), its proposals, decision rounds and handoff log | [`../history/`](../history/README.md) |
 
 ## Viewing the model
 
 Structurizr Lite on this folder (`docker run -it --rm -p 8080:8080 -v <this folder>:/usr/local/structurizr structurizr/lite`) opens `workspace.dsl` and imports `adr/` as decisions. `structurizr-cli export -workspace workspace.dsl -format mermaid` produces diagrams without a server. The master `workspace.dsl` includes the generated component model of `c4/model/`; see `c4/README.md` to rebuild, view and export it.
 
-Elements carry three properties: `code` (where it lives), `adr` (which decisions explain it) and, where there is one, `contract`. The tag `rough` (red outline, red dashed lines) marks an element or relationship that appears in `ROUGH_SPOTS.md`.
+Elements carry three properties: `code` (where it lives), `adr` (which decisions explain it) and, where there is one, `contract`. The tag `rough` (red outline, red dashed lines) marks an element or relationship that appeared in the rough-spots snapshot.
 
 ## Running the checks
 

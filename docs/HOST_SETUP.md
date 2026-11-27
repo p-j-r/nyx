@@ -6,7 +6,7 @@ For the people who connect nyx to an AI host (Antigravity, Claude Code, Claude D
 
 Three ways, all writing the same `nyx` entry (ADR 98):
 
-1. **The button.** In the nyx window, the menu **Connect** (between Examples and Python) lists every installed host (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Antigravity) with a Connect, Reconnect or Disconnect button. *Points to another nyx-mcp* means the host runs an older build: Reconnect. The same from a terminal: `nyx-connect list`, `nyx-connect connect antigravity` (or `all`). `nyx-connect` is a command-line program: a double click only shows its commands and the state, then waits for Enter.
+1. **The button.** In the nyx window, the menu **Connect** in the menu bar lists every installed host (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Antigravity) with a Connect, Reconnect or Disconnect button. *Points to another nyx-mcp* means the host runs an older build: Reconnect. The same from a terminal: `nyx-connect list`, `nyx-connect connect antigravity` (or `all`). `nyx-connect` is a command-line program: a double click only shows its commands and the state, then waits for Enter.
 2. **Let the AI do it.** *Copy instructions for an AI* in the Connect menu, or `nyx-connect instructions`, gives a text to paste into the chat of any AI app that can edit files (Antigravity, Cursor, Claude Code ...). It names the program, the file and the key of every host on this computer and the rules (keep the other servers, back the file up, keep it plain JSON). Restart the app afterwards.
 3. **By hand.** *Copy config JSON*, or `nyx-connect snippet`, and paste it into the `mcpServers` of the host.
 

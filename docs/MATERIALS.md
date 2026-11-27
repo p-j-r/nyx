@@ -180,7 +180,7 @@ e_crit = "12.0 V/m"
 
 ## The library
 
-`materials/*.toml` is loaded at run time with `Library::load_dir`; a material is found by its file name, ignoring case. Shipped: 40 `format = 2` materials across five domains (`materials/examples/silicon_measured.toml` remains at `format = 1` as the legacy compatibility fixture). Every table of every file names its source; values that could not be checked against a primary publication carry `"APPROXIMATE"` or `"UNVERIFIED"` in that source (the library test enforces this for the shipped files).
+`materials/*.toml` is loaded at run time with `Library::load_dir`; a material is found by its file name, ignoring case. Shipped: 45 `format = 2` materials across five domains (`materials/examples/silicon_measured.toml` remains at `format = 1` as the legacy compatibility fixture). Every table of every file names its source; values that could not be checked against a primary publication carry `"APPROXIMATE"` or `"UNVERIFIED"` in that source (the library test enforces this for the shipped files).
 
 ## Provenance: where a number comes from
 

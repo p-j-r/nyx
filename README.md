@@ -2,8 +2,8 @@
 
 A desktop application for finite-element photonics and phononics (waveguide modes, effective index, polarization, vibration modes, anchor loss,
 cavities, heat and electrostatics), written in Rust. The numerics are pure Rust (`femcore`, three physics crates on top of it); no Python is needed to
-build or run anything. There are three ways to drive one engine: the **window**, **scripts** (`*.nys`, Python syntax) and an **MCP server** for AI hosts.
-Every action is an engine command with a JSON Schema (about a hundred of them, one page each in [`docs/api`](docs/api)), so the three front-ends do the same things.
+build or run anything (tests and CI use Python 3.12 with `h5py` and `numpy` to check the results files against a second HDF5 reader). There are three ways to drive one engine: the **window**, **scripts** (`*.nys`, Python syntax) and an **MCP server** for AI hosts.
+Every action is an engine command with a JSON Schema (114 of them, one page each in [`docs/api`](docs/api)), so the three front-ends do the same things.
 
 ```
 crates/geom           geometry kernel: parametric wafer-frame models, named regions, selectors
@@ -14,9 +14,11 @@ crates/nyx-sms        solid mechanics: static, eigenfrequencies, axisymmetric ei
 crates/nyx-ems        EM waves: waveguide modes, axisymmetric modes, cavity eigenfrequencies; PML, Floquet, magnetic wall
 crates/nyx-analysis   analyses of a result: polarization (Stokes, Poincare sphere), figures of modes (SVG, PNG)
 crates/nyx-store      workspaces, workflows, experiments and run records (JSON)
+crates/nyx-storage    the pure-Rust HDF5 results file engine (read and write, packed layout)
 crates/nyx-engine     the Engine: project, commands, jobs and queue, sweeps, results files (HDF5), guide cards
 crates/nyx-script     scripts (`*.nys`) run by Monty in a worker process
 crates/nyx-mcp        the MCP server (four script tools) ; crates/nyx-connect connects it to AI apps
+crates/nyx-install    installer and packager: nyx-setup, nyx-uninstall, nyx-pack (.nyxpack, zip, dmg)
 crates/app            the egui application (binary `nyx`)
 docs/                 HOW_IT_WORKS.md, docs/architecture (ADRs, C4 model, contracts), docs/api (command reference), docs/ports (provenance of ported code)
 ```
@@ -56,12 +58,12 @@ bash tools/package_dist.sh                          # release programs in dist/<
 * Rust 1.99.1 (pinned in `rust-toolchain.toml`). Always build with `--release`: the solvers are unusably slow otherwise. The first build takes several
   minutes (egui, wgpu, faer).
 * Results files (`results.h5`, cargo feature `hdf5`, on by default) use 100% pure-Rust `hdf5-pure` + `zlib-rs` (ADR 107): **no external `HDF5_DIR`,
-  C library, or `hdf5.dll` is required** to build or run. `.cargo/config.toml` sets a shared `target-dir = "../nyx2-target"` for colocated `jj` workspaces.
+  C library, or `hdf5.dll` is required** to build or run. 
 * A nyx install is `nyx`, `nyx-worker` (solves in a child process) and `nyx-script-worker` (runs scripts) side by side, plus `nyx-mcp`, `nyx-connect`
   (AI hosts), and `nyx-uninstall`. `cargo build --release -p nyx-script` before `cargo test -p nyx-mcp`.
 * Cross-OS release bundles (`.zip`, self-extracting `nyx-setup`, `.nyxpack`, and macOS `.dmg`) are built by `nyx-pack` locally or via
   [`.github/workflows/release.yml`](.github/workflows/release.yml) on Windows, Linux, and macOS (`arm64` + `x86_64`).
-* Several jj workspaces on one machine should each set `CARGO_TARGET_DIR`; `CLAUDE.md` has the conventions and the checks.
+* Several checkouts or workspaces on one machine can share a build directory by setting `CARGO_TARGET_DIR`; `CLAUDE.md` has the conventions and the checks.
 
 [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md) explains in plain language what the program does from mesh to picture and what every line of the solver log
 means; every source file of `femcore` starts with a short description of what it does.
@@ -91,8 +93,8 @@ Claude Desktop, Cursor, VS Code, Windsurf and Antigravity. What costs time with 
 **Jobs, sweeps and the queue.** Meshing and solving run as jobs in worker processes (cancellable, with a memory estimate); `sweep_run` records one run per
 point of a parameter sweep, and a warm start can carry the modes of one point to the next; the queue holds work for several programs on one machine.
 
-**Examples** (`examples/`, `01_capacitor` to `17_disk_anchor_loss`): one or more per physics, among them a WR-90 waveguide, a PML slab, a box cavity,
-a silicon-on-insulator wire (`15_soi_wire`) and its hybrid version, silicon on sapphire, anchor loss of a disk. They are found next to the program or in a
+**Examples** (`examples/`, `01_capacitor` to `20_cavity_3d_spherical_pml`): one or more per physics, among them a WR-90 waveguide, a PML slab, a box cavity,
+a silicon-on-insulator wire (`15_soi_wire`) and its hybrid version, silicon on sapphire, anchor loss of a disk, and PML examples in cylindrical, axisymmetric and 3D spherical form (`18` to `20`). They are found next to the program or in a
 parent folder.
 
 ## What is solved
@@ -104,20 +106,21 @@ parent folder.
 | `ems` | **Waveguide modes** (full-vector Nedelec(2)+P2 on the cross-section, complex neff and Q with PML, tilted anisotropic crystals), **axisymmetric modes**, **cavity eigenfrequencies** (Nedelec edge elements of degree 1 and 2 on tetrahedra, optional curved cells), PML, Floquet-periodic pairs (Bloch dispersion), magnetic walls |
 
 Elements are P1/P2 Lagrange on triangles and tetrahedra (Nedelec for the waves). Stiffness, thermal expansion, conductivity, permittivity and the
-photoelastic tensor are full tensors with Euler-angle orientation (`crates/femcore/tests/anisotropic.rs`, `aniso_optics.rs`). The solvers are checked against
+photoelastic tensor are full tensors with Euler-angle orientation (`crates/femcore/tests/anisotropic.rs`). The solvers are checked against
 closed forms (waveguides, cavities, beams, plates, bars) and against golden files (`crates/nyx-{dfs,sms,ems}/tests/golden`, `crates/geom/golden`); the physics
-crates' tests and `docs/architecture/RESTRUCTURE_PLAN.md` say what each is checked against. Brillouin scattering and the chips built on it were removed
+crates' tests say what each is checked against. Brillouin scattering and the chips built on it were removed
 (`docs/architecture/adr/0024-brillouin-and-chips-removed.md`; the last state with them is the tag `sbs-last`).
 
 **Analyses.** Every optical mode study returns the Stokes parameters and the Poincare-sphere point of each mode, computed from the complex field the solver
 found (degree of polarization, ellipticity and orientation, TE and longitudinal shares, a class, and the resolved pair for degenerate modes): the `analyse`
-command and the Analysis tab (`nyx-analysis`, ADR 56). `docs/photonic_use_cases.md` is the older write-up of the 300 nm SOI use cases; its code references
-predate the restructure.
+command and the Analysis tab (`nyx-analysis`, ADR 56). The older write-up of the 300 nm SOI use cases is kept in [`docs/history/`](docs/history/README.md); its code references predate the restructure.
 
 **Figures of modes.** The `figure` command writes a gallery or a components figure of the modes of a result as SVG or PNG (ADR 99): each mode is put in a
 fixed phase (the in-plane motion largest in Re, sign fixed, peak scaled to 1; the reply reports how far the propagation component is in quadrature), drawn on the
 cross-section (the first y-plane of a 3D result) with the outline of the regions and arrows of the in-plane motion; a displacement deforms the section, other
 fields do not. The window, scripts and the MCP server share it. An example is [`docs/figures/example_modes_gallery.png`](docs/figures/example_modes_gallery.png).
+
+**Also in the engine** (each has a page in [`docs/api`](docs/api)): a `magnetostatic` study and infinite elements in `dfs`; `driven` studies and piezoelectric coupling (ADR 129) in `sms`; Bloch and `driven` studies, lumped ports, wave ports, surface impedance and lumped Josephson junctions in `ems`; cQED analyses in `nyx-analysis` (capacitance matrix, EPR, Hamiltonian, TLS participation, network, piezo resonator, `uq_cqed`); `convergence_check` (grid-convergence index) and `vvuq_export` for verification and validation (ADR 131 to 133, `benchmarks/validation`, `bash tools/vvuq_ci.sh --tier N`); `import_gds` for GDS layouts; `fetch_material` for remote materials. The installer and packager (`nyx-setup`, `nyx-uninstall`, `nyx-pack`) are described under Build and run.
 
 ## Axes: the wafer frame
 
@@ -131,7 +134,7 @@ the Voigt order (x, z, y). Units are SI (metres) everywhere in the library and t
 The application meshes `geom` models: 2D cross-sections (constrained Delaunay with Ruppert refinement, the `spade` crate) and 3D models with a
 lattice mesher (`femcore::meshing::mesher3d`: isosurface stuffing after Labelle and Shewchuk, interfaces cut exactly, local size per body or face with
 `add_size`, `min_layers` for thin films). The mesh setting `curved` gives the 3D cells on a curved surface quadratic geometry (ADR 82, 83); with it off every
-number is the one of the straight mesh. Cells that are not tetrahedra (hexahedra, prisms, quadrilaterals given as a `CellMesh`) are cut into simplices with no extra
+number is the one of the straight mesh. Structured PML cells stay native quadrilaterals, prisms and hexahedra (ADR 128). Other cells that are not tetrahedra (hexahedra, prisms, quadrilaterals given as a `CellMesh`) are cut into simplices with no extra
 vertices (`SplitMode::Minimal`: 6 tetrahedra per hexahedron, 3 per prism; the older `Star` split has a vertex at every face and cell centre). Metric-based
 adaptation lives in `femcore::adapt`.
 
@@ -139,7 +142,7 @@ adaptation lives in `femcore::adapt`.
 
 Small systems use a sparse Cholesky or LU factorisation (`faer`). Large ones use conjugate gradients preconditioned by smoothed-aggregation algebraic
 multigrid (own Rust code: rigid-body modes as near-nullspace, Chebyshev smoothing, single-precision matrices inside the cycle, and for quadratic elements the
-linear subspace as first coarse space). `Automatic` switches multigrid on at 30,000 free unknowns in 3D and 400,000 in 2D (`femcore::fem::AMG_THRESHOLD*`) and falls back
+linear subspace as first coarse space). `Automatic` switches multigrid on at 25,000 free unknowns in 3D and 400,000 in 2D (`femcore::fem::AMG_THRESHOLD*`) and falls back
 to the factorisation if it does not converge. The lowest eigenfrequencies use LOBPCG with the multigrid cycle as preconditioner above 80,000 free unknowns when a
 probe shows multigrid converging fast. Eigenproblems of the waves use a block shift-and-invert Krylov solver written for this project (it finds repeated
 eigenvalues such as degenerate modes). The code of the ported solver library (Krylov methods, block Krylov-Schur, Jacobi-Davidson, LOBPCG and contour
@@ -156,7 +159,7 @@ eigenfrequency study then chooses the factorisation.
   (1 = serial). Sparse factorisations can use a smaller pool (`NYX_FACTOR_THREADS`). The same input gives the same numbers for any thread count.
 * A running solve is stopped with Stop (Esc) or `job_cancel`; the solvers check at every iteration and at every multigrid level. Earlier results stay untouched.
 * Every solve records a log of what it did (`What the solver did` in the Results tab, `log.txt` in a run folder, printed by `--batch`). `NYX_PROFILE=1` echoes it to
-  the console while it runs; `NYX_FRAME_LOG=1` prints the time of every window frame.
+  the console while it runs; `NYX_FRAME_LOG=frames.csv` writes the time of every window frame to that CSV file (the variable only has an effect with a `.csv` name).
 
 ## Projects, runs and results files
 
@@ -174,19 +177,15 @@ for a viewer.
 order of the quadratic cell nodes differs from nyx's, stated in `CellNodeOrder`). It names `points`, `cells` and the stored fields as they are, with their
 shapes; several solutions become a temporal collection. A test resolves every reference against the HDF5 file.
 
-**Parallel output** (cargo feature `phdf5`, implies `hdf5`): `export_results` with `parallel` makes every MPI process write its own block of rows of every
-dataset, so the file equals a serial one. Builds without the feature contain no MPI code and say that parallel output is not available. The `phdf5` code could not
-be compiled or run on the development machine (no MPI SDK, an HDF5 without MPI); what is tested is the row partitioning and a replay in which three emulated ranks
-write one file that equals the serial file.
+**Parallel output** (cargo feature `phdf5`) is not available: the feature is a stub with no MPI code, and `export_results` with `parallel=true` returns an error ("parallel HDF5 (MPI-IO) is not available in this build"). Results files are always written serially.
 
 ## Limits
 
 * Linear materials only (no contact or nonlinear solids). Absorbing layers (complex coordinate stretching) are available for the wave modes and for solid
   eigenfrequencies; low-reflecting boundaries need a search frequency (they make the problem quadratic) and cannot be combined with periodic conditions yet.
-* Figures are drawn for mode studies with a vector field (displacement or electric field); scalar results, sweep curves and the axisymmetric half plane are not
-  drawn yet, and the window does not draw them yet.
-* Known rough spots and open questions are kept in [`docs/architecture/ROUGH_SPOTS.md`](docs/architecture/ROUGH_SPOTS.md); the state of each work line is in
-  `docs/*_STATUS.md`.
+* The 2D figure kinds (`gallery`, `components`) are drawn for mode studies with a vector field (displacement or electric field); sweep curves and the
+  axisymmetric half plane are not drawn. The 3D kinds (`slice3d`, `cutaway3d`, `isosurface3d`, `mesh3d`, see `docs/api/figure.md`) draw an expression of a 3D result.
+* Decisions, and why each was taken, are in the ADRs (`docs/architecture/adr/`); the plans, status logs and rough-spot lists of earlier work are kept for reference in [`docs/history/`](docs/history/README.md) and are not current.
 
 ## Where to read next
 

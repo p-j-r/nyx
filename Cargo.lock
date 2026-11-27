@@ -4402,7 +4402,6 @@ dependencies = [
  "femcore",
  "geom",
  "nyx-physics",
- "rayon",
  "serde_json",
 ]
 
