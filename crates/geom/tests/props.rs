@@ -244,6 +244,40 @@ fn near_tolerance_union_area_is_associative_regression() {
     }
 }
 
+#[test]
+fn pinched_csg_edge_between_rotated_boxes_passes_check3() {
+    let boxes = [
+        (-1.5090423952238703, 1e-9, 0.0, 0.5, 2.349053304024697, 0.5, 85.67248748751473, 2u8),
+        (-3.5, 1e-9, 0.0, 0.5, 0.5, 0.5, 79.62470893893675, 1u8),
+        (-3.5, 1e-9, 0.0, 0.5, 0.5, 0.5, 31.484207691471557, 1u8),
+    ];
+    let mut m = Model::new_3d();
+    let ids: Vec<FeatureId> = boxes
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, y, z, a, b, c, deg, ax))| {
+            let bx = m.box_(&format!("b{i}"), (x, y, z), (x + a, y + b, z + c));
+            let axis = [Axis::X, Axis::Y, Axis::Z][ax as usize];
+            m.transform(
+                &format!("t{i}"),
+                bx,
+                vec![TStep::Rotate { axis, deg: deg.into(), about: [x.into(), y.into(), z.into()] }],
+            )
+        })
+        .collect();
+    let mut regs: Vec<(String, FeatureId)> = ids.iter().enumerate().map(|(i, &id)| (format!("R{i}"), id)).collect();
+    let id = m.intersect("i", &ids[..2]);
+    regs.push(("X".into(), id));
+    let regs: Vec<(&str, FeatureId)> = regs.iter().map(|(n, i)| (n.as_str(), *i)).collect();
+    m.overlay(&regs);
+    if let Some(ev) = ok_or_refusal(m.eval(Tier::Complex)) {
+        ev.complex().check().unwrap();
+        for r in ev.regions() {
+            assert!(r.measure >= 0.0);
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 150, failure_persistence: None, ..ProptestConfig::default() })]
 

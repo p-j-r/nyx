@@ -519,8 +519,9 @@ impl Complex {
             }
         }
 
-        // Verify 2-manifold shell edge pairing: per shell (Option<u32>), every undirected edge is shared by
-        // exactly two half-edges of opposite orientation (+1 and -1). Zero-thickness interior sheets with
+        // Verify 2-manifold shell edge pairing: per shell (Option<u32>), every undirected edge is used by
+        // balanced opposite-orientation half-edge pairs (`2k` half-edges summing to `0`; `k = 1` normally, `k > 1` at
+        // pinched CSG edges where two closed lobes meet along a shared 1D edge). Zero-thickness interior sheets with
         // `first == second` are two-sided internal baffles embedded inside one region and do not bound a 3D shell.
         for (ei, dirs) in edge_face_dir.iter().enumerate() {
             let mut per_shell: BTreeMap<Option<u32>, Vec<i8>> = BTreeMap::new();
@@ -533,7 +534,8 @@ impl Complex {
                 per_shell.entry(f.second).or_default().push(-dir_on_face);
             }
             for (shell, hs) in per_shell {
-                if hs.len() != 2 || hs[0] + hs[1] != 0 {
+                let net: i32 = hs.iter().map(|&d| i32::from(d)).sum();
+                if hs.len() < 2 || !hs.len().is_multiple_of(2) || net != 0 {
                     let sname = shell.map_or_else(|| "void".to_string(), |r| self.regions[r as usize].name.clone());
                     return Err(format!(
                         "edge '{}' is non-manifold or misoriented on shell '{sname}': half-edge orientations {hs:?}",
