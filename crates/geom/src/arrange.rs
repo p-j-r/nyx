@@ -656,17 +656,51 @@ pub fn arrange_with(
     };
     for &(i, j) in &pairs {
         let (si, sj) = (&segs[i], &segs[j]);
+        let who_i = || pname(si.prim, si.role);
+        let who_j = || pname(sj.prim, sj.role);
+        let (ci, cj) = (&curves.list[si.cid as usize], &curves.list[sj.cid as usize]);
         let adjacent = si.prim == sj.prim
             && (j == i + 1
                 || (prims[si.prim as usize].segs.len() > 2
                     && i + prims[si.prim as usize].segs.len() - 1 == j
                     && segs[i].role == 0));
         if adjacent {
+            if si.cid == sj.cid && si.in_left != sj.in_left {
+                return Err(GeomError(format!(
+                    "the profile of '{}' overlaps itself ({} and {})",
+                    prims[si.prim as usize].name,
+                    who_i(),
+                    who_j()
+                )));
+            }
+            if si.cid != sj.cid
+                && !si.closed
+                && !sj.closed
+                && matches!(ci, Curve::Line { .. })
+                && matches!(cj, Curve::Line { .. })
+            {
+                let (pa0, pa1) = (ci.eval(si.a), ci.eval(si.b));
+                let (pb0, pb1) = (cj.eval(sj.a), cj.eval(sj.b));
+                let d_i0 = dist2(pa0, pb0).min(dist2(pa0, pb1));
+                let d_i1 = dist2(pa1, pb0).min(dist2(pa1, pb1));
+                let p_i_free = if d_i0 <= d_i1 { pa1 } else { pa0 };
+                let d_j0 = dist2(pb0, pa0).min(dist2(pb0, pa1));
+                let d_j1 = dist2(pb1, pa0).min(dist2(pb1, pa1));
+                let p_j_free = if d_j0 <= d_j1 { pb1 } else { pb0 };
+                for (p, other, co) in [(p_i_free, sj, cj), (p_j_free, si, ci)] {
+                    let (to, q) = co.closest(p);
+                    if dist2(p, q) <= band && co.in_range(to, other.a, other.b, band / speed(co)) {
+                        return Err(GeomError(format!(
+                            "the profile of '{}' folds back on itself ({} and {})",
+                            prims[si.prim as usize].name,
+                            who_i(),
+                            who_j()
+                        )));
+                    }
+                }
+            }
             continue;
         }
-        let who_i = || pname(si.prim, si.role);
-        let who_j = || pname(sj.prim, sj.role);
-        let (ci, cj) = (&curves.list[si.cid as usize], &curves.list[sj.cid as usize]);
         if si.cid == sj.cid {
             // the same curve: split each piece at the other's end points that fall strictly inside it
             let mut overlap = false;

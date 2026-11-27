@@ -71,6 +71,9 @@ jobs:
         with:
           prefix-key: release-${{ matrix.target }}
 
+      - name: Fetch workspace crates (locked) for offline THIRD_PARTY_NOTICES.txt
+        run: cargo fetch --locked
+
       - name: Resolve release version
         id: ver
         shell: bash

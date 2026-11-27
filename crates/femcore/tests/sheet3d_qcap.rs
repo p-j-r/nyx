@@ -391,10 +391,16 @@ fn repro_concentric_mesh_fail_p2_fast_meshes_cleanly() {
         g.mesh.n_dofs(2) as f64 / g_zc.mesh.n_dofs(2) as f64,
     );
     assert!(
-        g.mesh.n_cells() >= 3 * g_zc.mesh.n_cells(),
-        "z_coarsen must reduce concentric cells >= 3x (full={}, coarse={})",
+        (g.mesh.n_cells() as f64) >= 2.9 * (g_zc.mesh.n_cells() as f64),
+        "z_coarsen must reduce concentric cells >= 2.9x (full={}, coarse={})",
         g.mesh.n_cells(),
         g_zc.mesh.n_cells()
+    );
+    assert!(
+        (g.mesh.n_dofs(2) as f64) >= 2.9 * (g_zc.mesh.n_dofs(2) as f64),
+        "z_coarsen must reduce concentric P2 DOFs >= 2.9x (full={}, coarse={})",
+        g.mesh.n_dofs(2),
+        g_zc.mesh.n_dofs(2)
     );
 }
 

@@ -444,7 +444,9 @@ fn library_reports_every_broken_file() {
 
 #[test]
 fn every_toml_example_of_the_guide_reads() {
-    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/MATERIALS.md")).unwrap();
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/MATERIALS.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let mut n = 0;
     for block in text.split("```toml").skip(1) {
         let body = block.split("```").next().unwrap();

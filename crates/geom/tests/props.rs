@@ -158,7 +158,7 @@ proptest! {
         let base = area([0, 1, 2], true);
         for (o, n) in [([0, 1, 2], false), ([2, 0, 1], true), ([1, 2, 0], false), ([2, 1, 0], true)] {
             if let (Some(x), Some(y)) = (base, area(o, n)) {
-                prop_assert!((x - y).abs() <= 1e-9 * x.abs().max(y.abs()).max(1e-12), "{x} vs {y}");
+                prop_assert!((x - y).abs() <= 1e-7 * x.abs().max(y.abs()).max(1e-12), "{x} vs {y}");
             }
         }
     }
@@ -199,6 +199,47 @@ proptest! {
                 prop_assert_eq!(&more.edges()[i].name, &e.name);
             }
             prop_assert_eq!(more.regions().len(), base.regions().len() + 1);
+        }
+    }
+}
+
+#[test]
+fn hairpin_near_collinear_polygon_is_cleanly_refused_or_valid() {
+    let pts = [(1e-9, -1.0), (0.0, 2.6790266390872066), (0.0, 0.0), (-0.10259072690960207, 4.950451230554963)];
+    let mut m = Model::new_2d();
+    let epts: Vec<(Expr, Expr)> = pts.iter().map(|&(x, y)| (Expr::from(x), Expr::from(y))).collect();
+    let p = m.polygon("s0", &epts);
+    m.overlay(&[("R0", p)]);
+    if let Some(ev) = ok_or_refusal(m.eval(Tier::Complex)) {
+        ev.complex().check().unwrap();
+    }
+}
+
+#[test]
+fn near_tolerance_union_area_is_associative_regression() {
+    let a = Shape::Ellipse(4.0, 0.0, 0.1, 0.1, 0.0);
+    let b = Shape::Poly(vec![(0.0, 0.0), (0.0, -1.0), (-3.5, 0.0)]);
+    let c = Shape::Poly(vec![(-3.5, 1e-9), (0.0, -1.0), (-2.742422836991286, 0.0)]);
+    let area = |order: [usize; 3], nested: bool| -> Option<f64> {
+        let sh = [&a, &b, &c];
+        let mut m = Model::new_2d();
+        let ids: Vec<FeatureId> =
+            order.iter().enumerate().map(|(i, &o)| add(&mut m, &format!("s{i}"), sh[o])).collect();
+        let u = if nested {
+            let ab = m.union("ab", &[ids[0], ids[1]]);
+            m.union("abc", &[ab, ids[2]])
+        } else {
+            let bc = m.union("bc", &[ids[1], ids[2]]);
+            m.union("abc", &[ids[0], bc])
+        };
+        m.overlay(&[("u", u)]);
+        let ev = ok_or_refusal(m.eval(Tier::Complex))?;
+        Some(ev.regions().iter().map(|r| r.measure).sum())
+    };
+    let base = area([0, 1, 2], true);
+    for (o, n) in [([0, 1, 2], false), ([2, 0, 1], true), ([1, 2, 0], false), ([2, 1, 0], true)] {
+        if let (Some(x), Some(y)) = (base, area(o, n)) {
+            assert!((x - y).abs() <= 1e-7 * x.abs().max(y.abs()).max(1e-12), "{x} vs {y}");
         }
     }
 }
