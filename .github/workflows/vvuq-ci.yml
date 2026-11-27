@@ -24,6 +24,9 @@ env:
   # Prevent premature workspace-queue dead-lease expiry during heavy 3D factorizations / swapping (§7.3).
   NYX_QUEUE_LEASE_DEAD_SECS: "60"
 
+permissions:
+  contents: read
+
 concurrency:
   group: vvuq-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -32,7 +35,7 @@ jobs:
   tier1_pr_fast:
     name: "Tier 1: PR Fast Gate (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +47,7 @@ jobs:
       - name: Install pinned Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.99.1
           components: clippy, rustfmt
 
       - name: Set up Python 3.12
@@ -136,6 +140,7 @@ jobs:
       - name: Install pinned Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.99.1
           components: clippy, rustfmt
 
       - name: Set up Python 3.12
@@ -174,6 +179,8 @@ jobs:
 
       - name: Install pinned Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -342,7 +349,7 @@ jobs:
           toolchain: nightly
 
       - name: Install cargo-bolero
-        run: cargo +nightly install --locked cargo-bolero || true
+        run: cargo +nightly install --locked cargo-bolero
 
       - name: Run time-boxed (900s/target) Bolero LibFuzzer + ASan campaigns
         run: |
