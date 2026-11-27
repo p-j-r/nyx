@@ -10,17 +10,9 @@ on:
         description: "Release version override (defaults to Cargo.toml version + short commit)"
         type: string
         default: ""
-      draft:
-        description: "Create GitHub Release as draft (tag builds)"
-        type: boolean
-        default: true
-      prerelease:
-        description: "Mark GitHub Release as prerelease (tag builds)"
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,7 +22,7 @@ jobs:
   build:
     name: "Build & Package (${{ matrix.os_label }})"
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +59,8 @@ jobs:
 
       - name: Install pinned Rust toolchain (1.99.1)
         uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
 
       - name: Add cross-compilation target (${{ matrix.target }})
         if: matrix.cross == true
@@ -80,12 +74,14 @@ jobs:
       - name: Resolve release version
         id: ver
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
             ver="${GITHUB_REF_NAME#v}"
-          elif [ -n "${{ inputs.version }}" ]; then
-            ver="${{ inputs.version }}"
+          elif [ -n "${INPUT_VERSION}" ]; then
+            ver="${INPUT_VERSION}"
           else
             pkg_ver=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
             short_sha=$(git rev-parse --short=8 HEAD)
@@ -218,6 +214,8 @@ jobs:
     name: "Checksums & GitHub Release"
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all platform release artifacts
         uses: actions/download-artifact@v4
@@ -254,8 +252,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
-          draft: ${{ inputs.draft == true }}
-          prerelease: ${{ inputs.prerelease == true }}
+          # Tag pushes have no workflow inputs, so the release is a draft to review and publish by hand;
+          # a tag with a suffix (v0.2.0-rc1) is marked as a prerelease.
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           body: |
             Cross-platform binary release of `nyx` (Windows x86_64, Linux x86_64, macOS arm64 & x86_64).

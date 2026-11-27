@@ -18,6 +18,9 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `README.md` | 13 | |
 | `LICENSE` | 100 | the AGPL-3.0 text |
 | `NOTICE` | 100 | the dual licence and the parts that keep their own |
+| `CONTRIBUTING.md` | 13, 19, 100 | contributor workflow, VVUQ checks, and inbound contribution licence |
+| `SECURITY.md` | 93, 100, 131 | vulnerability reporting policy and security boundaries |
+| `CITATION.cff` | 13, 100 | Citation File Format metadata for academic attribution |
 | `.gitignore` | 13, 20 | `*.py` ignored on purpose |
 | `docs/architecture/adr/*` | 19 | the ADRs themselves |
 | `docs/architecture/contracts/*` | 19 | exemplars |
@@ -210,6 +213,7 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `crates/nyx-mcp/*` | 94, 97, 15, 113, 131 | the MCP server: four script tools (`script_run`, `script_wait`, `script_check`, `api`) over isolated `McpSession` kernels with bounded framing/sessions |
 | `crates/nyx-connect/*` | 15, 28, 19, 98 | one copy of the Connect logic (R07 resolved)|
 | `.github/workflows/*` | 122, 131, 20, 133 | 3-tier VVUQ CI workflow (`vvuq-ci.yml`) and cross-OS Windows/Linux/macOS binary release packaging (`release.yml` via `nyx-pack`) |
+| `.github/*` | 19, 100 | repository ownership (`CODEOWNERS`) and PR checklist (`pull_request_template.md`) |
 | `tools/vvuq_ci.*` | 131, 20, 133 | local Linux/WSL and Windows PowerShell VVUQ 3-tier CI playbook runners |
 | `tools/vvuq_telemetry.py` | 133, 20 | best-of-N quiet-runner wall-time, peak RSS (`ru_maxrss`/`K32GetProcessMemoryInfo`), and ASME V&V 20 telemetry ledger |
 | `tools/*` | 20 | baseline and helper scripts |

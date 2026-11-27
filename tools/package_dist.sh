@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 name="${1:-nyx-main-$(jj --ignore-working-copy log -r 'main' --no-graph -T 'commit_id.short(8)' 2>/dev/null || echo local)}"
-target="${CARGO_TARGET_DIR:-../nyx2-target}"
+target="${CARGO_TARGET_DIR:-target}"
 
 cargo build --release -p nyx -p nyx-engine -p nyx-mcp -p nyx-script -p nyx-connect -p nyx-install
 if [ "${NYX_INSTALLER_NO_GUI:-0}" != "1" ]; then

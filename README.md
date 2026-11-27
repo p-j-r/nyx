@@ -29,6 +29,22 @@ docs/                 HOW_IT_WORKS.md, docs/architecture (ADRs, C4 model, contra
 
 Copyright (C) 2026 p-j-r. A commercial licence is available from the copyright holder for use that the AGPL does not fit. Parts that carry their own licence keep it and are not relicensed: `crates/geom` and the ported solver and mesher modules of `femcore` (BSD-2-Clause, see `docs/ports`), and the third-party crates in `Cargo.lock`. [NOTICE](NOTICE) lists them.
 
+## Citing nyx
+
+If you use `nyx` in a paper, thesis, or technical report, please cite the repository (also available via GitHub's **Cite this repository** button from [`CITATION.cff`](CITATION.cff)):
+
+> Simulations were performed using `nyx` (v0.1.0, https://github.com/p-j-r/nyx).
+
+```bibtex
+@software{robin_nyx_2026,
+  author  = {Robin, Paul Joseph},
+  title   = {{nyx}: Finite-Element Simulation for Photonics, Phononics, Piezoelectrics, and Superconducting Quantum Circuits},
+  version = {0.1.0},
+  year    = {2026},
+  url     = {https://github.com/p-j-r/nyx}
+}
+```
+
 ## Build and run
 
 ```
