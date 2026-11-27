@@ -22,7 +22,7 @@ jobs:
   build:
     name: "Build & Package (${{ matrix.os_label }})"
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
