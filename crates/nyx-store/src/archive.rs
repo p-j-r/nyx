@@ -325,7 +325,7 @@ fn vet<R: Read + Seek>(z: &mut zip::ZipArchive<R>, lim: &Limits) -> Result<u64, 
     let mut total = 0u64;
     for i in 0..z.len() {
         let f = z.by_index_raw(i).map_err(|e| e.to_string())?;
-        let name = f.name().to_string();
+        let name = f.name().map_err(|e| e.to_string())?.into_owned();
         if f.is_dir() {
             continue;
         }
@@ -394,7 +394,11 @@ pub fn inspect(path: &Path, lim: &Limits) -> Inspection {
     let mut intact = true;
     let listed: std::collections::HashSet<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
     for i in 0..z.len() {
-        let n = z.by_index_raw(i).map(|f| (f.name().to_string(), f.is_dir())).unwrap_or_default();
+        let n = z
+            .by_index_raw(i)
+            .ok()
+            .and_then(|f| f.name().ok().map(|s| (s.into_owned(), f.is_dir())))
+            .unwrap_or_default();
         if !n.1 && n.0 != MANIFEST && !listed.contains(n.0.as_str()) {
             intact = false;
             ins.problems.push(format!("'{}' is in the file but not in its list", n.0));
@@ -456,10 +460,13 @@ pub fn import(path: &Path, workspace: &Path, lim: &Limits) -> Result<WorkflowDir
         let mut total = 0u64;
         for i in 0..z.len() {
             let mut f = z.by_index(i).map_err(|e| e.to_string())?;
-            if f.is_dir() || f.name() == MANIFEST {
+            if f.is_dir() {
                 continue;
             }
-            let name = f.name().to_string();
+            let name = f.name().map_err(|e| e.to_string())?.into_owned();
+            if name == MANIFEST {
+                continue;
+            }
             check_name(&name)?;
             let dest = tmp.join(&name);
             if let Some(d) = dest.parent() {
@@ -525,7 +532,7 @@ mod tests {
 
     fn names(bytes: &[u8]) -> Vec<String> {
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-        (0..z.len()).map(|i| z.by_index(i).unwrap().name().to_string()).collect()
+        (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().into_owned()).collect()
     }
 
     fn opt(level: ShareLevel) -> ExportOptions<'static> {
@@ -738,7 +745,7 @@ mod tests {
         assert!(try_open(&bomb, &Limits { max_ratio: 100, ..Default::default() }).unwrap_err().contains("compressed more than"));
         // a changed byte inside a stored file is not an intact file
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(good.clone())).unwrap();
-        let mut entries: Vec<(String, Vec<u8>)> = (0..z.len()).map(|i| { let mut f = z.by_index(i).unwrap(); let mut b = vec![]; f.read_to_end(&mut b).unwrap(); (f.name().to_string(), b) }).collect();
+        let mut entries: Vec<(String, Vec<u8>)> = (0..z.len()).map(|i| { let mut f = z.by_index(i).unwrap(); let mut b = vec![]; f.read_to_end(&mut b).unwrap(); (f.name().unwrap().into_owned(), b) }).collect();
         for e in entries.iter_mut() {
             if e.0 == "notes.md" {
                 e.1 = b"tampered".to_vec();
@@ -778,7 +785,7 @@ mod exclude_tests {
         let ex = vec!["analysis/a.py".to_string()];
         let b = export_bytes(&d, &ExportOptions { level: ShareLevel::Recipe, only: None, strip_paths: true, exclude: &ex }).unwrap();
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(b)).unwrap();
-        assert!((0..z.len()).all(|i| !z.by_index(i).unwrap().name().starts_with("analysis/")));
+        assert!((0..z.len()).all(|i| !z.by_index(i).unwrap().name().unwrap().starts_with("analysis/")));
         let _ = std::fs::remove_dir_all(&ws);
     }
 }
