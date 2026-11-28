@@ -864,7 +864,8 @@ fn static_fields_simplex(
     let d = asm.constraints.d;
     let n1 = asm.constraints.n1;
     let n_mech = asm.constraints.n_mech;
-    let u = &x_full[..n_mech];
+    let u_full = asm.constraints.expand_u_full_nodes(&x_full[..n_mech], 0.0);
+    let u = &u_full[..];
     let phi = &x_full[n_mech..];
     let names = component_names(d);
 
@@ -929,6 +930,7 @@ fn static_fields_simplex(
     let shape_grads: Vec<Vec<f64>> = lam_nodes.iter().map(|l| shape(l, order).1).collect();
 
     let mut s_all = vec![[0.0; 6]; nc * nloc];
+    let mut strain_all = vec![[0.0; 6]; nc * nloc];
     let mut e_cell = vec![Vec::with_capacity(nc * nloc); d];
     let mut d_cell = vec![Vec::with_capacity(nc * nloc); d];
     let mut dofs = Vec::new();
@@ -963,6 +965,7 @@ fn static_fields_simplex(
             let th_pt = asm.thermal.as_ref().map(|th| (&th.alpha[ci], th.t[dofs[a_idx]] - th.tref));
             let ev = eval_piezo_point(mat, d, plane, &g_u, &g_p, th_pt);
             s_all[ci * nloc + a_idx] = ev.stress;
+            strain_all[ci * nloc + a_idx] = ev.strain_wafer;
             let emag = (0..d).map(|k| ev.e_field[k] * ev.e_field[k]).sum::<f64>().sqrt();
             max_e = max_e.max(emag);
             for k in 0..d {
@@ -997,6 +1000,13 @@ fn static_fields_simplex(
         cells.push_real(sname, "Pa", v);
     }
 
+    let strain_nodal: Vec<Vec<f64>> = (0..6)
+        .map(|k| {
+            let v: Vec<f64> = strain_all.iter().map(|x| x[k]).collect();
+            node_average(mesh, &v, 1, order)
+        })
+        .collect();
+    fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
     fields.push(Field::vector("E", "V/m", names, &e_nodal));
     fields.push(Field::vector("D", "C/m^2", names, &d_nodal));
 
@@ -1018,7 +1028,8 @@ fn static_fields_mixed(
     let d = asm.constraints.d;
     let n1 = asm.constraints.n1;
     let n_mech = asm.constraints.n_mech;
-    let u = &x_full[..n_mech];
+    let u_full = asm.constraints.expand_u_full_nodes(&x_full[..n_mech], 0.0);
+    let u = &u_full[..];
     let phi = &x_full[n_mech..];
     let space = dof_map.space;
     let nc = mixed.n_cells();
@@ -1064,6 +1075,7 @@ fn static_fields_mixed(
     cell_fields.push(proj.project_cell_field(mixed, space, "phi", "V", &phi_mixed, &[], &m_offsets, order));
 
     let mut s_all = Vec::with_capacity(total_cell_nodes);
+    let mut strain_all = Vec::with_capacity(total_cell_nodes);
     let mut e_cell = vec![Vec::with_capacity(total_cell_nodes); d];
     let mut d_cell = vec![Vec::with_capacity(total_cell_nodes); d];
     let (mut vals, mut dxi, mut sn, mut sdn) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -1110,6 +1122,7 @@ fn static_fields_mixed(
             let th_pt = asm.thermal.as_ref().map(|th| (&th.alpha[mc], th.t[cdofs[a]] - th.tref));
             let ev = eval_piezo_point(mat, d, plane, &g_u, &g_p, th_pt);
             s_all.push(ev.stress);
+            strain_all.push(ev.strain_wafer);
             let emag = (0..d).map(|k| ev.e_field[k] * ev.e_field[k]).sum::<f64>().sqrt();
             max_e = max_e.max(emag);
             for k in 0..d {
@@ -1148,6 +1161,14 @@ fn static_fields_mixed(
         cell_fields.push(s_cf);
     }
 
+    let strain_nodal: Vec<Vec<f64>> = (0..6)
+        .map(|k| {
+            let comp_mixed: Vec<f64> = strain_all.iter().map(|x| x[k]).collect();
+            let s_cf = proj.project_cell_field(mixed, space, "S_tmp", "m/m", &comp_mixed, &[], &m_offsets, order);
+            node_average(simplex, &s_cf.re, 1, order)
+        })
+        .collect();
+    fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
     fields.push(Field::vector("E", "V/m", names, &e_nodal));
     fields.push(Field::vector("D", "C/m^2", names, &d_nodal));
 
@@ -1219,6 +1240,86 @@ pub(crate) fn push_eigen_mode_fields_simplex(
         }
         cells.push_complex("phi", "a.u.", re_p, im_p);
     }
+
+    // Also compute real-part strain `S` (`m/m`) and electric field `E = -grad(Re phi)` (`V/m`) for cross-physics export
+    let u_re: Vec<f64> = u_full.iter().map(|z| z.re).collect();
+    let phi_re: Vec<f64> = phi_full.iter().map(|z| z.re).collect();
+    let geo = geometry(mesh);
+    let lam_nodes: Vec<Vec<f64>> = match (d, order) {
+        (2, 1) => vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]],
+        (2, _) => vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+            vec![0.5, 0.5, 0.0],
+            vec![0.5, 0.0, 0.5],
+            vec![0.0, 0.5, 0.5],
+        ],
+        (_, 1) => {
+            vec![vec![1.0, 0.0, 0.0, 0.0], vec![0.0, 1.0, 0.0, 0.0], vec![0.0, 0.0, 1.0, 0.0], vec![0.0, 0.0, 0.0, 1.0]]
+        }
+        _ => vec![
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0, 0.0],
+            vec![0.0, 0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 0.0, 1.0],
+            vec![0.5, 0.5, 0.0, 0.0],
+            vec![0.5, 0.0, 0.5, 0.0],
+            vec![0.5, 0.0, 0.0, 0.5],
+            vec![0.0, 0.5, 0.5, 0.0],
+            vec![0.0, 0.5, 0.0, 0.5],
+            vec![0.0, 0.0, 0.5, 0.5],
+        ],
+    };
+    let shape_grads: Vec<Vec<f64>> = lam_nodes.iter().map(|l| shape(l, order).1).collect();
+    let mut strain_all = vec![[0.0; 6]; nc * nloc];
+    let mut e_cell = vec![Vec::with_capacity(nc * nloc); d];
+    let mut dofs = Vec::new();
+    for ci in 0..nc {
+        mesh.cell_dofs(ci, order, &mut dofs);
+        let base = ci * (d + 1) * d;
+        for a_idx in 0..nloc {
+            let dn = &shape_grads[a_idx];
+            let mut g_u = [[0.0; 3]; 3];
+            let mut g_p = [0.0; 3];
+            for node_i in 0..nloc {
+                let mut gvec = [0.0; 3];
+                for k in 0..d {
+                    let mut ga = 0.0;
+                    for v_idx in 0..=d {
+                        ga += dn[node_i * (d + 1) + v_idx] * geo.g[base + v_idx * d + k];
+                    }
+                    gvec[k] = ga;
+                }
+                let gd = dofs[node_i];
+                let pv = phi_re[gd];
+                for k in 0..d {
+                    g_p[k] += pv * gvec[k];
+                    for comp in 0..d {
+                        g_u[comp][k] += u_re[comp * n1 + gd] * gvec[k];
+                    }
+                }
+            }
+            strain_all[ci * nloc + a_idx] = if d == 3 {
+                [g_u[0][0], g_u[1][1], g_u[2][2], g_u[0][1] + g_u[1][0], g_u[1][2] + g_u[2][1], g_u[0][2] + g_u[2][0]]
+            } else {
+                [g_u[0][0], 0.0, g_u[1][1], 0.0, 0.0, g_u[0][1] + g_u[1][0]]
+            };
+            for k in 0..d {
+                e_cell[k].push(-g_p[k]);
+            }
+        }
+    }
+    let strain_nodal: Vec<Vec<f64>> = (0..6)
+        .map(|k| {
+            let v: Vec<f64> = strain_all.iter().map(|x| x[k]).collect();
+            node_average(mesh, &v, 1, order)
+        })
+        .collect();
+    let e_nodal: Vec<Vec<f64>> = (0..d).map(|k| node_average(mesh, &e_cell[k], 1, order)).collect();
+    fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
+    fields.push(Field::vector("E", "V/m", names, &e_nodal));
+
     (fields, cells)
 }
 
@@ -1226,6 +1327,7 @@ pub(crate) fn push_eigen_mode_fields_simplex(
 pub(crate) fn push_eigen_mode_fields_mixed(
     mixed: &MixedDiscretisation,
     dof_map: &MixedLagrangeDofMap,
+    simplex: &Discretisation,
     proj: &MixedToSimplexProjector,
     order: usize,
     d: usize,
@@ -1329,6 +1431,57 @@ pub(crate) fn push_eigen_mode_fields_mixed(
         }
         cell_fields.push(proj.project_cell_field(mixed, space, "phi", "a.u.", &re_pc, &im_pc, &m_offsets, order));
     }
+
+    let u_re: Vec<f64> = u_full.iter().map(|z| z.re).collect();
+    let phi_re: Vec<f64> = phi_full.iter().map(|z| z.re).collect();
+    let mut strain_all = Vec::with_capacity(total_nodes);
+    let mut e_cell = vec![Vec::with_capacity(total_nodes); d];
+    let (mut vals, mut dxi, mut sn, mut sdn) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for mc in 0..nc {
+        let cdofs = dof_map.cell_dofs(mc);
+        let ct = mixed.cell_type(mc);
+        let iso = IsoparametricCell::from_mesh(mixed, mc);
+        let ref_nodes = lagrange_ref_nodes(ct, space);
+        for xi in ref_nodes {
+            let jg = iso.eval_into(&xi[..d], &mut sn, &mut sdn);
+            lagrange_shape_into(ct, space, &xi[..d], &mut vals, &mut dxi);
+            let mut g_u = [[0.0; 3]; 3];
+            let mut g_p = [0.0; 3];
+            for (b_idx, &gd) in cdofs.iter().enumerate() {
+                let gp = jg.map_grad(dxi[b_idx]);
+                for k in 0..d {
+                    g_p[k] += phi_re[gd] * gp[k];
+                    for comp in 0..d {
+                        g_u[comp][k] += u_re[comp * n1 + gd] * gp[k];
+                    }
+                }
+            }
+            strain_all.push(if d == 3 {
+                [g_u[0][0], g_u[1][1], g_u[2][2], g_u[0][1] + g_u[1][0], g_u[1][2] + g_u[2][1], g_u[0][2] + g_u[2][0]]
+            } else {
+                [g_u[0][0], 0.0, g_u[1][1], 0.0, 0.0, g_u[0][1] + g_u[1][0]]
+            });
+            for k in 0..d {
+                e_cell[k].push(-g_p[k]);
+            }
+        }
+    }
+    let strain_nodal: Vec<Vec<f64>> = (0..6)
+        .map(|k| {
+            let comp_mixed: Vec<f64> = strain_all.iter().map(|x| x[k]).collect();
+            let s_cf = proj.project_cell_field(mixed, space, "S_tmp", "m/m", &comp_mixed, &[], &m_offsets, order);
+            node_average(simplex, &s_cf.re, 1, order)
+        })
+        .collect();
+    let e_nodal: Vec<Vec<f64>> = (0..d)
+        .map(|k| {
+            let e_cf = proj.project_cell_field(mixed, space, "E_tmp", "V/m", &e_cell[k], &[], &m_offsets, order);
+            node_average(simplex, &e_cf.re, 1, order)
+        })
+        .collect();
+    fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
+    fields.push(Field::vector("E", "V/m", names, &e_nodal));
+
     (fields, cell_fields)
 }
 
@@ -1510,6 +1663,12 @@ fn solve_static_iterative_with_phi_threshold(
     let n1 = asm.constraints.n1;
     let n_mech = asm.constraints.n_mech;
     let n_tot = asm.constraints.n_tot;
+    if asm.constraints.has_u_submesh() {
+        if spec.solver == LinearSolver::Auto {
+            return Ok(None);
+        }
+        return Err("iterative coupled piezoelectric solver requires a uniform all-solid u mesh; choose solver = \"direct\" or \"auto\"".into());
+    }
     let fixed_u_full: Vec<usize> = (0..n_mech).filter(|&i| asm.constraints.red_u.index_of[i] == usize::MAX).collect();
     let free_u_expected: Vec<usize> =
         (0..n_mech).filter(|&i| asm.constraints.red_u.index_of[i] != usize::MAX).collect();
@@ -1696,7 +1855,8 @@ fn build_eigen_result(
         let anchor = if big_u.norm() > 0.0 { big_u } else { big };
         let rot = if anchor.norm() > 0.0 { anchor.conj() / anchor.norm() } else { c(1.0, 0.0) };
         let scale = 1.0 / anchor.norm().max(1e-300);
-        let u_norm: Vec<C> = u_raw.iter().map(|&z| z * rot * scale).collect();
+        let u_raw_full = asm.constraints.expand_u_full_nodes(u_raw, c(0.0, 0.0));
+        let u_norm: Vec<C> = u_raw_full.iter().map(|&z| z * rot * scale).collect();
         let p_norm: Vec<C> = p_raw.iter().map(|&z| z * rot * scale).collect();
 
         let (ue, ud) = energy_fn(&u_norm, &p_norm);
@@ -1713,8 +1873,8 @@ fn build_eigen_result(
             let scale2 = scale * scale;
             let (layer_fraction, phys_mass_norm) = match (&asm.m1_phys_all, &asm.m1_phys_pml) {
                 (Some(ma), Some(mp)) => {
-                    let tot = real_quad_norm(ma, u_raw, n1, d) * scale2;
-                    let in_pml = real_quad_norm(mp, u_raw, n1, d) * scale2;
+                    let tot = real_quad_norm(ma, &u_raw_full, n1, d) * scale2;
+                    let in_pml = real_quad_norm(mp, &u_raw_full, n1, d) * scale2;
                     let lf = if tot > 0.0 { (in_pml / tot).clamp(0.0, 1.0) } else { 0.0 };
                     (lf, (tot - in_pml).max(0.0))
                 }
@@ -1839,7 +1999,8 @@ pub fn solve_piezo(mesh: &Discretisation, spec: &Problem) -> Result<SolveResult,
                 solve_static_simplex(mesh, spec, &asm)?
             };
             lap(&mut tl, "linear solve");
-            let u_c: Vec<C> = x_full[..asm.constraints.n_mech].iter().map(|&v| c(v, 0.0)).collect();
+            let u_full = asm.constraints.expand_u_full_nodes(&x_full[..asm.constraints.n_mech], 0.0);
+            let u_c: Vec<C> = u_full.iter().map(|&v| c(v, 0.0)).collect();
             let p_c: Vec<C> = x_full[asm.constraints.n_mech..].iter().map(|&v| c(v, 0.0)).collect();
             let (ue, ud) = cell_energies_simplex(
                 mesh,
@@ -1936,7 +2097,8 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
                 solve_static_equilibrated_checked(&asm)?
             };
             lap(&mut tl, "linear solve");
-            let u_c: Vec<C> = x_full[..asm.constraints.n_mech].iter().map(|&v| c(v, 0.0)).collect();
+            let u_full = asm.constraints.expand_u_full_nodes(&x_full[..asm.constraints.n_mech], 0.0);
+            let u_c: Vec<C> = u_full.iter().map(|&v| c(v, 0.0)).collect();
             let p_c: Vec<C> = x_full[asm.constraints.n_mech..].iter().map(|&v| c(v, 0.0)).collect();
             let (ue, ud) = cell_energies_mixed(
                 mixed,
@@ -1997,7 +2159,7 @@ pub fn solve_piezo_mixed(raw_mesh: &Mesh, mixed: &MixedDiscretisation, spec: &Pr
                 cell_energies_mixed(mixed, &dof_map, &asm.mats, spec.plane, spec.thickness, u, p, &asm.resolved_pml)
             };
             let fields_fn = |u: &[C], p: &[C], complex_mode: bool| {
-                push_eigen_mode_fields_mixed(mixed, &dof_map, &proj, order, d, n1, u, p, complex_mode)
+                push_eigen_mode_fields_mixed(mixed, &dof_map, &simplex, &proj, order, d, n1, u, p, complex_mode)
             };
             Ok(build_eigen_result(order, d, &asm, &solved, t0, &energy_fn, &fields_fn))
         }

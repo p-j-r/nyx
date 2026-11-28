@@ -270,6 +270,9 @@ pub struct Problem {
     /// domains that do not take part in this physics (for example air): they carry no stiffness or mass and the dofs they alone touch are
     /// held at zero
     pub inactive: Vec<i32>,
+    /// optional explicit subset of solid domains carrying displacement DOFs `u` in coupled piezoelectric solves;
+    /// domains outside `u_domains` (such as vacuum/air gaps) carry only electric potential `phi`
+    pub u_domains: Vec<i32>,
     /// Floquet-periodic boundary pairs (eigenfrequency studies)
     pub periodic: Vec<Periodic>,
     /// Static Infinite Element domains (`sms::static` open-boundary real coordinate stretching)
@@ -290,6 +293,7 @@ impl Problem {
             thermal: None,
             solver: LinearSolver::Auto,
             inactive: vec![],
+            u_domains: vec![],
             periodic: vec![],
             infinite_elements: BTreeMap::new(),
             piezoelectric: PiezoMode::Auto,
@@ -867,6 +871,12 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     }
     inactive.sort_unstable();
     inactive.dedup();
+    let mut u_domains = vec![];
+    for region in pp.names("u_domains")? {
+        u_domains.extend(ctx.resolver.domains(&region)?);
+    }
+    u_domains.sort_unstable();
+    u_domains.dedup();
     let f_ref = study.reference_freq();
     let mut ctx_eff = Ctx::new(ctx.resolver);
     ctx_eff.library = ctx.library.clone();
@@ -1043,6 +1053,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         thermal,
         solver,
         inactive,
+        u_domains,
         periodic,
         infinite_elements,
         piezoelectric,

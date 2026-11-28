@@ -2,7 +2,7 @@
 
 Generated from `Engine::catalog()` by `nyx_engine::apiref` and checked by `crates/nyx-engine/tests/api_docs.rs`: **do not edit**. After a deliberate change of a command, rewrite with `NYX_WRITE_API=1 cargo test --release -p nyx-engine --test api_docs` (and the interface version, `engine_commands` in `docs/architecture/contracts/VERSIONS.md`, changes with it).
 
-Catalog hash: `b3:60697136d596a5b047f70971b85b0f54` · 114 commands. `nyx api list` and `nyx api show <command>` print the same text.
+Catalog hash: `b3:f4c059caae7ee3100bbf472db2c560bd` · 118 commands. `nyx api list` and `nyx api show <command>` print the same text.
 
 | Command | Access | What it does |
 |---|---|---|
@@ -44,6 +44,7 @@ Catalog hash: `b3:60697136d596a5b047f70971b85b0f54` · 114 commands. `nyx api li
 | [`convergence_check`](convergence_check.md) | expensive | Check mesh convergence |
 | [`describe_material`](describe_material.md) | read | Describe a material |
 | [`describe_physics`](describe_physics.md) | read | Describe a physics |
+| [`eme_sweep`](eme_sweep.md) | read | Run an analytical EME sweep |
 | [`evaluate_material`](evaluate_material.md) | read | Evaluate a material at temperature, frequency and wavelength |
 | [`export_results`](export_results.md) | expensive | Write the results to an HDF5 file |
 | [`extremum`](extremum.md) | read | Largest or smallest value of an expression |
@@ -70,6 +71,7 @@ Catalog hash: `b3:60697136d596a5b047f70971b85b0f54` · 114 commands. `nyx api li
 | [`list_remote_materials`](list_remote_materials.md) | read | List downloadable remote materials |
 | [`mesh_build`](mesh_build.md) | expensive | Mesh the geometry |
 | [`open_results`](open_results.md) | edit | Open an HDF5 results file |
+| [`optimize_run`](optimize_run.md) | expensive | Run gradient-based shape, material, or topology optimization |
 | [`overlap`](overlap.md) | read | Overlap of two fields |
 | [`pml_diagnostics`](pml_diagnostics.md) | read | Absorbing-layer mesh and stability diagnostics |
 | [`poll_jobs`](poll_jobs.md) | read | Apply finished jobs |
@@ -101,7 +103,9 @@ Catalog hash: `b3:60697136d596a5b047f70971b85b0f54` · 114 commands. `nyx api li
 | [`result_info`](result_info.md) | read | Describe the results |
 | [`results_file_info`](results_file_info.md) | read | Describe an HDF5 results file |
 | [`search_remote_materials`](search_remote_materials.md) | read | Search curated and live open material databases |
+| [`sensitivity_run`](sensitivity_run.md) | expensive | Compute discrete adjoint sensitivities |
 | [`set_active`](set_active.md) | edit | Set the active physics |
+| [`set_coupled_loop`](set_coupled_loop.md) | edit | Configure two-way Anderson coupled loop |
 | [`set_geometry`](set_geometry.md) | edit | Replace the geometry |
 | [`set_material`](set_material.md) | edit | Assign a material to a region |
 | [`set_mesh`](set_mesh.md) | edit | Set the mesh settings |

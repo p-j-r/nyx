@@ -193,6 +193,10 @@ fn the_physics_trait_is_object_safe_and_has_these_methods() {
     let solve: fn(&dyn Physics, &Mesh, &ProblemSpec, &mut Ctx) -> Result<SolveResult, Error> =
         |p, m, s, c| p.solve(m, s, c);
     let _ = solve;
+    type SensFn =
+        fn(&dyn Physics, &Mesh, &ProblemSpec, &mut Ctx, &SensitivityRequest) -> Result<SensitivityReport, Error>;
+    let sens: SensFn = |p, m, s, c, r| p.sensitivity(m, s, c, r);
+    let _ = sens;
     fn send_sync<T: Send + Sync + ?Sized>() {}
     send_sync::<dyn Physics>();
 }

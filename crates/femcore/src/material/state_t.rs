@@ -309,6 +309,30 @@ pub fn einstein_thermal_coordinate(temperature_k: f64, theta_e_k: f64) -> f64 {
     theta_e_k / ratio.exp_m1()
 }
 
+/// Temperature derivative `dg/dT` of [`einstein_thermal_coordinate`].
+pub fn einstein_thermal_coordinate_deriv(temperature_k: f64, theta_e_k: f64) -> f64 {
+    if temperature_k.is_nan() || theta_e_k.is_nan() {
+        return f64::NAN;
+    }
+    if !temperature_k.is_finite() || temperature_k <= 0.0 {
+        return 0.0;
+    }
+    if !theta_e_k.is_finite() || theta_e_k <= 0.0 {
+        return 1.0;
+    }
+    let ratio = theta_e_k / temperature_k;
+    if ratio > 350.0 {
+        return 0.0;
+    }
+    if ratio < 1e-6 {
+        let r2 = ratio * ratio;
+        return 1.0 - r2 / 12.0 + (r2 * r2) / 240.0;
+    }
+    let em1 = ratio.exp_m1();
+    let q = ratio / em1;
+    q * q * ratio.exp()
+}
+
 /// Allowed TOML keys inside a temperature-curve table (`$defs.temp_curve` in `material_schema`).
 pub const TEMP_CURVE_KEYS: &[&str] = &[
     "form",
@@ -501,6 +525,54 @@ impl TempCurve {
     /// Evaluate the scalar quantity (in SI units) at `temperature_k` [K].
     pub fn eval(&self, temperature_k: f64) -> f64 {
         self.eval_checked(temperature_k).value
+    }
+
+    /// Analytical derivative `df/dT` (SI units per Kelvin) at `temperature_k` [K],
+    /// consistent with clamping (`0.0` outside calibrated `T_range` / tabulated bounds).
+    pub fn eval_deriv(&self, temperature_k: f64) -> f64 {
+        if temperature_k.is_nan() {
+            return f64::NAN;
+        }
+        match self {
+            Self::Constant { .. } => 0.0,
+            Self::Tabulated { t, values, .. } => {
+                if t.is_empty() || values.is_empty() {
+                    return 0.0;
+                }
+                let last = t.len().min(values.len()) - 1;
+                if last == 0 || temperature_k <= t[0] || temperature_k >= t[last] {
+                    return 0.0;
+                }
+                let idx = t[..=last].partition_point(|&ti| ti <= temperature_k);
+                let i0 = idx.saturating_sub(1).min(last.saturating_sub(1));
+                let i1 = (i0 + 1).min(last);
+                let dt = t[i1] - t[i0];
+                if dt <= 0.0 { 0.0 } else { (values[i1] - values[i0]) / dt }
+            }
+            Self::Log10Poly { t_range, coeffs, .. } => {
+                if coeffs.is_empty() {
+                    return 0.0;
+                }
+                let lo = t_range[0].max(1e-6);
+                let hi = t_range[1].max(lo);
+                if temperature_k <= lo || temperature_k >= hi {
+                    return 0.0;
+                }
+                let l = temperature_k.log10();
+                let mut p = 0.0;
+                let mut dp = 0.0;
+                for (k, &c) in coeffs.iter().enumerate().rev() {
+                    p = p * l + c;
+                    if k > 0 {
+                        dp = dp * l + (k as f64) * c;
+                    }
+                }
+                (10.0_f64.powf(p) / temperature_k) * dp
+            }
+            Self::EinsteinShift { theta_e, alpha, .. } => {
+                alpha * einstein_thermal_coordinate_deriv(temperature_k, *theta_e)
+            }
+        }
     }
 
     pub fn at_ref(&self) -> f64 {
@@ -817,6 +889,44 @@ impl TempTensor {
         self.eval_scalar_checked(temperature_k).0
     }
 
+    /// Evaluates the `3x3` symmetric tensor in the global frame rotated by `euler_deg` at `temperature_k` [K],
+    /// returning any out-of-range clamping events.
+    pub fn eval_matrix_global_checked(&self, temperature_k: f64, euler_deg: [f64; 3]) -> (super::M3, Vec<ComponentClamp>) {
+        let (tp, clamps) = self.eval_tensor_checked(temperature_k);
+        let m_cryst = tp.matrix();
+        let m_glob = if euler_deg.iter().any(|a| a.abs() > 1e-12) {
+            super::rotate_tensor(&m_cryst, &super::rotation(euler_deg))
+        } else {
+            m_cryst
+        };
+        (m_glob, clamps)
+    }
+
+    /// Evaluates the `3x3` symmetric tensor in the global frame rotated by `euler_deg` at `temperature_k` [K].
+    pub fn eval_matrix_global(&self, temperature_k: f64, euler_deg: [f64; 3]) -> super::M3 {
+        self.eval_matrix_global_checked(temperature_k, euler_deg).0
+    }
+
+    /// Analytical temperature derivative `dM/dT` (SI units per Kelvin) of the global-frame `3x3` tensor at `temperature_k` [K].
+    pub fn eval_matrix_deriv_global(&self, temperature_k: f64, euler_deg: [f64; 3]) -> super::M3 {
+        match self {
+            Self::Scalar(c) => {
+                let d = c.eval_deriv(temperature_k);
+                [[d, 0.0, 0.0], [0.0, d, 0.0], [0.0, 0.0, d]]
+            }
+            Self::Uniaxial { perp, par } => {
+                let dp = perp.eval_deriv(temperature_k);
+                let dpar = par.eval_deriv(temperature_k);
+                let m_cryst = [[dp, 0.0, 0.0], [0.0, dp, 0.0], [0.0, 0.0, dpar]];
+                if euler_deg.iter().any(|a| a.abs() > 1e-12) {
+                    super::rotate_tensor(&m_cryst, &super::rotation(euler_deg))
+                } else {
+                    m_cryst
+                }
+            }
+        }
+    }
+
     pub fn read(s: &mut Section, key: &str, dim: Dim, default_unit: Option<&str>) -> Result<Option<Self>, MaterialError> {
         let Some(v) = s.value(key) else {
             return Ok(None);
@@ -901,5 +1011,40 @@ unit = "J/(kg*K)"
         assert!(!PointGroup::parse("3m").unwrap().forbids_piezo_and_pockels());
         assert!(!PointGroup::parse("6mm").unwrap().forbids_piezo_and_pockels());
         assert!(!PointGroup::parse("-43m").unwrap().forbids_piezo_and_pockels());
+    }
+
+    #[test]
+    fn temp_curve_analytical_derivatives_match_finite_differences() {
+        let tab = TempCurve::Tabulated {
+            t: vec![50.0, 150.0, 350.0],
+            values: vec![200.0, 140.0, 80.0],
+            t_ref: Some(293.15),
+            source: Vec::new(),
+        };
+        let logp = TempCurve::Log10Poly {
+            t_range: [4.0, 300.0],
+            coeffs: vec![-1.91844, -0.15973, 8.61013, -18.9964, 21.9661, -12.7328, 3.54322, -0.3797],
+            t_ref: Some(293.15),
+            source: Vec::new(),
+        };
+        let ein = TempCurve::EinsteinShift {
+            ref_value: 148.0,
+            t_ref: 300.0,
+            theta_e: 420.0,
+            alpha: -0.25,
+            source: Vec::new(),
+        };
+        for (curve, pts) in [(&tab, &[90.0_f64, 220.0][..]), (&logp, &[15.0, 120.0][..]), (&ein, &[40.0, 250.0][..])] {
+            for &t in pts {
+                let h = 1e-4 * t;
+                let fd = (curve.eval(t + h) - curve.eval(t - h)) / (2.0 * h);
+                let exact = curve.eval_deriv(t);
+                assert!((exact - fd).abs() <= 1e-7 * fd.abs().max(1.0), "t={t}: exact={exact} vs fd={fd}");
+            }
+        }
+        assert_eq!(tab.eval_deriv(20.0), 0.0);
+        assert_eq!(tab.eval_deriv(500.0), 0.0);
+        assert_eq!(logp.eval_deriv(1.0), 0.0);
+        assert_eq!(logp.eval_deriv(450.0), 0.0);
     }
 }

@@ -77,3 +77,15 @@ data = [
   [4.00, 3.4229], [5.00, 3.4195], [6.00, 3.4177], [7.00, 3.4165], [8.00, 3.4158], [9.00, 3.4153],
   [10.0, 3.4150], [11.0, 3.4147], [12.0, 3.4145], [13.0, 3.4144], [14.0, 3.4142],
 ]
+
+[nonlinear]
+T_range = [10.0, 500.0]
+
+[nonlinear.chi3]
+wavelength = "1.55 um"
+n_2 = "4.5e-18 m^2/W"
+beta_tpa = "5.0e-12 m/W"
+sigma_fca = "1.45e-21 m^2"
+k_fcd = "-1.35e-27 m^3"
+tau_c = "1.0 ns"
+source = { cite = "APPROXIMATE crystalline Si at 1550 nm: Kerr n_2 ~ 4.5e-18 m^2/W and two-photon absorption beta_TPA ~ 5.0e-12 m/W (0.5 cm/GW, A. D. Bristow, N. Rotenberg, H. M. van Driel, Appl. Phys. Lett. 90, 191104 (2007); Q. Lin, O. J. Painter, G. P. Agrawal, Opt. Express 15, 16604-16644 (2007)), Soref & Bennett (IEEE J. Quantum Electron. 23, 123 (1987)) linearized free-carrier absorption sigma_FCA = 1.45e-21 m^2 and dispersion k_FCD ~ -1.35e-27 m^3, with representative SOI waveguide carrier lifetime tau_c ~ 1 ns", doi = "10.1063/1.2737359" }

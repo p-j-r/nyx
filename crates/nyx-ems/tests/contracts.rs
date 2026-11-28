@@ -197,6 +197,17 @@ fn kernel_stage_api_is_public() {
     let _ = (nyx_ems::assemble_axisym, nyx_ems::solve_axisym_pairs, nyx_ems::axisym_fields_cells);
     let _ = (nyx_ems::assemble_emw_eigen, nyx_ems::solve_emw_modes, nyx_ems::emw_eigen_fields);
     let _ = (nyx_ems::assemble_bloch, nyx_ems::solve_bloch_eigen, nyx_ems::bloch_fields_cells);
+    let _ = (nyx_ems::assemble_eme, nyx_ems::solve_eme_cascade, nyx_ems::eme_fields);
+    let _ = (nyx_ems::eme_length_sweep, nyx_ems::eme_periodicity_sweep, nyx_ems::eme_mode_sweep);
+    let _ =
+        (nyx_ems::assemble_nonlinear_driven, nyx_ems::solve_nonlinear_driven_system, nyx_ems::nonlinear_driven_fields);
+    let _ = (
+        nyx_ems::assemble_nonlinear_modes,
+        nyx_ems::solve_nonlinear_modes_continuation,
+        nyx_ems::nonlinear_modes_fields,
+    );
+    let _ = (nyx_ems::assemble_dgtd, nyx_ems::solve_dgtd, nyx_ems::dgtd_fields);
+    let _ = (nyx_ems::assemble_fdtd, nyx_ems::solve_fdtd, nyx_ems::fdtd_fields);
     // the one-call kernels of the studies, the run and the decoder
     let _ = (
         nyx_ems::solve_waveguide,
@@ -204,6 +215,12 @@ fn kernel_stage_api_is_public() {
         nyx_ems::solve_axisymmetric,
         nyx_ems::solve_cavity,
         nyx_ems::solve_bloch,
+        nyx_ems::solve_eme,
+        nyx_ems::solve_nonlinear_driven,
+        nyx_ems::solve_nonlinear_modes,
+        nyx_ems::run_dgtd,
+        nyx_ems::run_fdtd,
+        nyx_ems::find_resonances_prony,
     );
     let _ = (nyx_ems::run, nyx_ems::decode, nyx_ems::solve_optical);
 }
@@ -250,12 +267,74 @@ fn result_shape_exemplar_is_stable() {
         nyx_ems::Problem::new(Study::Bloch { freq: 10.0e9, n_target: 1.5, n_modes: 2, brillouin_zone: 1 }, 2);
     bloch.materials.set(1, "eps_r", 4.0);
     bloch.periodic = vec![femcore::props::Periodic { source: vec![2], dest: vec![5], phase: 0.0 }];
+    let mut eme = nyx_ems::Problem::new(
+        Study::Eme {
+            freq: 10.0e9,
+            n_target: 1.5,
+            evanescent: false,
+            n_modes: 1,
+            grid: nyx_ems::EmeGridSpec::Uniform { n_cells: 2, n_modes: None, bend_radius: None },
+            y_range: None,
+            port_modes: 1,
+            port_z0_ohm: 50.0,
+            reconstruct_fields: true,
+        },
+        2,
+    );
+    eme.materials.set(1, "eps_r", 4.0);
+    let mut nl_modes = nyx_ems::Problem::new(
+        Study::NonlinearModes(nyx_ems::NonlinearModesSpec {
+            freq: 12e9,
+            n_target: 0.9,
+            evanescent: false,
+            mode_index: 1,
+            power_w: 1.0,
+            powers_w: vec![],
+            rtol: 1e-10,
+            max_it: 20,
+        }),
+        2,
+    );
+    nl_modes.materials.aniso.entry(1).or_default().nonlinear = Some(femcore::material::Nonlinear {
+        chi3: Some(femcore::material::Chi3 { n_2: Some(1.0e-19), ..Default::default() }),
+        ..Default::default()
+    });
+    let mut nl_driven = nyx_ems::Problem::new(
+        Study::NonlinearDriven(nyx_ems::NonlinearDrivenSpec {
+            process: nyx_ems::NonlinearProcess::Chi3,
+            freq: 10.0e9,
+            power_w: 1.0,
+            ..Default::default()
+        }),
+        1,
+    );
+    nl_driven.materials.set(1, "eps_r", 4.0);
+    nl_driven.materials.aniso.entry(1).or_default().nonlinear = Some(femcore::material::Nonlinear {
+        chi3: Some(femcore::material::Chi3 { n_2: Some(1.0e-19), ..Default::default() }),
+        ..Default::default()
+    });
+    nl_driven.waveports = vec![
+        nyx_ems::WavePortBc { labels: vec![2], name: "in".into(), mode: 1, n_eff_guess: None, z0_ohm: None },
+        nyx_ems::WavePortBc { labels: vec![5], name: "out".into(), mode: 1, n_eff_guess: None, z0_ohm: None },
+    ];
+    let dgtd_cfg = nyx_ems::DgtdConfig { t_final: 1.0e-12, freqs_hz: vec![10.0e9], ..Default::default() };
+    let mut dgtd = nyx_ems::Problem::new(Study::Dgtd(dgtd_cfg), 1);
+    dgtd.materials.set(1, "eps_r", 4.0);
+    let mut fdtd_cfg = nyx_ems::FdtdStudyConfig { max_steps: 12, ..Default::default() };
+    fdtd_cfg.grid.auto.wavelength_min_m = 0.03;
+    fdtd_cfg.grid.auto.min_steps_per_wave = 6.0;
+    let fdtd = nyx_ems::Problem::new(Study::Fdtd(Box::new(fdtd_cfg)), 1);
     let got = json!({
         "modes_real": run(&guide, &real),
         "modes_complex": run(&split, &complex),
         "axisymmetric_modes": run(&coax, &axi),
         "cavity": run(&boxm, &cavity),
         "bloch": run(&boxm, &bloch),
+        "eme": run(&boxm, &eme),
+        "nonlinear_modes": run(&guide, &nl_modes),
+        "nonlinear_driven": run(&boxm, &nl_driven),
+        "dgtd": run(&guide, &dgtd),
+        "fdtd": run(&boxm, &fdtd),
     });
     contract::check_exemplar(env!("CARGO_MANIFEST_DIR"), "physics_ems_result.v1.json", &got);
 }

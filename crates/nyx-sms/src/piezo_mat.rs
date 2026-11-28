@@ -127,6 +127,8 @@ pub(crate) fn cell_constitutive_blocks(mat: &PiezoCellMat, dim: usize, plane: Pl
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PiezoPointEval {
     pub stress: [f64; 6],
+    /// Elastic strain in 3D wafer solver Voigt order `[xx, yy, zz, xy, yz, xz]` (engineering shear).
+    pub strain_wafer: [f64; 6],
     pub e_field: [f64; 3],
     pub d_field: [f64; 3],
     pub elastic_energy_density: f64,
@@ -197,6 +199,7 @@ pub fn eval_piezo_point(
         }
         return PiezoPointEval {
             stress,
+            strain_wafer: if mat.mech_active { s_el } else { [0.0; 6] },
             e_field: if mat.elec_active { e_field } else { [0.0; 3] },
             d_field,
             elastic_energy_density: u_e,
@@ -258,6 +261,7 @@ pub fn eval_piezo_point(
     }
     PiezoPointEval {
         stress,
+        strain_wafer: if mat.mech_active { [s_xx, s_yy_eff, s_zz, 0.0, 0.0, g_xz] } else { [0.0; 6] },
         e_field: if mat.elec_active { [e_field[0], e_field[1], 0.0] } else { [0.0; 3] },
         d_field,
         elastic_energy_density: u_e,
@@ -293,11 +297,35 @@ pub fn resolve_domain_mats(
     need_rho: bool,
     dim: usize,
 ) -> Result<BTreeMap<i32, PiezoCellMat>, String> {
+    resolve_domain_mats_with_u_domains(domain_labels, materials, inactive, &[], conductor_domains, need_rho, dim)
+}
+
+/// Resolves per-domain piezoelectric material tables over unique domain labels, supporting an
+/// optional explicit solid submesh `u_domains` as well as automatic dielectric-only vacuum/air
+/// domains (`eps_r` without elastic stiffness `E`/`stiffness`).
+pub fn resolve_domain_mats_with_u_domains(
+    domain_labels: &[i32],
+    materials: &Materials,
+    inactive: &[i32],
+    u_domains: &[i32],
+    conductor_domains: &[i32],
+    need_rho: bool,
+    dim: usize,
+) -> Result<BTreeMap<i32, PiezoCellMat>, String> {
+    let any_solid_has_elastic = domain_labels.iter().any(|&dom| {
+        !inactive.contains(&dom)
+            && (u_domains.is_empty() || u_domains.contains(&dom))
+            && (materials.aniso.get(&dom).and_then(|a| a.stiffness.as_ref()).is_some()
+                || materials.get(dom, "E").is_some_and(|e| e > 0.0))
+    });
     let mut out = BTreeMap::new();
     for &dom in domain_labels {
-        let mech_active = !inactive.contains(&dom);
-        let elec_active = !conductor_domains.contains(&dom);
         let an = materials.aniso.get(&dom);
+        let has_elastic =
+            an.and_then(|a| a.stiffness.as_ref()).is_some() || materials.get(dom, "E").is_some_and(|e| e > 0.0);
+        let in_u_domains = u_domains.is_empty() || u_domains.contains(&dom);
+        let mech_active = !inactive.contains(&dom) && in_u_domains && (has_elastic || !any_solid_has_elastic);
+        let elec_active = !conductor_domains.contains(&dom);
 
         let c6 = if !mech_active {
             [[0.0; 6]; 6]
@@ -414,7 +442,21 @@ pub fn resolve_piezo_mats_simplex(
 ) -> Result<(BTreeMap<i32, PiezoCellMat>, Vec<PiezoCellMat>), String> {
     let doms = mesh.domain_labels();
     let conds = spec.conductor_domains();
-    let by_dom = resolve_domain_mats(&doms, &spec.materials, &spec.inactive, &conds, need_rho, mesh.dim)?;
+    let by_dom = resolve_domain_mats_with_u_domains(
+        &doms,
+        &spec.materials,
+        &spec.inactive,
+        &spec.u_domains,
+        &conds,
+        need_rho,
+        mesh.dim,
+    )?;
+    if !by_dom.values().any(|m| m.mech_active) {
+        return Err(
+            "coupled piezoelectric problem has no mechanically active solid domain (check `inactive` and `u_domains`)"
+                .into(),
+        );
+    }
     let cells = mesh.cell_labels.iter().map(|l| by_dom[l]).collect();
     Ok((by_dom, cells))
 }
@@ -429,7 +471,21 @@ pub fn resolve_piezo_mats_mixed(
     doms.sort_unstable();
     doms.dedup();
     let conds = spec.conductor_domains();
-    let by_dom = resolve_domain_mats(&doms, &spec.materials, &spec.inactive, &conds, need_rho, mixed.dim)?;
+    let by_dom = resolve_domain_mats_with_u_domains(
+        &doms,
+        &spec.materials,
+        &spec.inactive,
+        &spec.u_domains,
+        &conds,
+        need_rho,
+        mixed.dim,
+    )?;
+    if !by_dom.values().any(|m| m.mech_active) {
+        return Err(
+            "coupled piezoelectric problem has no mechanically active solid domain (check `inactive` and `u_domains`)"
+                .into(),
+        );
+    }
     let cells = mixed.cell_labels.iter().map(|l| by_dom[l]).collect();
     Ok((by_dom, cells))
 }

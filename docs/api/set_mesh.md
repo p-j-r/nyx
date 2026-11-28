@@ -2,12 +2,13 @@
 
 **Set the mesh settings** · access `edit`: changes the project
 
-Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.
+Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap. With `physics` the settings that physics is meshed with on its own are edited instead (per-physics meshing, ADR 135), and `active_domains` keeps only some regions of a mesh.
 
 ## Arguments
 
 | Argument | Type | Required | Default | What it is |
 |---|---|---|---|---|
+| `active_domains` | list of text or null | no |  | mesh only these regions (names or name* patterns); the other cells are dropped and the region names are kept, so fields still pair by region name across meshes; null meshes every region |
 | `adapt_grade` | number or null | no |  | adaptive / AMR metric gradation slope (> 0); null uses 0.4 |
 | `adapt_growth` | number or null | no |  | target mesh cell growth multiplier per ems::cavity / sms AMR pass (> 1.0); null uses 1.5 |
 | `adapt_max_cells` | integer or null | no |  | adaptive / AMR maximum cell count (>= 1); null uses 2000000 |
@@ -23,6 +24,8 @@ Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_ce
 | `max_dev` | number or null | no |  | largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher |
 | `max_steiner_multiplier` | integer or null | no |  | 2D Ruppert refinement: cap on additional Steiner vertices as a multiple of initial PSLG vertices; null uses default max(20 * n_init, 100000) |
 | `max_z_slabs` | integer or null | no |  | 3D sheet stack: maximum total number of horizontal z-slabs across active stack layers (must be >= active stack layers); null disables the cap |
+| `own` | true or false | no |  | with physics: false drops the physics' own mesh settings so it uses the project mesh again |
+| `physics` | text | no |  | edit the settings this physics is meshed with on its own (per-physics meshing; it starts from the project mesh settings); fields of physics on different meshes are transferred by region name |
 | `physics_sizing` | true or false | no |  | size the elements from the waves of the physics (points per wavelength) |
 | `pml_mode` | text or null: `auto`, `structured`, `inline`, `null` | no |  | how absorbing layers are meshed: "auto" (default, structured native Quad/Prism/Hex layers when PML regions exist), "structured", or "inline" (legacy unstructured simplices) |
 | `points_per_wavelength` | number or null | no |  | points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2 |

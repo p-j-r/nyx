@@ -196,6 +196,21 @@ pub struct Dielectric {
     /// Critical electric field `E_c` in V/m for TLS saturation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_e_crit: Option<f64>,
+    /// Optional electric gyrotropy / Voigt axial vector $\mathbf{g}_{\text{re}}$ in the crystal frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy: Option<[f64; 3]>,
+    /// Optional imaginary part $\mathbf{g}_{\text{im}}$ of the electric gyrotropy axial vector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy_im: Option<[f64; 3]>,
+    /// Optional relative permeability tensor $\boldsymbol{\mu}_r$.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_r: Option<TensorProp>,
+    /// Optional magnetic gyrotropy / Polder axial vector $\mathbf{g}_{\mu,\text{re}}$ in the crystal frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_gyrotropy: Option<[f64; 3]>,
+    /// Optional imaginary part $\mathbf{g}_{\mu,\text{im}}$ of the magnetic gyrotropy axial vector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_gyrotropy_im: Option<[f64; 3]>,
 }
 
 pub const DIELECTRIC_KEYS: &[&str] = &[
@@ -211,6 +226,26 @@ pub const DIELECTRIC_KEYS: &[&str] = &[
     "tls_tan_delta_0",
     "tls_e_crit",
     "tls_e_crit_unit",
+];
+
+const DIELECTRIC_PARSE_KEYS: &[&str] = &[
+    "source",
+    "eps_r",
+    "eps_clamped",
+    "eps_free",
+    "eps_inf",
+    "eps_T",
+    "loss_tangent",
+    "loss_ref_freq",
+    "loss_ref_freq_unit",
+    "tls_tan_delta_0",
+    "tls_e_crit",
+    "tls_e_crit_unit",
+    "gyrotropy",
+    "gyrotropy_im",
+    "mu_r",
+    "mu_gyrotropy",
+    "mu_gyrotropy_im",
 ];
 
 impl Dielectric {
@@ -264,7 +299,12 @@ impl Dielectric {
                 return Err(s.err("tls_e_crit", "tls_e_crit must be positive"));
             }
         }
-        s.finish(DIELECTRIC_KEYS)?;
+        let gyrotropy = super::tensor::read_axial_vec3(s, "gyrotropy")?;
+        let gyrotropy_im = super::tensor::read_axial_vec3(s, "gyrotropy_im")?;
+        let mu_r = TensorProp::read(s, "mu_r", Dim::Dimensionless, Requirement::PositiveDefinite, "dielectric.mu_r")?;
+        let mu_gyrotropy = super::tensor::read_axial_vec3(s, "mu_gyrotropy")?;
+        let mu_gyrotropy_im = super::tensor::read_axial_vec3(s, "mu_gyrotropy_im")?;
+        s.finish(DIELECTRIC_PARSE_KEYS)?;
         Ok(Self {
             source,
             eps_r,
@@ -276,6 +316,11 @@ impl Dielectric {
             loss_ref_freq,
             tls_tan_delta_0,
             tls_e_crit,
+            gyrotropy,
+            gyrotropy_im,
+            mu_r,
+            mu_gyrotropy,
+            mu_gyrotropy_im,
         })
     }
 
@@ -309,6 +354,21 @@ impl Dielectric {
         }
         if let Some(ec) = self.tls_e_crit {
             tbl.insert("tls_e_crit".into(), format!("{ec} V/m").into());
+        }
+        if let Some(g) = self.gyrotropy {
+            tbl.insert("gyrotropy".into(), toml::Value::Array(g.into_iter().map(toml::Value::Float).collect()));
+        }
+        if let Some(g) = self.gyrotropy_im {
+            tbl.insert("gyrotropy_im".into(), toml::Value::Array(g.into_iter().map(toml::Value::Float).collect()));
+        }
+        if let Some(t) = &self.mu_r {
+            tbl.insert("mu_r".into(), t.write(1.0));
+        }
+        if let Some(g) = self.mu_gyrotropy {
+            tbl.insert("mu_gyrotropy".into(), toml::Value::Array(g.into_iter().map(toml::Value::Float).collect()));
+        }
+        if let Some(g) = self.mu_gyrotropy_im {
+            tbl.insert("mu_gyrotropy_im".into(), toml::Value::Array(g.into_iter().map(toml::Value::Float).collect()));
         }
     }
 
@@ -1133,6 +1193,134 @@ impl ElectroOptic {
         Some(out)
     }
 
+    /// Expands a 6x3 textbook-Voigt electro-optic matrix `r_Ik` (`(xx, yy, zz, yz, xz, xy)`) to rank-3 tensor `r_abk`.
+    pub fn to_rank3(r_voigt: &[[f64; 3]; 6]) -> [[[f64; 3]; 3]; 3] {
+        let mut t = [[[0.0; 3]; 3]; 3];
+        for (i, &(a, b)) in VP.iter().enumerate() {
+            for k in 0..3 {
+                let v = r_voigt[i][k];
+                t[a][b][k] = v;
+                t[b][a][k] = v;
+            }
+        }
+        t
+    }
+
+    /// Rotates a 6x3 textbook-Voigt electro-optic matrix `r_Ik` from the crystal frame to the global frame
+    /// via `rot` (`x_global = rot * x_crystal`), returning a 6x3 matrix in textbook Voigt order `(xx, yy, zz, yz, xz, xy)`.
+    pub fn rotate_voigt(r_voigt: &[[f64; 3]; 6], rot: &M3) -> [[f64; 3]; 6] {
+        let t = Self::to_rank3(r_voigt);
+        let mut out = [[0.0; 3]; 6];
+        for (ii, &(i, j)) in VP.iter().enumerate() {
+            for k in 0..3 {
+                let mut sum = 0.0;
+                for a in 0..3 {
+                    let ria = rot[i][a];
+                    if ria == 0.0 {
+                        continue;
+                    }
+                    for b in 0..3 {
+                        let rjb = rot[j][b];
+                        if rjb == 0.0 {
+                            continue;
+                        }
+                        let ria_rjb = ria * rjb;
+                        for c in 0..3 {
+                            sum += ria_rjb * rot[k][c] * t[a][b][c];
+                        }
+                    }
+                }
+                out[ii][k] = sum;
+            }
+        }
+        out
+    }
+}
+
+/// Rotates a 6x3 textbook-Voigt electro-optic tensor `r_voigt` by Bunge Z-X-Z `euler_deg` into the global wafer frame.
+pub fn electro_optic_global(r_voigt: &[[f64; 3]; 6], euler_deg: [f64; 3]) -> [[f64; 3]; 6] {
+    if euler_deg == [0.0; 3] {
+        return *r_voigt;
+    }
+    let rot = super::rotation(euler_deg);
+    ElectroOptic::rotate_voigt(r_voigt, &rot)
+}
+
+/// Rotates a 6x6 textbook-Voigt photoelastic tensor `p_textbook` by Bunge Z-X-Z `euler_deg` into the global wafer frame.
+pub fn photoelastic_global(p_textbook: &M6, euler_deg: [f64; 3]) -> M6 {
+    if euler_deg == [0.0; 3] {
+        return *p_textbook;
+    }
+    let rot = super::rotation(euler_deg);
+    let pe = Photoelastic { source: Vec::new(), wavelength: None, matrix: *p_textbook };
+    pe.rotate_voigt(&rot)
+}
+
+/// Evaluates the exact relative permittivity perturbation tensor:
+///
+/// `\Delta(\varepsilon_r^{-1})_I = \sum_{k=0}^2 r^S_{Ik} E_{\text{DC},k} + \sum_{J=0}^5 p_{IJ} S^{\text{tb}}_J`,
+/// `\Delta \boldsymbol{\varepsilon}_r = -\boldsymbol{\varepsilon}_r \, \Delta(\boldsymbol{\varepsilon}_r^{-1}) \, \boldsymbol{\varepsilon}_r`,
+///
+/// where `r_global_tb` (`6x3`, m/V) and `p_global_tb` (`6x6`, dimensionless) are in the global wafer frame
+/// in **textbook Voigt order** `(xx, yy, zz, yz, xz, xy)`, `e_dc_wafer` is `[Ex, Ey, Ez]` (V/m) in wafer axes,
+/// and `strain_wafer_solver` is `[Sxx, Syy, Szz, Sxy, Syz, Sxz]` (m/m) in **solver Voigt order**.
+pub fn delta_eps_eo_pe(
+    eps_r: &M3,
+    r_global_tb: Option<&[[f64; 3]; 6]>,
+    p_global_tb: Option<&M6>,
+    e_dc_wafer: Option<&[f64; 3]>,
+    strain_wafer_solver: Option<&[f64; 6]>,
+) -> M3 {
+    let mut d_eta_v = [0.0; 6];
+    let mut active = false;
+    if let (Some(r), Some(e)) = (r_global_tb, e_dc_wafer) {
+        for i in 0..6 {
+            d_eta_v[i] += r[i][0] * e[0] + r[i][1] * e[1] + r[i][2] * e[2];
+        }
+        active = true;
+    }
+    if let (Some(p), Some(s_sol)) = (p_global_tb, strain_wafer_solver) {
+        let s_tb = [s_sol[0], s_sol[1], s_sol[2], s_sol[4], s_sol[5], s_sol[3]];
+        for i in 0..6 {
+            let mut acc = 0.0;
+            for j in 0..6 {
+                acc += p[i][j] * s_tb[j];
+            }
+            d_eta_v[i] += acc;
+        }
+        active = true;
+    }
+    if !active {
+        return [[0.0; 3]; 3];
+    }
+    let d_eta = [
+        [d_eta_v[0], d_eta_v[5], d_eta_v[4]],
+        [d_eta_v[5], d_eta_v[1], d_eta_v[3]],
+        [d_eta_v[4], d_eta_v[3], d_eta_v[2]],
+    ];
+    let mut tmp = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            tmp[i][j] = eps_r[i][0] * d_eta[0][j] + eps_r[i][1] * d_eta[1][j] + eps_r[i][2] * d_eta[2][j];
+        }
+    }
+    let mut d_eps = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            d_eps[i][j] = -(tmp[i][0] * eps_r[0][j] + tmp[i][1] * eps_r[1][j] + tmp[i][2] * eps_r[2][j]);
+        }
+    }
+    for i in 0..3 {
+        for j in (i + 1)..3 {
+            let s = 0.5 * (d_eps[i][j] + d_eps[j][i]);
+            d_eps[i][j] = s;
+            d_eps[j][i] = s;
+        }
+    }
+    d_eps
+}
+
+impl ElectroOptic {
     pub fn read(s: &mut Section, pg: Option<PointGroup>) -> Result<Self, MaterialError> {
         let source = read_sources(s, "source")?;
         let wavelength = s.quantity("wavelength", Dim::Length, None)?;

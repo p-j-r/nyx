@@ -15,6 +15,14 @@
 //! on the cells of the mesh the result was solved on (the result keeps that mesh, so a result is read on its own cells whatever the project's
 //! mesh is now).
 //!
+//! **Fields of results on different meshes (ADR 135).** The first leaf of a request fixes the primary mesh. A leaf whose result was solved
+//! on another mesh (a physics meshed on its own, `Project::mesh_by_physics`) is not refused: `femcore::transfer` samples it directly at the
+//! degree-4 quadrature points of every primary cell (for `integrate`, `overlap` and `confinement`, exact for any polynomial of the source
+//! order even when the primary mesh has a lower element order or coarser cells) and at the local nodes of every primary cell (for `extremum`,
+//! `probe`, `line_cut` and boundary integrals), each point read only in source cells of the same canonical region as its primary cell so a
+//! field that jumps at an interface is never smeared. A primary point whose region the other mesh does not have (an active-domain subset)
+//! reads 0. The answer carries `cross_mesh_transfer: true` and `cross_mesh` with the snapped and missing quadrature-point counts.
+//!
 //! **Quadrature (the rule S5 must reproduce bit for bit).** Integrals use the degree-4 symmetric rule of `femcore::fem::quad_rule` (6 points
 //! on a triangle, 14 on a tetrahedron), exact for the product of two P2 fields, so `|E|^2` of a P2 field is exact up to rounding; an
 //! integrand of higher degree (a product of three fields, `sqrt`, a quotient) carries the quadrature error. At each point every leaf is the
@@ -102,6 +110,9 @@ enum Kind {
     Const(Vec<f64>),
     /// a component of the normal of the facet being integrated (set per facet by the boundary integral, 0 elsewhere)
     Normal(usize),
+    /// a field solved on another mesh, sampled directly at the degree-4 quadrature points (`quad_re[c * nq + q]`) and at the local nodes
+    /// (`node_re[c * nloc + a]`) of every cell of the primary mesh (ADR 135); `*_im` empty for a real field
+    Transferred { quad_re: Vec<f64>, quad_im: Vec<f64>, node_re: Vec<f64>, node_im: Vec<f64>, order: usize },
 }
 
 struct Leaf {
@@ -135,6 +146,9 @@ pub(crate) struct Prep {
     order: usize,
     nloc: usize,
     physics: Vec<String>,
+    /// some leaf was solved on another mesh and was transferred onto this one (ADR 135), with the nodes snapped to their region and the
+    /// nodes whose region the other mesh does not have (read as 0)
+    cross_mesh: Option<(usize, usize)>,
 }
 
 fn invalid<T>(text: impl Into<String>) -> Result<T, Error> {
@@ -152,7 +166,74 @@ fn slot(specs: &mut Vec<Spec>, s: Spec) -> usize {
 }
 
 fn same_mesh(a: &SimplexMesh, b: &SimplexMesh) -> bool {
-    a.dim == b.dim && a.points == b.points && a.cells == b.cells && a.cell_labels == b.cell_labels
+    femcore::transfer::same_simplex_mesh(a, b)
+}
+
+/// A leaf computed on the mesh of its own result moved onto the primary mesh of the request (ADR 135): a field is sampled directly at the
+/// degree-4 quadrature points and at the local nodes of every primary cell, a per-cell value at the centre of every primary cell, each
+/// point read only in the source cells of the same canonical region as its primary cell (`femcore::transfer`). Coordinates and normals are
+/// the same on any mesh and stay as they are.
+#[allow(clippy::too_many_arguments)]
+fn transfer_leaf(
+    kind: Kind,
+    sol: &nyx_physics::Solution,
+    src_model: &MeshedModel,
+    src_mesh: &SimplexMesh,
+    src_order: usize,
+    base_model: &MeshedModel,
+    base_mesh: &SimplexMesh,
+    base_order: usize,
+    stats: &mut (usize, usize),
+) -> Result<Kind, Error> {
+    use femcore::transfer::{canonical_name, SourceField, SourceMesh, TransferIndex, TransferOptions};
+    let err = |e: femcore::transfer::TransferError| Error::invalid(e.to_string());
+    if matches!(kind, Kind::Coord(_) | Kind::Normal(_) | Kind::Transferred { .. }) {
+        return Ok(kind);
+    }
+    let src_names = src_model.domain_name_map();
+    let base_names = base_model.domain_name_map();
+    let index =
+        TransferIndex::new(SourceMesh::Simplex(src_mesh), &src_names, TransferOptions::default()).map_err(err)?;
+    let mut both = |field: SourceField| -> Result<(Vec<f64>, Vec<f64>), Error> {
+        let q = index.sample_quadrature(&field, base_mesh, &base_names, 4).map_err(err)?;
+        let n = index.sample_cell_nodes(&field, base_mesh, &base_names, base_order).map_err(err)?;
+        stats.0 += q.snapped;
+        stats.1 += q.missing;
+        Ok((q.values, n.values))
+    };
+    match kind {
+        Kind::Cell(i) => {
+            let f = sol.cell_fields.get(i).ok_or_else(|| Error::invalid("a cell field of the result is missing"))?;
+            let (quad_re, node_re) = both(SourceField::Cell { values: &f.re, order: src_order })?;
+            let (quad_im, node_im) = if f.im.is_empty() {
+                (vec![], vec![])
+            } else {
+                both(SourceField::Cell { values: &f.im, order: src_order })?
+            };
+            Ok(Kind::Transferred { quad_re, quad_im, node_re, node_im, order: src_order })
+        }
+        Kind::Dof(vals) => {
+            let (quad_re, node_re) = both(SourceField::Nodal { values: &vals, ncomp: 1, order: src_order })?;
+            Ok(Kind::Transferred { quad_re, quad_im: vec![], node_re, node_im: vec![], order: src_order })
+        }
+        Kind::Const(v) => {
+            let d = base_mesh.dim;
+            let mut points = Vec::with_capacity(base_mesh.n_cells() * d);
+            let names: Vec<String> = base_mesh.cell_labels.iter().map(|&l| canonical_name(&base_names, l)).collect();
+            for c in 0..base_mesh.n_cells() {
+                let vs = base_mesh.cell(c);
+                for k in 0..d {
+                    points.push(vs.iter().map(|&x| base_mesh.point(x as usize)[k]).sum::<f64>() / vs.len() as f64);
+                }
+            }
+            let domains: Vec<Option<&str>> = names.iter().map(|n| Some(n.as_str())).collect();
+            let s = index.eval_at_points(&SourceField::PerCell { values: &v }, &points, &domains).map_err(err)?;
+            stats.0 += s.snapped;
+            stats.1 += s.missing;
+            Ok(Kind::Const(s.values))
+        }
+        other => Ok(other),
+    }
 }
 
 #[inline]
@@ -861,6 +942,8 @@ impl Engine {
         let mut base: Option<(Arc<MeshedModel>, Arc<SimplexMesh>, usize)> = None;
         let mut leaves = Vec::with_capacity(specs.len());
         let mut physics: Vec<String> = vec![];
+        let mut cross = false;
+        let mut stats = (0usize, 0usize);
         for s in specs {
             let stored = self.results.get(&s.physics).ok_or_else(|| {
                 Error::invalid(format!(
@@ -888,13 +971,23 @@ impl Engine {
             let mesh = stored.model.solver_mesh();
             let order = res.order as usize;
             let nloc = mesh.nloc(order);
+            // the first leaf fixes the primary mesh; a leaf of a result solved on another mesh is transferred onto it (ADR 135)
+            let foreign = match &base {
+                Some((m, b, _)) => !Arc::ptr_eq(m, &stored.model) && !same_mesh(b, &mesh),
+                None => false,
+            };
             let (kind, complex, unit) = match &s.what {
                 What::Coord(a) => (Kind::Coord(*a), false, "m".to_string()),
                 What::Normal(a) => (Kind::Normal(*a), false, String::new()),
                 What::Region => {
-                    let labels = stored.model.domains(&s.name)?;
+                    // a region indicator is read on the primary mesh directly
+                    let (rmodel, rmesh) = match (&base, foreign) {
+                        (Some((m, b, _)), true) => (m.clone(), b.clone()),
+                        _ => (stored.model.clone(), mesh.clone()),
+                    };
+                    let labels = rmodel.domains(&s.name)?;
                     let v: Vec<f64> =
-                        mesh.cell_labels.iter().map(|l| if labels.contains(l) { 1.0 } else { 0.0 }).collect();
+                        rmesh.cell_labels.iter().map(|l| if labels.contains(l) { 1.0 } else { 0.0 }).collect();
                     if !v.contains(&1.0) {
                         return invalid(format!("the region '{}' has no cells", s.name));
                     }
@@ -946,15 +1039,19 @@ impl Engine {
             match &base {
                 None => base = Some((stored.model.clone(), mesh, order)),
                 Some((m, b, o)) => {
+                    if foreign {
+                        let kind = if matches!(s.what, What::Region) {
+                            kind
+                        } else {
+                            transfer_leaf(kind, sol, &stored.model, &mesh, order, m, b, *o, &mut stats)?
+                        };
+                        cross = true;
+                        leaves.push(Leaf { res: res.clone(), sol: s.solution, kind, complex, unit });
+                        continue;
+                    }
                     if *o != order {
                         return invalid(format!(
                             "'{}' is solved at order {order} and an earlier field at order {o}; an expression reads fields of one order",
-                            s.physics
-                        ));
-                    }
-                    if !Arc::ptr_eq(m, &stored.model) && !same_mesh(b, &mesh) {
-                        return invalid(format!(
-                            "'{}' was solved on a different mesh from the other fields of the expression; solve them on one mesh",
                             s.physics
                         ));
                     }
@@ -964,7 +1061,7 @@ impl Engine {
         }
         let (model, mesh, order) = base.ok_or_else(|| Error::invalid("the expression reads no field"))?;
         let nloc = mesh.nloc(order);
-        Ok(Prep { leaves, model, mesh, order, nloc, physics })
+        Ok(Prep { leaves, model, mesh, order, nloc, physics, cross_mesh: cross.then_some(stats) })
     }
 
     /// Parses expressions that share one leaf table (each a handle, a name or a number), resolved against the stored results.
@@ -1084,9 +1181,20 @@ impl Engine {
         Ok((t.remove(0), p))
     }
 
-    /// Adds the staleness of what an answer read.
+    /// Adds the staleness of what an answer read, and whether a field was transferred from another mesh (ADR 135).
     fn decorate(&self, v: &mut Value, p: &Prep) {
         self.decorate_physics(v, &p.physics);
+        if let Some((snapped, missing)) = p.cross_mesh {
+            v["cross_mesh_transfer"] = json!(true);
+            v["cross_mesh"] = json!({
+                "primary_physics": p.physics.first(),
+                "sampling": "direct degree-4 quadrature points of the primary mesh, read only in source cells of the same region",
+                "snapped_points": snapped,
+                "missing_points": missing,
+                "snapped_nodes": snapped,
+                "missing_nodes": missing,
+            });
+        }
     }
 
     fn decorate_physics(&self, v: &mut Value, physics: &[String]) {
@@ -1222,6 +1330,8 @@ struct ConfinementBatch {
 enum FastLeaf<'a> {
     CellReal(&'a [f64]),
     CellComplex(&'a [f64], &'a [f64]),
+    QuadReal(&'a [f64], usize),
+    QuadComplex(&'a [f64], &'a [f64], usize),
     Const(&'a [f64]),
     Slow,
 }
@@ -1489,6 +1599,19 @@ impl Prep {
                         }
                     }
                 }
+                Kind::Transferred { node_re, node_im, .. } => {
+                    let re = &node_re[c * nloc..(c + 1) * nloc];
+                    if node_im.is_empty() {
+                        for a in 0..nloc {
+                            out[a] = C::new(re[a], 0.0);
+                        }
+                    } else {
+                        let im = &node_im[c * nloc..(c + 1) * nloc];
+                        for a in 0..nloc {
+                            out[a] = C::new(re[a], im[a]);
+                        }
+                    }
+                }
                 Kind::Dof(vals) => {
                     for a in 0..nloc {
                         out[a] = C::new(vals[dofs[a]], 0.0);
@@ -1518,6 +1641,24 @@ impl Prep {
                 Kind::Const(_) => nodes[0],
                 Kind::Normal(a) => C::new(normal.map_or(f64::NAN, |v| v[*a]), 0.0),
                 _ => interp(n, nodes),
+            });
+        }
+        tree.eval(work)
+    }
+
+    /// Like [`Prep::at_point`] at quadrature point `q` of cell `c` (`nq` points per cell): reads transferred leaves directly at `(c, q)`.
+    #[allow(clippy::too_many_arguments)]
+    fn at_quad_point(&self, tree: &Tree, c: usize, q: usize, nq: usize, loc: &[C], n: &[f64], work: &mut Vec<C>) -> C {
+        work.clear();
+        for (i, l) in self.leaves.iter().enumerate() {
+            work.push(match &l.kind {
+                Kind::Const(_) => loc[i * self.nloc],
+                Kind::Normal(_) => C::new(f64::NAN, 0.0),
+                Kind::Transferred { quad_re, quad_im, .. } => {
+                    let idx = c * nq + q;
+                    C::new(quad_re[idx], if quad_im.is_empty() { 0.0 } else { quad_im[idx] })
+                }
+                _ => interp(n, &loc[i * self.nloc..(i + 1) * self.nloc]),
             });
         }
         tree.eval(work)
@@ -1579,7 +1720,7 @@ impl Prep {
                 let (mut cre, mut cim, mut cm) = (0.0, 0.0, 0.0);
                 let v = self.mesh.cell(c);
                 for q in 0..nq {
-                    let mut f = self.at_point(tree, &loc, &el.n[q], None, &mut work);
+                    let mut f = self.at_quad_point(tree, c, q, nq, &loc, &el.n[q], &mut work);
                     let mut w = el.w[q];
                     if revolution {
                         let mut r = 0.0;
@@ -1615,7 +1756,7 @@ impl Prep {
         Ok(t)
     }
 
-    fn fast_leaves(&self) -> (Vec<FastLeaf<'_>>, bool) {
+    fn fast_leaves(&self, nq: usize) -> (Vec<FastLeaf<'_>>, bool) {
         let mut has_slow = false;
         let v = self
             .leaves
@@ -1630,6 +1771,13 @@ impl Prep {
                     }
                 }
                 Kind::Const(vals) => FastLeaf::Const(vals),
+                Kind::Transferred { quad_re, quad_im, .. } => {
+                    if quad_im.is_empty() {
+                        FastLeaf::QuadReal(quad_re, nq)
+                    } else {
+                        FastLeaf::QuadComplex(quad_re, quad_im, nq)
+                    }
+                }
                 _ => {
                     has_slow = true;
                     FastLeaf::Slow
@@ -1649,10 +1797,12 @@ impl Prep {
     }
 
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     fn interp_fast_leaves(
         &self,
         fast: &[FastLeaf<'_>],
         c: usize,
+        q: usize,
         n: &[f64],
         loc: &[C],
         normal: Option<&[f64; 3]>,
@@ -1667,6 +1817,13 @@ impl Prep {
                 }
                 FastLeaf::CellComplex(re, im) => {
                     work[i] = dot_n_complex(n, &re[base..base + nloc], &im[base..base + nloc]);
+                }
+                FastLeaf::QuadReal(re, nq) => {
+                    work[i] = C::new(re[c * *nq + q], 0.0);
+                }
+                FastLeaf::QuadComplex(re, im, nq) => {
+                    let idx = c * *nq + q;
+                    work[i] = C::new(re[idx], im[idx]);
                 }
                 FastLeaf::Const(_) => {}
                 FastLeaf::Slow => {
@@ -1702,7 +1859,7 @@ impl Prep {
         let n_trees = trees.len();
         let n_doms = dom_map.map_or(0, |m| m.names.len());
         let nb = self.mesh.n_cells().div_ceil(BLOCK);
-        let (fast_leaves, has_slow) = self.fast_leaves();
+        let (fast_leaves, has_slow) = self.fast_leaves(nq);
         let dag = FlatDag::compile(trees, self.leaves.len());
         let work_len = dag.as_ref().map_or(self.leaves.len(), FlatDag::reg_len);
         let block = |b: usize| -> BatchSum {
@@ -1727,7 +1884,7 @@ impl Prep {
                 let v = self.mesh.cell(c);
                 for q in 0..nq {
                     let n = &el.n[q];
-                    self.interp_fast_leaves(&fast_leaves, c, n, &loc, None, &mut work);
+                    self.interp_fast_leaves(&fast_leaves, c, q, n, &loc, None, &mut work);
                     let mut w = el.w[q];
                     let rho = if revolution {
                         let mut r = 0.0;
@@ -1848,7 +2005,7 @@ impl Prep {
         let n_sols = power_trees.len();
         let n_regs = regions.len();
         let nb = self.mesh.n_cells().div_ceil(BLOCK);
-        let (fast_leaves, has_slow) = self.fast_leaves();
+        let (fast_leaves, has_slow) = self.fast_leaves(nq);
         let dag = FlatDag::compile(power_trees, self.leaves.len());
         let work_len = dag.as_ref().map_or(self.leaves.len(), FlatDag::reg_len);
         let block = |b: usize| -> ConfinementBatch {
@@ -1867,7 +2024,7 @@ impl Prep {
                 let v = self.mesh.cell(c);
                 for q in 0..nq {
                     let n = &el.n[q];
-                    self.interp_fast_leaves(&fast_leaves, c, n, &loc, None, &mut work);
+                    self.interp_fast_leaves(&fast_leaves, c, q, n, &loc, None, &mut work);
                     let rho = if revolution {
                         let mut r = 0.0;
                         for (k, &vk) in v.iter().enumerate() {
@@ -2311,6 +2468,7 @@ fn expr_poly_degree(tree: &Tree, prep: &Prep) -> Option<usize> {
             Some(Kind::Const(_) | Kind::Normal(_)) => Some(0),
             Some(Kind::Coord(_)) => Some(1),
             Some(Kind::Cell(_) | Kind::Dof(_)) => Some(prep.order),
+            Some(Kind::Transferred { order, .. }) => Some(*order),
             None => None,
         },
         Tree::Neg(a) | Tree::Call(Fun::Re | Fun::Im | Fun::Conj, a) => expr_poly_degree(a, prep),

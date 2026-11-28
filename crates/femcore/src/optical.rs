@@ -20,7 +20,7 @@ pub const MU0: f64 = 1.256_637_062_12e-6;
 /// Speed of light in vacuum (m/s).
 pub const C0: f64 = 299_792_458.0;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EpsC {
     pub xx: C,
     pub xy: C,
@@ -29,15 +29,201 @@ pub struct EpsC {
     /// couplings of the transverse components x, y to the propagation axis
     pub xz: C,
     pub yz: C,
+    /// lower-triangle off-diagonal components for non-symmetric / gyrotropic media
+    /// (`yx == xy`, `zx == xz`, `zy == yz` when symmetric)
+    pub yx: C,
+    pub zx: C,
+    pub zy: C,
 }
 
-#[derive(Clone, Copy, Debug)]
+impl EpsC {
+    /// Isotropic permittivity $\varepsilon \mathbf{I}_3$.
+    pub fn isotropic(v: C) -> Self {
+        let z = c(0.0, 0.0);
+        Self { xx: v, xy: z, yy: v, zz: v, xz: z, yz: z, yx: z, zx: z, zy: z }
+    }
+
+    /// Complex-symmetric permittivity tensor (`yx = xy`, `zx = xz`, `zy = yz`).
+    pub fn symmetric(xx: C, xy: C, yy: C, zz: C, xz: C, yz: C) -> Self {
+        Self { xx, xy, yy, zz, xz, yz, yx: xy, zx: xz, zy: yz }
+    }
+
+    /// Builds `EpsC` from a $3 \times 3$ complex matrix in local cross-section coordinates.
+    pub fn from_matrix(m: &[[C; 3]; 3]) -> Self {
+        Self {
+            xx: m[0][0],
+            xy: m[0][1],
+            yy: m[1][1],
+            zz: m[2][2],
+            xz: m[0][2],
+            yz: m[1][2],
+            yx: m[1][0],
+            zx: m[2][0],
+            zy: m[2][1],
+        }
+    }
+
+    /// Returns the full $3 \times 3$ complex matrix in local cross-section coordinates.
+    pub fn to_matrix(&self) -> [[C; 3]; 3] {
+        [
+            [self.xx, self.xy, self.xz],
+            [self.yx, self.yy, self.yz],
+            [self.zx, self.zy, self.zz],
+        ]
+    }
+
+    /// Returns `true` when any off-diagonal pair violates transpose symmetry ($\varepsilon_{ij} \neq \varepsilon_{ji}$).
+    pub fn is_non_symmetric(&self) -> bool {
+        let max_v = [
+            self.xx.norm(),
+            self.yy.norm(),
+            self.zz.norm(),
+            self.xy.norm(),
+            self.yx.norm(),
+            self.xz.norm(),
+            self.zx.norm(),
+            self.yz.norm(),
+            self.zy.norm(),
+        ]
+        .into_iter()
+        .fold(0.0_f64, f64::max);
+        let tol = 1e-14 * max_v.max(1e-30);
+        (self.xy - self.yx).norm() > tol || (self.xz - self.zx).norm() > tol || (self.yz - self.zy).norm() > tol
+    }
+
+    /// Returns `true` when any longitudinal-transverse coupling entry (`xz`, `zx`, `yz`, `zy`) is non-zero.
+    pub fn has_longitudinal_coupling(&self) -> bool {
+        self.xz.norm() > 0.0 || self.zx.norm() > 0.0 || self.yz.norm() > 0.0 || self.zy.norm() > 0.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MuC {
     pub x: C,
     pub y: C,
     pub z: C,
+    /// Off-diagonal complex permeability components (all zero for diagonal/isotropic permeability).
+    pub xy: C,
+    pub yx: C,
+    pub xz: C,
+    pub zx: C,
+    pub yz: C,
+    pub zy: C,
 }
 
+impl MuC {
+    /// Isotropic permeability $\mu \mathbf{I}_3$.
+    pub fn isotropic(v: C) -> Self {
+        Self::diagonal(v, v, v)
+    }
+
+    /// Diagonal permeability $\text{diag}(x, y, z)$.
+    pub fn diagonal(x: C, y: C, z: C) -> Self {
+        let z0 = c(0.0, 0.0);
+        Self { x, y, z, xy: z0, yx: z0, xz: z0, zx: z0, yz: z0, zy: z0 }
+    }
+
+    /// Builds `MuC` from a $3 \times 3$ complex matrix in local cross-section coordinates.
+    pub fn from_matrix(m: &[[C; 3]; 3]) -> Self {
+        Self {
+            x: m[0][0],
+            y: m[1][1],
+            z: m[2][2],
+            xy: m[0][1],
+            yx: m[1][0],
+            xz: m[0][2],
+            zx: m[2][0],
+            yz: m[1][2],
+            zy: m[2][1],
+        }
+    }
+
+    /// Returns the full $3 \times 3$ complex permeability matrix in local cross-section coordinates.
+    pub fn to_matrix(&self) -> [[C; 3]; 3] {
+        [
+            [self.x, self.xy, self.xz],
+            [self.yx, self.y, self.yz],
+            [self.zx, self.zy, self.z],
+        ]
+    }
+
+    /// Returns `true` when any off-diagonal permeability entry is non-zero.
+    pub fn has_off_diagonal(&self) -> bool {
+        self.xy.norm() > 0.0
+            || self.yx.norm() > 0.0
+            || self.xz.norm() > 0.0
+            || self.zx.norm() > 0.0
+            || self.yz.norm() > 0.0
+            || self.zy.norm() > 0.0
+    }
+
+    /// Returns `true` when any longitudinal-transverse permeability entry (`xz`, `zx`, `yz`, `zy`) is non-zero.
+    pub fn has_longitudinal_coupling(&self) -> bool {
+        self.xz.norm() > 0.0 || self.zx.norm() > 0.0 || self.yz.norm() > 0.0 || self.zy.norm() > 0.0
+    }
+
+    /// Returns `true` when any off-diagonal pair violates transpose symmetry ($\mu_{ij} \neq \mu_{ji}$).
+    pub fn is_non_symmetric(&self) -> bool {
+        if !self.has_off_diagonal() {
+            return false;
+        }
+        let max_v = [
+            self.x.norm(),
+            self.y.norm(),
+            self.z.norm(),
+            self.xy.norm(),
+            self.yx.norm(),
+            self.xz.norm(),
+            self.zx.norm(),
+            self.yz.norm(),
+            self.zy.norm(),
+        ]
+        .into_iter()
+        .fold(0.0_f64, f64::max);
+        let tol = 1e-14 * max_v.max(1e-30);
+        (self.xy - self.yx).norm() > tol || (self.xz - self.zx).norm() > tol || (self.yz - self.zy).norm() > tol
+    }
+
+    /// Returns the $3 \times 3$ inverse permeability matrix $\boldsymbol{\mu}^{-1}$.
+    /// When diagonal, preserves the exact reciprocal `1 / x`, `1 / y`, `1 / z`.
+    pub fn inv_matrix(&self) -> [[C; 3]; 3] {
+        if !self.has_off_diagonal() {
+            let z0 = c(0.0, 0.0);
+            let one = c(1.0, 0.0);
+            return [
+                [one / self.x, z0, z0],
+                [z0, one / self.y, z0],
+                [z0, z0, one / self.z],
+            ];
+        }
+        crate::props::inv3_c(&self.to_matrix()).unwrap_or_else(|_| {
+            let z0 = c(0.0, 0.0);
+            let one = c(1.0, 0.0);
+            [
+                [one / self.x, z0, z0],
+                [z0, one / self.y, z0],
+                [z0, z0, one / self.z],
+            ]
+        })
+    }
+}
+
+/// Returns `true` if any cell in `eps` or `mu` has a non-symmetric (gyrotropic) tensor.
+pub fn is_non_symmetric_cells(eps: &[EpsC], mu: &[MuC]) -> bool {
+    eps.iter().any(EpsC::is_non_symmetric) || mu.iter().any(MuC::is_non_symmetric)
+}
+
+fn permute_c3_local_signed(t: &[[C; 3]; 3], prop_sign: f64) -> [[C; 3]; 3] {
+    let axes = [0usize, 2, 1];
+    let signs = [1.0, 1.0, prop_sign];
+    let mut r = [[c(0.0, 0.0); 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            r[i][j] = t[axes[i]][axes[j]] * (signs[i] * signs[j]);
+        }
+    }
+    r
+}
 
 /// Domain labels of all active perfectly matched layers (`x`, `y`, or `z` != `PmlDir::Off`).
 pub fn absorbing_domains(m: &Materials) -> Vec<i32> {
@@ -56,17 +242,23 @@ pub fn cell_materials(mesh: &SimplexMesh, m: &Materials) -> Result<(Vec<EpsC>, V
 
 /// As `cell_materials` for a propagation axis along `prop_sign * y` (only the reciprocity test uses a sign other than `PROP_SIGN`).
 pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) -> Result<(Vec<EpsC>, Vec<MuC>), String> {
-    let tens_re: Vec<_> = m
-        .cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?
+    let eps_full: Vec<[[C; 3]; 3]> = m
+        .cell_full_complex_permittivity(mesh, Some(1.0))?
         .iter()
-        .map(|t| crate::section::local_tensor_signed(t, prop_sign))
+        .map(|t| permute_c3_local_signed(t, prop_sign))
         .collect();
-    let tens_im: Vec<_> = m
-        .cell_tensor(mesh, TensorKind::PermittivityIm, Some(0.0))?
-        .iter()
-        .map(|t| crate::section::local_tensor_signed(t, prop_sign))
-        .collect();
-    let mu = m.cell_values(mesh, "mu_r", Some(1.0))?;
+    let has_tensor_mu = m.has_tensor(TensorKind::Permeability)
+        || m.has_tensor(TensorKind::PermeabilityIm)
+        || m.aniso.values().any(|a| a.mu_gyrotropy.is_some() || a.mu_gyrotropy_im.is_some());
+    let mu_scalar = if has_tensor_mu { Vec::new() } else { m.cell_values(mesh, "mu_r", Some(1.0))? };
+    let mu_full: Vec<[[C; 3]; 3]> = if has_tensor_mu {
+        m.cell_full_complex_permeability(mesh, Some(1.0))?
+            .iter()
+            .map(|t| permute_c3_local_signed(t, prop_sign))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // bounding boxes of the PML domains
     let mut boxes: std::collections::BTreeMap<i32, ([f64; 2], [f64; 2])> = Default::default();
     for c in 0..mesh.n_cells() {
@@ -85,9 +277,7 @@ pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) 
     let mut eps = Vec::with_capacity(mesh.n_cells());
     let mut mus = Vec::with_capacity(mesh.n_cells());
     for ci in 0..mesh.n_cells() {
-        let tr = tens_re[ci];
-        let ti = tens_im[ci];
-        let tc = |a: usize, b: usize| c(tr[a][b], -ti[a][b]);
+        let tc = &eps_full[ci];
         let l = mesh.cell_labels[ci];
         let (mut sx, mut sy) = (c(1.0, 0.0), c(1.0, 0.0));
         if let (Some(p), Some((lo, hi))) = (m.pml.get(&l), boxes.get(&l)) {
@@ -103,10 +293,35 @@ pub fn cell_materials_signed(mesh: &SimplexMesh, m: &Materials, prop_sign: f64) 
             sy = s.1;
         }
         let (lx, ly, lz) = (sy / sx, sx / sy, sx * sy);
-        // eps_ij -> det(S) eps_ij / (s_i s_j) with S = diag(sx, sy, 1): the diagonal gets lx, ly, lz, xy is unchanged,
-        // xz and yz are multiplied by sy and sx
-        eps.push(EpsC { xx: lx * tc(0, 0), xy: tc(0, 1), yy: ly * tc(1, 1), zz: lz * tc(2, 2), xz: sy * tc(0, 2), yz: sx * tc(1, 2) });
-        mus.push(MuC { x: lx * mu[ci], y: ly * mu[ci], z: lz * mu[ci] });
+        // eps_ij -> det(S) eps_ij / (s_i s_j) with S = diag(sx, sy, 1): the diagonal gets lx, ly, lz, xy/yx are unchanged,
+        // xz/zx and yz/zy are multiplied by sy and sx
+        eps.push(EpsC {
+            xx: lx * tc[0][0],
+            xy: tc[0][1],
+            yy: ly * tc[1][1],
+            zz: lz * tc[2][2],
+            xz: sy * tc[0][2],
+            yz: sx * tc[1][2],
+            yx: tc[1][0],
+            zx: sy * tc[2][0],
+            zy: sx * tc[2][1],
+        });
+        if has_tensor_mu {
+            let mc = &mu_full[ci];
+            mus.push(MuC {
+                x: lx * mc[0][0],
+                y: ly * mc[1][1],
+                z: lz * mc[2][2],
+                xy: mc[0][1],
+                yx: mc[1][0],
+                xz: sy * mc[0][2],
+                zx: sy * mc[2][0],
+                yz: sx * mc[1][2],
+                zy: sx * mc[2][1],
+            });
+        } else {
+            mus.push(MuC::diagonal(lx * mu_scalar[ci], ly * mu_scalar[ci], lz * mu_scalar[ci]));
+        }
     }
     Ok((eps, mus))
 }

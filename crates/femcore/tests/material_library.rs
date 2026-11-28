@@ -69,6 +69,22 @@ fn every_library_file_and_table_has_a_source() {
         if let Some(ve) = &m.viscoelastic {
             check_sources(&format!("{name}: [viscoelastic]"), &ve.source);
         }
+        if let Some(s2d) = &m.sheet_2d {
+            check_sources(&format!("{name}: [sheet_2d]"), &s2d.source);
+        }
+        if let Some(nl) = &m.nonlinear {
+            if !nl.source.is_empty() {
+                check_sources(&format!("{name}: [nonlinear]"), &nl.source);
+            }
+            if let Some(c2) = &nl.chi2 {
+                let srcs = if c2.source.is_empty() { &nl.source } else { &c2.source };
+                check_sources(&format!("{name}: [nonlinear.chi2]"), srcs);
+            }
+            if let Some(c3) = &nl.chi3 {
+                let srcs = if c3.source.is_empty() { &nl.source } else { &c3.source };
+                check_sources(&format!("{name}: [nonlinear.chi3]"), srcs);
+            }
+        }
         if let Some(ma) = &m.interfaces.ma {
             check_sources(&format!("{name}: [interfaces.ma]"), &ma.source);
         }
@@ -105,6 +121,7 @@ fn sources_survive_writing_and_reading() {
         assert_eq!(back.thermal.source, m.thermal.source, "{name}");
         assert_eq!(back.optical.as_ref().map(|o| o.source.clone()), m.optical.as_ref().map(|o| o.source.clone()), "{name}");
         assert_eq!(back.superconducting.as_ref().map(|s| s.source.clone()), m.superconducting.as_ref().map(|s| s.source.clone()), "{name}");
+        assert_eq!(back.nonlinear.as_ref().map(|n| n.source.clone()), m.nonlinear.as_ref().map(|n| n.source.clone()), "{name}");
     }
 }
 
@@ -293,7 +310,7 @@ fn new_models_need_their_range_and_units_and_say_so() {
 #[test]
 fn every_library_material_has_a_comparative_description() {
     let lib = library();
-    assert_eq!(lib.len(), 45);
+    assert_eq!(lib.len(), 46);
     for name in lib.names() {
         let m = lib.get(&name).unwrap();
         assert_eq!(m.format, 2, "{name} should be migrated to format = 2");

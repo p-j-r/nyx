@@ -147,6 +147,76 @@ impl TensorProp {
     }
 }
 
+/// Determinant of a 3x3 matrix.
+pub fn det3(r: &M3) -> f64 {
+    r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+        - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+        + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0])
+}
+
+/// Rotate an axial vector (pseudovector, e.g. gyrotropic / Voigt magnetization vector $\mathbf{g}$)
+/// from the crystal frame to the global frame: $\mathbf{g}_{\text{global}} = (\det \mathbf{R}) \, \mathbf{R} \, \mathbf{g}_{\text{local}}$.
+///
+/// This guarantees covariance with tensor congruence: $\mathbf{R} (\mathbf{g}_{\text{local}})_\times \mathbf{R}^T = (\mathbf{g}_{\text{global}})_\times$.
+pub fn rotate_axial_vector(g: &[f64; 3], r: &M3) -> [f64; 3] {
+    let d = det3(r);
+    [
+        d * (r[0][0] * g[0] + r[0][1] * g[1] + r[0][2] * g[2]),
+        d * (r[1][0] * g[0] + r[1][1] * g[1] + r[1][2] * g[2]),
+        d * (r[2][0] * g[0] + r[2][1] * g[1] + r[2][2] * g[2]),
+    ]
+}
+
+/// Build the real skew-symmetric cross-product matrix $\mathbf{G}_\times$ from an axial vector
+/// $\mathbf{g} = (g_x, g_y, g_z)$ such that $\mathbf{G}_\times \mathbf{E} = \mathbf{g} \times \mathbf{E}$:
+/// $(G_\times)_{xy} = -g_z$, $(G_\times)_{yx} = +g_z$, $(G_\times)_{xz} = +g_y$,
+/// $(G_\times)_{zx} = -g_y$, $(G_\times)_{yz} = -g_x$, $(G_\times)_{zy} = +g_x$.
+pub fn skew_from_axial(g: &[f64; 3]) -> M3 {
+    [
+        [0.0, -g[2], g[1]],
+        [g[2], 0.0, -g[0]],
+        [-g[1], g[0], 0.0],
+    ]
+}
+
+/// Extract the axial vector $\mathbf{g} = (g_x, g_y, g_z)$ from the skew-symmetric part
+/// $\frac{1}{2}(\mathbf{M} - \mathbf{M}^T)$ of a 3x3 matrix $\mathbf{M}$ under the convention
+/// $\mathbf{G}_\times \mathbf{E} = \mathbf{g} \times \mathbf{E}$.
+pub fn axial_from_skew(m: &M3) -> [f64; 3] {
+    [
+        0.5 * (m[2][1] - m[1][2]),
+        0.5 * (m[0][2] - m[2][0]),
+        0.5 * (m[1][0] - m[0][1]),
+    ]
+}
+
+/// Reads an optional 3-component axial vector `[gx, gy, gz]` (or a single scalar `gz` along crystal `+z`)
+/// from a TOML section.
+pub fn read_axial_vec3(s: &mut Section, key: &str) -> Result<Option<[f64; 3]>, MaterialError> {
+    let Some(val) = s.value(key) else {
+        return Ok(None);
+    };
+    match val {
+        toml::Value::Float(_) | toml::Value::Integer(_) => {
+            let gz = s.number_of(key, val)?;
+            if !gz.is_finite() {
+                return Err(s.err(key, "gyrotropy component must be a finite number"));
+            }
+            Ok(Some([0.0, 0.0, gz]))
+        }
+        toml::Value::Array(arr) if arr.len() == 3 => {
+            let gx = s.number_of(key, &arr[0])?;
+            let gy = s.number_of(key, &arr[1])?;
+            let gz = s.number_of(key, &arr[2])?;
+            if !gx.is_finite() || !gy.is_finite() || !gz.is_finite() {
+                return Err(s.err(key, "gyrotropy vector components must be finite numbers"));
+            }
+            Ok(Some([gx, gy, gz]))
+        }
+        _ => Err(s.err(key, "must be a 3-element axial vector [gx, gy, gz] or a scalar gz")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

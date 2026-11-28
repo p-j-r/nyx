@@ -1929,6 +1929,9 @@ pub struct ShiftedFactorization<T: FaerScalar> {
     pub accept_perturbed_shift: bool,
     /// Optional dimension threshold above which `set_shift` routes directly to preconditioned Krylov (`GMRES`).
     pub iterative_threshold: Option<usize>,
+    /// When `true` (e.g. non-symmetric gyrotropic media, `FR-34`), bypass symmetric/Hermitian `LBL^T`
+    /// probes and factor directly with general COLAMD `LU`.
+    pub force_general_lu: bool,
     stats: FactorStats,
     diagnostics: FactorDiagnostics,
     solves: AtomicUsize,
@@ -1980,6 +1983,7 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             recovery: SingularRecovery::Auto,
             accept_perturbed_shift: false,
             iterative_threshold: None,
+            force_general_lu: false,
             stats: FactorStats {
                 analyse_secs: t0.elapsed().as_secs_f64(),
                 symbolic_count: 0,
@@ -2685,7 +2689,11 @@ impl<T: FaerScalar> ShiftedFactorization<T> {
             };
             (vals, is_herm, is_cplx_sym)
         };
-        let policy = backend_policy();
+        let policy = if self.force_general_lu {
+            BackendPolicy::ForceColamd
+        } else {
+            backend_policy()
+        };
 
         let res = match policy {
             BackendPolicy::ForceColamd => self.do_colamd_lu(sigma, &vals),

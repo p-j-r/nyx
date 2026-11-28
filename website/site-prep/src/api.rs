@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-const EXPECTED_COMMAND_COUNT: usize = 114;
-const EXPECTED_CATALOG_HASH: &str = "b3:60697136d596a5b047f70971b85b0f54";
+const EXPECTED_COMMAND_COUNT: usize = 118;
+const EXPECTED_CATALOG_HASH: &str = "b3:f4c059caae7ee3100bbf472db2c560bd";
 
 #[derive(Debug, Serialize)]
 pub struct ApiArgument {
@@ -318,14 +318,20 @@ fn categorize_command(name: &str) -> &'static str {
         | "remove_physics"
         | "search_remote_materials"
         | "set_active"
+        | "set_coupled_loop"
         | "set_material"
         | "set_physics_params"
         | "set_problem"
         | "set_study" => "Physics & Materials",
 
-        "convergence_check" | "solve_run" | "sweep_cancel" | "sweep_run" | "sweep_table" => {
-            "Solving & Sweeps"
-        }
+        "convergence_check"
+        | "eme_sweep"
+        | "optimize_run"
+        | "sensitivity_run"
+        | "solve_run"
+        | "sweep_cancel"
+        | "sweep_run"
+        | "sweep_table" => "Solving & Sweeps",
 
         "analyse"
         | "confinement"

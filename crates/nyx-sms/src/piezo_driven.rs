@@ -601,7 +601,9 @@ fn run_piezo_driven_core(asm: &PiezoDrivenAssembly) -> Result<SweepCoreResult, S
     })
 }
 
-fn normalize_and_split_mode(x_full: &[C], n1: usize, d: usize, n_mech: usize) -> (Vec<C>, Vec<C>, bool) {
+fn normalize_and_split_mode(x_full: &[C], constraints: &crate::piezo_asm::PiezoConstraints) -> (Vec<C>, Vec<C>, bool) {
+    let n1 = constraints.n1;
+    let n_mech = constraints.n_mech;
     let mut big_u = c(0.0, 0.0);
     for &v in &x_full[..n_mech] {
         if v.norm_sqr() > big_u.norm_sqr() {
@@ -614,11 +616,11 @@ fn normalize_and_split_mode(x_full: &[C], n1: usize, d: usize, n_mech: usize) ->
         x_full.iter().copied().fold(c(0.0, 0.0), |m, v| if v.norm_sqr() > m.norm_sqr() { v } else { m })
     };
     let scale = if big.norm() > 0.0 { big.conj() / big.norm_sqr() } else { c(1.0, 0.0) };
-    let u_full: Vec<C> = x_full[..n_mech].iter().map(|&v| v * scale).collect();
+    let u_sub: Vec<C> = x_full[..n_mech].iter().map(|&v| v * scale).collect();
+    let u_full = constraints.expand_u_full_nodes(&u_sub, c(0.0, 0.0));
     let phi_full: Vec<C> = x_full[n_mech..n_mech + n1].iter().map(|&v| v * scale).collect();
     let max_norm = u_full.iter().chain(&phi_full).map(|z| z.norm()).fold(0.0, f64::max).max(1e-300);
     let is_complex = u_full.iter().chain(&phi_full).any(|z| z.im.abs() > 1e-12 * max_norm);
-    let _ = d;
     (u_full, phi_full, is_complex)
 }
 
@@ -717,8 +719,8 @@ pub fn solve_piezo_driven(mesh: &SimplexMesh, spec: &Problem) -> Result<SolveRes
     let out = run_piezo_driven_core(&asm)?;
 
     let x_full = asm.constraints.red_all.expand_with(&out.rep_x_red, &asm.constraints.terminal_lifts[0]);
-    let (u_norm, p_norm, complex_mode) =
-        normalize_and_split_mode(&x_full, asm.constraints.n1, asm.constraints.d, asm.constraints.n_mech);
+    let (u_norm, p_norm, complex_mode) = normalize_and_split_mode(&x_full, &asm.constraints);
+    let u_full_unscaled = asm.constraints.expand_u_full_nodes(&x_full[..asm.constraints.n_mech], c(0.0, 0.0));
     let (fields, cells) = push_eigen_mode_fields_simplex(
         mesh,
         spec.order,
@@ -728,15 +730,7 @@ pub fn solve_piezo_driven(mesh: &SimplexMesh, spec: &Problem) -> Result<SolveRes
         &p_norm,
         complex_mode,
     );
-    Ok(finish_driven_result(
-        &asm,
-        out,
-        fields,
-        cell_fields_of(&cells),
-        &x_full[..asm.constraints.n_mech],
-        t0,
-        spec.order,
-    ))
+    Ok(finish_driven_result(&asm, out, fields, cell_fields_of(&cells), &u_full_unscaled, t0, spec.order))
 }
 
 /// Solves a coupled piezoelectric `Study::Driven` frequency sweep natively on [`MixedDiscretisation`].
@@ -753,12 +747,13 @@ pub fn solve_piezo_driven_mixed(
     let out = run_piezo_driven_core(&asm)?;
 
     let x_full = asm.constraints.red_all.expand_with(&out.rep_x_red, &asm.constraints.terminal_lifts[0]);
-    let (u_norm, p_norm, complex_mode) =
-        normalize_and_split_mode(&x_full, asm.constraints.n1, asm.constraints.d, asm.constraints.n_mech);
-    let (_simplex, proj) = MixedToSimplexProjector::from_mesh(raw_mesh, mixed).map_err(|e| e.to_string())?;
+    let (u_norm, p_norm, complex_mode) = normalize_and_split_mode(&x_full, &asm.constraints);
+    let u_full_unscaled = asm.constraints.expand_u_full_nodes(&x_full[..asm.constraints.n_mech], c(0.0, 0.0));
+    let (simplex, proj) = MixedToSimplexProjector::from_mesh(raw_mesh, mixed).map_err(|e| e.to_string())?;
     let (fields, cell_fields) = push_eigen_mode_fields_mixed(
         mixed,
         &dof_map,
+        &simplex,
         &proj,
         spec.order,
         asm.constraints.d,
@@ -767,5 +762,5 @@ pub fn solve_piezo_driven_mixed(
         &p_norm,
         complex_mode,
     );
-    Ok(finish_driven_result(&asm, out, fields, cell_fields, &x_full[..asm.constraints.n_mech], t0, spec.order))
+    Ok(finish_driven_result(&asm, out, fields, cell_fields, &u_full_unscaled, t0, spec.order))
 }

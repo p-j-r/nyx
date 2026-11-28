@@ -29,11 +29,11 @@
           </div>
           <div class="spec-ledger-cell">
             <span class="spec-ledger-label">Engine Catalogue</span>
-            <span class="spec-ledger-value">{{ config.extra.command_count | default(value=114) }} JSON-Schema commands</span>
+            <span class="spec-ledger-value">{{ config.extra.command_count | default(value=118) }} JSON-Schema commands</span>
           </div>
           <div class="spec-ledger-cell">
             <span class="spec-ledger-label">Material Library</span>
-            <span class="spec-ledger-value">{{ config.extra.material_count | default(value=41) }} public TOML records (format = 2)</span>
+            <span class="spec-ledger-value">{{ config.extra.material_count | default(value=42) }} public TOML records (format = 2)</span>
           </div>
           <div class="spec-ledger-cell">
             <span class="spec-ledger-label">Results Storage</span>
@@ -135,7 +135,7 @@
         <div class="kicker"><span class="kicker-rule" aria-hidden="true"></span><span>01 · ARCHITECTURE</span></div>
         <h2>Three front-ends driving one deterministic engine</h2>
       </div>
-      <a class="btn btn-mono" href="{{ get_url(path='/api/') }}">Browse {{ config.extra.command_count | default(value=114) }} commands →</a>
+      <a class="btn btn-mono" href="{{ get_url(path='/api/') }}">Browse {{ config.extra.command_count | default(value=118) }} commands →</a>
     </div>
 
     <div class="grid-3">

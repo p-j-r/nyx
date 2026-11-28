@@ -119,6 +119,9 @@ fn build(p: &Project, geometry_json: bool) -> Result<Vec<Cmd>, Error> {
     if let Some(a) = &p.active {
         c.push(("set_active".into(), json!({ "physics": a })));
     }
+    if let Some(cl) = &p.coupled_loop {
+        c.push(("set_coupled_loop".into(), serde_json::to_value(cl).map_err(|e| Error::invalid(e.to_string()))?));
+    }
     Ok(c)
 }
 

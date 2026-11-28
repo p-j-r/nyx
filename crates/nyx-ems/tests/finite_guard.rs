@@ -8,7 +8,7 @@ mod common;
 use common::{emw, solve};
 use femcore::material::{Anisotropy, Tensor};
 use femcore::props::{Periodic, Pml, PmlCoord, PmlDir, PmlProfile, PmlStabilization};
-use nyx_ems::{LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, WavePortBc};
+use nyx_ems::{EmeGridSpec, LumpedJjBc, LumpedPortBc, Problem, Study, SurfaceImpedanceBc, WavePortBc};
 use nyx_physics::{check_result_finite, Field, Solution, SolveResult, TlsInterfaceSpec, TlsInterfaces};
 
 const NON_FINITES: [f64; 3] = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
@@ -234,6 +234,93 @@ fn nan_and_infinite_study_parameters_are_refused() {
                 solver: "auto".into(),
                 blr_tol: bad,
             },
+            Study::Eme {
+                freq: bad,
+                n_target: 2.0,
+                evanescent: false,
+                n_modes: 2,
+                grid: EmeGridSpec::Uniform { n_cells: 1, n_modes: None, bend_radius: None },
+                y_range: None,
+                port_modes: 1,
+                port_z0_ohm: 50.0,
+                reconstruct_fields: false,
+            },
+            Study::Eme {
+                freq: 193.4e12,
+                n_target: bad,
+                evanescent: false,
+                n_modes: 2,
+                grid: EmeGridSpec::Uniform { n_cells: 1, n_modes: None, bend_radius: None },
+                y_range: None,
+                port_modes: 1,
+                port_z0_ohm: 50.0,
+                reconstruct_fields: false,
+            },
+            Study::Eme {
+                freq: 193.4e12,
+                n_target: 2.0,
+                evanescent: false,
+                n_modes: 2,
+                grid: EmeGridSpec::Uniform { n_cells: 1, n_modes: None, bend_radius: Some(bad) },
+                y_range: None,
+                port_modes: 1,
+                port_z0_ohm: 50.0,
+                reconstruct_fields: false,
+            },
+            Study::Eme {
+                freq: 193.4e12,
+                n_target: 2.0,
+                evanescent: false,
+                n_modes: 2,
+                grid: EmeGridSpec::Explicit {
+                    lengths: vec![bad],
+                    n_modes: None,
+                    bend_radius: None,
+                    mesh_lengths: None,
+                },
+                y_range: None,
+                port_modes: 1,
+                port_z0_ohm: 50.0,
+                reconstruct_fields: false,
+            },
+            Study::Eme {
+                freq: 193.4e12,
+                n_target: 2.0,
+                evanescent: false,
+                n_modes: 2,
+                grid: EmeGridSpec::Uniform { n_cells: 1, n_modes: None, bend_radius: None },
+                y_range: Some([0.0, bad]),
+                port_modes: 1,
+                port_z0_ohm: 50.0,
+                reconstruct_fields: false,
+            },
+            Study::Eme {
+                freq: 193.4e12,
+                n_target: 2.0,
+                evanescent: false,
+                n_modes: 2,
+                grid: EmeGridSpec::Uniform { n_cells: 1, n_modes: None, bend_radius: None },
+                y_range: None,
+                port_modes: 1,
+                port_z0_ohm: bad,
+                reconstruct_fields: false,
+            },
+            Study::NonlinearDriven(nyx_ems::NonlinearDrivenSpec { freq: bad, ..Default::default() }),
+            Study::NonlinearDriven(nyx_ems::NonlinearDrivenSpec { power_w: bad, ..Default::default() }),
+            Study::NonlinearDriven(nyx_ems::NonlinearDrivenSpec { rtol: bad, ..Default::default() }),
+            Study::NonlinearModes(nyx_ems::NonlinearModesSpec { freq: bad, ..Default::default() }),
+            Study::NonlinearModes(nyx_ems::NonlinearModesSpec { power_w: bad, ..Default::default() }),
+            Study::Dgtd(nyx_ems::DgtdConfig { t_final: bad, ..Default::default() }),
+            Study::Dgtd(nyx_ems::DgtdConfig { cfl: bad, ..Default::default() }),
+            Study::Dgtd(nyx_ems::DgtdConfig { freqs_hz: vec![bad], ..Default::default() }),
+            Study::Fdtd(Box::new(nyx_ems::FdtdStudyConfig { run_time_s: bad, ..Default::default() })),
+            Study::Fdtd(Box::new(nyx_ems::FdtdStudyConfig { courant: bad, ..Default::default() })),
+            Study::Fdtd(Box::new(nyx_ems::FdtdStudyConfig { port_z0_ohm: bad, ..Default::default() })),
+            Study::Fdtd(Box::new({
+                let mut c = nyx_ems::FdtdStudyConfig::default();
+                c.grid.auto.wavelength_min_m = bad;
+                c
+            })),
         ];
 
         for study in studies {
@@ -374,6 +461,49 @@ fn nan_and_infinite_boundary_conditions_are_refused() {
         ] {
             let mut p = valid_emw_problem();
             p.waveports.push(wp);
+            assert!(solve(&m, &p).is_err());
+        }
+
+        for exc in [
+            nyx_ems::ExcitationSpec {
+                name: "pw_bad".into(),
+                excitation: nyx_ems::Excitation::PlaneWave {
+                    k_hat: [0.0, 0.0, -1.0],
+                    pol: [
+                        femcore::linalg::csr::c(1.0, 0.0),
+                        femcore::linalg::csr::c(0.0, 0.0),
+                        femcore::linalg::csr::c(0.0, 0.0),
+                    ],
+                    amplitude: bad,
+                    phase: 0.0,
+                    origin: [0.0; 3],
+                },
+                domains: vec![1],
+                eps_bg: femcore::linalg::csr::c(1.0, 0.0),
+                mu_bg: 1.0,
+                keep_scattered: true,
+            },
+            nyx_ems::ExcitationSpec {
+                name: "pw_bg_bad".into(),
+                excitation: nyx_ems::Excitation::PlaneWave {
+                    k_hat: [0.0, 0.0, -1.0],
+                    pol: [
+                        femcore::linalg::csr::c(1.0, 0.0),
+                        femcore::linalg::csr::c(0.0, 0.0),
+                        femcore::linalg::csr::c(0.0, 0.0),
+                    ],
+                    amplitude: 1.0,
+                    phase: 0.0,
+                    origin: [0.0; 3],
+                },
+                domains: vec![1],
+                eps_bg: femcore::linalg::csr::c(bad, 0.0),
+                mu_bg: 1.0,
+                keep_scattered: false,
+            },
+        ] {
+            let mut p = valid_emw_problem();
+            p.excitations.push(exc);
             assert!(solve(&m, &p).is_err());
         }
     }

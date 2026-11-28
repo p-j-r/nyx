@@ -28,6 +28,9 @@ pub enum JobOutput {
     /// chain failed, `failed` holds why and `results` the physics that were solved before it (they stay valid results)
     Solved {
         model: Arc<MeshedModel>,
+        /// the meshes of the physics meshed on their own (`Project::mesh_by_physics`, ADR 135), by physics code; their results are stored on
+        /// these instead of `model`
+        models: std::collections::BTreeMap<String, Arc<MeshedModel>>,
         results: Vec<SolveResult>,
         /// the chain the job solved (its targets), and the error that stopped it
         failed: Option<Error>,

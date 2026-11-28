@@ -387,7 +387,10 @@ impl Engine {
         for imp in me.imports() {
             for other in &self.project.physics {
                 if other.physics != id
-                    && self.registry.get(&other.physics).is_some_and(|q| q.exports().iter().any(|e| e.role == imp.role))
+                    && self
+                        .registry
+                        .get(&other.physics)
+                        .is_some_and(|q| q.study_exports(&other.study.kind).iter().any(|e| e.role == imp.role))
                 {
                     from.insert(other.physics.clone());
                 }
@@ -402,8 +405,15 @@ impl Engine {
         obj.insert("materials".into(), json!(self.project.materials));
         obj.insert("library".into(), json!(self.base_library_hash));
         obj.insert("mesh".into(), json!(mesh));
+        // a physics meshed on its own depends on its own settings too (only present then, so other keys are unchanged)
+        if self.project.has_own_mesh(id) {
+            obj.insert("own_mesh".into(), json!(self.project.mesh_for(id)));
+        }
         if self.project.strict_material_range {
             obj.insert("strict_material_range".into(), json!(true));
+        }
+        if let Some(cl) = &self.project.coupled_loop {
+            obj.insert("coupled_loop".into(), json!(cl));
         }
         obj.insert("imports".into(), json!(imports));
         let v = serde_json::Value::Object(obj);
@@ -446,6 +456,11 @@ impl Engine {
     pub fn result(&self, physics: &str) -> Option<(&Arc<SolveResult>, bool)> {
         let s = self.results.get(physics)?;
         Some((&s.result, self.is_stale(physics)))
+    }
+
+    /// The mesh the latest result of `physics` was solved on.
+    pub fn result_model(&self, physics: &str) -> Option<&Arc<MeshedModel>> {
+        Some(&self.results.get(physics)?.model)
     }
 
     // ----------------------------------------------------------------------------------------------------------------- jobs
@@ -577,6 +592,8 @@ impl Engine {
                 Some("this engine has no worker program (`Engine::set_worker`: nyx and nyx-mcp use themselves)")
             } else if !self.isolable {
                 Some("this engine has a registry or mesher of its own, which a worker process cannot rebuild")
+            } else if !project.mesh_by_physics.is_empty() {
+                Some("a project with per-physics meshes (`mesh_by_physics`) is solved in this process")
             } else if cfg!(not(feature = "hdf5")) {
                 Some("this build has no HDF5 support, which the worker needs to hand its results back")
             } else {
@@ -667,35 +684,35 @@ impl Engine {
                     None => None,
                 };
                 let mut warm_done: Option<crate::reuse::WarmDone> = None;
+                let mut own_models: BTreeMap<String, Arc<MeshedModel>> = BTreeMap::new();
                 let (results, failed, worker, fields_saved, post_out) = match (&shared, &remote) {
                     (_, None) => {
-                        let (next_model, mut r, f) = match &resolved {
-                            Some(rs) => {
-                                let (out, wd) = crate::reuse::with_context(rs, || {
-                                    crate::solve::run_chain_partial_amr_with(
-                                        &registry,
-                                        &project,
-                                        model.clone(),
-                                        &chain,
-                                        &library,
-                                        progress,
-                                        retain_amr_data,
-                                    )
-                                });
-                                warm_done = Some(wd);
-                                out
-                            }
-                            None => crate::solve::run_chain_partial_amr_with(
+                        let base = model.clone();
+                        let run = |progress: Arc<femcore::progress::Progress>| {
+                            let out = crate::solve::run_chain_models(
                                 &registry,
                                 &project,
-                                model.clone(),
+                                base.clone(),
                                 &chain,
                                 &library,
                                 progress,
                                 retain_amr_data,
-                            ),
+                                mesher.as_ref(),
+                            );
+                            (out.model, out.results, out.failed, out.models)
+                        };
+                        let (next_model, mut r, f, models) = match &resolved {
+                            Some(rs) => {
+                                let (out, wd) = crate::reuse::with_context(rs, || run(progress));
+                                warm_done = Some(wd);
+                                out
+                            }
+                            None => run(progress),
                         };
                         model = next_model;
+                        // the physics meshed on their own keep their own mesh (ADR 135); the others are stored on the project mesh
+                        own_models =
+                            models.into_iter().filter(|(code, _)| project.has_own_mesh(code)).collect();
                         let mut pa_out = Vec::new();
                         if f.is_none() && !post_analyses.is_empty() {
                             let mut tmp = Engine::with(registry.clone(), mesher.clone());
@@ -706,6 +723,7 @@ impl Engine {
                             for res in std::mem::take(&mut r) {
                                 let p_code = res.physics.clone();
                                 let k_code = solve_keys.get(&p_code).cloned().unwrap_or_default();
+                                let on = own_models.get(&p_code).cloned().unwrap_or_else(|| model.clone());
                                 tmp.results.insert(
                                     p_code,
                                     Stored {
@@ -713,7 +731,7 @@ impl Engine {
                                         key: k_code,
                                         job: 0,
                                         at: at_now,
-                                        model: model.clone(),
+                                        model: on,
                                         run: None,
                                     },
                                 );
@@ -724,9 +742,12 @@ impl Engine {
                                 .into_values()
                                 .map(|st| Arc::try_unwrap(st.result).unwrap_or_else(|a| (*a).clone()))
                                 .collect();
-                            let order: Vec<String> = registry
-                                .solve_order(&chain.iter().map(String::as_str).collect::<Vec<_>>())
-                                .unwrap_or_else(|_| chain.clone());
+                            let order: Vec<String> = crate::solve::project_solve_order(
+                                &registry,
+                                &project,
+                                &chain.iter().map(String::as_str).collect::<Vec<_>>(),
+                            )
+                            .unwrap_or_else(|_| chain.clone());
                             restored.sort_by_key(|res| order.iter().position(|o| o == &res.physics).unwrap_or(usize::MAX));
                             r = restored;
                             pa_out = pa_res?;
@@ -801,9 +822,12 @@ impl Engine {
                             }
                         }
                         // in the order they were solved, which the file does not keep
-                        let order: Vec<String> = registry
-                            .solve_order(&chain.iter().map(String::as_str).collect::<Vec<_>>())
-                            .unwrap_or_else(|_| chain.clone());
+                        let order: Vec<String> = crate::solve::project_solve_order(
+                            &registry,
+                            &project,
+                            &chain.iter().map(String::as_str).collect::<Vec<_>>(),
+                        )
+                        .unwrap_or_else(|_| chain.clone());
                         let mut stored = done.results;
                         stored.sort_by_key(|(code, _)| order.iter().position(|o| o == code).unwrap_or(usize::MAX));
                         (
@@ -843,7 +867,16 @@ impl Engine {
                         l.mine.set(d);
                     }
                 }
-                Ok(JobOutput::Solved { model, results, failed, worker, reuse, fields_saved, post_analyses: post_out })
+                Ok(JobOutput::Solved {
+                    model,
+                    models: own_models,
+                    results,
+                    failed,
+                    worker,
+                    reuse,
+                    fields_saved,
+                    post_analyses: post_out,
+                })
             }
         });
         match purpose {
@@ -1113,7 +1146,7 @@ impl Engine {
             }
             (
                 Pending::Solve { key, keys, project, .. },
-                Ok(JobOutput::Solved { model, results, failed, worker, fields_saved, post_analyses, .. }),
+                Ok(JobOutput::Solved { model, models, results, failed, worker, fields_saved, post_analyses, .. }),
             ) => {
                 let (cells, dim) = (model.mesh().n_cells() as u64, model.mesh().dim() as u8);
                 let mesh = model.solver_mesh();
@@ -1158,7 +1191,7 @@ impl Engine {
                         fields_saved,
                         &[],
                     );
-                    self.store_results(results, keep, id, &solved_on, None);
+                    self.store_results(results, keep, id, &solved_on, &models, None);
                     return Err(e);
                 }
                 self.learn(&project, &results, cells, dim, &worker);
@@ -1181,7 +1214,7 @@ impl Engine {
                             .filter(|p| p.is_file())
                     })
                     .map(|p| (self.stamp(), p));
-                self.store_results(results, keep, id, &solved_on, run_id);
+                self.store_results(results, keep, id, &solved_on, &models, run_id);
                 let mut answer =
                     json!({ "job": id, "state": "done", "results": summary, "run": run, "seconds": seconds });
                 if !fields_saved {
@@ -1285,27 +1318,23 @@ impl Engine {
     }
 
     /// Moves the results of job `id` that replace the stored ones (`keep` holds, per result, the key it is stored under) into the store, each
-    /// with the run that recorded it. Nothing is copied.
+    /// with the run that recorded it and the mesh it was solved on (`models` for a physics meshed on its own, else `solved_on`). Nothing is
+    /// copied.
     fn store_results(
         &mut self,
         results: Vec<SolveResult>,
         keep: Vec<Option<String>>,
         id: JobId,
         solved_on: &Arc<MeshedModel>,
+        models: &BTreeMap<String, Arc<MeshedModel>>,
         run: Option<String>,
     ) {
         for (r, key) in results.into_iter().zip(keep) {
             let Some(key) = key else { continue };
+            let model = models.get(&r.physics).unwrap_or(solved_on).clone();
             self.results.insert(
                 r.physics.clone(),
-                Stored {
-                    result: Arc::new(r),
-                    key,
-                    job: id,
-                    at: Instant::now(),
-                    model: solved_on.clone(),
-                    run: run.clone(),
-                },
+                Stored { result: Arc::new(r), key, job: id, at: Instant::now(), model, run: run.clone() },
             );
         }
     }

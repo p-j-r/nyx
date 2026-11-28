@@ -132,6 +132,8 @@ pub(crate) fn cell_tensor_mixed(
             TensorKind::Conductivity => ("k", |a| a.conductivity.as_ref()),
             TensorKind::Permittivity => ("eps_r", |a| a.permittivity.as_ref()),
             TensorKind::PermittivityIm => ("eps_r_im", |a| a.permittivity_im.as_ref()),
+            TensorKind::Permeability => ("mu_r", |a| a.permeability.as_ref()),
+            TensorKind::PermeabilityIm => ("mu_r_im", |a| a.permeability_im.as_ref()),
             TensorKind::Expansion => ("alpha", |a| a.expansion.as_ref()),
         };
     let mut by_domain: BTreeMap<i32, M3> = BTreeMap::new();

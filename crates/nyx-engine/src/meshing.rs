@@ -427,6 +427,22 @@ pub(crate) fn build_mesh_request(
 
 impl Mesher for FemcoreMesher {
     fn mesh(&self, geometry: &FeatureList, s: &MeshSettings, sizing: Option<&Sizing>) -> Result<MeshedModel, Error> {
+        let model = self.mesh_all(geometry, s, sizing)?;
+        match &s.active_domains {
+            Some(active) => model.restrict_to_active(active),
+            None => Ok(model),
+        }
+    }
+}
+
+impl FemcoreMesher {
+    /// Every region of the model meshed (`active_domains` is applied by `mesh`).
+    fn mesh_all(
+        &self,
+        geometry: &FeatureList,
+        s: &MeshSettings,
+        sizing: Option<&Sizing>,
+    ) -> Result<MeshedModel, Error> {
         use femcore::meshing::request::mesh_request_native;
         let req = build_mesh_request(s, sizing)?;
         if let Some(layers) = &s.sweep {
@@ -523,6 +539,178 @@ impl Mesher for FemcoreMesher {
 }
 
 impl MeshedModel {
+    /// A second handle on the same mesh, geometry and names (the arrays are shared, not copied): what a chain given a borrowed model
+    /// keeps in its table of the meshes each physics was solved on.
+    pub(crate) fn shallow_clone(&self) -> MeshedModel {
+        let solver = std::sync::OnceLock::new();
+        if let Some(s) = self.solver.get() {
+            let _ = solver.set(s.clone());
+        }
+        MeshedModel {
+            mesh: self.mesh.clone(),
+            eval: self.eval.clone(),
+            labels: self.labels.clone(),
+            ends: self.ends,
+            ends_3d: self.ends_3d.clone(),
+            report: self.report.clone(),
+            amr_adapted: self.amr_adapted,
+            solver,
+        }
+    }
+
+    /// The model with only the cells of the regions `active` names (region names or `name*` patterns, ADR 135): the other cells are dropped,
+    /// the labels and names of the model are kept (so a field transfer still pairs regions by name). The model itself when every cell is
+    /// already active.
+    pub fn restrict_to_active(self, active: &[String]) -> Result<MeshedModel, Error> {
+        let mut keep: Vec<i32> = vec![];
+        for pattern in active {
+            keep.extend(resolve_domains(&self.labels, pattern)?);
+        }
+        keep.sort_unstable();
+        keep.dedup();
+        let all_active = match self.mesh.as_ref() {
+            Mesh::D2(cm) => cm.label.iter().all(|l| keep.binary_search(l).is_ok()),
+            Mesh::D3(cm) => cm.label.iter().all(|l| keep.binary_search(l).is_ok()),
+        };
+        if all_active {
+            return Ok(self);
+        }
+        let mut mesh = femcore::transfer::restrict_to_domains(&self.mesh, &keep)
+            .map_err(|e| Error::invalid(format!("active_domains {active:?}: {e}")))?;
+        match &mut mesh {
+            Mesh::D2(cm) => {
+                let existing: std::collections::HashSet<[u32; 2]> = (0..cm.n_facets())
+                    .map(|f| {
+                        let fv = cm.facet(f);
+                        [fv[0].min(fv[1]), fv[0].max(fv[1])]
+                    })
+                    .collect();
+                let missing: Vec<[u32; 2]> = cm
+                    .boundary_faces_ordered()
+                    .into_iter()
+                    .filter_map(|fv| {
+                        if fv.len() == 2 {
+                            let k = [fv[0].min(fv[1]), fv[0].max(fv[1])];
+                            (!existing.contains(&k)).then_some([fv[0], fv[1]])
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !missing.is_empty() {
+                    let b = self.eval.bounds();
+                    let scale = (b.hi[0] - b.lo[0]).max(b.hi[2] - b.lo[2]).max(1e-30);
+                    let max_dev = 1e-4 * scale;
+                    let tol = 1e-6 * scale;
+                    let mut chains: Vec<(usize, i32, Vec<[f64; 2]>)> = Vec::new();
+                    for (i, ed) in self.eval.edges().iter().enumerate() {
+                        let Some(label) = self.labels.label_of_edge(i as u32) else {
+                            continue;
+                        };
+                        let mut pts: Vec<[f64; 2]> = self
+                            .eval
+                            .discretize_edge(i as u32, geom::query::DiscretizeOpts { max_dev, max_len: scale })
+                            .into_iter()
+                            .map(|(_, p)| [p[0], p[2]])
+                            .collect();
+                        if let Some(first) = pts.first_mut() {
+                            let p0 = self.eval.vertices()[ed.v0 as usize].p;
+                            *first = [p0[0], p0[2]];
+                        }
+                        if let Some(last) = pts.last_mut() {
+                            let p1 = self.eval.vertices()[ed.v1 as usize].p;
+                            *last = [p1[0], p1[2]];
+                        }
+                        chains.push((i, label, pts));
+                    }
+                    let dist_seg = |p: [f64; 2], a: [f64; 2], b: [f64; 2]| -> f64 {
+                        let (ab, ap) = ([b[0] - a[0], b[1] - a[1]], [p[0] - a[0], p[1] - a[1]]);
+                        let l2 = ab[0] * ab[0] + ab[1] * ab[1];
+                        let t = if l2 > 0.0 { ((ap[0] * ab[0] + ap[1] * ab[1]) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                        ((a[0] + t * ab[0] - p[0]).powi(2) + (a[1] + t * ab[1] - p[1]).powi(2)).sqrt()
+                    };
+                    for [a, b_v] in missing {
+                        let pa = cm.points[a as usize];
+                        let pb = cm.points[b_v as usize];
+                        let mid = [0.5 * (pa[0] + pb[0]), 0.5 * (pa[1] + pb[1])];
+                        let mut best: Option<(f64, usize, i32)> = None;
+                        for &(part, label, ref pts) in &chains {
+                            for seg in pts.windows(2) {
+                                let d = dist_seg(mid, seg[0], seg[1]);
+                                if best.is_none_or(|(bd, bp, _)| d < bd - tol || (d <= bd + tol && part >= bp)) {
+                                    best = Some((d, part, label));
+                                }
+                            }
+                        }
+                        if let Some((_, _, lab)) = best {
+                            cm.push_facet(&[a, b_v], lab);
+                        }
+                    }
+                }
+            }
+            Mesh::D3(cm) => {
+                let fkey = |vs: &[u32]| -> [u32; 4] {
+                    let mut k = [u32::MAX; 4];
+                    k[..vs.len().min(4)].copy_from_slice(&vs[..vs.len().min(4)]);
+                    k[..vs.len().min(4)].sort_unstable();
+                    k
+                };
+                let existing: std::collections::HashSet<[u32; 4]> =
+                    (0..cm.n_facets()).map(|f| fkey(cm.facet(f))).collect();
+                let missing: Vec<Vec<u32>> =
+                    cm.boundary_faces_ordered().into_iter().filter(|fv| !existing.contains(&fkey(fv))).collect();
+                if !missing.is_empty() && self.eval.list.dim == 3 {
+                    let cx = self.eval.complex();
+                    let nf = cx.facet_count();
+                    for fv in missing {
+                        let mut mid = [0.0_f64; 3];
+                        for &v in &fv {
+                            let p = cm.points[v as usize];
+                            mid[0] += p[0] / (fv.len() as f64);
+                            mid[1] += p[1] / (fv.len() as f64);
+                            mid[2] += p[2] / (fv.len() as f64);
+                        }
+                        let mut best: Option<(f64, i32)> = None;
+                        for fi in 0..nf as u32 {
+                            let Some(lab) = self.labels.label_of_edge(fi) else {
+                                continue;
+                            };
+                            let q = cx.facet_project(fi, mid);
+                            let d =
+                                ((q[0] - mid[0]).powi(2) + (q[1] - mid[1]).powi(2) + (q[2] - mid[2]).powi(2)).sqrt();
+                            if best.is_none_or(|(bd, _)| d < bd) {
+                                best = Some((d, lab));
+                            }
+                        }
+                        if let Some((_, lab)) = best {
+                            cm.push_facet(&fv, lab);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(MeshedModel {
+            mesh: Arc::new(mesh),
+            eval: self.eval,
+            labels: self.labels,
+            ends: self.ends,
+            ends_3d: self.ends_3d,
+            report: None,
+            amr_adapted: self.amr_adapted,
+            solver: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// The canonical names of the regions by label (what a cross-mesh transfer pairs cells by).
+    pub fn domain_name_map(&self) -> std::collections::BTreeMap<i32, String> {
+        self.regions().into_iter().collect()
+    }
+
+    /// The canonical names of the boundaries by label.
+    pub fn boundary_name_map(&self) -> std::collections::BTreeMap<i32, String> {
+        self.boundary_names().into_iter().collect()
+    }
+
     /// Selectors, simplest first, that pick exactly the boundaries with these numbers; empty when no selector does. What the window offers
     /// after a click on the mesh.
     pub fn suggest(&self, labels: &[i32]) -> Vec<String> {

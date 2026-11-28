@@ -906,6 +906,7 @@ fn import_rii_yaml(raw: &str, opts: &ImportOptions<'_>) -> Result<String, Materi
                 dn_dt_einstein_theta: None,
                 dn_dt_range: None,
             }),
+            gyrotropy: None,
         }),
         ..Default::default()
     };

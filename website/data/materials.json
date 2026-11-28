@@ -1,5 +1,5 @@
 {
-  "count": 41,
+  "count": 42,
   "kinds": [
     "amorphous",
     "crystalline",
@@ -667,6 +667,55 @@
       ]
     },
     {
+      "id": "graphene",
+      "name": "graphene",
+      "kind": "semiconductor",
+      "point_group": "6/mmm",
+      "reference_temperature": "300 K",
+      "density": "2267 kg/m^3",
+      "description": "Monolayer graphene (2D zero-thickness Dirac semimetal sheet, Kubo intraband + interband conductivity)",
+      "capabilities": [
+        "thermal",
+        "electrical",
+        "sheet_2d"
+      ],
+      "sources": [
+        {
+          "cite": "L. A. Falkovsky and A. A. Varlamov, Space-time dispersion of graphene conductivity, Eur. Phys. J. B 56, 281-284 (2007)",
+          "doi": "10.1140/epjb/e2007-00142-3",
+          "verified": "2026-04-17"
+        },
+        {
+          "cite": "V. P. Gusynin, S. G. Sharapov, and J. P. Carbotte, Magneto-optical conductivity in graphene, J. Phys.: Condens. Matter 19, 026222 (2007)",
+          "doi": "10.1088/0953-8984/19/2/026222",
+          "verified": "2026-04-17"
+        },
+        {
+          "cite": "G. W. Hanson, Dyadic Green's functions and guided surface waves for a surface conductivity model of graphene, J. Appl. Phys. 103, 064302 (2008)",
+          "doi": "10.1063/1.2891452",
+          "verified": "2026-04-17"
+        },
+        {
+          "cite": "APPROXIMATE equivalent bulk graphite/graphene anisotropic static permittivity and DC conductivity baseline at 300 K (use [sheet_2d] Kubo conductivity for zero-thickness monolayer sheets)"
+        },
+        {
+          "cite": "G. W. Hanson, Dyadic Green's functions and guided surface waves for a surface conductivity model of graphene, J. Appl. Phys. 103, 064302 (2008), Eqs. (7)-(11)",
+          "doi": "10.1063/1.2891452",
+          "verified": "2026-04-17"
+        },
+        {
+          "cite": "M. Liu et al., A graphene-based broadband optical modulator, Nature 474, 64-67 (2011)",
+          "doi": "10.1038/nature10067",
+          "verified": "2026-04-17"
+        },
+        {
+          "cite": "A. A. Balandin et al., Superior thermal conductivity of single-layer graphene, Nano Lett. 8, 902-907 (2008)",
+          "doi": "10.1021/nl0731872",
+          "verified": "2026-04-17"
+        }
+      ]
+    },
+    {
       "id": "lithium_niobate",
       "name": "lithium_niobate",
       "kind": "crystalline",
@@ -682,7 +731,8 @@
         "piezoelectric",
         "photoelastic",
         "electro_optic",
-        "viscoelastic"
+        "viscoelastic",
+        "nonlinear"
       ],
       "sources": [
         {
@@ -712,6 +762,17 @@
         },
         {
           "cite": "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 second- and third-order nonlinear optical parameters (Shoji et al. 1997; DeSalvo et al. 1996)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 second-order d_iJ tensor at 1064 nm (I. Shoji, T. Kondo, A. Kitamoto, M. Shirane, R. Ito, Absolute scale of second-order nonlinear-optical coefficients, J. Opt. Soc. Am. B 14, 2268-2294 (1997); D. A. Roberts, IEEE J. Quantum Electron. 28, 2057-2074 (1992))",
+          "doi": "10.1364/JOSAB.14.002268"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 electronic Kerr index n_2 ~ 1.8e-19 m^2/W in the telecom band (R. DeSalvo et al., IEEE J. Quantum Electron. 32, 1324-1333 (1996); M. Wang et al., Opt. Express 27, 24416 (2019))",
+          "doi": "10.1109/3.511545"
         },
         {
           "cite": "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, as in the refractiveindex.info database (LiNbO3, Zelmon-o and Zelmon-e, CC0)",
@@ -753,7 +814,8 @@
         "piezoelectric",
         "photoelastic",
         "electro_optic",
-        "viscoelastic"
+        "viscoelastic",
+        "nonlinear"
       ],
       "sources": [
         {
@@ -768,6 +830,17 @@
         },
         {
           "cite": "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 second- and third-order nonlinear optical parameters (Shoji et al. 1997; DeSalvo et al. 1996)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 second-order d_iJ tensor at 1064 nm (I. Shoji, T. Kondo, A. Kitamoto, M. Shirane, R. Ito, Absolute scale of second-order nonlinear-optical coefficients, J. Opt. Soc. Am. B 14, 2268-2294 (1997); D. A. Roberts, IEEE J. Quantum Electron. 28, 2057-2074 (1992))",
+          "doi": "10.1364/JOSAB.14.002268"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 electronic Kerr index n_2 ~ 1.8e-19 m^2/W in the telecom band (R. DeSalvo et al., IEEE J. Quantum Electron. 32, 1324-1333 (1996); M. Wang et al., Opt. Express 27, 24416 (2019))",
+          "doi": "10.1109/3.511545"
         },
         {
           "cite": "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, as in the refractiveindex.info database (LiNbO3, Zelmon-o and Zelmon-e, CC0)",
@@ -806,7 +879,8 @@
         "piezoelectric",
         "photoelastic",
         "electro_optic",
-        "viscoelastic"
+        "viscoelastic",
+        "nonlinear"
       ],
       "sources": [
         {
@@ -832,6 +906,17 @@
         },
         {
           "cite": "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 second- and third-order nonlinear optical parameters (Shoji et al. 1997; DeSalvo et al. 1996)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 second-order d_iJ tensor at 1064 nm (I. Shoji, T. Kondo, A. Kitamoto, M. Shirane, R. Ito, Absolute scale of second-order nonlinear-optical coefficients, J. Opt. Soc. Am. B 14, 2268-2294 (1997); D. A. Roberts, IEEE J. Quantum Electron. 28, 2057-2074 (1992))",
+          "doi": "10.1364/JOSAB.14.002268"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 electronic Kerr index n_2 ~ 1.8e-19 m^2/W in the telecom band (R. DeSalvo et al., IEEE J. Quantum Electron. 32, 1324-1333 (1996); M. Wang et al., Opt. Express 27, 24416 (2019))",
+          "doi": "10.1109/3.511545"
         },
         {
           "cite": "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, refractiveindex.info (MgO-LiNbO3, Zelmon-o and Zelmon-e, CC0)",
@@ -1324,6 +1409,7 @@
         "optical",
         "photoelastic",
         "viscoelastic",
+        "nonlinear",
         "interfaces"
       ],
       "sources": [
@@ -1346,6 +1432,10 @@
         },
         {
           "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si at 1550 nm: Kerr n_2 ~ 4.5e-18 m^2/W and two-photon absorption beta_TPA ~ 5.0e-12 m/W (0.5 cm/GW, A. D. Bristow, N. Rotenberg, H. M. van Driel, Appl. Phys. Lett. 90, 191104 (2007); Q. Lin, O. J. Painter, G. P. Agrawal, Opt. Express 15, 16604-16644 (2007)), Soref & Bennett (IEEE J. Quantum Electron. 23, 123 (1987)) linearized free-carrier absorption sigma_FCA = 1.45e-21 m^2 and dispersion k_FCD ~ -1.35e-27 m^3, with representative SOI waveguide carrier lifetime tau_c ~ 1 ns",
+          "doi": "10.1063/1.2737359"
         },
         {
           "cite": "H. H. Li, Refractive index of silicon and germanium and its wavelength and temperature derivatives, J. Phys. Chem. Ref. Data 9, 561 (1980); table for 293 K as in the refractiveindex.info database (Si, Li-293K, CC0)",
@@ -1453,6 +1543,7 @@
         "optical",
         "photoelastic",
         "viscoelastic",
+        "nonlinear",
         "interfaces"
       ],
       "sources": [
@@ -1476,6 +1567,10 @@
         },
         {
           "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si at 1550 nm: Kerr n_2 ~ 4.5e-18 m^2/W and two-photon absorption beta_TPA ~ 5.0e-12 m/W (0.5 cm/GW, A. D. Bristow, N. Rotenberg, H. M. van Driel, Appl. Phys. Lett. 90, 191104 (2007); Q. Lin, O. J. Painter, G. P. Agrawal, Opt. Express 15, 16604-16644 (2007)), Soref & Bennett (IEEE J. Quantum Electron. 23, 123 (1987)) linearized free-carrier absorption sigma_FCA = 1.45e-21 m^2 and dispersion k_FCD ~ -1.35e-27 m^3, with representative SOI waveguide carrier lifetime tau_c ~ 1 ns",
+          "doi": "10.1063/1.2737359"
         },
         {
           "cite": "H. H. Li, Refractive index of silicon and germanium and its wavelength and temperature derivatives, J. Phys. Chem. Ref. Data 9, 561 (1980); table for 293 K as in the refractiveindex.info database (Si, Li-293K, CC0)",
@@ -1519,7 +1614,8 @@
         "thermal",
         "dielectric",
         "optical",
-        "photoelastic"
+        "photoelastic",
+        "nonlinear"
       ],
       "sources": [
         {
@@ -1531,6 +1627,10 @@
         },
         {
           "cite": "APPROXIMATE typical LPCVD stoichiometric Si3N4 thin-film modulus (250-290 GPa reported across MEMS handbooks depending on residual tensile stress ~0.9-1.2 GPa and Si:N ratio)"
+        },
+        {
+          "cite": "APPROXIMATE stoichiometric LPCVD Si3N4 Kerr refractive index n_2 = 2.4e-19 m^2/W at 1550 nm with negligible two-photon absorption below the ~5 eV bandgap (K. Ikeda, R. E. Saperstein, N. Alic, Y. Fainman, Opt. Express 16, 12987-12994 (2008); D. J. Moss, R. Morandotti, A. L. Gaeta, M. Lipson, Nat. Photonics 7, 597-607 (2013))",
+          "doi": "10.1364/OE.16.012987"
         },
         {
           "cite": "K. Luke, Y. Okawachi, M. R. E. Lamont, A. L. Gaeta, M. Lipson, Broadband mid-infrared frequency comb generation in a Si3N4 microresonator, Opt. Lett. 40, 4823-4826 (2015): Sellmeier fit of a 340 nm film on 3.1 um thermal SiO2, as in the refractiveindex.info database (Si3N4, Luke, CC0). Film index depends on deposition (stoichiometry): use your own ellipsometry for quantitative work",
@@ -1594,7 +1694,8 @@
         "thermal",
         "dielectric",
         "optical",
-        "photoelastic"
+        "photoelastic",
+        "nonlinear"
       ],
       "sources": [
         {
@@ -1608,6 +1709,10 @@
         },
         {
           "cite": "APPROXIMATE typical LPCVD stoichiometric Si3N4 thin-film modulus (250-290 GPa reported across MEMS handbooks depending on residual tensile stress ~0.9-1.2 GPa and Si:N ratio)"
+        },
+        {
+          "cite": "APPROXIMATE stoichiometric LPCVD Si3N4 Kerr refractive index n_2 = 2.4e-19 m^2/W at 1550 nm with negligible two-photon absorption below the ~5 eV bandgap (K. Ikeda, R. E. Saperstein, N. Alic, Y. Fainman, Opt. Express 16, 12987-12994 (2008); D. J. Moss, R. Morandotti, A. L. Gaeta, M. Lipson, Nat. Photonics 7, 597-607 (2013))",
+          "doi": "10.1364/OE.16.012987"
         },
         {
           "cite": "H. R. Philipp, Optical properties of silicon nitride, J. Electrochem. Soc. 120, 295-300 (1973); Sellmeier fit by T. Baak, Appl. Opt. 21, 1069-1072 (1982), refractiveindex.info (Si3N4, Philipp, CC0)",
@@ -1643,6 +1748,7 @@
         "optical",
         "photoelastic",
         "viscoelastic",
+        "nonlinear",
         "interfaces"
       ],
       "sources": [
@@ -1667,6 +1773,10 @@
         },
         {
           "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si at 1550 nm: Kerr n_2 ~ 4.5e-18 m^2/W and two-photon absorption beta_TPA ~ 5.0e-12 m/W (0.5 cm/GW, A. D. Bristow, N. Rotenberg, H. M. van Driel, Appl. Phys. Lett. 90, 191104 (2007); Q. Lin, O. J. Painter, G. P. Agrawal, Opt. Express 15, 16604-16644 (2007)), Soref & Bennett (IEEE J. Quantum Electron. 23, 123 (1987)) linearized free-carrier absorption sigma_FCA = 1.45e-21 m^2 and dispersion k_FCD ~ -1.35e-27 m^3, with representative SOI waveguide carrier lifetime tau_c ~ 1 ns",
+          "doi": "10.1063/1.2737359"
         },
         {
           "cite": "E. D. Palik (Ed.), Handbook of Optical Constants of Solids (Academic Press, 1985), Si.nk compilation; UV-VIS (0.25-0.83 um) from D. E. Aspnes and A. A. Studna, Phys. Rev. B 27, 985-1009 (1983); transparent IR rows set k=0",
@@ -1706,6 +1816,7 @@
         "optical",
         "photoelastic",
         "viscoelastic",
+        "nonlinear",
         "interfaces"
       ],
       "sources": [
@@ -1730,6 +1841,10 @@
         },
         {
           "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si at 1550 nm: Kerr n_2 ~ 4.5e-18 m^2/W and two-photon absorption beta_TPA ~ 5.0e-12 m/W (0.5 cm/GW, A. D. Bristow, N. Rotenberg, H. M. van Driel, Appl. Phys. Lett. 90, 191104 (2007); Q. Lin, O. J. Painter, G. P. Agrawal, Opt. Express 15, 16604-16644 (2007)), Soref & Bennett (IEEE J. Quantum Electron. 23, 123 (1987)) linearized free-carrier absorption sigma_FCA = 1.45e-21 m^2 and dispersion k_FCD ~ -1.35e-27 m^3, with representative SOI waveguide carrier lifetime tau_c ~ 1 ns",
+          "doi": "10.1063/1.2737359"
         },
         {
           "cite": "C. D. Salzberg and J. J. Villa, J. Opt. Soc. Am. 47, 244-246 (1957); Sellmeier parameterization by B. Tatian, Appl. Opt. 23, 4477-4485 (1984), 26 degC, refractiveindex.info (Si, Salzberg, CC0)",

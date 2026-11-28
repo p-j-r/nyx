@@ -98,6 +98,30 @@ impl AxiMaterial {
         Ok(AxiMaterial { eps, mu, eps_c3, mu_inv_c3, pml })
     }
 
+    /// Like [`Self::from_materials_at_freq`], evaluating cell-wise permittivity through [`Problem::cell_complex_permittivity`]
+    /// so thermo-optic, electro-optic, and photoelastic perturbations are included.
+    pub fn from_problem_at_freq(mesh: &Discretisation, problem: &Problem, f_ref: f64) -> Result<AxiMaterial, String> {
+        let nc = mesh.n_cells();
+        let tens = problem.cell_complex_permittivity(mesh)?;
+        let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
+        let mut eps = Vec::with_capacity(nc);
+        let mut mu = Vec::with_capacity(nc);
+        let mut eps_c3 = Vec::with_capacity(nc);
+        let mut mu_inv_c3 = Vec::with_capacity(nc);
+        for ci in 0..nc {
+            let re_rz = plane_tensor(&tens[ci].0, 2);
+            let im_rz = plane_tensor(&tens[ci].1, 2);
+            let ec = complex_eps_c3(&re_rz, &im_rz);
+            eps.push([ec[0][0], ec[1][1], ec[2][2]]);
+            mu.push([c(mur[ci], 0.0); 3]);
+            eps_c3.push(ec);
+            mu_inv_c3.push(iso_mu_inv_c3(mur[ci]));
+        }
+        let pml_table = EmPmlTable::from_simplex(mesh, &problem.materials, f_ref, true, false);
+        let pml = pml_table.has_any().then_some(pml_table);
+        Ok(AxiMaterial { eps, mu, eps_c3, mu_inv_c3, pml })
+    }
+
     /// Attaches a curvilinear/Cartesian PML table (`EmPmlTable`) so assembly and field evaluation
     /// sample `s_theta = r_tilde / r` at Gauss quadrature points (R6d).
     pub fn with_pml(mut self, mesh: &Discretisation, pml: &std::collections::BTreeMap<i32, Pml>) -> AxiMaterial {
@@ -315,6 +339,22 @@ pub fn assemble_axisym_with_bcs(
     ibc_bcs: &[SurfaceImpedanceBc],
     pmc_labels: &[i32],
 ) -> Result<AxiAssembly, String> {
+    assemble_axisym_with_bcs_and_sheets(mesh, mat, m, order, f_search, pec_labels, ibc_bcs, &[], None, pmc_labels)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_axisym_with_bcs_and_sheets(
+    mesh: &Discretisation,
+    mat: &AxiMaterial,
+    m: f64,
+    order: usize,
+    f_search: f64,
+    pec_labels: &[i32],
+    ibc_bcs: &[SurfaceImpedanceBc],
+    sheet_bcs: &[crate::problem::Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    pmc_labels: &[i32],
+) -> Result<AxiAssembly, String> {
     if mesh.has_curved() {
         return Err(
             "curved meshes are not supported by simplex axisymmetric kernels; use mixed/isoparametric path or a straight mesh"
@@ -411,12 +451,17 @@ pub fn assemble_axisym_with_bcs(
     }
 
     add_ibc_2d_axisym(mesh, order, f_search, pec_labels, ibc_bcs, &mut a_coo)?;
+    crate::ibc::add_sheet2d_2d_axisym(mesh, order, f_search, pec_labels, sheet_bcs, imported_potential, &mut a_coo)?;
     let a_full: CCsr = a_coo.to_csr();
     let b_full: CCsr = b_coo.to_csr();
 
     // Separate exterior symmetry-axis facets (`r = 0`) from exterior PEC walls!
     let exterior = mesh.exterior_facets();
-    let ibc_labels: Vec<i32> = ibc_bcs.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let ibc_labels: Vec<i32> = ibc_bcs
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(sheet_bcs.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
     let mut pec_edges = Vec::new();
     let mut pec_nodes = Vec::new();
     let mut axis_edges = Vec::new();
@@ -592,8 +637,8 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
     if n_modes < 1 {
         return Err("at least one mode is needed".into());
     }
-    let mat = AxiMaterial::from_materials_at_freq(mesh, &problem.materials, f_search)?;
-    let asm = assemble_axisym_with_bcs(
+    let mat = AxiMaterial::from_problem_at_freq(mesh, problem, f_search)?;
+    let asm = assemble_axisym_with_bcs_and_sheets(
         mesh,
         &mat,
         azimuthal_order as f64,
@@ -601,6 +646,8 @@ pub fn solve_axisymmetric(mesh: &Discretisation, problem: &Problem) -> Result<So
         f_search,
         &problem.pec,
         &problem.surface_impedance,
+        &problem.sheet_2d,
+        problem.imported_potential.as_deref(),
         &problem.pmc,
     )?;
     let modes = solve_axisym_pairs(&asm, f_search, n_modes)?;
@@ -831,11 +878,26 @@ pub fn assemble_axisym_mixed(
     }
 
     add_ibc_2d_axisym_mixed(mesh, &ned, &phi_map, f_search, &problem.pec, &problem.surface_impedance, &mut a_coo)?;
+    crate::ibc::add_sheet2d_2d_axisym_mixed(
+        mesh,
+        &ned,
+        &phi_map,
+        f_search,
+        &problem.pec,
+        &problem.sheet_2d,
+        problem.imported_potential.as_deref(),
+        &mut a_coo,
+    )?;
     let a_full = a_coo.to_csr();
     let b_full = b_coo.to_csr();
 
     let nv = mesh.n_points();
-    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let ibc_labels: Vec<i32> = problem
+        .surface_impedance
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(problem.sheet_2d.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
     let mut fixed_set = std::collections::BTreeSet::new();
 
     for f in 0..mesh.n_facets() {

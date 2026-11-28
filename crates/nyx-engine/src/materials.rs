@@ -162,7 +162,7 @@ pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
     use nyx_physics::ParamKind;
     let studies = p.studies();
     let sd = studies.iter().find(|s| s.kind == spec.study.kind)?;
-    if spec.study.kind == "driven" {
+    if matches!(spec.study.kind.as_str(), "driven" | "dgtd" | "fdtd") {
         if let Some(arr) = spec.study.params.get("freqs_hz").and_then(Value::as_array) {
             let mut lo = f64::INFINITY;
             let mut hi = f64::NEG_INFINITY;
@@ -193,6 +193,11 @@ pub fn study_frequency(p: &dyn Physics, spec: &ProblemSpec) -> Option<f64> {
         };
         if let (Some(f_min), Some(f_max)) = (param_num("f_min"), param_num("f_max")) {
             return Some(0.5 * (f_min + f_max));
+        }
+        if spec.study.kind == "fdtd" {
+            if let Some(lam) = param_num("wavelength_min") {
+                return Some(299_792_458.0 / lam);
+            }
         }
     }
     if let Some(d) = sd.params.iter().find(|d| d.unit == "Hz") {
@@ -250,6 +255,7 @@ pub(crate) fn describe(m: &MaterialSpec) -> Value {
         "photoelastic": m.photoelastic.is_some(),
         "electro_optic": m.electro_optic.is_some(),
         "viscoelastic": m.viscoelastic.is_some(),
+        "nonlinear": m.nonlinear.is_some(),
         "interfaces": !m.interfaces.is_empty(),
         "toml": m.to_toml(),
     })
@@ -296,6 +302,7 @@ impl Engine {
                 "photoelastic": m.photoelastic.is_some(),
                 "electro_optic": m.electro_optic.is_some(),
                 "viscoelastic": m.viscoelastic.is_some(),
+                "nonlinear": m.nonlinear.is_some(),
             }))
             .collect::<Vec<_>>()))
     }
@@ -454,6 +461,55 @@ impl Engine {
             let eta_mat =
                 if euler != [0.0; 3] { femcore::material::rotate_m6_textbook(&ve.matrix, euler) } else { ve.matrix };
             out.insert("viscoelastic".into(), json!({ "eta_pa_s": eta_mat, "cryo_qm_floor": ve.cryo_qm_floor }));
+        }
+        if let Some(nl) = &m.nonlinear {
+            let n0_ref = opt_lambda
+                .and_then(|lam| m.optical.as_ref().and_then(|o| o.nk(0, lam, t_k).ok().map(|v| v.0)))
+                .or_else(|| m.permittivity_clamped().map(|e| e[0][0].max(1.0).sqrt()))
+                .unwrap_or(1.0);
+            let mut nl_obj = serde_json::Map::new();
+            if let Some(tr) = nl.t_range {
+                nl_obj.insert("t_range_k".into(), json!(tr));
+            }
+            if let Some(c2) = &nl.chi2 {
+                nl_obj.insert(
+                    "chi2".into(),
+                    json!({
+                        "wavelength_m": c2.wavelength.or(nl.wavelength),
+                        "d_global_m_per_v": c2.d_global(euler),
+                        "broken_centrosymmetry": c2.broken_centrosymmetry,
+                    }),
+                );
+            }
+            if let Some(qpm) = &nl.qpm {
+                nl_obj.insert(
+                    "qpm".into(),
+                    json!({
+                        "sign": qpm.sign,
+                        "period_m": qpm.period,
+                        "axis": qpm.axis,
+                        "duty_cycle": qpm.duty_cycle,
+                        "phase_offset_m": qpm.phase_offset,
+                    }),
+                );
+            }
+            if let Some(c3) = &nl.chi3 {
+                let (a_mt, b_mt) = c3.isotropic_ab(n0_ref);
+                nl_obj.insert(
+                    "chi3".into(),
+                    json!({
+                        "wavelength_m": c3.wavelength.or(nl.wavelength),
+                        "n_2_m2_per_w": c3.n_2,
+                        "a_mt_m2_per_v2": a_mt,
+                        "b_mt_m2_per_v2": b_mt,
+                        "beta_tpa_m_per_w": c3.beta_tpa,
+                        "sigma_fca_m2": c3.sigma_fca,
+                        "k_fcd_m3": c3.k_fcd,
+                        "tau_c_s": c3.tau_c,
+                    }),
+                );
+            }
+            out.insert("nonlinear".into(), Value::Object(nl_obj));
         }
 
         // Superconducting BCS evaluation if [superconducting] is present

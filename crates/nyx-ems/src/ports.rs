@@ -1247,7 +1247,13 @@ pub fn assemble_waveports_3d(
             });
         }
 
-        // Assemble 3D waveport boundary matrix W_p and modal vector b_p
+        // Assemble 3D waveport boundary matrix W_p and modal vector b_p.
+        // For a single-mode face (K = 1), W_1 = M_Gamma. When K > 1 waveports share the same face,
+        // W_m = (1/K) M_Gamma + b_m b_m^T - (1/K) sum_{r=1}^K b_r b_r^T (applied below after all ports
+        // on the face are assembled) so W_m e_n = delta_{mn} b_n on every tracked mode while keeping
+        // full-rank absorbing admittance on the orthogonal complement.
+        let shared_count = waveport_bcs.iter().filter(|other| other.labels == bc.labels).count();
+        let inv_k = 1.0 / (shared_count.max(1) as f64);
         let mut w_coo = Coo::new(n, n);
         let mut b_full = vec![0.0; n];
         for (c_idx, eval) in tri_evals.iter().enumerate() {
@@ -1263,8 +1269,9 @@ pub fn assemble_waveports_3d(
                 let w_imu = wq * imu;
                 for a in 0..nb {
                     b_full[bnd_dofs[a]] += w_imu * dot3(pq[a], eq);
+                    let w_scale = w_imu * inv_k;
                     for b in 0..nb {
-                        loc_w[a * nb + b] += w_imu * dot3(pq[a], pq[b]);
+                        loc_w[a * nb + b] += w_scale * dot3(pq[a], pq[b]);
                     }
                 }
             }
@@ -1287,6 +1294,34 @@ pub fn assemble_waveports_3d(
             eigen_residuals,
             warnings,
         });
+    }
+
+    // Complete W_m = (1/K) M_Gamma + b_m b_m^T - (1/K) sum_{r=1}^K b_r b_r^T on shared multi-mode waveport faces:
+    let n_wp = ports.len();
+    for i in 0..n_wp {
+        let same: Vec<usize> = (0..n_wp).filter(|&j| ports[j].bc.labels == ports[i].bc.labels).collect();
+        if same.len() <= 1 {
+            continue;
+        }
+        let inv_k = 1.0 / (same.len() as f64);
+        let mut coo = Coo::new(n, n);
+        for r in 0..n {
+            let (cols, vals) = ports[i].w_full.row(r);
+            for (&c_idx, &v) in cols.iter().zip(vals) {
+                coo.push(r, c_idx as usize, v);
+            }
+        }
+        for &j in &same {
+            let coeff = if j == i { 1.0 - inv_k } else { -inv_k };
+            let nz: Vec<(usize, f64)> =
+                ports[j].b_full.iter().copied().enumerate().filter(|&(_, v)| v.abs() > 0.0).collect();
+            for &(r, br) in &nz {
+                for &(cc, bc_val) in &nz {
+                    coo.push(r, cc, coeff * br * bc_val);
+                }
+            }
+        }
+        ports[i].w_full = coo.to_csr();
     }
 
     Ok(ports)

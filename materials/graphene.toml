@@ -1,0 +1,41 @@
+format = 2
+name = "graphene"
+description = "Monolayer graphene (2D zero-thickness Dirac semimetal sheet, Kubo intraband + interband conductivity)"
+kind = "semiconductor"
+point_group = "6/mmm"
+reference_temperature = "300 K"
+density = "2267 kg/m^3"
+
+source = [
+    { cite = "L. A. Falkovsky and A. A. Varlamov, Space-time dispersion of graphene conductivity, Eur. Phys. J. B 56, 281-284 (2007)", doi = "10.1140/epjb/e2007-00142-3", verified = "2026-04-17" },
+    { cite = "V. P. Gusynin, S. G. Sharapov, and J. P. Carbotte, Magneto-optical conductivity in graphene, J. Phys.: Condens. Matter 19, 026222 (2007)", doi = "10.1088/0953-8984/19/2/026222", verified = "2026-04-17" },
+    { cite = "G. W. Hanson, Dyadic Green's functions and guided surface waves for a surface conductivity model of graphene, J. Appl. Phys. 103, 064302 (2008)", doi = "10.1063/1.2891452", verified = "2026-04-17" },
+]
+
+[sheet_2d]
+source = [
+    { cite = "G. W. Hanson, Dyadic Green's functions and guided surface waves for a surface conductivity model of graphene, J. Appl. Phys. 103, 064302 (2008), Eqs. (7)-(11)", doi = "10.1063/1.2891452", verified = "2026-04-17" },
+    { cite = "M. Liu et al., A graphene-based broadband optical modulator, Nature 474, 64-67 (2011)", doi = "10.1038/nature10067", verified = "2026-04-17" },
+]
+model = "kubo_graphene"
+mu_c = "0.3 eV"
+tau = "0.5 ps"
+temperature = "300 K"
+v_f = "1.0e6 m/s"
+b_0 = "0.0 T"
+n_layers = 1.0
+T_range = [1.0, 1000.0]
+
+[thermal]
+source = [
+    { cite = "A. A. Balandin et al., Superior thermal conductivity of single-layer graphene, Nano Lett. 8, 902-907 (2008)", doi = "10.1021/nl0731872", verified = "2026-04-17" },
+]
+conductivity = { perp = "3000 W/(m*K)", par = "6 W/(m*K)" }
+specific_heat = "710 J/(kg*K)"
+expansion = { perp = "-7.0e-6 1/K", par = "25.0e-6 1/K" }
+
+[electrical]
+permittivity = { perp = 6.9, par = 2.5 }
+permeability = 1.0
+conductivity = { perp = "1.0e6 S/m", par = "100 S/m" }
+source = { cite = "APPROXIMATE equivalent bulk graphite/graphene anisotropic static permittivity and DC conductivity baseline at 300 K (use [sheet_2d] Kubo conductivity for zero-thickness monolayer sheets)" }

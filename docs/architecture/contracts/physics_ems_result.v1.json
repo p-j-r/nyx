@@ -262,6 +262,156 @@
     ],
     "study": "cavity"
   },
+  "dgtd": {
+    "physics": "ems",
+    "scalars": [
+      "dt_min (s)",
+      "dt_max (s)",
+      "lts_tiers",
+      "lts_work_speedup",
+      "energy_initial (J)",
+      "energy_final (J)",
+      "dgtd time-domain data",
+      "field frame"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": true,
+        "label_prefix": "f = 10.0000 GHz"
+      }
+    ],
+    "study": "dgtd"
+  },
+  "eme": {
+    "physics": "ems",
+    "scalars": [
+      "unique_slices",
+      "total_segments",
+      "passivity_max_sigma",
+      "reciprocity_rel_err",
+      "R_p1",
+      "T_21",
+      "phase_S21_rad",
+      "slice_1_neff1_re",
+      "slice_1_neff1_im",
+      "field frame",
+      "driven port matrix",
+      "eme cascade data"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": false,
+        "has_value": true,
+        "label_prefix": "EME f = 1.0000e10 Hz (port 1 drive)"
+      }
+    ],
+    "study": "eme"
+  },
+  "fdtd": {
+    "physics": "ems",
+    "scalars": [
+      "fdtd monitor data",
+      "fdtd_steps",
+      "dt (s)",
+      "field frame"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": false,
+        "has_value": true,
+        "label_prefix": "fdtd"
+      }
+    ],
+    "study": "fdtd"
+  },
   "modes_complex": {
     "physics": "ems",
     "scalars": [
@@ -481,5 +631,127 @@
       }
     ],
     "study": "modes"
+  },
+  "nonlinear_driven": {
+    "physics": "ems",
+    "scalars": [
+      "process",
+      "continuation",
+      "n_steps",
+      "newton_iterations",
+      "factorizations",
+      "symbolic_analyses",
+      "n_turning_points",
+      "P_in (W)",
+      "U_stored (J)",
+      "harmonic 1 P_in_total (W)",
+      "harmonic 1 P_out_total (W)",
+      "harmonic 1 port 'in' P_out (W)",
+      "harmonic 1 port 'in' b_out_re (W^0.5)",
+      "harmonic 1 port 'in' b_out_im (W^0.5)",
+      "harmonic 1 port 'out' P_out (W)",
+      "harmonic 1 port 'out' b_out_re (W^0.5)",
+      "harmonic 1 port 'out' b_out_im (W^0.5)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ey",
+          "Ez",
+          "Hx",
+          "Hy",
+          "Hz"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": true,
+        "label_prefix": "step 1"
+      }
+    ],
+    "study": "nonlinear_driven"
+  },
+  "nonlinear_modes": {
+    "physics": "ems",
+    "scalars": [
+      "neff_linear_re",
+      "neff_linear_im",
+      "gamma (1/(W*m))",
+      "gamma_tpa (1/(W*m))",
+      "A_eff (m^2)",
+      "newton_iterations",
+      "power (W)",
+      "neff_re",
+      "neff_im",
+      "delta_neff_re",
+      "delta_neff_im",
+      "delta_beta_re (1/m)"
+    ],
+    "solutions": [
+      {
+        "cell_fields": [
+          "Ex",
+          "Ez",
+          "Ey"
+        ],
+        "fields": [
+          {
+            "components": [],
+            "name": "|E|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Exz|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "|Ey|",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ex",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ez",
+            "unit": "a.u."
+          },
+          {
+            "components": [],
+            "name": "Re Ey",
+            "unit": "a.u."
+          }
+        ],
+        "has_eigenvalue": true,
+        "has_value": true,
+        "label_prefix": "P = 1.0000e0 W"
+      }
+    ],
+    "study": "nonlinear_modes"
   }
 }

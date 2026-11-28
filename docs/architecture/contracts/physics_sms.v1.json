@@ -912,6 +912,14 @@
     {
       "field": "sms.u",
       "role": "displacement"
+    },
+    {
+      "field": "sms.S",
+      "role": "strain"
+    },
+    {
+      "field": "sms.E",
+      "role": "electric_field"
     }
   ],
   "fields": {
@@ -1203,6 +1211,17 @@
       },
       "label": "Inactive regions",
       "name": "inactive",
+      "required": false,
+      "unit": ""
+    },
+    {
+      "doc": "optional explicit subset of solid domains carrying displacement DOFs u in coupled piezoelectric solves; regions outside u_domains carry only electric potential phi",
+      "kind": {
+        "default": [],
+        "type": "names"
+      },
+      "label": "Active mechanical domains",
+      "name": "u_domains",
       "required": false,
       "unit": ""
     }
@@ -2247,6 +2266,14 @@
             "description": "Thickness (2D plane stress) [m]",
             "minimum": 2.2250738585072014e-308,
             "type": "number"
+          },
+          "u_domains": {
+            "default": [],
+            "description": "Active mechanical domains. optional explicit subset of solid domains carrying displacement DOFs u in coupled piezoelectric solves; regions outside u_domains carry only electric potential phi",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [],

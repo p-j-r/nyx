@@ -9,6 +9,7 @@
 use crate::desc::{BcDesc, FieldDesc, FieldLink, ParamDesc, PropDesc, Sizing, StudyDesc};
 use crate::error::Error;
 use crate::result::SolveResult;
+use crate::sensitivity::{SensitivityReport, SensitivityRequest};
 use crate::spec::ProblemSpec;
 use crate::Mesh;
 use femcore::progress::Progress;
@@ -33,6 +34,77 @@ pub trait LabelResolver {
     }
 }
 
+/// A field another physics exported, kept on the mesh it was solved on (per-physics meshing, ADR 135). The engine fills
+/// `Ctx::transferred_inputs` with one per imported role whenever the exporting physics was solved on a different mesh, and still puts the
+/// field sampled at the dofs of the importing mesh into `Ctx::inputs`, so a kernel that only reads `inputs` keeps working unchanged. A kernel
+/// that wants the exact source (to sample it at its own quadrature points, or per cell across an interface) reads this.
+#[derive(Clone, Debug)]
+pub struct TransferredField {
+    /// the physics that exported it and the field name (`dfs`, `T`)
+    pub physics: String,
+    pub field: String,
+    /// the mesh the field was solved on
+    pub mesh: Arc<Mesh>,
+    /// the simplex discretisation of `mesh` the values number (the engine shares the cached one; `None` makes one on demand)
+    pub discretisation: Option<Arc<crate::Discretisation>>,
+    /// canonical domain and boundary names of `mesh` (the `geom` names of `LabelMap`), by label
+    pub domain_names: BTreeMap<i32, String>,
+    pub boundary_names: BTreeMap<i32, String>,
+    /// the element order of the values (1 or 2)
+    pub order: usize,
+    /// components per dof (1 for a scalar)
+    pub components: usize,
+    /// one value per dof of `mesh` at `order`, `components` interleaved per dof
+    pub values: Vec<f64>,
+    /// the un-averaged per-cell fields of the same solution, when it has them
+    pub cell_fields: Vec<crate::result::CellField>,
+}
+
+impl TransferredField {
+    /// Whether `mesh` is the mesh the field lives on (same vertices, cells and labels): the zero-cost path where no transfer is needed.
+    pub fn is_same_mesh(&self, mesh: &Mesh) -> bool {
+        femcore::transfer::same_exchange_mesh(&self.mesh, mesh)
+    }
+
+    fn source(&self) -> Result<Arc<crate::Discretisation>, Error> {
+        match &self.discretisation {
+            Some(d) => Ok(d.clone()),
+            None => Ok(Arc::new(crate::discretise(&self.mesh)?)),
+        }
+    }
+
+    /// The field at the local nodes of every cell of `target` (`nloc(order)` per cell, `components` interleaved), each node read only in
+    /// source cells of the same canonical domain as its target cell (`target_domains`). `found` marks the nodes a source cell was found for.
+    pub fn sample_cell_nodes(
+        &self,
+        target: &crate::Discretisation,
+        target_domains: &BTreeMap<i32, String>,
+        order: usize,
+    ) -> Result<femcore::transfer::Sampled, Error> {
+        use femcore::transfer::{SourceField, SourceMesh, TransferIndex, TransferOptions};
+        let src = self.source()?;
+        let index = TransferIndex::new(SourceMesh::Simplex(&src), &self.domain_names, TransferOptions::default())
+            .map_err(|e| Error::invalid(e.to_string()))?;
+        let field = SourceField::Nodal { values: &self.values, ncomp: self.components.max(1), order: self.order };
+        index.sample_cell_nodes(&field, target, target_domains, order).map_err(|e| Error::invalid(e.to_string()))
+    }
+
+    /// The field at the dofs of `target` (`order`, `components` interleaved per dof): per-cell domain-filtered samples averaged at each dof.
+    pub fn sample_dofs(
+        &self,
+        target: &crate::Discretisation,
+        target_domains: &BTreeMap<i32, String>,
+        order: usize,
+    ) -> Result<femcore::transfer::Sampled, Error> {
+        use femcore::transfer::{SourceField, SourceMesh, TransferIndex, TransferOptions};
+        let src = self.source()?;
+        let index = TransferIndex::new(SourceMesh::Simplex(&src), &self.domain_names, TransferOptions::default())
+            .map_err(|e| Error::invalid(e.to_string()))?;
+        let field = SourceField::Nodal { values: &self.values, ncomp: self.components.max(1), order: self.order };
+        index.sample_dofs(&field, target, target_domains, order).map_err(|e| Error::invalid(e.to_string()))
+    }
+}
+
 /// What a solve may use besides the mesh and the problem: the label resolver, progress and cancellation, and the fields that other
 /// physics exported earlier in a one-way chain.
 pub struct Ctx<'a> {
@@ -48,6 +120,9 @@ pub struct Ctx<'a> {
     pub temperature: Option<f64>,
     /// imported fields by role (`temperature`), values per dof, from physics that ran before this one
     pub inputs: BTreeMap<String, Vec<f64>>,
+    /// imported fields by role that were solved on another mesh (per-physics meshing, ADR 135), with that mesh; empty when every physics of
+    /// the chain shares one mesh. `inputs` still holds the same roles sampled on this solve's mesh
+    pub transferred_inputs: BTreeMap<String, TransferredField>,
 }
 
 impl<'a> Ctx<'a> {
@@ -60,6 +135,7 @@ impl<'a> Ctx<'a> {
             frequency: None,
             temperature: None,
             inputs: BTreeMap::new(),
+            transferred_inputs: BTreeMap::new(),
         }
     }
 
@@ -92,6 +168,14 @@ pub trait Physics: Send + Sync {
     fn exports(&self) -> Vec<FieldLink>;
     /// Fields this physics takes from other physics (for example `sms` takes a temperature).
     fn imports(&self) -> Vec<FieldLink>;
+    /// Exports produced when running a specific `study` (defaults to [`Self::exports`]).
+    fn study_exports(&self, _study: &str) -> Vec<FieldLink> {
+        self.exports()
+    }
+    /// Imports consumed when running a specific `study` (defaults to [`Self::imports`]).
+    fn study_imports(&self, _study: &str) -> Vec<FieldLink> {
+        self.imports()
+    }
 
     /// Checks the physics-specific part of a problem against `mesh`; the structural checks against the descriptors are `validate_spec`.
     fn validate(&self, spec: &ProblemSpec, mesh: &Mesh) -> Result<(), Error>;
@@ -99,4 +183,16 @@ pub trait Physics: Send + Sync {
     fn sizing(&self, spec: &ProblemSpec, library: Option<&Arc<femcore::material::Library>>) -> Sizing;
     /// Solves the problem on `mesh`.
     fn solve(&self, mesh: &Mesh, spec: &ProblemSpec, ctx: &mut Ctx) -> Result<SolveResult, Error>;
+
+    /// Evaluates a scalar design objective and its exact discrete adjoint / eigenvalue gradients
+    /// on `mesh` with respect to [`SensitivityRequest::params`] (ADR 142).
+    fn sensitivity(
+        &self,
+        _mesh: &Mesh,
+        _spec: &ProblemSpec,
+        _ctx: &mut Ctx,
+        _req: &SensitivityRequest,
+    ) -> Result<SensitivityReport, Error> {
+        Err(Error::Unsupported(format!("physics '{}' does not implement adjoint sensitivities", self.id())))
+    }
 }

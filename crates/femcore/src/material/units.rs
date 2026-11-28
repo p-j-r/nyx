@@ -40,6 +40,26 @@ pub enum Dim {
     DynamicViscosity,
     /// electric field strength; the SI value is V/m
     ElectricField,
+    /// 2D surface / sheet conductivity; the SI value is S (S*sq)
+    SheetConductivity,
+    /// time or relaxation time; the SI value is s
+    Time,
+    /// velocity; the SI value is m/s
+    Velocity,
+    /// magnetic flux density; the SI value is T
+    MagneticFluxDensity,
+    /// capacitance per unit area; the SI value is F/m^2
+    CapacitancePerArea,
+    /// nonlinear Kerr refractive index n_2; the SI value is m^2/W
+    NonlinearIndex,
+    /// third-order nonlinear susceptibility chi^(3); the SI value is m^2/V^2
+    Chi3Susceptibility,
+    /// two-photon absorption coefficient beta_TPA; the SI value is m/W
+    TwoPhotonAbsorption,
+    /// cross-section or area (e.g. free-carrier absorption sigma_FCA); the SI value is m^2
+    Area,
+    /// volume or free-carrier dispersion coefficient k_FCD; the SI value is m^3
+    Volume,
 }
 
 impl Dim {
@@ -62,9 +82,19 @@ impl Dim {
             Dim::SheetInductance => "a sheet inductance, for example pH/sq or nH/sq",
             Dim::PiezoelectricStress => "a stress-charge piezoelectric coefficient, for example C/m^2",
             Dim::PiezoelectricStrain => "a strain-charge piezoelectric coefficient, for example pC/N",
-            Dim::ElectroOptic => "an electro-optic (Pockels) coefficient, for example pm/V",
+            Dim::ElectroOptic => "an electro-optic or chi^(2) coefficient, for example pm/V",
             Dim::DynamicViscosity => "a dynamic viscosity, for example Pa*s or mPa*s",
             Dim::ElectricField => "an electric field strength, for example V/m or kV/cm",
+            Dim::SheetConductivity => "a 2D sheet conductivity, for example S, mS or uS",
+            Dim::Time => "a time or relaxation time, for example ps, fs or ns",
+            Dim::Velocity => "a velocity, for example m/s or cm/s",
+            Dim::MagneticFluxDensity => "a magnetic flux density, for example T or mT",
+            Dim::CapacitancePerArea => "a capacitance per unit area, for example F/m^2 or uF/cm^2",
+            Dim::NonlinearIndex => "a nonlinear refractive index n_2, for example m^2/W or cm^2/W",
+            Dim::Chi3Susceptibility => "a third-order susceptibility chi^(3), for example m^2/V^2 or pm^2/V^2",
+            Dim::TwoPhotonAbsorption => "a two-photon absorption coefficient, for example m/W or cm/GW",
+            Dim::Area => "an area or cross-section, for example m^2 or cm^2",
+            Dim::Volume => "a volume or carrier-dispersion coefficient, for example m^3 or cm^3",
         }
     }
 }
@@ -180,6 +210,73 @@ pub fn lookup(unit: &str) -> Option<(Dim, f64)> {
     }
     if let Some(f) = with_prefix(&u, "V/cm") {
         return Some((Dim::ElectricField, f * 1e2));
+    }
+    if let Some(f) = with_prefix(&u, "Ssq")
+        .or_else(|| with_prefix(&u, "S"))
+        .or_else(|| with_prefix(&u, "Ohm^-1"))
+        .or_else(|| with_prefix(&u, "ohm^-1"))
+    {
+        return Some((Dim::SheetConductivity, f));
+    }
+    if let Some(f) = with_prefix(&u, "m/s") {
+        return Some((Dim::Velocity, f));
+    }
+    if let Some(f) = with_prefix(&u, "F/m^2").or_else(|| with_prefix(&u, "F/m2")) {
+        return Some((Dim::CapacitancePerArea, f));
+    }
+    if let Some(f) = with_prefix(&u, "F/cm^2").or_else(|| with_prefix(&u, "F/cm2")) {
+        return Some((Dim::CapacitancePerArea, f * 1e4));
+    }
+    if let Some(rest) = u.strip_suffix("/GW") {
+        if rest == "cm^2" || rest == "cm2" {
+            return Some((Dim::NonlinearIndex, 1e-13));
+        }
+        if rest == "cm" {
+            return Some((Dim::TwoPhotonAbsorption, 1e-11));
+        }
+    }
+    if let Some(rest) = u.strip_suffix("/W") {
+        if let Some(head) = rest.strip_suffix("^2").or_else(|| rest.strip_suffix('2')) {
+            if let Some(f) = with_prefix(head, "m") {
+                return Some((Dim::NonlinearIndex, f * f));
+            }
+        }
+        if let Some(f) = with_prefix(rest, "m") {
+            return Some((Dim::TwoPhotonAbsorption, f));
+        }
+    }
+    if let Some(rest) = u.strip_suffix("/V^2").or_else(|| u.strip_suffix("/V2")) {
+        if let Some(head) = rest.strip_suffix("^2").or_else(|| rest.strip_suffix('2')) {
+            if let Some(f) = with_prefix(head, "m") {
+                return Some((Dim::Chi3Susceptibility, f * f));
+            }
+        }
+    }
+    if let Some(head) = u.strip_suffix("^2") {
+        if let Some(f) = with_prefix(head, "m") {
+            return Some((Dim::Area, f * f));
+        }
+    }
+    if u == "m2" || u == "cm2" || u == "mm2" || u == "um2" || u == "nm2" || u == "pm2" {
+        if let Some(f) = with_prefix(u.strip_suffix('2').unwrap_or(""), "m") {
+            return Some((Dim::Area, f * f));
+        }
+    }
+    if let Some(head) = u.strip_suffix("^3") {
+        if let Some(f) = with_prefix(head, "m") {
+            return Some((Dim::Volume, f * f * f));
+        }
+    }
+    if u == "m3" || u == "cm3" || u == "mm3" || u == "um3" || u == "nm3" {
+        if let Some(f) = with_prefix(u.strip_suffix('3').unwrap_or(""), "m") {
+            return Some((Dim::Volume, f * f * f));
+        }
+    }
+    if let Some(f) = with_prefix(&u, "T") {
+        return Some((Dim::MagneticFluxDensity, f));
+    }
+    if let Some(f) = with_prefix(&u, "s") {
+        return Some((Dim::Time, f));
     }
     if let Some(f) = with_prefix(&u, "J") {
         return Some((Dim::Energy, f));

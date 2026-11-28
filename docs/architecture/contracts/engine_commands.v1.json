@@ -676,6 +676,46 @@
     "title": "Set the active physics"
   },
   {
+    "access": "edit",
+    "description": "Configures or disables an explicit opt-in two-way Anderson-accelerated self-consistent coupled loop (`femcore::linalg::snes::anderson`, default history depth `m = 5`) for photothermal (`ems` <-> `dfs` `heat_stationary`) or electrothermal (`dfs` `conduction` `auxiliary` <-> `dfs` `heat_stationary`) convergence (`||T^{k+1} - T^k||_inf / max(1, ||T^k||_inf) <= rtol`). Pass `enabled: false` to clear.",
+    "name": "set_coupled_loop",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "anderson_m": {
+          "description": "Anderson type-II history depth m (0..=64; 0 is Picard), default 5",
+          "type": "integer"
+        },
+        "auxiliary": {
+          "description": "optional auxiliary source ProblemSpec (e.g. dfs conduction problem for intra-physics electrothermal V <-> T coupling); null clears auxiliary",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "when false, clears coupled_loop so solve_run enforces acyclic one-way chains; default true",
+          "type": "boolean"
+        },
+        "max_iters": {
+          "description": "maximum outer Anderson iterations (>= 1), default 25",
+          "type": "integer"
+        },
+        "rtol": {
+          "description": "relative L_inf temperature convergence tolerance (> 0), default 1e-6",
+          "type": "number"
+        },
+        "source_scale": {
+          "description": "non-negative multiplier applied to exported heat_source before thermal assembly (e.g. input optical power in W), default 1.0",
+          "type": "number"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "title": "Configure two-way Anderson coupled loop"
+  },
+  {
     "access": "read",
     "description": "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.",
     "name": "check_project",
@@ -840,11 +880,21 @@
   },
   {
     "access": "edit",
-    "description": "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.",
+    "description": "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap. With `physics` the settings that physics is meshed with on its own are edited instead (per-physics meshing, ADR 135), and `active_domains` keeps only some regions of a mesh.",
     "name": "set_mesh",
     "schema": {
       "additionalProperties": false,
       "properties": {
+        "active_domains": {
+          "description": "mesh only these regions (names or name* patterns); the other cells are dropped and the region names are kept, so fields still pair by region name across meshes; null meshes every region",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "adapt_grade": {
           "description": "adaptive / AMR metric gradation slope (> 0); null uses 0.4",
           "type": [
@@ -948,6 +998,14 @@
             "integer",
             "null"
           ]
+        },
+        "own": {
+          "description": "with physics: false drops the physics' own mesh settings so it uses the project mesh again",
+          "type": "boolean"
+        },
+        "physics": {
+          "description": "edit the settings this physics is meshed with on its own (per-physics meshing; it starts from the project mesh settings); fields of physics on different meshes are transferred by region name",
+          "type": "string"
         },
         "physics_sizing": {
           "description": "size the elements from the waves of the physics (points per wavelength)",
@@ -1122,13 +1180,13 @@
           ]
         },
         "post_analyses": {
-          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"eme_sweep\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
           "items": {
             "additionalProperties": false,
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
               "analysis": {
-                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)",
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics)",
                 "type": "string"
               },
               "args": {
@@ -1136,7 +1194,7 @@
                 "type": "object"
               },
               "cmd": {
-                "description": "explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
+                "description": "explicit read-only post-solve command name (analyse, eme_sweep, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
                 "type": "string"
               },
               "label": {
@@ -1342,13 +1400,13 @@
           ]
         },
         "post_analyses": {
-          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"eme_sweep\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
           "items": {
             "additionalProperties": false,
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
               "analysis": {
-                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)",
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics)",
                 "type": "string"
               },
               "args": {
@@ -1356,7 +1414,7 @@
                 "type": "object"
               },
               "cmd": {
-                "description": "explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
+                "description": "explicit read-only post-solve command name (analyse, eme_sweep, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
                 "type": "string"
               },
               "label": {
@@ -1685,13 +1743,13 @@
           "type": "array"
         },
         "post_analyses": {
-          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+          "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"eme_sweep\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
           "items": {
             "additionalProperties": false,
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
               "analysis": {
-                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)",
+                "description": "shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics)",
                 "type": "string"
               },
               "args": {
@@ -1699,7 +1757,7 @@
                 "type": "object"
               },
               "cmd": {
-                "description": "explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
+                "description": "explicit read-only post-solve command name (analyse, eme_sweep, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)",
                 "type": "string"
               },
               "label": {
@@ -1915,6 +1973,586 @@
       "type": "object"
     },
     "title": "Cancel the points of a sweep that have not finished"
+  },
+  {
+    "access": "expensive",
+    "description": "Evaluates the scalar objective `J(p)` and its exact discrete adjoint, modal, or analytical Redheffer EME sensitivity gradient `dJ/dp` across named CAD parameters (`param_var`, via harmonic mesh-velocity extension), scalar material properties (`material_scalar`), EME segment lengths (`eme_segment_length`, via `dP_c/dL_c = -j beta_c P_c`), and Helmholtz-filtered SIMP/RAMP/optical cellwise densities (`topology_density`) without finite-difference solve loops (ADR 140, ADR 142).",
+    "name": "sensitivity_run",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "include_densities": {
+          "description": "include projected physical densities in the reply when topology parameters are present, default true",
+          "type": "boolean"
+        },
+        "objective": {
+          "additionalProperties": false,
+          "description": "scalar objective differentiated by discrete adjoint or modal sensitivity (`eigenfrequency`, `effective_index`, `quality_factor`, `transmission`, `splitter_balance`, `capacitance`, `compliance`, `target_temperature`, or `field_power`)",
+          "properties": {
+            "domain": {
+              "description": "region name or pattern for target_temperature or field_power",
+              "type": "string"
+            },
+            "freq_index": {
+              "description": "optional 0-based driven frequency index (omit to average across all sweep frequencies)",
+              "type": "integer"
+            },
+            "in_port": {
+              "description": "0-based excited input port index for transmission, splitter_balance, or field_power (default 0)",
+              "type": "integer"
+            },
+            "inverse": {
+              "description": "for quality_factor: differentiate loss tangent 1/Q instead of Q, default false",
+              "type": "boolean"
+            },
+            "kind": {
+              "description": "objective family",
+              "enum": [
+                "eigenfrequency",
+                "effective_index",
+                "quality_factor",
+                "transmission",
+                "splitter_balance",
+                "capacitance",
+                "compliance",
+                "target_temperature",
+                "field_power"
+              ],
+              "type": "string"
+            },
+            "mode": {
+              "description": "0-based eigenmode index (default 0)",
+              "type": "integer"
+            },
+            "out_port": {
+              "description": "0-based output port index for transmission (default 1)",
+              "type": "integer"
+            },
+            "out_ports": {
+              "description": "0-based output port indices for splitter_balance",
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "p_norm": {
+              "description": "optional smooth L_p peak norm exponent (>= 1) for target_temperature",
+              "type": "number"
+            },
+            "scale_hz": {
+              "description": "optional normalization scale in Hz (> 0) for target_hz mismatch",
+              "type": "number"
+            },
+            "target": {
+              "description": "optional target transmission or compliance value (switches to squared mismatch)",
+              "type": "number"
+            },
+            "target_f": {
+              "description": "optional target capacitance in farads (switches to squared mismatch)",
+              "type": "number"
+            },
+            "target_hz": {
+              "description": "optional target resonant frequency in Hz (switches objective to normalized squared mismatch)",
+              "type": "number"
+            },
+            "target_k": {
+              "description": "optional target temperature in kelvin for squared tracking error",
+              "type": "number"
+            },
+            "target_neff": {
+              "description": "optional target effective or Bloch index (switches objective to 0.5 * (neff - target_neff)^2)",
+              "type": "number"
+            },
+            "targets": {
+              "description": "target power fractions per output port in splitter_balance",
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "term_i": {
+              "description": "0-based row terminal index for capacitance C_{ij} (default 0)",
+              "type": "integer"
+            },
+            "term_j": {
+              "description": "0-based column terminal index for capacitance C_{ij} (default 0)",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "params": {
+          "description": "design parameters differentiated or optimized (`param_var`, `material_scalar`, `eme_segment_length`, or `topology_density`)",
+          "items": {
+            "additionalProperties": false,
+            "description": "one scalar CAD, scalar material, EME segment-length, or cellwise topology-density design parameter",
+            "properties": {
+              "beta": {
+                "description": "Heaviside tanh projection sharpness beta (>= 0, default 1.0)",
+                "type": "number"
+              },
+              "densities": {
+                "description": "optional explicit per-cell raw densities in [0, 1]",
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "domain": {
+                "description": "design region name or pattern (for topology_density)",
+                "type": "string"
+              },
+              "eta": {
+                "description": "Heaviside projection threshold eta in [0, 1] (default 0.5)",
+                "type": "number"
+              },
+              "filter_radius": {
+                "description": "unstructured Helmholtz PDE filter radius l_f in metres (>= 0, default 0)",
+                "type": "number"
+              },
+              "initial_density": {
+                "description": "uniform initial raw density in [0, 1] when densities is omitted",
+                "type": "number"
+              },
+              "kind": {
+                "description": "design parameter category",
+                "enum": [
+                  "param_var",
+                  "material_scalar",
+                  "eme_segment_length",
+                  "topology_density"
+                ],
+                "type": "string"
+              },
+              "max": {
+                "description": "optional upper box bound",
+                "type": "number"
+              },
+              "min": {
+                "description": "optional lower box bound",
+                "type": "number"
+              },
+              "name": {
+                "description": "geometry parameter name in FeatureList::params (for param_var)",
+                "type": "string"
+              },
+              "plasmon_damping": {
+                "description": "intermediate extinction floor for plasmon-safe metallic optical interpolation (default 0.0)",
+                "type": "number"
+              },
+              "property": {
+                "description": "scalar material property name such as eps_r, k, E, nu, rho, Q (for material_scalar or topology_density)",
+                "type": "string"
+              },
+              "ramp_q": {
+                "description": "optional RAMP concavity parameter q (>= 0); overrides simp_penalty when given",
+                "type": "number"
+              },
+              "region": {
+                "description": "material region name (for material_scalar)",
+                "type": "string"
+              },
+              "segment": {
+                "description": "0-based EME segment index for eme_segment_length (default 0)",
+                "type": "integer"
+              },
+              "simp_penalty": {
+                "description": "SIMP power-law exponent p (>= 1, default 3.0)",
+                "type": "number"
+              },
+              "val_max": {
+                "description": "solid endpoint scalar/real property value at rho_bar = 1 (default 1.0)",
+                "type": "number"
+              },
+              "val_max_im": {
+                "description": "solid imaginary permittivity endpoint at rho_bar = 1 (default 0.0)",
+                "type": "number"
+              },
+              "val_min": {
+                "description": "void endpoint scalar/real property value at rho_bar = 0 (default 1e-3)",
+                "type": "number"
+              },
+              "val_min_im": {
+                "description": "void imaginary permittivity endpoint at rho_bar = 0 (default 0.0)",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "shape_step_rel": {
+          "description": "optional relative CAD step size for harmonic boundary velocity extraction, default 1e-6",
+          "type": "number"
+        }
+      },
+      "required": [
+        "objective",
+        "params"
+      ],
+      "type": "object"
+    },
+    "title": "Compute discrete adjoint sensitivities"
+  },
+  {
+    "access": "expensive",
+    "description": "Optimizes CAD geometry parameters, scalar material properties, EME propagation segment lengths (`eme_segment_length`), or unstructured Helmholtz-filtered cellwise topology densities using `lbfgs`, `ncg` (Polak-Ribiere+), or constrained `mma` (method of moving asymptotes) driven by exact discrete adjoint / analytical Redheffer gradients, optional Heaviside `beta` continuation stages, and modal eigenvector tracking (ADR 140, ADR 142). Stores the final solved result (attaching `topology_density` when present) and optionally writes a JSON checkpoint to `checkpoint_path`.",
+    "name": "optimize_run",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "description": "gradient optimizer: lbfgs (default), ncg (Polak-Ribiere+ nonlinear conjugate gradients), or mma (method of moving asymptotes)",
+          "enum": [
+            "lbfgs",
+            "ncg",
+            "mma"
+          ],
+          "type": "string"
+        },
+        "apply": {
+          "description": "apply optimized parameters and store the final solved result on the active project, default true",
+          "type": "boolean"
+        },
+        "checkpoint_path": {
+          "description": "optional JSON file path for writing optimization history and final design checkpoint",
+          "type": "string"
+        },
+        "constraints": {
+          "description": "inequality constraints c_i(x) <= 0 enforced by mma",
+          "items": {
+            "additionalProperties": false,
+            "description": "one optimization constraint",
+            "properties": {
+              "kind": {
+                "description": "constraint kind",
+                "enum": [
+                  "volume_fraction"
+                ],
+                "type": "string"
+              },
+              "max_fraction": {
+                "description": "upper bound on physical volume fraction in (0, 1]",
+                "type": "number"
+              },
+              "min_fraction": {
+                "description": "optional lower bound on physical volume fraction in [0, max_fraction]",
+                "type": "number"
+              },
+              "param_index": {
+                "description": "0-based index of the topology_density entry in params (default 0)",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "max_fraction"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "continuation_schedule": {
+          "description": "optional multi-stage Heaviside beta continuation schedule [{ beta, max_iters }]",
+          "items": {
+            "additionalProperties": false,
+            "description": "one Heaviside projection sharpness stage",
+            "properties": {
+              "beta": {
+                "description": "Heaviside sharpness beta (>= 0) for this stage",
+                "type": "number"
+              },
+              "max_iters": {
+                "description": "maximum optimizer iterations in this stage (>= 1)",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "beta",
+              "max_iters"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ftol": {
+          "description": "relative objective change threshold (> 0) for lbfgs and ncg, default 1e-12",
+          "type": "number"
+        },
+        "gtol": {
+          "description": "relative gradient norm convergence threshold (> 0) for lbfgs and ncg, default 1e-6",
+          "type": "number"
+        },
+        "max_iters": {
+          "description": "maximum optimizer iterations per stage (>= 1), default 50",
+          "type": "integer"
+        },
+        "move_limit": {
+          "description": "fractional per-iteration box move limit (> 0) for mma, default 0.2",
+          "type": "number"
+        },
+        "objective": {
+          "additionalProperties": false,
+          "description": "scalar objective differentiated by discrete adjoint or modal sensitivity (`eigenfrequency`, `effective_index`, `quality_factor`, `transmission`, `splitter_balance`, `capacitance`, `compliance`, `target_temperature`, or `field_power`)",
+          "properties": {
+            "domain": {
+              "description": "region name or pattern for target_temperature or field_power",
+              "type": "string"
+            },
+            "freq_index": {
+              "description": "optional 0-based driven frequency index (omit to average across all sweep frequencies)",
+              "type": "integer"
+            },
+            "in_port": {
+              "description": "0-based excited input port index for transmission, splitter_balance, or field_power (default 0)",
+              "type": "integer"
+            },
+            "inverse": {
+              "description": "for quality_factor: differentiate loss tangent 1/Q instead of Q, default false",
+              "type": "boolean"
+            },
+            "kind": {
+              "description": "objective family",
+              "enum": [
+                "eigenfrequency",
+                "effective_index",
+                "quality_factor",
+                "transmission",
+                "splitter_balance",
+                "capacitance",
+                "compliance",
+                "target_temperature",
+                "field_power"
+              ],
+              "type": "string"
+            },
+            "mode": {
+              "description": "0-based eigenmode index (default 0)",
+              "type": "integer"
+            },
+            "out_port": {
+              "description": "0-based output port index for transmission (default 1)",
+              "type": "integer"
+            },
+            "out_ports": {
+              "description": "0-based output port indices for splitter_balance",
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "p_norm": {
+              "description": "optional smooth L_p peak norm exponent (>= 1) for target_temperature",
+              "type": "number"
+            },
+            "scale_hz": {
+              "description": "optional normalization scale in Hz (> 0) for target_hz mismatch",
+              "type": "number"
+            },
+            "target": {
+              "description": "optional target transmission or compliance value (switches to squared mismatch)",
+              "type": "number"
+            },
+            "target_f": {
+              "description": "optional target capacitance in farads (switches to squared mismatch)",
+              "type": "number"
+            },
+            "target_hz": {
+              "description": "optional target resonant frequency in Hz (switches objective to normalized squared mismatch)",
+              "type": "number"
+            },
+            "target_k": {
+              "description": "optional target temperature in kelvin for squared tracking error",
+              "type": "number"
+            },
+            "target_neff": {
+              "description": "optional target effective or Bloch index (switches objective to 0.5 * (neff - target_neff)^2)",
+              "type": "number"
+            },
+            "targets": {
+              "description": "target power fractions per output port in splitter_balance",
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "term_i": {
+              "description": "0-based row terminal index for capacitance C_{ij} (default 0)",
+              "type": "integer"
+            },
+            "term_j": {
+              "description": "0-based column terminal index for capacitance C_{ij} (default 0)",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "optimize": {
+          "description": "optional OptimizeSpec object overriding default optimizer tolerances, constraints, or continuation stages",
+          "type": "object"
+        },
+        "params": {
+          "description": "design parameters differentiated or optimized (`param_var`, `material_scalar`, `eme_segment_length`, or `topology_density`)",
+          "items": {
+            "additionalProperties": false,
+            "description": "one scalar CAD, scalar material, EME segment-length, or cellwise topology-density design parameter",
+            "properties": {
+              "beta": {
+                "description": "Heaviside tanh projection sharpness beta (>= 0, default 1.0)",
+                "type": "number"
+              },
+              "densities": {
+                "description": "optional explicit per-cell raw densities in [0, 1]",
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "domain": {
+                "description": "design region name or pattern (for topology_density)",
+                "type": "string"
+              },
+              "eta": {
+                "description": "Heaviside projection threshold eta in [0, 1] (default 0.5)",
+                "type": "number"
+              },
+              "filter_radius": {
+                "description": "unstructured Helmholtz PDE filter radius l_f in metres (>= 0, default 0)",
+                "type": "number"
+              },
+              "initial_density": {
+                "description": "uniform initial raw density in [0, 1] when densities is omitted",
+                "type": "number"
+              },
+              "kind": {
+                "description": "design parameter category",
+                "enum": [
+                  "param_var",
+                  "material_scalar",
+                  "eme_segment_length",
+                  "topology_density"
+                ],
+                "type": "string"
+              },
+              "max": {
+                "description": "optional upper box bound",
+                "type": "number"
+              },
+              "min": {
+                "description": "optional lower box bound",
+                "type": "number"
+              },
+              "name": {
+                "description": "geometry parameter name in FeatureList::params (for param_var)",
+                "type": "string"
+              },
+              "plasmon_damping": {
+                "description": "intermediate extinction floor for plasmon-safe metallic optical interpolation (default 0.0)",
+                "type": "number"
+              },
+              "property": {
+                "description": "scalar material property name such as eps_r, k, E, nu, rho, Q (for material_scalar or topology_density)",
+                "type": "string"
+              },
+              "ramp_q": {
+                "description": "optional RAMP concavity parameter q (>= 0); overrides simp_penalty when given",
+                "type": "number"
+              },
+              "region": {
+                "description": "material region name (for material_scalar)",
+                "type": "string"
+              },
+              "segment": {
+                "description": "0-based EME segment index for eme_segment_length (default 0)",
+                "type": "integer"
+              },
+              "simp_penalty": {
+                "description": "SIMP power-law exponent p (>= 1, default 3.0)",
+                "type": "number"
+              },
+              "val_max": {
+                "description": "solid endpoint scalar/real property value at rho_bar = 1 (default 1.0)",
+                "type": "number"
+              },
+              "val_max_im": {
+                "description": "solid imaginary permittivity endpoint at rho_bar = 1 (default 0.0)",
+                "type": "number"
+              },
+              "val_min": {
+                "description": "void endpoint scalar/real property value at rho_bar = 0 (default 1e-3)",
+                "type": "number"
+              },
+              "val_min_im": {
+                "description": "void imaginary permittivity endpoint at rho_bar = 0 (default 0.0)",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "remesh": {
+          "description": "rebuild the CAD mesh at every shape evaluation instead of smooth harmonic mesh morphing, default false",
+          "type": "boolean"
+        },
+        "sense": {
+          "description": "optimization direction: minimize (default) or maximize",
+          "enum": [
+            "minimize",
+            "maximize"
+          ],
+          "type": "string"
+        },
+        "shape_step_rel": {
+          "description": "optional relative CAD step size for harmonic boundary velocity extraction, default 1e-6",
+          "type": "number"
+        },
+        "xtol": {
+          "description": "maximum design variable step threshold (> 0) for mma, default 1e-6",
+          "type": "number"
+        }
+      },
+      "required": [
+        "objective",
+        "params"
+      ],
+      "type": "object"
+    },
+    "title": "Run gradient-based shape, material, or topology optimization"
   },
   {
     "access": "read",
@@ -3343,7 +3981,7 @@
   },
   {
     "access": "read",
-    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed), which solved physics each applies to and, per physics, whether its result is `stale`.",
+    "description": "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics), which solved physics each applies to and, per physics, whether its result is `stale`.",
     "name": "list_analyses",
     "schema": {
       "additionalProperties": false,
@@ -3355,7 +3993,75 @@
   },
   {
     "access": "read",
-    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, or uq_cqed. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]`, `params` accept `trench_depth_m` (substrate over-etch depth in metres), and passing `electrostatic_physics` (e.g. `\"dfs\"`, with optional `port_terminals`, `modal_voltages`, `modal_freqs_hz`) evaluates hybrid quasi-electrostatic modal TLS participation and `T1_TLS_s` on the fine electrostatic mesh. For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. For `piezo_resonator`, extracts series/parallel resonance frequencies (`f_s_Hz`, `f_p_Hz`), IEEE coupling factors (`k_t2`, `k_eff2`), unwrapped phase-slope quality factors (`Q_s`, `Q_p`), and bounded 6-parameter mBVD equivalent circuit (`C_0`, `R_0`, `R_s`, `C_m`, `L_m`, `R_m`) from `DrivenPortData`. For `uq_cqed`, propagates fabrication and constitutive 1-sigma `uncertainties` (plus `seed`, `n_samples`, `electrostatic_physics` companion bounds) through zero-solve EPR/Hamiltonian/Capacitance/TLS post-processing while keeping ASME V&V 20 epistemic brackets strictly separated from aleatoric variances. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
+    "description": "Evaluates an analytical post-solve Eigenmode Expansion sweep (`length`, `periodicity`, or `modes`) on the cached `EmeData` of a solved `eme` study without re-solving 2D cross-section eigenmodes. `length` sweeps the propagation length of segment `segment`, `periodicity` sweeps `PeriodicSubgrid` `subgrid` repetitions in O(log N) Redheffer star products, and `modes` sweeps modal truncation counts across cached interface overlaps. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
+    "name": "eme_sweep",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "lengths": {
+          "description": "segment lengths in metres (>= 0) for mode = 'length'",
+          "items": {
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "mode": {
+          "description": "post-solve EME sweep kind: 'length', 'periodicity', or 'modes'",
+          "enum": [
+            "length",
+            "periodicity",
+            "modes"
+          ],
+          "type": "string"
+        },
+        "mode_counts": {
+          "description": "modal truncation counts (>= 1) per slice for mode = 'modes'",
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "physics": {
+          "description": "the three-letter code of the physics",
+          "enum": [
+            "dfs",
+            "ems",
+            "sms"
+          ],
+          "type": "string"
+        },
+        "reps": {
+          "description": "unit-cell repetition counts (>= 1) for mode = 'periodicity'",
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "segment": {
+          "description": "0-based EME segment index for mode = 'length', default 0",
+          "type": "integer"
+        },
+        "subgrid": {
+          "description": "0-based PeriodicSubgrid index for mode = 'periodicity', default 0",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "title": "Run an analytical EME sweep"
+  },
+  {
+    "access": "read",
+    "description": "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, or optomechanics. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]`, `params` accept `trench_depth_m` (substrate over-etch depth in metres), and passing `electrostatic_physics` (e.g. `\"dfs\"`, with optional `port_terminals`, `modal_voltages`, `modal_freqs_hz`) evaluates hybrid quasi-electrostatic modal TLS participation and `T1_TLS_s` on the fine electrostatic mesh. For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. For `piezo_resonator`, extracts series/parallel resonance frequencies (`f_s_Hz`, `f_p_Hz`), IEEE coupling factors (`k_t2`, `k_eff2`), unwrapped phase-slope quality factors (`Q_s`, `Q_p`), and bounded 6-parameter mBVD equivalent circuit (`C_0`, `R_0`, `R_s`, `C_m`, `L_m`, `R_m`) from `DrivenPortData`. For `uq_cqed`, propagates fabrication and constitutive 1-sigma `uncertainties` (plus `seed`, `n_samples`, `electrostatic_physics` companion bounds) through zero-solve EPR/Hamiltonian/Capacitance/TLS post-processing while keeping ASME V&V 20 epistemic brackets strictly separated from aleatoric variances. For `optomechanics`, evaluates photoelastic (`g_pe_hz`), moving-boundary (`g_mb_hz`), total vacuum optomechanical coupling (`g_0_hz`, `m_eff_kg`, `x_zpf_m`), and stimulated Brillouin scattering gain (`sbs_gain_w_inv_m_inv`) across shared or independent optical (`optical_physics`) and mechanical (`mechanical_physics`) meshes (ADR 141). The reply carries `stale`, `age_s`, and `validated` of the result it was run on.",
     "name": "analyse",
     "schema": {
       "additionalProperties": false,
@@ -3365,7 +4071,7 @@
           "type": "string"
         },
         "params": {
-          "description": "optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, electrostatic_physics, port_terminals, modal_voltages, modal_freqs_hz; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; piezo_resonator: port, terminations, f_window_hz, z_ref_ohm, fix_r_s_ohm; uq_cqed: seed, n_samples, basis, uncertainties, electrostatic_physics, qubits, resonators, metal_thickness_m; epr options)",
+          "description": "optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, electrostatic_physics, port_terminals, modal_voltages, modal_freqs_hz; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; piezo_resonator: port, terminations, f_window_hz, z_ref_ohm, fix_r_s_ohm; uq_cqed: seed, n_samples, basis, uncertainties, electrostatic_physics, qubits, resonators, metal_thickness_m; optomechanics: optical_physics, mechanical_physics, optical_mode, mechanical_mode, core_domains, interface_boundaries, acoustic_q; far_field/beam_overlap/epr options)",
           "type": "object"
         },
         "physics": {

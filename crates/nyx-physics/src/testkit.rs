@@ -108,9 +108,22 @@ pub fn golden(dir: &std::path::Path, name: &str, r: &SolveResult, tol: f64) {
         "f re ",
         "f im ",
     ];
+    const ADDITIVE_FR39_FIELD_NAMES: &[&str] =
+        &["|S|", "Sxx", "Syy", "Szz", "Sxy", "Syz", "Sxz", "|E|", "Ex", "Ey", "Ez"];
     let want_scalars = want["scalars"].as_object().cloned().unwrap_or_default();
+    let want_sols = want["solutions"].as_array().cloned().unwrap_or_default();
     let strip = |v: &Value, is_got: bool| -> Value {
         let mut v = v.clone();
+        if is_got {
+            if let Some(sols) = v["solutions"].as_array_mut() {
+                for (i, sol) in sols.iter_mut().enumerate() {
+                    let want_fields = want_sols.get(i).and_then(|ws| ws["fields"].as_object());
+                    if let (Some(wf), Some(gf)) = (want_fields, sol["fields"].as_object_mut()) {
+                        gf.retain(|k, _| wf.contains_key(k) || !ADDITIVE_FR39_FIELD_NAMES.contains(&k.as_str()));
+                    }
+                }
+            }
+        }
         if let Some(sc) = v["scalars"].as_object_mut() {
             sc.retain(|k, x| {
                 if k.starts_with("Q ") || (x.is_string() && k.starts_with("neff")) {

@@ -532,12 +532,12 @@ fn driven_study_and_port_condition_validation_checks() {
     assert_eq!(cav_rom.ports[0].kind, "lumped_port");
     assert_eq!(cav_rom.ports[0].z0_ohm, Some(50.0));
 
-    // 2. waveport outside Study::Driven is rejected
+    // 2. waveport outside Study::Driven / Study::Eme is rejected
     let mut bad_wp = ProblemSpec::new("ems", 1, "cavity");
     bad_wp.study.params = json!({ "f_search": 10e9, "n_modes": 1 });
     bad_wp.bcs.push(BcSpec { on: "y0".into(), kind: "waveport".into(), params: json!({ "name": "p1", "mode": 1 }) });
     let err = Ems.solve(&exchange, &bad_wp, &mut Ctx::new(&BlockResolver)).unwrap_err();
-    assert!(err.to_string().contains("belongs to the driven study"), "{err}");
+    assert!(err.to_string().contains("belongs to the driven or eme study"), "{err}");
 
     // 3. Duplicate port names are rejected
     let mut dup = ProblemSpec::new("ems", 1, "driven");

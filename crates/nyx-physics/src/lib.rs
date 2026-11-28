@@ -3,7 +3,8 @@
 //! nyx-physics: the interface between nyx and a physics (ADR 25). A physics crate (`nyx-dfs`, `nyx-sms`, `nyx-ems`, ...) implements
 //! `Physics`; the engine finds it in a `Registry`; the window, the MCP server and the mesher read only its descriptors.
 //!
-//! * `physics`: the `Physics` trait, `Ctx` (progress, cancel, imported fields) and `LabelResolver` (names to mesh labels)
+//! * `physics`: the `Physics` trait, `Ctx` (progress, cancel, imported fields; `TransferredField` for a field solved on another mesh, ADR 135)
+//!   and `LabelResolver` (names to mesh labels)
 //! * `spec`: the problem envelope (`ProblemSpec`, `StudySpec`, `BcSpec`, `MaterialAssign`) and `canonical_json` for exemplar files
 //! * `desc`: descriptors of studies, conditions, properties, fields, couplings and the sizing hint
 //! * `result`: `SolveResult`, `Solution`, `Field`, plain serialisable data
@@ -27,6 +28,7 @@ pub mod physics;
 pub mod registry;
 pub mod result;
 pub mod schema;
+pub mod sensitivity;
 pub mod spec;
 pub mod testkit;
 pub mod validate;
@@ -73,11 +75,15 @@ pub fn check_mesh(mesh: &Mesh) -> Result<(), Error> {
     simplex.check().map_err(|e| Error::invalid(e.to_string()))?;
     Ok(())
 }
-pub use physics::{Ctx, LabelResolver, Physics};
+pub use physics::{Ctx, LabelResolver, Physics, TransferredField};
 pub use registry::Registry;
 pub use result::{
     cell_fields_back, cell_fields_of, CellField, DiagnosticSeverity, DiagnosticWarning, Field, MixedToSimplexProjector,
     NumericalErrorBudget, Scalar, Solution, SolveResult, SolverDiagnostics, SpatialErrorEstimate,
+};
+pub use sensitivity::{
+    ConstraintSpec, ContinuationStage, DesignParam, EvaluatedTopologyParam, OptimizeSense, OptimizeSpec,
+    SensitivityObjective, SensitivityReport, SensitivityRequest, TrackedModeBasis,
 };
 pub use spec::{canonical_json, BcSpec, MaterialAssign, ProblemSpec, PropValue, StudySpec, FORMAT as PROBLEM_FORMAT};
 pub use validate::{check_params, check_result_finite, validate_spec};

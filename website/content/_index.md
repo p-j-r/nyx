@@ -103,7 +103,7 @@ solver_log = [
 
 ## One engine, four front-ends
 
-Every action in `nyx` maps onto a single versioned catalog of **114 JSON-Schema commands** (`nyx api list`), ensuring identical numerical results across:
+Every action in `nyx` maps onto a single versioned catalog of **118 JSON-Schema commands** (`nyx api list`), ensuring identical numerical results across:
 
 1. **The desktop window** (`nyx`, built on `eframe`/`egui` with `wgpu` rendering and live field probing).
 2. **Typed Monty scripts** (`*.nys`, Python syntax executed in an isolated `nyx-script-worker` sandbox).

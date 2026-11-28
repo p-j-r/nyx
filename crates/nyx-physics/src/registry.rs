@@ -56,18 +56,34 @@ impl Registry {
     /// The order in which `ids` must be solved so that every import finds its export first. An import with no matching export among `ids` is
     /// left to the user (the field simply is not available); a cycle is an error because version 1 supports one-way chains only.
     pub fn solve_order(&self, ids: &[&str]) -> Result<Vec<String>, Error> {
+        let items: Vec<(&str, Option<&str>)> = ids.iter().map(|&id| (id, None)).collect();
+        self.solve_order_for_studies(&items)
+    }
+
+    /// Like [`Self::solve_order`], narrowed to the actual `study_exports` and `study_imports` of each physics's active study when known
+    /// (so e.g. `dfs` running `electrostatic` exports `potential` to `ems` without creating a false cycle with `ems.Q_opt -> dfs.heat_source`).
+    pub fn solve_order_for_studies(&self, items: &[(&str, Option<&str>)]) -> Result<Vec<String>, Error> {
         let mut deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for &id in ids {
+        for &(id, study_opt) in items {
             let p = self.get(id).ok_or_else(|| Error::invalid(format!("no physics '{id}' in this build")))?;
+            let imps = match study_opt {
+                Some(st) => p.study_imports(st),
+                None => p.imports(),
+            };
             let mut d = vec![];
-            for imp in p.imports() {
-                for &other in ids {
+            for imp in imps {
+                for &(other, other_study_opt) in items {
                     if other == id {
                         continue;
                     }
-                    if self.get(other).is_some_and(|q| q.exports().iter().any(|e| e.role == imp.role))
-                        && !d.contains(&other.to_string())
-                    {
+                    let exports_role = self.get(other).is_some_and(|q| {
+                        let exps = match other_study_opt {
+                            Some(ost) => q.study_exports(ost),
+                            None => q.exports(),
+                        };
+                        exps.iter().any(|e| e.role == imp.role)
+                    });
+                    if exports_role && !d.contains(&other.to_string()) {
                         d.push(other.to_string());
                     }
                 }
@@ -82,9 +98,11 @@ impl Registry {
                 .map(|(k, _)| k.clone());
             match next {
                 Some(k) => order.push(k),
-                None => return Err(Error::invalid(
-                    "the physics of this project depend on each other in a cycle; only one-way chains are supported",
-                )),
+                None => {
+                    return Err(Error::invalid(
+                        "the physics of this project depend on each other in a cycle; only one-way chains are supported unless coupled_loop is configured",
+                    ))
+                }
             }
         }
         Ok(order)

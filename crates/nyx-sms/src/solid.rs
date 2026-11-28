@@ -186,6 +186,8 @@ pub(crate) fn mixed_cell_tensor(
         TensorKind::Conductivity => ("k", |a| a.conductivity.as_ref()),
         TensorKind::Permittivity => ("eps_r", |a| a.permittivity.as_ref()),
         TensorKind::PermittivityIm => ("eps_r_im", |a| a.permittivity_im.as_ref()),
+        TensorKind::Permeability => ("mu_r", |a| a.permeability.as_ref()),
+        TensorKind::PermeabilityIm => ("mu_r_im", |a| a.permeability_im.as_ref()),
         TensorKind::Expansion => ("alpha", |a| a.expansion.as_ref()),
     };
     let mut by_domain: BTreeMap<i32, M3> = BTreeMap::new();
@@ -1454,6 +1456,53 @@ fn thermal_load_mixed(
     f
 }
 
+/// Elastic strain (3D wafer solver Voigt order `[xx, yy, zz, xy, yz, xz]`, six components, also in 2D)
+/// at every local node of every cell from the displacement gradients `grad[p*d*d + i*d + k] = d u_i / d x_k`.
+pub fn strain_at_nodes(
+    grad: &[f64],
+    nc: usize,
+    nloc: usize,
+    d: usize,
+    c6: &[M6],
+    plane: Plane,
+    eth: &[[f64; 6]],
+) -> Vec<[f64; 6]> {
+    let mut out = vec![[0.0; 6]; nc * nloc];
+    for c in 0..nc {
+        for a in 0..nloc {
+            let p = c * nloc + a;
+            let g = &grad[p * d * d..(p + 1) * d * d];
+            let mut e = [0.0; 6];
+            for i in 0..d {
+                e[i] = g[i * d + i];
+            }
+            e[3] = g[1] + g[d];
+            if d == 3 {
+                e[4] = g[3 + 2] + g[3 * 2 + 1];
+                e[5] = g[2] + g[3 * 2];
+            }
+            let th = if eth.is_empty() { [0.0; 6] } else { eth[p] };
+            let mut m = [0.0; 6];
+            for i in 0..6 {
+                m[i] = e[i] - th[i];
+            }
+            if d == 2 && plane == Plane::Stress && c6[c][2][2].abs() > 1e-30 {
+                m[2] = -(c6[c][2][0] * m[0] + c6[c][2][1] * m[1] + c6[c][2][3] * m[3]) / c6[c][2][2];
+            }
+            if d == 3 {
+                out[p] = m;
+            } else {
+                let mut w = [0.0; 6];
+                for i in 0..6 {
+                    w[femcore::section::PLANE_VOIGT[i]] = m[i];
+                }
+                out[p] = w;
+            }
+        }
+    }
+    out
+}
+
 /// Cauchy stress (solver Voigt order, six components, also in 2D) at every local node of every
 /// cell from the displacement gradients `grad[p*d*d + i*d + k] = d u_i / d x_k`. `eth` holds the
 /// thermal strain vector per cell node, or is empty.
@@ -1702,6 +1751,14 @@ fn fields_of(
             fields.push(Field::scalar(femcore::section::stress_name(d, idx), "Pa", node_average(mesh, &v, 1, order)));
             cells.push_real(femcore::section::stress_name(d, idx), "Pa", v);
         }
+        let st_all = strain_at_nodes(&grad, nc, nloc, d, &st.c6, plane, &eth);
+        let strain_nodal: Vec<Vec<f64>> = (0..6)
+            .map(|k| {
+                let v: Vec<f64> = st_all.iter().map(|x| x[k]).collect();
+                node_average(mesh, &v, 1, order)
+            })
+            .collect();
+        fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
     } else {
         for (k, ax) in names.iter().enumerate() {
             cells.push_real(
@@ -1710,6 +1767,15 @@ fn fields_of(
                 femcore::fem::cell_values_at_nodes(mesh, &u[k * n1..(k + 1) * n1], order),
             );
         }
+        let grad = gradients_at_nodes(mesh, u, d, order);
+        let st_all = strain_at_nodes(&grad, nc, nloc, d, &st.c6, plane, &[]);
+        let strain_nodal: Vec<Vec<f64>> = (0..6)
+            .map(|k| {
+                let v: Vec<f64> = st_all.iter().map(|x| x[k]).collect();
+                node_average(mesh, &v, 1, order)
+            })
+            .collect();
+        fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
     }
     (fields, cells)
 }
@@ -1748,6 +1814,7 @@ fn fields_of_mixed(
 
     if with_stress {
         let mut s_all = Vec::with_capacity(total_cell_nodes);
+        let mut st_all = Vec::with_capacity(total_cell_nodes);
         let mut vals = Vec::new();
         let mut dxi = Vec::new();
         let mut sn = Vec::new();
@@ -1759,6 +1826,7 @@ fn fields_of_mixed(
             let nloc = cdofs.len();
             if inactive.contains(&dom) {
                 s_all.extend(std::iter::repeat_n([0.0; 6], nloc));
+                st_all.extend(std::iter::repeat_n([0.0; 6], nloc));
                 continue;
             }
             let ct = mixed.cell_type(mc);
@@ -1804,7 +1872,9 @@ fn fields_of_mixed(
                 }
             }
             let cell_stress = stress_at_nodes(&grad_cell, 1, nloc, d, &st.c6[mc..mc + 1], plane, &eth_cell);
+            let cell_strain = strain_at_nodes(&grad_cell, 1, nloc, d, &st.c6[mc..mc + 1], plane, &eth_cell);
             s_all.extend_from_slice(&cell_stress);
+            st_all.extend_from_slice(&cell_strain);
         }
 
         let vm_mixed: Vec<f64> = s_all.iter().map(von_mises).collect();
@@ -1839,6 +1909,14 @@ fn fields_of_mixed(
             fields.push(Field::scalar(sname, "Pa", node_average(simplex, &s_cf.re, 1, order)));
             cell_fields.push(s_cf);
         }
+        let strain_nodal: Vec<Vec<f64>> = (0..6)
+            .map(|k| {
+                let comp_mixed: Vec<f64> = st_all.iter().map(|x| x[k]).collect();
+                let s_cf = proj.project_cell_field(mixed, space, "S_tmp", "m/m", &comp_mixed, &[], &m_offsets, order);
+                node_average(simplex, &s_cf.re, 1, order)
+            })
+            .collect();
+        fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
     } else {
         for (k, ax) in names.iter().enumerate() {
             let mut uk_mixed = Vec::with_capacity(total_cell_nodes);
@@ -1858,6 +1936,50 @@ fn fields_of_mixed(
                 order,
             ));
         }
+        let mut st_all = Vec::with_capacity(total_cell_nodes);
+        let (mut vals, mut dxi, mut sn, mut sdn) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for mc in 0..nc {
+            let dom = mixed.cell_labels[mc];
+            let cdofs = dof_map.cell_dofs(mc);
+            let nloc = cdofs.len();
+            if inactive.contains(&dom) {
+                st_all.extend(std::iter::repeat_n([0.0; 6], nloc));
+                continue;
+            }
+            let ct = mixed.cell_type(mc);
+            let iso = IsoparametricCell::from_mesh(mixed, mc);
+            let ref_nodes = lagrange_ref_nodes(ct, space);
+            let mut grad_cell = vec![0.0; nloc * d * d];
+            for (a, xi) in ref_nodes.iter().enumerate() {
+                let jg = iso.eval_into(xi, &mut sn, &mut sdn);
+                lagrange_shape_into(ct, space, xi, &mut vals, &mut dxi);
+                let mut g_phys = [[0.0; 3]; 3];
+                for (b_idx, &gd) in cdofs.iter().enumerate() {
+                    let gp = jg.map_grad(dxi[b_idx]);
+                    for i in 0..d {
+                        let ui = u[i * n1 + gd];
+                        for k in 0..d {
+                            g_phys[i][k] += ui * gp[k];
+                        }
+                    }
+                }
+                for i in 0..d {
+                    for m in 0..d {
+                        grad_cell[a * d * d + i * d + m] = g_phys[i][m];
+                    }
+                }
+            }
+            let cell_strain = strain_at_nodes(&grad_cell, 1, nloc, d, &st.c6[mc..mc + 1], plane, &[]);
+            st_all.extend_from_slice(&cell_strain);
+        }
+        let strain_nodal: Vec<Vec<f64>> = (0..6)
+            .map(|k| {
+                let comp_mixed: Vec<f64> = st_all.iter().map(|x| x[k]).collect();
+                let s_cf = proj.project_cell_field(mixed, space, "S_tmp", "m/m", &comp_mixed, &[], &m_offsets, order);
+                node_average(simplex, &s_cf.re, 1, order)
+            })
+            .collect();
+        fields.push(Field::vector("S", "m/m", &["xx", "yy", "zz", "xy", "yz", "xz"], &strain_nodal));
     }
     (fields, cell_fields)
 }

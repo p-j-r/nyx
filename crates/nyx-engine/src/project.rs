@@ -124,6 +124,11 @@ pub struct MeshSettings {
     /// retain transient cellwise `ElectroAmrData` indicators on `SolveResult` instead of stripping them after solve
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retain_amr_data: bool,
+    /// mesh only the regions named here (region names or `name*` patterns of the geometry, ADR 135): the cells of the other regions are
+    /// dropped after meshing, the labels and names of the model are kept, so a physics can mesh its own subset (the solid regions and their
+    /// absorbing layers of a solid-mechanics problem) and still exchange fields by canonical region name. `None` meshes every region
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_domains: Option<Vec<String>>,
 }
 
 impl Default for MeshSettings {
@@ -156,6 +161,7 @@ impl Default for MeshSettings {
             adapt_rel_tol: None,
             adapt_growth: None,
             retain_amr_data: false,
+            active_domains: None,
         }
     }
 }
@@ -175,8 +181,92 @@ impl MeshSettings {
 /// The file format of a project (ADR 63).
 pub const PROJECT_FORMAT: u32 = 1;
 
+/// The checks of mesh settings that need no mesh, in plain words.
+fn check_mesh_settings(s: &MeshSettings) -> Result<(), String> {
+    if !(s.h > 0.0 && s.h.is_finite()) {
+        return Err("the element size must be a positive finite number".into());
+    }
+    if s.gap_cells.is_some_and(|gc| !(gc > 0.0 && gc.is_finite())) {
+        return Err("`gap_cells` must be a positive finite number".into());
+    }
+    if s.max_cells.is_some_and(|mc| mc < 1) {
+        return Err("`max_cells` must be an integer >= 1".into());
+    }
+    if s.dz_min.is_some_and(|dz| !(dz > 0.0 && dz.is_finite())) {
+        return Err("`dz_min` must be a positive finite number".into());
+    }
+    if s.max_z_slabs.is_some_and(|ms| ms < 1) {
+        return Err("`max_z_slabs` must be an integer >= 1".into());
+    }
+    if s.z_growth_ratio.is_some_and(|zr| !(zr > 1.0 && zr.is_finite())) {
+        return Err("`z_growth_ratio` must be a finite number strictly greater than 1.0".into());
+    }
+    if let Some(a) = &s.active_domains {
+        if a.is_empty() || a.iter().any(|n| n.trim().is_empty()) {
+            return Err("`active_domains` must name at least one region, and no empty name".into());
+        }
+    }
+    Ok(())
+}
+
 fn current_format() -> u32 {
     PROJECT_FORMAT
+}
+
+fn default_coupled_max_iters() -> usize {
+    25
+}
+fn default_coupled_rtol() -> f64 {
+    1e-6
+}
+fn default_anderson_m() -> usize {
+    5
+}
+fn default_source_scale() -> f64 {
+    1.0
+}
+fn is_one_f64(v: &f64) -> bool {
+    (*v - 1.0).abs() <= f64::EPSILON
+}
+
+/// Explicit opt-in configuration for two-way Anderson-accelerated self-consistent coupled loops
+/// (photothermal `ems <-> dfs` or electrothermal `dfs::conduction <-> dfs::heat_stationary`, ADR 139).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CoupledLoopConfig {
+    /// Maximum outer Anderson/Picard iterations (`>= 1`, default `25`).
+    #[serde(default = "default_coupled_max_iters")]
+    pub max_iters: usize,
+    /// Relative $L_\infty$ temperature convergence tolerance `||T^{k+1} - T^k||_inf / max(1, ||T^k||_inf) <= rtol` (default `1e-6`).
+    #[serde(default = "default_coupled_rtol")]
+    pub rtol: f64,
+    /// Anderson type-II history depth `m` (`0` = plain Picard, default `5`).
+    #[serde(default = "default_anderson_m")]
+    pub anderson_m: usize,
+    /// Optional auxiliary source problem (e.g. `dfs` `conduction` paired with `Project`'s `dfs` `heat_stationary`
+    /// for intra-physics electrothermal `V <-> T` coupling within a single `Project`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auxiliary: Option<ProblemSpec>,
+    /// Optional multiplier applied to exported `"heat_source"` (`Q_opt` or `Q_joule`) before thermal assembly (default `1.0`).
+    #[serde(default = "default_source_scale", skip_serializing_if = "is_one_f64")]
+    pub source_scale: f64,
+}
+
+impl Default for CoupledLoopConfig {
+    fn default() -> Self {
+        Self {
+            max_iters: default_coupled_max_iters(),
+            rtol: default_coupled_rtol(),
+            anderson_m: default_anderson_m(),
+            auxiliary: None,
+            source_scale: 1.0,
+        }
+    }
+}
+
+impl CoupledLoopConfig {
+    pub fn new(max_iters: usize, rtol: f64, anderson_m: usize) -> Self {
+        Self { max_iters, rtol, anderson_m, auxiliary: None, source_scale: 1.0 }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -187,6 +277,10 @@ pub struct Project {
     pub title: String,
     pub geometry: FeatureList,
     pub mesh: MeshSettings,
+    /// mesh settings of a physics that is meshed on its own (per-physics meshing, ADR 135), by physics code; a physics not listed uses
+    /// `mesh`. Fields between physics on different meshes are transferred by canonical region name (`femcore::transfer`)
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mesh_by_physics: std::collections::BTreeMap<String, MeshSettings>,
     /// one problem per physics the project loads (one to three)
     #[serde(default)]
     pub physics: Vec<ProblemSpec>,
@@ -199,6 +293,9 @@ pub struct Project {
     /// when true, out-of-range material temperature evaluations refuse the solve instead of clamping and emitting a warning
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub strict_material_range: bool,
+    /// optional explicit opt-in configuration for two-way self-consistent Anderson coupled loops (`ems <-> dfs` or `conduction <-> heat`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coupled_loop: Option<CoupledLoopConfig>,
 }
 
 impl Project {
@@ -209,11 +306,23 @@ impl Project {
             title: title.into(),
             geometry: FeatureList::new(dim),
             mesh: MeshSettings::default(),
+            mesh_by_physics: Default::default(),
             physics: vec![],
             active: None,
             materials: Default::default(),
             strict_material_range: false,
+            coupled_loop: None,
         }
+    }
+
+    /// The mesh settings `physics` is meshed with: its own entry of `mesh_by_physics`, else the project's `mesh`.
+    pub fn mesh_for(&self, physics: &str) -> &MeshSettings {
+        self.mesh_by_physics.get(physics).unwrap_or(&self.mesh)
+    }
+
+    /// Whether `physics` is meshed with settings other than the project's `mesh`.
+    pub fn has_own_mesh(&self, physics: &str) -> bool {
+        self.mesh_by_physics.get(physics).is_some_and(|s| *s != self.mesh)
     }
 
     pub fn spec(&self, physics: &str) -> Option<&ProblemSpec> {
@@ -268,6 +377,9 @@ impl Project {
         for (i, s) in v["physics"].as_array().into_iter().flatten().enumerate() {
             need(&format!("problem {}", i + 1), s)?;
         }
+        if let Some(aux) = v.get("coupled_loop").and_then(|c| c.get("auxiliary")).filter(|x| !x.is_null()) {
+            need("coupled_loop.auxiliary", aux)?;
+        }
         let p: Project = serde_json::from_value(v).map_err(|e| Error::invalid(format!("not a nyx project: {e}")))?;
         p.check_formats()?;
         Ok(p)
@@ -289,6 +401,11 @@ impl Project {
                 return bad(&format!("the '{}' problem", s.physics), s.format, nyx_physics::PROBLEM_FORMAT);
             }
         }
+        if let Some(aux) = self.coupled_loop.as_ref().and_then(|c| c.auxiliary.as_ref()) {
+            if aux.format != nyx_physics::PROBLEM_FORMAT {
+                return bad("the coupled_loop auxiliary problem", aux.format, nyx_physics::PROBLEM_FORMAT);
+            }
+        }
         Ok(())
     }
 
@@ -296,33 +413,14 @@ impl Project {
     /// against the descriptors of its physics. The first problem found is returned, in plain words.
     pub fn check(&self, registry: &Registry) -> Result<(), Error> {
         self.geometry.validate().map_err(|e| Error::invalid(format!("geometry: {e}")))?;
-        if !(self.mesh.h > 0.0 && self.mesh.h.is_finite()) {
-            return Err(Error::invalid("the element size must be a positive finite number"));
-        }
-        if let Some(gc) = self.mesh.gap_cells {
-            if !(gc > 0.0 && gc.is_finite()) {
-                return Err(Error::invalid("`gap_cells` must be a positive finite number"));
+        check_mesh_settings(&self.mesh).map_err(Error::invalid)?;
+        for (code, s) in &self.mesh_by_physics {
+            if self.spec(code).is_none() {
+                return Err(Error::invalid(format!(
+                    "`mesh_by_physics` has settings for '{code}', which has no problem in the project"
+                )));
             }
-        }
-        if let Some(mc) = self.mesh.max_cells {
-            if mc < 1 {
-                return Err(Error::invalid("`max_cells` must be an integer >= 1"));
-            }
-        }
-        if let Some(dz) = self.mesh.dz_min {
-            if !(dz > 0.0 && dz.is_finite()) {
-                return Err(Error::invalid("`dz_min` must be a positive finite number"));
-            }
-        }
-        if let Some(ms) = self.mesh.max_z_slabs {
-            if ms < 1 {
-                return Err(Error::invalid("`max_z_slabs` must be an integer >= 1"));
-            }
-        }
-        if let Some(zr) = self.mesh.z_growth_ratio {
-            if !(zr > 1.0 && zr.is_finite()) {
-                return Err(Error::invalid("`z_growth_ratio` must be a finite number strictly greater than 1.0"));
-            }
+            check_mesh_settings(s).map_err(|e| Error::invalid(format!("the mesh of '{code}': {e}")))?;
         }
         for (i, s) in self.physics.iter().enumerate() {
             if self.physics[..i].iter().any(|o| o.physics == s.physics) {
@@ -334,6 +432,24 @@ impl Project {
         if let Some(a) = &self.active {
             if self.spec(a).is_none() {
                 return Err(Error::invalid(format!("the active physics '{a}' has no problem in the project")));
+            }
+        }
+        if let Some(cfg) = &self.coupled_loop {
+            if cfg.max_iters < 1 {
+                return Err(Error::invalid("`coupled_loop.max_iters` must be an integer >= 1"));
+            }
+            if !(cfg.rtol > 0.0 && cfg.rtol.is_finite()) {
+                return Err(Error::invalid("`coupled_loop.rtol` must be a positive finite number"));
+            }
+            if cfg.anderson_m > 64 {
+                return Err(Error::invalid("`coupled_loop.anderson_m` must be <= 64"));
+            }
+            if !(cfg.source_scale >= 0.0 && cfg.source_scale.is_finite()) {
+                return Err(Error::invalid("`coupled_loop.source_scale` must be a non-negative finite number"));
+            }
+            if let Some(aux) = &cfg.auxiliary {
+                let p = crate::physics_for(registry, &aux.physics)?;
+                nyx_physics::validate_spec(p, aux)?;
             }
         }
         Ok(())

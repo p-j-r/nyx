@@ -3740,6 +3740,1127 @@
     "name": {
       "type": "string"
     },
+    "nonlinear": {
+      "additionalProperties": false,
+      "properties": {
+        "T_range": {
+          "description": "valid temperature range [T_min, T_max]",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "T_unit": {
+          "default": "K",
+          "type": "string"
+        },
+        "broken_centrosymmetry": {
+          "default": false,
+          "description": "allow non-zero chi2 on centrosymmetric point groups when inversion symmetry is broken",
+          "type": "boolean"
+        },
+        "chi2": {
+          "additionalProperties": false,
+          "properties": {
+            "broken_centrosymmetry": {
+              "default": false,
+              "description": "explicitly permit non-zero d_iJ on centrosymmetric point groups (e.g. DC-field or strain-induced chi^(2))",
+              "type": "boolean"
+            },
+            "d11": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d12": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d13": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d14": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d15": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d16": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d21": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d22": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d23": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d24": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d25": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d26": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d31": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d32": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d33": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d34": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d35": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "d36": {
+              "description": "second-order nonlinear optical tensor entry d_iJ, pm/V or m/V",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "kleinman": {
+              "default": false,
+              "description": "apply Kleinman permutation symmetry when expanding named d_iJ entries",
+              "type": "boolean"
+            },
+            "matrix": {
+              "description": "contracted 3x6 second-order d_iJ = 0.5 * chi^(2)_iJ matrix in textbook Voigt order (1=xx..6=xy)",
+              "type": "array"
+            },
+            "qpm": {
+              "additionalProperties": false,
+              "properties": {
+                "Lambda_qpm": {
+                  "description": "spatial periodic poling period Lambda_qpm, um or m",
+                  "oneOf": [
+                    {
+                      "description": "a number with its unit, for example \"496.8 GPa\"",
+                      "type": "string"
+                    },
+                    {
+                      "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                      "type": "number"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "unit": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "value"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "Lambda_qpm_unit": {
+                  "type": "string"
+                },
+                "axis": {
+                  "default": [
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  "description": "QPM grating wavevector direction in global wafer coordinates",
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                },
+                "duty_cycle": {
+                  "default": 0.5,
+                  "description": "positive-domain duty cycle D in (0, 1)",
+                  "exclusiveMaximum": 1.0,
+                  "exclusiveMinimum": 0.0,
+                  "type": "number"
+                },
+                "period": {
+                  "description": "alias for Lambda_qpm",
+                  "oneOf": [
+                    {
+                      "description": "a number with its unit, for example \"496.8 GPa\"",
+                      "type": "string"
+                    },
+                    {
+                      "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                      "type": "number"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "unit": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "value"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "period_unit": {
+                  "type": "string"
+                },
+                "phase_offset": {
+                  "description": "coordinate offset along axis where the +sign half-period starts",
+                  "oneOf": [
+                    {
+                      "description": "a number with its unit, for example \"496.8 GPa\"",
+                      "type": "string"
+                    },
+                    {
+                      "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                      "type": "number"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "unit": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "value"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "phase_offset_unit": {
+                  "type": "string"
+                },
+                "sign": {
+                  "default": 1.0,
+                  "description": "ferroelectric domain poling sign (+1 or -1)",
+                  "enum": [
+                    -1.0,
+                    1.0
+                  ],
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "source": {
+              "$ref": "#/$defs/source"
+            },
+            "unit": {
+              "description": "unit of bare d_iJ numbers, for example \"pm/V\" or \"m/V\"",
+              "type": "string"
+            },
+            "wavelength": {
+              "description": "reference optical wavelength of d_iJ measurement",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "wavelength_unit": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "chi3": {
+          "additionalProperties": false,
+          "properties": {
+            "b_over_a": {
+              "description": "Maker-Terhune cross-polarization ratio B/A (default 1.0 for electronic Kleinman symmetry)",
+              "type": "number"
+            },
+            "beta_tpa": {
+              "description": "two-photon absorption coefficient beta_TPA >= 0, m/W or cm/GW",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "beta_tpa_unit": {
+              "type": "string"
+            },
+            "chi3_xxxx": {
+              "description": "diagonal third-order susceptibility chi^(3)_xxxx, m^2/V^2",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "chi3_xxyy": {
+              "description": "cross-polarized susceptibility chi^(3)_xxyy, m^2/V^2",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "chi3_xyxy": {
+              "description": "cross-polarized susceptibility chi^(3)_xyxy, m^2/V^2",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "chi3_xyyx": {
+              "description": "conjugate cross-polarized susceptibility chi^(3)_xyyx, m^2/V^2",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "k_fcd": {
+              "description": "signed free-carrier dispersion coefficient k_FCD (Delta n = k_FCD * N_c), m^3 or cm^3",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "k_fcd_unit": {
+              "type": "string"
+            },
+            "n_2": {
+              "description": "nonlinear Kerr refractive index n_2, m^2/W or cm^2/W",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "n_2_unit": {
+              "type": "string"
+            },
+            "sigma_fca": {
+              "description": "free-carrier absorption cross-section sigma_FCA >= 0, m^2 or cm^2",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "sigma_fca_unit": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/source"
+            },
+            "tau_c": {
+              "description": "effective free-carrier recombination lifetime tau_c >= 0, ns, ps or s",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "tau_c_unit": {
+              "type": "string"
+            },
+            "unit": {
+              "description": "unit of bare chi3_ijkl numbers, for example \"m^2/V^2\" or \"pm^2/V^2\"",
+              "type": "string"
+            },
+            "wavelength": {
+              "description": "reference optical wavelength of chi^(3) / TPA parameters",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "wavelength_unit": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "qpm": {
+          "additionalProperties": false,
+          "properties": {
+            "Lambda_qpm": {
+              "description": "spatial periodic poling period Lambda_qpm, um or m",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "Lambda_qpm_unit": {
+              "type": "string"
+            },
+            "axis": {
+              "default": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "description": "QPM grating wavevector direction in global wafer coordinates",
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "duty_cycle": {
+              "default": 0.5,
+              "description": "positive-domain duty cycle D in (0, 1)",
+              "exclusiveMaximum": 1.0,
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            "period": {
+              "description": "alias for Lambda_qpm",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "period_unit": {
+              "type": "string"
+            },
+            "phase_offset": {
+              "description": "coordinate offset along axis where the +sign half-period starts",
+              "oneOf": [
+                {
+                  "description": "a number with its unit, for example \"496.8 GPa\"",
+                  "type": "string"
+                },
+                {
+                  "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+                  "type": "number"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "phase_offset_unit": {
+              "type": "string"
+            },
+            "sign": {
+              "default": 1.0,
+              "description": "ferroelectric domain poling sign (+1 or -1)",
+              "enum": [
+                -1.0,
+                1.0
+              ],
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "wavelength": {
+          "description": "default reference optical wavelength for [nonlinear]",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "wavelength_unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "notes": {
       "type": "string"
     },
@@ -5246,6 +6367,327 @@
     },
     "residual_stress_unit": {
       "type": "string"
+    },
+    "sheet_2d": {
+      "additionalProperties": false,
+      "properties": {
+        "T_range": {
+          "description": "valid temperature range [T_min, T_max] in K",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "b_0": {
+          "description": "out-of-plane static magnetic bias B_0, T",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "b_0_unit": {
+          "type": "string"
+        },
+        "data": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "data_uu": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "data_vv": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "frequency_unit": {
+          "type": "string"
+        },
+        "gamma": {
+          "description": "phenomenological scattering rate Gamma = hbar/(2*tau) (eV/meV) or gamma = 1/tau (THz/rad/s)",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "gamma_unit": {
+          "type": "string"
+        },
+        "model": {
+          "default": "kubo_graphene",
+          "enum": [
+            "kubo_graphene",
+            "kubo",
+            "anisotropic",
+            "drude_lorentz_2d",
+            "constant",
+            "tabulated"
+          ]
+        },
+        "mu_c": {
+          "description": "chemical potential (Fermi level) mu_c, eV or J",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "mu_c_unit": {
+          "type": "string"
+        },
+        "n_layers": {
+          "default": 1.0,
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "omega": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "poles_u": {
+          "description": "rows [omega_0, gamma, weight] along principal axis u",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "poles_v": {
+          "description": "rows [omega_0, gamma, weight] along principal axis v",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "scattering_rate": {
+          "description": "alias for gamma",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "scattering_rate_unit": {
+          "type": "string"
+        },
+        "sigma_unit": {
+          "default": "S",
+          "type": "string"
+        },
+        "sigma_uu_im": {
+          "description": "principal-axis u sheet conductivity imaginary part, S or array for tabulated"
+        },
+        "sigma_uu_re": {
+          "description": "principal-axis u sheet conductivity real part, S or array for tabulated"
+        },
+        "sigma_vv_im": {
+          "description": "principal-axis v sheet conductivity imaginary part, S or array for tabulated"
+        },
+        "sigma_vv_re": {
+          "description": "principal-axis v sheet conductivity real part, S or array for tabulated"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "tau": {
+          "description": "carrier momentum relaxation time tau, ps, fs or s",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "tau_unit": {
+          "type": "string"
+        },
+        "temperature": {
+          "description": "reference temperature T, K",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "temperature_unit": {
+          "type": "string"
+        },
+        "theta_deg": {
+          "description": "in-plane rotation angle of principal axes (u, v) in degrees",
+          "type": "number"
+        },
+        "theta_rad": {
+          "description": "in-plane rotation angle of principal axes (u, v) in radians",
+          "type": "number"
+        },
+        "v_f": {
+          "description": "Dirac Fermi velocity v_F, m/s (default 1.0e6 m/s)",
+          "oneOf": [
+            {
+              "description": "a number with its unit, for example \"496.8 GPa\"",
+              "type": "string"
+            },
+            {
+              "description": "a bare number: needs the unit declared in a sibling key `<name>_unit` (or `unit` in [elastic]), unless dimensionless",
+              "type": "number"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unit": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "v_f_unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "source": {
       "$ref": "#/$defs/source"

@@ -6,7 +6,7 @@
 
 use crate::cavity::{basis3_keyed, safe_curved_jacobian, Ned3, CURVED_QUAD_DEGREE};
 use crate::modes::C0;
-use crate::problem::{symmetry_facet_flags_mixed, LumpedJjBc, SurfaceImpedanceBc, Symmetry};
+use crate::problem::{symmetry_facet_flags_mixed, LumpedJjBc, Sheet2dBc, SurfaceImpedanceBc, Symmetry};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::edge_mixed::{eval_cell_basis_2d, eval_cell_basis_3d, nedelec_nloc, NedEvalScratch, NedMixed};
 use femcore::fem::{facet_rule, geometry, quad_rule, shape, CurvedTet};
@@ -142,6 +142,34 @@ pub enum SheetCellKind {
     Ibc { inv_l_eff: f64, g_eff: f64, n_hat: [f64; 3] },
     Jj { port_index: usize, d_hat: [f64; 3], width_m: f64 },
     Pec { n_hat: [f64; 3] },
+    Sheet2D { sigma_2d: [[C; 2]; 2], u_hat: [f64; 3], v_hat: [f64; 3], n_hat: [f64; 3] },
+}
+
+/// Builds a globally consistent right-handed orthonormal tangent frame `(u_hat, v_hat, n_canon)`
+/// on a 3D facet with normal `n_raw`, independent of facet vertex permutation.
+/// On horizontal wafer-plane sheets (`n = +/- z`), `u_hat = +x` and `v_hat = +y`.
+pub fn sheet2d_tangent_frame_3d(n_raw: [f64; 3]) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    let nl = norm3(n_raw).max(1e-30);
+    let mut n = [n_raw[0] / nl, n_raw[1] / nl, n_raw[2] / nl];
+    let flip = if n[2].abs() > 1e-9 {
+        n[2] < 0.0
+    } else if n[1].abs() > 1e-9 {
+        n[1] < 0.0
+    } else {
+        n[0] < 0.0
+    };
+    if flip {
+        n = [-n[0], -n[1], -n[2]];
+    }
+    let ref_ax = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let rn = dot3(ref_ax, n);
+    let u_proj = [ref_ax[0] - rn * n[0], ref_ax[1] - rn * n[1], ref_ax[2] - rn * n[2]];
+    let ul = norm3(u_proj).max(1e-30);
+    let u_hat = [u_proj[0] / ul, u_proj[1] / ul, u_proj[2] / ul];
+    let v_raw = cross3(n, u_hat);
+    let vl = norm3(v_raw).max(1e-30);
+    let v_hat = [v_raw[0] / vl, v_raw[1] / vl, v_raw[2] / vl];
+    (u_hat, v_hat, n)
 }
 
 /// One boundary triangle handled by perturbative surface-current IBC (`ibc_mode = "perturbative"` or `"auto"`, FR-30).
@@ -1082,6 +1110,210 @@ fn assemble_ibc_and_jj_3d_with_mode(
     })
 }
 
+/// Evaluates an imported electrostatic potential `pot` (`P1` vertex or `P2` vertex+edge-midpoint) on a 3D triangle `tri` at barycentric `l2`.
+#[inline]
+pub(crate) fn eval_potential_tri_3d(
+    mesh: &Discretisation,
+    tri: [u32; 3],
+    l2: &[f64],
+    pot: Option<&[f64]>,
+) -> Option<f64> {
+    let pot = pot?;
+    let nv = mesh.n_points();
+    if pot.len() < nv {
+        return None;
+    }
+    let (v0, v1, v2) = (tri[0], tri[1], tri[2]);
+    let (b0, b1, b2) = (l2[0], l2[1], l2[2]);
+    let ne = mesh.n_edges();
+    if pot.len() == nv + ne && ne > 0 {
+        let e01 = mesh.edge_index(v0, v1);
+        let e12 = mesh.edge_index(v1, v2);
+        let e02 = mesh.edge_index(v0, v2);
+        Some(
+            b0 * (2.0 * b0 - 1.0) * pot[v0 as usize]
+                + b1 * (2.0 * b1 - 1.0) * pot[v1 as usize]
+                + b2 * (2.0 * b2 - 1.0) * pot[v2 as usize]
+                + 4.0 * b0 * b1 * pot[nv + e01]
+                + 4.0 * b1 * b2 * pot[nv + e12]
+                + 4.0 * b0 * b2 * pot[nv + e02],
+        )
+    } else {
+        Some(b0 * pot[v0 as usize] + b1 * pot[v1 as usize] + b2 * pot[v2 as usize])
+    }
+}
+
+/// Evaluates an imported electrostatic potential `pot` (`P1` vertex or `P2` vertex+edge-midpoint) on a 2D mesh edge `(va, vb)` at `(l0, l1)`.
+#[inline]
+pub(crate) fn eval_potential_edge_2d(
+    mesh: &Discretisation,
+    va: u32,
+    vb: u32,
+    l0: f64,
+    l1: f64,
+    pot: Option<&[f64]>,
+) -> Option<f64> {
+    let pot = pot?;
+    let nv = mesh.n_points();
+    if pot.len() < nv {
+        return None;
+    }
+    let ne = mesh.n_edges();
+    if pot.len() == nv + ne && ne > 0 {
+        let eid = mesh.edge_index(va, vb);
+        Some(
+            l0 * (2.0 * l0 - 1.0) * pot[va as usize]
+                + l1 * (2.0 * l1 - 1.0) * pot[vb as usize]
+                + 4.0 * l0 * l1 * pot[nv + eid],
+        )
+    } else {
+        Some(l0 * pot[va as usize] + l1 * pot[vb as usize])
+    }
+}
+
+/// Assembles penetrable 3D `sheet_2d` boundary/interface conditions (`ADR 137`) into an existing [`IbcJjAssembly3D`]:
+/// $$a_{2\text{D}}(\mathbf{w}, \mathbf{E}) = +i\omega\mu_0 \int_{\Gamma_{2\text{D}}} \mathbf{w}_t \cdot (\boldsymbol{\sigma}_{2\text{D}}(\mathbf{x})\,\mathbf{E}_t)\,\mathrm{d}S.$$
+/// Deduplicates interior/exterior facets by sorted vertex triple, leaves all Nédélec DOFs free (never added to `ibc_tris`
+/// or `pec_tris`), and interpolates any imported electrostatic potential $V(\mathbf{x})$ at the 6-point Dunavant nodes.
+/// Returns `Ok(has_non_symmetric)` where `has_non_symmetric` is true when $\sigma_{uv} \neq \sigma_{vu}$ ($B_0 \neq 0$).
+pub fn assemble_sheet2d_3d(
+    mesh: &Discretisation,
+    ned: &Ned3,
+    pec_labels: &[i32],
+    sheet_bcs: &[Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    f0: f64,
+    ij: &mut IbcJjAssembly3D,
+) -> Result<bool, String> {
+    if sheet_bcs.is_empty() {
+        return Ok(false);
+    }
+    let n = ned.n_dofs();
+    let geo = geometry(mesh);
+    let face_to_cell = build_face_to_cell_3d(mesh);
+    let quad2 = quad_rule(2, 4);
+
+    let mut seen: BTreeSet<[u32; 3]> =
+        ij.pec_tris.iter().chain(ij.ibc_tris.iter()).chain(ij.jj_tris.iter()).copied().collect();
+    for pt in &ij.pert_ibc_tris {
+        seen.insert(pt.tri);
+    }
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen.insert(sorted3(fv[0], fv[1], fv[2]));
+        }
+    }
+
+    let mut k_coo = Coo::new(n, n);
+    let mut c_coo = Coo::new(n, n);
+    let mut kc_coo = CCoo::new(n, n);
+    let mut face_sheet_map: HashMap<[u32; 3], SheetCellKind> = HashMap::new();
+    let mut has_non_symmetric = false;
+
+    for bc in sheet_bcs {
+        let f_ref = if bc.f_ref > 0.0 { bc.f_ref } else { f0 };
+        let omega_ref = (2.0 * PI * f_ref).max(1.0);
+        let k0_ref = omega_ref / C0;
+        if bc.is_non_symmetric() {
+            has_non_symmetric = true;
+        }
+        ij.direct_ibc_labels.extend(bc.labels.iter().copied());
+
+        for f in 0..mesh.n_facets() {
+            if !bc.labels.contains(&mesh.facet_labels[f]) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let key = sorted3(fv[0], fv[1], fv[2]);
+            if !seen.insert(key) {
+                continue;
+            }
+            let (_, n_hat, bnd_dofs, weights, psi_q) =
+                eval_triangle_tangential_basis(mesh, ned, &geo, &face_to_cell, key)?;
+            let (u_hat, v_hat, n_canon) = sheet2d_tangent_frame_3d(n_hat);
+            let nb = bnd_dofs.len();
+            let mut loc_k = vec![0.0_f64; nb * nb];
+            let mut loc_c = vec![0.0_f64; nb * nb];
+            let mut loc_kc = vec![c(0.0, 0.0); nb * nb];
+            let mut sigma_rep = [[c(0.0, 0.0); 2]; 2];
+
+            for (q, &wq) in weights.iter().enumerate() {
+                let l2 = &quad2.lam[q];
+                let local_v = eval_potential_tri_3d(mesh, key, l2, imported_potential);
+                let sig = bc.eval_tensor_at(f_ref, None, local_v)?;
+                if q == 0 {
+                    sigma_rep = sig;
+                }
+                if (sig[0][1] - sig[1][0]).norm() > 1e-18 * (sig[0][0].norm() + sig[1][1].norm()).max(1e-30) {
+                    has_non_symmetric = true;
+                }
+
+                // +i * omega_ref * mu_0 * sig_ab = (-omega_ref * mu_0 * Im(sig_ab)) + i * k0_ref * (mu_0 * c_0 * Re(sig_ab))
+                let ak = [
+                    [-omega_ref * MU0 * sig[0][0].im, -omega_ref * MU0 * sig[0][1].im],
+                    [-omega_ref * MU0 * sig[1][0].im, -omega_ref * MU0 * sig[1][1].im],
+                ];
+                let ac = [
+                    [MU0 * C0 * sig[0][0].re, MU0 * C0 * sig[0][1].re],
+                    [MU0 * C0 * sig[1][0].re, MU0 * C0 * sig[1][1].re],
+                ];
+
+                let pq = &psi_q[q];
+                for a in 0..nb {
+                    let pa_u = dot3(pq[a], u_hat);
+                    let pa_v = dot3(pq[a], v_hat);
+                    for b in 0..nb {
+                        let pb_u = dot3(pq[b], u_hat);
+                        let pb_v = dot3(pq[b], v_hat);
+                        let gk =
+                            pa_u * (ak[0][0] * pb_u + ak[0][1] * pb_v) + pa_v * (ak[1][0] * pb_u + ak[1][1] * pb_v);
+                        let gc =
+                            pa_u * (ac[0][0] * pb_u + ac[0][1] * pb_v) + pa_v * (ac[1][0] * pb_u + ac[1][1] * pb_v);
+                        loc_k[a * nb + b] += wq * gk;
+                        loc_c[a * nb + b] += wq * gc;
+                        loc_kc[a * nb + b] += c(wq * gk, k0_ref * wq * gc);
+                    }
+                }
+            }
+
+            face_sheet_map.insert(key, SheetCellKind::Sheet2D { sigma_2d: sigma_rep, u_hat, v_hat, n_hat: n_canon });
+            k_coo.push_block(&bnd_dofs, &bnd_dofs, &loc_k);
+            c_coo.push_block(&bnd_dofs, &bnd_dofs, &loc_c);
+            kc_coo.push_block(&bnd_dofs, &bnd_dofs, &loc_kc);
+        }
+    }
+
+    let k_sh = k_coo.to_csr();
+    let c_sh = c_coo.to_csr();
+    let kc_sh = kc_coo.to_csr();
+    if k_sh.nnz() > 0 {
+        ij.k_ibc_full = if ij.k_ibc_full.nnz() > 0 { ij.k_ibc_full.add_scaled(&k_sh, 1.0) } else { k_sh };
+    }
+    if c_sh.nnz() > 0 {
+        ij.c_ibc_full = if ij.c_ibc_full.nnz() > 0 { ij.c_ibc_full.add_scaled(&c_sh, 1.0) } else { c_sh };
+    }
+    if kc_sh.nnz() > 0 {
+        ij.kc_ibc_full = if ij.kc_ibc_full.nnz() > 0 { ij.kc_ibc_full.add_scaled(&kc_sh, c(1.0, 0.0)) } else { kc_sh };
+    }
+    if !face_sheet_map.is_empty() {
+        for ci in 0..mesh.n_cells() {
+            if ij.cell_sheet[ci].is_some() {
+                continue;
+            }
+            let v = mesh.cell(ci);
+            for f in FACES {
+                let key = sorted3(v[f[0]], v[f[1]], v[f[2]]);
+                if let Some(&kind) = face_sheet_map.get(&key) {
+                    ij.cell_sheet[ci] = Some(kind);
+                    break;
+                }
+            }
+        }
+    }
+    Ok(has_non_symmetric)
+}
+
 /// Real congruence transform `P^H A P` for a real matrix `A` under a periodic/Dirichlet reduction `red`.
 pub fn reduce_real_csr(red: &femcore::periodic::Reduction, pmat: &CCsr, a: &RCsr) -> RCsr {
     if a.nnz() == 0 {
@@ -1513,6 +1745,347 @@ pub fn add_ibc_2d_axisym(
     Ok(())
 }
 
+pub(crate) fn collect_sheet2d_edges_2d_simplex(
+    mesh: &Discretisation,
+    bc: &Sheet2dBc,
+    seen: &mut BTreeSet<(u32, u32)>,
+) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for f in 0..mesh.n_facets() {
+        if bc.labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            let key = (fv[0].min(fv[1]), fv[0].max(fv[1]));
+            if seen.insert(key) {
+                out.push(key);
+            }
+        }
+    }
+    if !bc.interface_domains.is_empty() {
+        let mut edge_doms: BTreeMap<(u32, u32), Vec<i32>> = BTreeMap::new();
+        for ci in 0..mesh.n_cells() {
+            let cv = mesh.cell(ci);
+            let dom = mesh.cell_labels[ci];
+            for (a, b) in [(cv[0], cv[1]), (cv[1], cv[2]), (cv[2], cv[0])] {
+                edge_doms.entry((a.min(b), a.max(b))).or_default().push(dom);
+            }
+        }
+        for (key, doms) in edge_doms {
+            if doms.len() == 2 {
+                let (d0, d1) = (doms[0], doms[1]);
+                let matches = bc
+                    .interface_domains
+                    .iter()
+                    .any(|(da, db)| (da.contains(&d0) && db.contains(&d1)) || (da.contains(&d1) && db.contains(&d0)));
+                if matches && seen.insert(key) {
+                    out.push(key);
+                }
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn collect_sheet2d_edges_2d_mixed(
+    mesh: &MixedDiscretisation,
+    bc: &Sheet2dBc,
+    seen: &mut BTreeSet<(u32, u32)>,
+) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for f in 0..mesh.n_facets() {
+        if bc.labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            let key = (fv[0].min(fv[1]), fv[0].max(fv[1]));
+            if seen.insert(key) {
+                out.push(key);
+            }
+        }
+    }
+    if !bc.interface_domains.is_empty() {
+        let mut edge_doms: BTreeMap<(u32, u32), Vec<i32>> = BTreeMap::new();
+        for ci in 0..mesh.n_cells() {
+            let cv = mesh.cell(ci);
+            let dom = mesh.cell_labels[ci];
+            let le: &[(usize, usize)] = match mesh.cell_type(ci) {
+                CellType::Tri => &TRI_EDGES,
+                CellType::Quad => &QUAD_EDGES,
+                _ => &[],
+            };
+            for &(i, j) in le {
+                let (a, b) = (cv[i], cv[j]);
+                edge_doms.entry((a.min(b), a.max(b))).or_default().push(dom);
+            }
+        }
+        for (key, doms) in edge_doms {
+            if doms.len() == 2 {
+                let (d0, d1) = (doms[0], doms[1]);
+                let matches = bc
+                    .interface_domains
+                    .iter()
+                    .any(|(da, db)| (da.contains(&d0) && db.contains(&d1)) || (da.contains(&d1) && db.contains(&d0)));
+                if matches && seen.insert(key) {
+                    out.push(key);
+                }
+            }
+        }
+    }
+    out
+}
+
+fn eval_edge2_jacobian_mixed(mesh: &MixedDiscretisation, fv: [u32; 2], xi: &[f64; 2]) -> ([f64; 3], f64, [f64; 3]) {
+    let corners = [mesh.point3(fv[0] as usize), mesh.point3(fv[1] as usize)];
+    let eid = mesh.edge_index(fv[0], fv[1]).expect("2D cell edge must exist");
+    let (space, nodes) = if let Some(mid) = mesh.edge_node(eid) {
+        (LagrangeSpace::Order2Serendipity, vec![corners[0], corners[1], mid])
+    } else {
+        (LagrangeSpace::Order1, vec![corners[0], corners[1]])
+    };
+    let (n, dn) = facet_lagrange_shape(FacetType::Edge2, space, xi);
+    let mut x = [0.0; 3];
+    let mut t = [0.0; 2];
+    for (a, p) in nodes.iter().enumerate() {
+        x[0] += n[a] * p[0];
+        x[1] += n[a] * p[1];
+        t[0] += dn[a][0] * p[0];
+        t[1] += dn[a][0] * p[1];
+    }
+    let ds = t[0].hypot(t[1]);
+    let n_hat = if ds > 0.0 { [t[1] / ds, -t[0] / ds, 0.0] } else { [0.0; 3] };
+    (x, ds, n_hat)
+}
+
+/// Assembles 2D `sheet_2d` contributions into `(a_coo, b_coo, a1_coo)` for `modes` / `modes_complex`.
+/// Covers both transverse $E_\tau$ (`a_coo`), longitudinal $E_y = j\beta\phi$ (`b_coo`), and off-diagonal
+/// $(\tau, y)$ coupling (`a1_coo`, returning `Ok(true)` when off-diagonal coupling is non-zero).
+#[allow(clippy::too_many_arguments)]
+pub fn add_sheet2d_2d_waveguide(
+    mesh: &Discretisation,
+    order: usize,
+    freq: f64,
+    pec_labels: &[i32],
+    sheet_bcs: &[Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    a_coo: &mut CCoo,
+    b_coo: &mut CCoo,
+    a1_coo: &mut CCoo,
+) -> Result<bool, String> {
+    if sheet_bcs.is_empty() {
+        return Ok(false);
+    }
+    let geo = geometry(mesh);
+    let cd = cell_data(mesh, order);
+    let net = cd.net;
+    let nl = mesh.nloc(order);
+    let nloc_e = if order == 1 { 3 } else { 8 };
+    let rule = facet_rule(1);
+    let edge_to_cell = build_edge_to_cell_2d(mesh);
+    let omega = 2.0 * PI * freq;
+
+    let mut seen = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen.insert((fv[0].min(fv[1]), fv[0].max(fv[1])));
+        }
+    }
+
+    let mut w = vec![[0.0; 2]; nloc_e];
+    let mut curl = vec![0.0; nloc_e];
+    let mut pd = Vec::new();
+    let mut has_coupling = false;
+
+    for bc in sheet_bcs {
+        let f_eval = if bc.f_ref > 0.0 { bc.f_ref } else { freq };
+        for key in collect_sheet2d_edges_2d_simplex(mesh, bc, &mut seen) {
+            let &(ci, [la, lb]) = edge_to_cell
+                .get(&key)
+                .ok_or_else(|| format!("1D facet {:?} is not an edge of any 2D triangle", key))?;
+            let v_cell = mesh.cell(ci);
+            let (p0, p1) = (mesh.point(v_cell[la] as usize), mesh.point(v_cell[lb] as usize));
+            let dx = p1[0] - p0[0];
+            let dz = p1[1] - p0[1];
+            let len = dx.hypot(dz);
+            if len <= 0.0 {
+                continue;
+            }
+            // Canonical in-plane tangent tau (+x when horizontal, +z when vertical)
+            let sign = if dx > 1e-12 || (dx.abs() <= 1e-12 && dz >= 0.0) { 1.0 } else { -1.0 };
+            let tau = [sign * dx / len, sign * dz / len];
+
+            let g = tri_g(&geo, ci);
+            mesh.cell_dofs(ci, order, &mut pd);
+            let rows_e = &cd.gdofs[ci];
+            let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+
+            let mut ke_e = vec![c(0.0, 0.0); nloc_e * nloc_e];
+            let mut ke_p = vec![c(0.0, 0.0); nl * nl];
+            let mut ke_ep = vec![c(0.0, 0.0); nloc_e * nl];
+            let mut ke_pe = vec![c(0.0, 0.0); nl * nloc_e];
+            let mut edge_cpl = false;
+
+            for (q, l1) in rule.lam.iter().enumerate() {
+                let mut l2 = [0.0; 3];
+                l2[la] = l1[0];
+                l2[lb] = l1[1];
+                let local_v = eval_potential_edge_2d(mesh, v_cell[la], v_cell[lb], l1[0], l1[1], imported_potential);
+                let sig = bc.eval_tensor_at(f_eval, None, local_v)?;
+                let i_om_mu0 = c(0.0, omega * MU0);
+                let a_tt = i_om_mu0 * sig[0][0];
+                let a_ty = i_om_mu0 * sig[0][1];
+                let a_yt = i_om_mu0 * sig[1][0];
+                let a_yy = i_om_mu0 * sig[1][1];
+                let cpl = a_ty.norm_sqr() + a_yt.norm_sqr() > 0.0;
+                if cpl {
+                    edge_cpl = true;
+                }
+
+                edge_basis(&l2, &g, &cd.sign[ci], order, &mut w, &mut curl);
+                let (nv, _) = shape(&l2, order);
+                let wq = rule.w[q] * len;
+                for s in 0..nloc_e {
+                    let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
+                    for t in 0..nloc_e {
+                        let wt_t = w[t][0] * tau[0] + w[t][1] * tau[1];
+                        ke_e[s * nloc_e + t] += a_tt * (wq * ws_t * wt_t);
+                    }
+                    if cpl {
+                        for a in 0..nl {
+                            ke_ep[s * nl + a] += a_ty * (wq * ws_t * nv[a]);
+                            ke_pe[a * nloc_e + s] -= a_yt * (wq * nv[a] * ws_t);
+                        }
+                    }
+                }
+                for a in 0..nl {
+                    for b in 0..nl {
+                        ke_p[a * nl + b] += a_yy * (wq * nv[a] * nv[b]);
+                    }
+                }
+            }
+            a_coo.push_block(rows_e, rows_e, &ke_e);
+            b_coo.push_block(&cols_p, &cols_p, &ke_p);
+            if edge_cpl {
+                has_coupling = true;
+                a1_coo.push_block(rows_e, &cols_p, &ke_ep);
+                a1_coo.push_block(&cols_p, rows_e, &ke_pe);
+            }
+        }
+    }
+    Ok(has_coupling)
+}
+
+/// Assembles 2D `sheet_2d` contributions into `a_coo` for `axisymmetric_modes` (`(r, z)` half-plane).
+pub fn add_sheet2d_2d_axisym(
+    mesh: &Discretisation,
+    order: usize,
+    f_search: f64,
+    pec_labels: &[i32],
+    sheet_bcs: &[Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    a_coo: &mut CCoo,
+) -> Result<(), String> {
+    if sheet_bcs.is_empty() {
+        return Ok(());
+    }
+    let geo = geometry(mesh);
+    let cd = cell_data(mesh, order);
+    let net = cd.net;
+    let nl = mesh.nloc(order);
+    let nloc_e = if order == 1 { 3 } else { 8 };
+    let rule = facet_rule(1);
+    let edge_to_cell = build_edge_to_cell_2d(mesh);
+    let omega_search = 2.0 * PI * f_search;
+
+    let mut seen = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen.insert((fv[0].min(fv[1]), fv[0].max(fv[1])));
+        }
+    }
+
+    let mut w = vec![[0.0; 2]; nloc_e];
+    let mut curl = vec![0.0; nloc_e];
+    let mut pd = Vec::new();
+
+    for bc in sheet_bcs {
+        let f_eval = if bc.f_ref > 0.0 { bc.f_ref } else { f_search };
+        for key in collect_sheet2d_edges_2d_simplex(mesh, bc, &mut seen) {
+            let &(ci, [la, lb]) = edge_to_cell
+                .get(&key)
+                .ok_or_else(|| format!("1D facet {:?} is not an edge of any 2D triangle", key))?;
+            let v_cell = mesh.cell(ci);
+            let (p0, p1) = (mesh.point(v_cell[la] as usize), mesh.point(v_cell[lb] as usize));
+            let dx = p1[0] - p0[0];
+            let dz = p1[1] - p0[1];
+            let len = dx.hypot(dz);
+            if len <= 0.0 {
+                continue;
+            }
+            let sign = if dx > 1e-12 || (dx.abs() <= 1e-12 && dz >= 0.0) { 1.0 } else { -1.0 };
+            let tau = [sign * dx / len, sign * dz / len];
+            let g = tri_g(&geo, ci);
+            mesh.cell_dofs(ci, order, &mut pd);
+            let rows_e = &cd.gdofs[ci];
+            let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+
+            let mut ke_e = vec![c(0.0, 0.0); nloc_e * nloc_e];
+            let mut ke_p = vec![c(0.0, 0.0); nl * nl];
+            let mut ke_ep = vec![c(0.0, 0.0); nloc_e * nl];
+            let mut ke_pe = vec![c(0.0, 0.0); nl * nloc_e];
+            let mut has_cpl = false;
+
+            for (q, l1) in rule.lam.iter().enumerate() {
+                let mut l2 = [0.0; 3];
+                l2[la] = l1[0];
+                l2[lb] = l1[1];
+                let r: f64 = (0..3).map(|k| l2[k] * mesh.point(v_cell[k] as usize)[0]).sum();
+                let local_v = eval_potential_edge_2d(mesh, v_cell[la], v_cell[lb], l1[0], l1[1], imported_potential);
+                let sig = bc.eval_tensor_at(f_eval, None, local_v)?;
+                let i_om_mu0 = c(0.0, omega_search * MU0);
+                let a_tt = i_om_mu0 * sig[0][0];
+                let a_ty = i_om_mu0 * sig[0][1];
+                let a_yt = i_om_mu0 * sig[1][0];
+                let a_yy = i_om_mu0 * sig[1][1];
+                let cpl = a_ty.norm_sqr() + a_yt.norm_sqr() > 0.0;
+                if cpl {
+                    has_cpl = true;
+                }
+
+                edge_basis(&l2, &g, &cd.sign[ci], order, &mut w, &mut curl);
+                let (nv, _) = shape(&l2, order);
+                let wdl = rule.w[q] * len;
+                let wr = wdl * r;
+                let w_inv_r = if r > 1e-30 { wdl / r } else { 0.0 };
+                for s in 0..nloc_e {
+                    let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
+                    for t in 0..nloc_e {
+                        let wt_t = w[t][0] * tau[0] + w[t][1] * tau[1];
+                        ke_e[s * nloc_e + t] += a_tt * (wr * ws_t * wt_t);
+                    }
+                    if cpl {
+                        for a in 0..nl {
+                            // E_theta = -i Psi / r, w_theta^* = +i N_a / r, multiplied by r * dl
+                            ke_ep[s * nl + a] += c(0.0, -1.0) * a_ty * (wdl * ws_t * nv[a]);
+                            ke_pe[a * nloc_e + s] += c(0.0, 1.0) * a_yt * (wdl * nv[a] * ws_t);
+                        }
+                    }
+                }
+                for a in 0..nl {
+                    for b in 0..nl {
+                        ke_p[a * nl + b] += a_yy * (w_inv_r * nv[a] * nv[b]);
+                    }
+                }
+            }
+            a_coo.push_block(rows_e, rows_e, &ke_e);
+            a_coo.push_block(&cols_p, &cols_p, &ke_p);
+            if has_cpl {
+                a_coo.push_block(rows_e, &cols_p, &ke_ep);
+                a_coo.push_block(&cols_p, rows_e, &ke_pe);
+            }
+        }
+    }
+    Ok(())
+}
+
 // ------------------------------------------------------------------ 2D MixedDiscretisation (`Tri + Quad`) PEC & IBC
 
 pub fn pec_edges_and_nodes_2d_mixed(
@@ -1751,6 +2324,247 @@ pub fn add_ibc_2d_axisym_mixed(
             }
             a_coo.push_block(rows_e, rows_e, &ke_e);
             a_coo.push_block(&cols_p, &cols_p, &ke_p);
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_sheet2d_2d_waveguide_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    phi_map: &MixedLagrangeDofMap,
+    freq: f64,
+    pec_labels: &[i32],
+    sheet_bcs: &[Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    a_coo: &mut CCoo,
+    b_coo: &mut CCoo,
+    a1_coo: &mut CCoo,
+) -> Result<bool, String> {
+    if sheet_bcs.is_empty() {
+        return Ok(false);
+    }
+    let net = ned.n_dofs;
+    let edge_to_cell = build_edge_to_cell_2d_mixed(mesh);
+    let omega = 2.0 * PI * freq;
+
+    let mut seen = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen.insert((fv[0].min(fv[1]), fv[0].max(fv[1])));
+        }
+    }
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut curl = Vec::new();
+    let mut nv = Vec::new();
+    let mut dxi = Vec::new();
+    let mut has_coupling = false;
+
+    for bc in sheet_bcs {
+        let f_eval = if bc.f_ref > 0.0 { bc.f_ref } else { freq };
+        for key in collect_sheet2d_edges_2d_mixed(mesh, bc, &mut seen) {
+            let fv = [key.0, key.1];
+            let &ci =
+                edge_to_cell.get(&key).ok_or_else(|| format!("1D facet {:?} is not an edge of any 2D cell", key))?;
+            let iso = IsoparametricCell::from_mesh(mesh, ci);
+            let cv = mesh.cell(ci);
+            let corners_ref = cell_corner_ref_coords(iso.cell_type);
+            let la = cv.iter().position(|&v| v == fv[0]).unwrap();
+            let lb = cv.iter().position(|&v| v == fv[1]).unwrap();
+            let deg = if iso.curved { 6 } else { 4 };
+            let frule = facet_rule_mixed(FacetType::Edge2, deg);
+            let rows_e = ned.cell_dofs(ci);
+            let pd = phi_map.cell_dofs(ci);
+            let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+            let nloc_e = rows_e.len();
+            let nl = cols_p.len();
+            let mut ke_e = vec![c(0.0, 0.0); nloc_e * nloc_e];
+            let mut ke_p = vec![c(0.0, 0.0); nl * nl];
+            let mut ke_ep = vec![c(0.0, 0.0); nloc_e * nl];
+            let mut ke_pe = vec![c(0.0, 0.0); nl * nloc_e];
+            let mut edge_cpl = false;
+
+            for (xi_f, &wf) in frule.pts.iter().zip(&frule.w) {
+                let (fn1, _) = facet_lagrange_shape(FacetType::Edge2, LagrangeSpace::Order1, xi_f);
+                let xi_cell = [
+                    fn1[0] * corners_ref[la][0] + fn1[1] * corners_ref[lb][0],
+                    fn1[0] * corners_ref[la][1] + fn1[1] * corners_ref[lb][1],
+                ];
+                let (_, ds, n_hat) = eval_edge2_jacobian_mixed(mesh, fv, xi_f);
+                let mut tau = [-n_hat[1], n_hat[0]];
+                if tau[0] < -1e-12 || (tau[0].abs() <= 1e-12 && tau[1] < 0.0) {
+                    tau = [-tau[0], -tau[1]];
+                }
+                let local_v = imported_potential.and_then(|pot| {
+                    if pot.len() >= mesh.n_points() {
+                        Some(fn1[0] * pot[fv[0] as usize] + fn1[1] * pot[fv[1] as usize])
+                    } else {
+                        None
+                    }
+                });
+                let sig = bc.eval_tensor_at(f_eval, None, local_v)?;
+                let i_om_mu0 = c(0.0, omega * MU0);
+                let a_tt = i_om_mu0 * sig[0][0];
+                let a_ty = i_om_mu0 * sig[0][1];
+                let a_yt = i_om_mu0 * sig[1][0];
+                let a_yy = i_om_mu0 * sig[1][1];
+                let cpl = a_ty.norm_sqr() + a_yt.norm_sqr() > 0.0;
+                if cpl {
+                    edge_cpl = true;
+                }
+
+                eval_cell_basis_2d(mesh, ned, ci, &iso, &xi_cell, &mut scratch, &mut w, &mut curl);
+                lagrange_shape_into(iso.cell_type, phi_map.space, &xi_cell, &mut nv, &mut dxi);
+                let wq = wf * ds;
+                for s in 0..nloc_e {
+                    let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
+                    for t in 0..nloc_e {
+                        let wt_t = w[t][0] * tau[0] + w[t][1] * tau[1];
+                        ke_e[s * nloc_e + t] += a_tt * (wq * ws_t * wt_t);
+                    }
+                    if cpl {
+                        for a in 0..nl {
+                            ke_ep[s * nl + a] += a_ty * (wq * ws_t * nv[a]);
+                            ke_pe[a * nloc_e + s] -= a_yt * (wq * nv[a] * ws_t);
+                        }
+                    }
+                }
+                for a in 0..nl {
+                    for b in 0..nl {
+                        ke_p[a * nl + b] += a_yy * (wq * nv[a] * nv[b]);
+                    }
+                }
+            }
+            a_coo.push_block(rows_e, rows_e, &ke_e);
+            b_coo.push_block(&cols_p, &cols_p, &ke_p);
+            if edge_cpl {
+                has_coupling = true;
+                a1_coo.push_block(rows_e, &cols_p, &ke_ep);
+                a1_coo.push_block(&cols_p, rows_e, &ke_pe);
+            }
+        }
+    }
+    Ok(has_coupling)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_sheet2d_2d_axisym_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    phi_map: &MixedLagrangeDofMap,
+    f_search: f64,
+    pec_labels: &[i32],
+    sheet_bcs: &[Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    a_coo: &mut CCoo,
+) -> Result<(), String> {
+    if sheet_bcs.is_empty() {
+        return Ok(());
+    }
+    let net = ned.n_dofs;
+    let edge_to_cell = build_edge_to_cell_2d_mixed(mesh);
+    let omega_search = 2.0 * PI * f_search;
+
+    let mut seen = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            let fv = mesh.facet(f);
+            seen.insert((fv[0].min(fv[1]), fv[0].max(fv[1])));
+        }
+    }
+    let mut scratch = NedEvalScratch::new();
+    let mut w = Vec::new();
+    let mut curl = Vec::new();
+    let mut nv = Vec::new();
+    let mut dxi = Vec::new();
+
+    for bc in sheet_bcs {
+        let f_eval = if bc.f_ref > 0.0 { bc.f_ref } else { f_search };
+        for key in collect_sheet2d_edges_2d_mixed(mesh, bc, &mut seen) {
+            let fv = [key.0, key.1];
+            let &ci =
+                edge_to_cell.get(&key).ok_or_else(|| format!("1D facet {:?} is not an edge of any 2D cell", key))?;
+            let iso = IsoparametricCell::from_mesh(mesh, ci);
+            let cv = mesh.cell(ci);
+            let corners_ref = cell_corner_ref_coords(iso.cell_type);
+            let la = cv.iter().position(|&v| v == fv[0]).unwrap();
+            let lb = cv.iter().position(|&v| v == fv[1]).unwrap();
+            let deg = if iso.curved { 6 } else { 4 };
+            let frule = facet_rule_mixed(FacetType::Edge2, deg);
+            let rows_e = ned.cell_dofs(ci);
+            let pd = phi_map.cell_dofs(ci);
+            let cols_p: Vec<usize> = pd.iter().map(|&p| net + p).collect();
+            let nloc_e = rows_e.len();
+            let nl = cols_p.len();
+            let mut ke_e = vec![c(0.0, 0.0); nloc_e * nloc_e];
+            let mut ke_p = vec![c(0.0, 0.0); nl * nl];
+            let mut ke_ep = vec![c(0.0, 0.0); nloc_e * nl];
+            let mut ke_pe = vec![c(0.0, 0.0); nl * nloc_e];
+            let mut has_cpl = false;
+
+            for (xi_f, &wf) in frule.pts.iter().zip(&frule.w) {
+                let (fn1, _) = facet_lagrange_shape(FacetType::Edge2, LagrangeSpace::Order1, xi_f);
+                let xi_cell = [
+                    fn1[0] * corners_ref[la][0] + fn1[1] * corners_ref[lb][0],
+                    fn1[0] * corners_ref[la][1] + fn1[1] * corners_ref[lb][1],
+                ];
+                let (xq, ds, n_hat) = eval_edge2_jacobian_mixed(mesh, fv, xi_f);
+                let r = xq[0];
+                let mut tau = [-n_hat[1], n_hat[0]];
+                if tau[0] < -1e-12 || (tau[0].abs() <= 1e-12 && tau[1] < 0.0) {
+                    tau = [-tau[0], -tau[1]];
+                }
+                let local_v = imported_potential.and_then(|pot| {
+                    if pot.len() >= mesh.n_points() {
+                        Some(fn1[0] * pot[fv[0] as usize] + fn1[1] * pot[fv[1] as usize])
+                    } else {
+                        None
+                    }
+                });
+                let sig = bc.eval_tensor_at(f_eval, None, local_v)?;
+                let i_om_mu0 = c(0.0, omega_search * MU0);
+                let a_tt = i_om_mu0 * sig[0][0];
+                let a_ty = i_om_mu0 * sig[0][1];
+                let a_yt = i_om_mu0 * sig[1][0];
+                let a_yy = i_om_mu0 * sig[1][1];
+                let cpl = a_ty.norm_sqr() + a_yt.norm_sqr() > 0.0;
+                if cpl {
+                    has_cpl = true;
+                }
+
+                eval_cell_basis_2d(mesh, ned, ci, &iso, &xi_cell, &mut scratch, &mut w, &mut curl);
+                lagrange_shape_into(iso.cell_type, phi_map.space, &xi_cell, &mut nv, &mut dxi);
+                let wdl = wf * ds;
+                let wr = wdl * r;
+                let w_inv_r = if r > 1e-30 { wdl / r } else { 0.0 };
+                for s in 0..nloc_e {
+                    let ws_t = w[s][0] * tau[0] + w[s][1] * tau[1];
+                    for t in 0..nloc_e {
+                        let wt_t = w[t][0] * tau[0] + w[t][1] * tau[1];
+                        ke_e[s * nloc_e + t] += a_tt * (wr * ws_t * wt_t);
+                    }
+                    if cpl {
+                        for a in 0..nl {
+                            ke_ep[s * nl + a] += c(0.0, -1.0) * a_ty * (wdl * ws_t * nv[a]);
+                            ke_pe[a * nloc_e + s] += c(0.0, 1.0) * a_yt * (wdl * nv[a] * ws_t);
+                        }
+                    }
+                }
+                for a in 0..nl {
+                    for b in 0..nl {
+                        ke_p[a * nl + b] += a_yy * (w_inv_r * nv[a] * nv[b]);
+                    }
+                }
+            }
+            a_coo.push_block(rows_e, rows_e, &ke_e);
+            a_coo.push_block(&cols_p, &cols_p, &ke_p);
+            if has_cpl {
+                a_coo.push_block(rows_e, &cols_p, &ke_ep);
+                a_coo.push_block(&cols_p, rows_e, &ke_pe);
+            }
         }
     }
     Ok(())

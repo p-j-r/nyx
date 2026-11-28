@@ -37,8 +37,28 @@ fn a_plate_pressed_from_above_moves_down_in_z_and_is_stressed_in_z_and_y() {
         Bc { labels: vec![3], kind: BcKind::Load([0.0, 0.0, -1e6]) },
     ];
     let r = common::solve(&mesh, &s);
-    assert_eq!(names(&r), sorted(&["sxx", "sxz", "syy", "szz", "ux", "uz", "von Mises", "|u|"]));
+    assert_eq!(
+        names(&r),
+        sorted(&[
+            "Sxx",
+            "Sxy",
+            "Sxz",
+            "Syy",
+            "Syz",
+            "Szz",
+            "sxx",
+            "sxz",
+            "syy",
+            "szz",
+            "ux",
+            "uz",
+            "von Mises",
+            "|S|",
+            "|u|"
+        ])
+    );
     assert!(mean(&r, "uz") < 0.0, "the plate is pushed down: {}", mean(&r, "uz"));
+    assert!(mean(&r, "Szz") < 0.0 && mean(&r, "Syy").abs() < 1e-15, "2D plane strain: Szz < 0, Syy == 0");
     // plane strain: sigma_zz = -1 MPa, and the out-of-plane stress is sigma_yy = nu (sigma_xx + sigma_zz), about -0.3 MPa (sigma_xx is not
     // zero near the clamped bottom)
     assert!((mean(&r, "szz") / -1e6 - 1.0).abs() < 0.02, "{}", mean(&r, "szz"));

@@ -432,6 +432,23 @@ impl Engine {
                         ));
                     }
                 },
+                "sensitivity_run" | "optimize_run" => {
+                    let targets = physics_arg(&l.args).unwrap_or_else(|| e.default_targets());
+                    if let Err(m) = self.plan_ready(&e, &targets) {
+                        report.problems.push(problem(m));
+                        continue;
+                    }
+                    let new_mesh = cache.need(e.mesh_key());
+                    report.meshes += usize::from(new_mesh);
+                    report.solves += 1;
+                    if what == "optimize_run" {
+                        solved.extend(targets.iter().cloned());
+                    }
+                    report.steps.push(step(
+                        "solve",
+                        format!("{what} {} (mesh {})", targets.join(" + "), if new_mesh { "built" } else { "reused" }),
+                    ));
+                }
                 "open_results" => {
                     // it replaces the project and the results with a file's; the lines after it cannot be checked against that
                     results_unknown = true;
@@ -447,6 +464,7 @@ impl Engine {
                         "result_info"
                             | "result_field"
                             | "analyse"
+                            | "eme_sweep"
                             | "figure"
                             | "export_results"
                             | "field"

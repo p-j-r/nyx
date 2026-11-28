@@ -450,8 +450,13 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
         );
     }
     if problem.materials.has_pml()
+        || problem.has_loss()
         || problem.materials.has_complex_permittivity()
+        || problem.materials.is_non_symmetric()
+        || problem.materials.has_tensor(TensorKind::Permeability)
+        || problem.materials.has_tensor(TensorKind::PermeabilityIm)
         || problem.surface_impedance.iter().any(|b| b.r_s > 0.0)
+        || !problem.sheet_2d.is_empty()
     {
         return crate::modes_complex::solve_waveguide_complex(mesh, problem);
     }
@@ -465,8 +470,11 @@ pub fn solve_waveguide(mesh: &Discretisation, problem: &Problem) -> Result<Solve
     if n_modes < 1 {
         return Err("at least one mode is needed".into());
     }
-    let tens: Vec<_> =
-        problem.materials.cell_tensor(mesh, TensorKind::Permittivity, Some(1.0))?.iter().map(local_tensor).collect();
+    let tens_pairs = problem.cell_complex_permittivity(mesh)?;
+    if tens_pairs.iter().any(|(_, im)| im.iter().flatten().any(|&v| v.abs() > 1e-15)) {
+        return crate::modes_complex::solve_waveguide_complex(mesh, problem);
+    }
+    let tens: Vec<_> = tens_pairs.iter().map(|(re, _)| local_tensor(re)).collect();
     for t in &tens {
         let scale = t[0][0].abs().max(t[1][1].abs()).max(t[2][2].abs()).max(1e-300);
         if t[0][2].abs() > 1e-9 * scale || t[1][2].abs() > 1e-9 * scale {
@@ -566,8 +574,13 @@ pub fn solve_waveguide_mixed(
     problem: &Problem,
 ) -> Result<SolveResult, String> {
     if problem.materials.has_pml()
+        || problem.has_loss()
         || problem.materials.has_complex_permittivity()
+        || problem.materials.is_non_symmetric()
+        || problem.materials.has_tensor(TensorKind::Permeability)
+        || problem.materials.has_tensor(TensorKind::PermeabilityIm)
         || problem.surface_impedance.iter().any(|b| b.r_s > 0.0)
+        || !problem.sheet_2d.is_empty()
     {
         return crate::modes_complex::solve_waveguide_complex_mixed(mesh, mixed, problem);
     }

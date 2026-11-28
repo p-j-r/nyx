@@ -32,6 +32,7 @@ pub mod chebfsi;
 pub mod contour;
 pub mod csr;
 pub mod dense;
+pub mod device;
 pub mod direct;
 pub mod driver;
 pub mod eps;
@@ -40,6 +41,7 @@ pub mod prom;
 pub mod expm;
 pub mod faer_glue;
 pub mod fieldsplit;
+pub mod gpu;
 pub mod ilu;
 pub mod jd;
 pub mod kernels;
@@ -69,8 +71,9 @@ pub mod toar;
 pub mod ts;
 pub mod vecops;
 
+pub use amg::{Amg, AmgF32, AmgOptions, AmgStats, SmootherKind};
 pub use ams::{
-    Ams, AmsFgmresOptions, AmsFgmresSolver, AmsFgmresStats, AmsOptions, AmsP2, AmsP2Options, AmsP2Topology,
+    Ams, AmsF32, AmsFgmresOptions, AmsFgmresSolver, AmsFgmresStats, AmsOptions, AmsP2, AmsP2Options, AmsP2Topology,
     assemble_shifted_curl_curl, solve_ams_fgmres_many, solve_ams_p2_fgmres_many,
 };
 pub use csr::Csr;

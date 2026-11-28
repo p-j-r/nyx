@@ -179,12 +179,31 @@
             ],
             "name": "u",
             "unit": "m"
+          },
+          {
+            "components": [
+              "xx",
+              "yy",
+              "zz",
+              "xy",
+              "yz",
+              "xz"
+            ],
+            "name": "S",
+            "unit": "m/m"
           }
         ],
         "flat": [
           "|u|",
           "ux",
-          "uz"
+          "uz",
+          "|S|",
+          "Sxx",
+          "Syy",
+          "Szz",
+          "Sxy",
+          "Syz",
+          "Sxz"
         ],
         "has_value": true,
         "label": "mode 1: 85.168744 Hz"
@@ -499,13 +518,43 @@
             "components": [],
             "name": "phi",
             "unit": "a.u."
+          },
+          {
+            "components": [
+              "xx",
+              "yy",
+              "zz",
+              "xy",
+              "yz",
+              "xz"
+            ],
+            "name": "S",
+            "unit": "m/m"
+          },
+          {
+            "components": [
+              "x",
+              "z"
+            ],
+            "name": "E",
+            "unit": "V/m"
           }
         ],
         "flat": [
           "|u|",
           "ux",
           "uz",
-          "phi"
+          "phi",
+          "|S|",
+          "Sxx",
+          "Syy",
+          "Szz",
+          "Sxy",
+          "Syz",
+          "Sxz",
+          "|E|",
+          "Ex",
+          "Ez"
         ],
         "has_value": true,
         "label": "driven (P1): 0.002000 MHz"
@@ -586,6 +635,18 @@
           },
           {
             "components": [
+              "xx",
+              "yy",
+              "zz",
+              "xy",
+              "yz",
+              "xz"
+            ],
+            "name": "S",
+            "unit": "m/m"
+          },
+          {
+            "components": [
               "x",
               "z"
             ],
@@ -611,6 +672,13 @@
           "szz",
           "sxz",
           "syy",
+          "|S|",
+          "Sxx",
+          "Syy",
+          "Szz",
+          "Sxy",
+          "Syz",
+          "Sxz",
           "|E|",
           "Ex",
           "Ez",
@@ -674,6 +742,18 @@
             "components": [],
             "name": "syy",
             "unit": "Pa"
+          },
+          {
+            "components": [
+              "xx",
+              "yy",
+              "zz",
+              "xy",
+              "yz",
+              "xz"
+            ],
+            "name": "S",
+            "unit": "m/m"
           }
         ],
         "flat": [
@@ -684,7 +764,14 @@
           "sxx",
           "szz",
           "sxz",
-          "syy"
+          "syy",
+          "|S|",
+          "Sxx",
+          "Syy",
+          "Szz",
+          "Sxy",
+          "Syz",
+          "Sxz"
         ],
         "has_value": false,
         "label": "static"

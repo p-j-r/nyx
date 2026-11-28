@@ -5,11 +5,12 @@
 
 use crate::engine::Engine;
 use nyx_analysis::{
-    tls_participation_quasi_electrostatic, uq_cqed_with_companion_and_params, Analysis, CapacitanceMatrixAnalysis,
-    EprAnalysis, HamiltonianAnalysis, InductanceMatrixAnalysis, ModeAnalysis, NetworkAnalysis, PiezoResonatorAnalysis,
-    PolarizationAnalysis, TlsParticipationAnalysis, UqCqedAnalysis,
+    optomechanics_with_meshes, tls_participation_quasi_electrostatic, uq_cqed_with_companion_and_params, Analysis,
+    BeamOverlapAnalysis, CapacitanceMatrixAnalysis, EprAnalysis, FarFieldAnalysis, HamiltonianAnalysis,
+    InductanceMatrixAnalysis, ModeAnalysis, NetworkAnalysis, OptomechanicsAnalysis, OptomechanicsDomainMat,
+    OptomechanicsOptions, PiezoResonatorAnalysis, PolarizationAnalysis, TlsParticipationAnalysis, UqCqedAnalysis,
 };
-use nyx_physics::{CapacitanceMatrixData, CircuitRom, Error};
+use nyx_physics::{CapacitanceMatrixData, CircuitRom, Ctx, Error};
 use serde_json::{json, Value};
 
 /// The analyses of this build.
@@ -24,6 +25,9 @@ pub fn analyses() -> Vec<Box<dyn Analysis>> {
         Box::new(NetworkAnalysis),
         Box::new(PiezoResonatorAnalysis),
         Box::new(UqCqedAnalysis),
+        Box::new(FarFieldAnalysis),
+        Box::new(BeamOverlapAnalysis),
+        Box::new(OptomechanicsAnalysis),
     ]
 }
 
@@ -415,6 +419,12 @@ impl Engine {
             }
             return Ok(v);
         }
+        if analysis == "optomechanics"
+            && params.get("mechanical_result").is_none_or(Value::is_null)
+            && params.get("optical_result").is_none_or(Value::is_null)
+        {
+            return self.run_optomechanics_analysis(physics, &model, &result, params);
+        }
         if !a.applies_to(&result) {
             return Err(Error::invalid(format!(
                 "the {analysis} analysis does not apply to the {} result of '{physics}'",
@@ -428,6 +438,238 @@ impl Engine {
             o.insert("stale".into(), json!(self.is_stale(physics)));
             o.insert("age_s".into(), json!(self.result_age(physics)));
             o.insert("validated".into(), self.validated_json(physics));
+        }
+        Ok(v)
+    }
+
+    /// Evaluates a zero-re-solve analytical post-solve EME sweep (`length`, `periodicity`, or `modes`)
+    /// on the cached [`nyx_ems::EmeData`] of `physics` (defaulting to `"ems"`).
+    pub fn eme_sweep(&self, args: &Value) -> Result<Value, Error> {
+        let physics = args.get("physics").and_then(Value::as_str).unwrap_or("ems");
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::invalid("`mode` is required ('length', 'periodicity', or 'modes')"))?;
+        let (_model, result) = self.analysis_inputs(physics)?;
+        if result.study != "eme" {
+            return Err(Error::invalid(format!(
+                "eme_sweep requires a solved 'eme' result on '{physics}', found study '{}'",
+                result.study
+            )));
+        }
+        let data = nyx_ems::EmeData::of(&result)
+            .ok_or_else(|| Error::invalid(format!("result of '{physics}' does not carry cached EME cascade data")))?;
+
+        let report = match mode {
+            "length" => {
+                let seg = match args.get("segment").filter(|v| !v.is_null()) {
+                    None => 0usize,
+                    Some(v) => {
+                        v.as_u64().ok_or_else(|| Error::invalid("`segment` must be a non-negative integer"))? as usize
+                    }
+                };
+                let lengths_val =
+                    args.get("lengths").ok_or_else(|| Error::invalid("`lengths` is required when mode = 'length'"))?;
+                let lengths = parse_f64_vec(lengths_val, "lengths")?;
+                nyx_ems::eme_length_sweep(&data, seg, &lengths).map_err(Error::invalid)?
+            }
+            "periodicity" => {
+                let subgrid = match args.get("subgrid").filter(|v| !v.is_null()) {
+                    None => 0usize,
+                    Some(v) => {
+                        v.as_u64().ok_or_else(|| Error::invalid("`subgrid` must be a non-negative integer"))? as usize
+                    }
+                };
+                let reps_arr = args.get("reps").and_then(Value::as_array).ok_or_else(|| {
+                    Error::invalid("`reps` must be a non-empty list of positive integers when mode = 'periodicity'")
+                })?;
+                let mut reps = Vec::with_capacity(reps_arr.len());
+                for (i, rv) in reps_arr.iter().enumerate() {
+                    let r = rv
+                        .as_u64()
+                        .filter(|&n| n >= 1)
+                        .ok_or_else(|| Error::invalid(format!("parameter 'reps[{i}]' must be an integer >= 1")))?
+                        as usize;
+                    reps.push(r);
+                }
+                nyx_ems::eme_periodicity_sweep(&data, subgrid, &reps).map_err(Error::invalid)?
+            }
+            "modes" => {
+                let mc_arr = args.get("mode_counts").and_then(Value::as_array).ok_or_else(|| {
+                    Error::invalid("`mode_counts` must be a non-empty list of positive integers when mode = 'modes'")
+                })?;
+                let mut mode_counts = Vec::with_capacity(mc_arr.len());
+                for (i, mv) in mc_arr.iter().enumerate() {
+                    let m = mv.as_u64().filter(|&n| n >= 1).ok_or_else(|| {
+                        Error::invalid(format!("parameter 'mode_counts[{i}]' must be an integer >= 1"))
+                    })? as usize;
+                    mode_counts.push(m);
+                }
+                nyx_ems::eme_mode_sweep(&data, &mode_counts).map_err(Error::invalid)?
+            }
+            other => {
+                return Err(Error::invalid(format!(
+                    "unknown eme_sweep mode '{other}' (expected 'length', 'periodicity', or 'modes')"
+                )));
+            }
+        };
+
+        let mut v = serde_json::to_value(&report).map_err(|e| Error::invalid(e.to_string()))?;
+        if let Some(o) = v.as_object_mut() {
+            o.insert("physics".into(), json!(physics));
+            o.insert("stale".into(), json!(self.is_stale(physics)));
+            o.insert("age_s".into(), json!(self.result_age(physics)));
+            o.insert("validated".into(), self.validated_json(physics));
+        }
+        Ok(v)
+    }
+
+    fn run_optomechanics_analysis(
+        &self,
+        physics: &str,
+        model: &std::sync::Arc<crate::meshing::MeshedModel>,
+        result: &std::sync::Arc<nyx_physics::SolveResult>,
+        params: &Value,
+    ) -> Result<Value, Error> {
+        let (opt_phys, opt_model, opt_result, mech_phys, mech_model, mech_result) = if result.physics == "sms" {
+            let op = params
+                .get("optical_physics")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("ems");
+            let (om, or) = self.analysis_inputs(op)?;
+            (op.to_string(), om, or, physics.to_string(), model.clone(), result.clone())
+        } else {
+            let mp = params
+                .get("mechanical_physics")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("sms");
+            let (mm, mr) = self.analysis_inputs(mp)?;
+            (physics.to_string(), model.clone(), result.clone(), mp.to_string(), mm, mr)
+        };
+
+        let mut opts = OptomechanicsOptions::from_params(params)?;
+        for d in &opt_model.labels().domains {
+            opts.opt_domain_names.entry(d.id).or_insert_with(|| d.name.clone());
+        }
+        for b in &opt_model.labels().boundaries {
+            opts.opt_boundary_names.entry(b.id).or_insert_with(|| b.name.clone());
+        }
+        for d in &mech_model.labels().domains {
+            opts.mech_domain_names.entry(d.id).or_insert_with(|| d.name.clone());
+        }
+        for b in &mech_model.labels().boundaries {
+            opts.mech_boundary_names.entry(b.id).or_insert_with(|| b.name.clone());
+        }
+
+        let explicit_mat_keys: std::collections::BTreeSet<String> = params
+            .get("domain_materials")
+            .and_then(Value::as_object)
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default();
+
+        let lib = self.library().ok();
+        if let Some(opt_spec) = self.project.spec(&opt_phys) {
+            if opts.optical_freq_hz.is_none() {
+                if let Some(f) = opt_spec
+                    .study
+                    .params
+                    .get("freq")
+                    .or_else(|| opt_spec.study.params.get("f_search"))
+                    .or_else(|| opt_spec.params.get("freq"))
+                    .or_else(|| opt_spec.params.get("f_search"))
+                    .and_then(Value::as_f64)
+                    .filter(|f| *f > 0.0 && f.is_finite())
+                {
+                    opts.optical_freq_hz = Some(f);
+                }
+            }
+            let wl = opts.optical_freq_hz.filter(|f| *f > 0.0).map(|f| femcore::optical::C0 / f);
+            let mut ctx = Ctx::new(opt_model.as_ref());
+            ctx.library = lib.clone();
+            ctx.wavelength = wl;
+            let props = self.registry.get(&opt_phys).map(|p| p.properties()).unwrap_or_default();
+            if let Ok(mats) = nyx_physics::decode::materials_by_label(opt_spec, &ctx, &props) {
+                for d in &opt_model.labels().domains {
+                    if explicit_mat_keys.contains(&d.name) {
+                        continue;
+                    }
+                    let eps_r = if let Some(an) = mats.aniso.get(&d.id) {
+                        if let Some(ref p) = an.permittivity {
+                            femcore::material::tensor_global(p, an.euler_deg)
+                        } else {
+                            femcore::material::iso_tensor(mats.get(d.id, "eps_r").unwrap_or(1.0))
+                        }
+                    } else {
+                        femcore::material::iso_tensor(mats.get(d.id, "eps_r").unwrap_or(1.0))
+                    };
+                    let pe = mats.aniso.get(&d.id).and_then(|an| {
+                        an.photoelastic
+                            .as_ref()
+                            .map(|p| femcore::material::coupled::photoelastic_global(p, an.euler_deg))
+                    });
+                    let entry = opts.domain_materials.entry(d.name.clone()).or_insert_with(|| OptomechanicsDomainMat {
+                        eps_r,
+                        photoelastic: pe,
+                        rho: 0.0,
+                    });
+                    entry.eps_r = eps_r;
+                    if entry.photoelastic.is_none() {
+                        entry.photoelastic = pe;
+                    }
+                }
+            }
+        }
+
+        if let Some(mech_spec) = self.project.spec(&mech_phys) {
+            let mut ctx = Ctx::new(mech_model.as_ref());
+            ctx.library = lib.clone();
+            let props = self.registry.get(&mech_phys).map(|p| p.properties()).unwrap_or_default();
+            if let Ok(mats) = nyx_physics::decode::materials_by_label(mech_spec, &ctx, &props) {
+                for d in &mech_model.labels().domains {
+                    if explicit_mat_keys.contains(&d.name) {
+                        continue;
+                    }
+                    let rho = mats.get(d.id, "rho").unwrap_or(0.0);
+                    let pe = mats.aniso.get(&d.id).and_then(|an| {
+                        an.photoelastic
+                            .as_ref()
+                            .map(|p| femcore::material::coupled::photoelastic_global(p, an.euler_deg))
+                    });
+                    let entry = opts.domain_materials.entry(d.name.clone()).or_insert_with(|| OptomechanicsDomainMat {
+                        eps_r: femcore::material::iso_tensor(1.0),
+                        photoelastic: pe,
+                        rho,
+                    });
+                    if rho > 0.0 {
+                        entry.rho = rho;
+                    }
+                    if entry.photoelastic.is_none() {
+                        entry.photoelastic = pe;
+                    }
+                }
+            }
+        }
+
+        let rep = optomechanics_with_meshes(opt_model.mesh(), &opt_result, mech_model.mesh(), &mech_result, &opts)?;
+        let mut v = rep.to_json();
+        let combined_stale = self.is_stale(&opt_phys) || self.is_stale(&mech_phys);
+        let validated = if opt_phys != mech_phys {
+            self.validated_of(&[opt_phys.clone(), mech_phys.clone()])
+        } else {
+            self.validated_json(physics)
+        };
+        if let Some(o) = v.as_object_mut() {
+            o.insert("analysis".into(), json!("optomechanics"));
+            o.insert("physics".into(), json!(physics));
+            o.insert("optical_physics".into(), json!(opt_phys));
+            o.insert("mechanical_physics".into(), json!(mech_phys));
+            o.insert("stale".into(), json!(combined_stale));
+            o.insert("age_s".into(), json!(self.result_age(physics)));
+            o.insert("validated".into(), validated);
         }
         Ok(v)
     }

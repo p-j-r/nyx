@@ -38,11 +38,12 @@ fn complex_solver_without_pml_reproduces_the_real_solver() {
             yy: c(1.0, 0.0),
             zz: c(1.0, 0.0),
             xz: c(0.0, 0.0),
-            yz: c(0.0, 0.0)
+            yz: c(0.0, 0.0),
+            ..Default::default()
         };
         nc
     ];
-    let mu = vec![MuC { x: c(1.0, 0.0), y: c(1.0, 0.0), z: c(1.0, 0.0) }; nc];
+    let mu = vec![MuC { x: c(1.0, 0.0), y: c(1.0, 0.0), z: c(1.0, 0.0), ..Default::default() }; nc];
     let cm = solve_modes_complex(&mesh, f, &eps, &mu, c(0.9, 0.0), 4, 2).unwrap();
     let rm = nyx_ems::solve_modes(&mesh, f, &vec![1.0; nc], &vec![1.0; nc], 0.9, false, 4, 2).unwrap();
     for j in 0..4 {

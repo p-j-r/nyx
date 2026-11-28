@@ -111,6 +111,11 @@ fn the_schema_lists_exactly_the_keys_the_loader_knows() {
     assert_eq!(keys(&s2["properties"]["electro_optic"]), set(k.electro_optic), "v2 [electro_optic]");
     assert_eq!(keys(&s2["properties"]["viscoelastic"]), set(k.viscoelastic), "v2 [viscoelastic]");
     assert_eq!(keys(&s2["properties"]["interfaces"]), set(k.interfaces), "v2 [interfaces]");
+    assert_eq!(keys(&s2["properties"]["sheet_2d"]), set(k.sheet_2d), "v2 [sheet_2d]");
+    assert_eq!(keys(&s2["properties"]["nonlinear"]), set(k.nonlinear), "v2 [nonlinear]");
+    assert_eq!(keys(&s2["properties"]["nonlinear"]["properties"]["chi2"]), set(k.chi2), "v2 [nonlinear.chi2]");
+    assert_eq!(keys(&s2["properties"]["nonlinear"]["properties"]["chi3"]), set(k.chi3), "v2 [nonlinear.chi3]");
+    assert_eq!(keys(&s2["properties"]["nonlinear"]["properties"]["qpm"]), set(k.qpm), "v2 [nonlinear.qpm]");
     assert_eq!(keys(&s2["$defs"]["interface_layer"]), set(k.interface_layer), "v2 interface_layer");
     let mut optical = set(k.optical);
     optical.extend(set(k.model));

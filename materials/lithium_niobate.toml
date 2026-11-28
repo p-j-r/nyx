@@ -103,3 +103,21 @@ C = [0.01764, 0.05914, 474.60]
 model = "sellmeier"
 B = [2.9804, 0.5981, 8.9543]
 C = [0.02047, 0.0666, 416.08]
+
+[nonlinear]
+T_range = [4.0, 450.0]
+source = { cite = "APPROXIMATE congruent LiNbO3 second- and third-order nonlinear optical parameters (Shoji et al. 1997; DeSalvo et al. 1996)" }
+
+[nonlinear.chi2]
+wavelength = "1.064 um"
+unit = "pm/V"
+d33 = -25.2
+d31 = -4.6
+d22 = 2.1
+d15 = -4.6
+source = { cite = "APPROXIMATE congruent LiNbO3 second-order d_iJ tensor at 1064 nm (I. Shoji, T. Kondo, A. Kitamoto, M. Shirane, R. Ito, Absolute scale of second-order nonlinear-optical coefficients, J. Opt. Soc. Am. B 14, 2268-2294 (1997); D. A. Roberts, IEEE J. Quantum Electron. 28, 2057-2074 (1992))", doi = "10.1364/JOSAB.14.002268" }
+
+[nonlinear.chi3]
+wavelength = "1.55 um"
+n_2 = "1.8e-19 m^2/W"
+source = { cite = "APPROXIMATE congruent LiNbO3 electronic Kerr index n_2 ~ 1.8e-19 m^2/W in the telecom band (R. DeSalvo et al., IEEE J. Quantum Electron. 32, 1324-1333 (1996); M. Wang et al., Opt. Express 27, 24416 (2019))", doi = "10.1109/3.511545" }

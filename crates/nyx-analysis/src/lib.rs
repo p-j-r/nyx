@@ -14,14 +14,17 @@
 //! `Analysis` trait, which returns plain JSON, so that the engine, the window and the MCP server can list and run analyses uniformly. Group
 //! index is a later analysis.
 
+pub mod beam;
 pub mod canvas;
 pub mod capacitance;
 pub mod epr;
+pub mod farfield;
 pub mod figure;
 pub mod hamiltonian;
 pub mod modes;
 pub mod modeview;
 pub mod network;
+pub mod optomechanics;
 pub mod piezo_resonator;
 pub mod polarization;
 pub mod raster;
@@ -31,12 +34,21 @@ pub mod tls;
 pub mod uq;
 pub mod view3d;
 
+pub use beam::{
+    beam_from_params, beam_overlap, beam_plane_samples, bessel_j, bessel_k, bessel_k_scaled, overlap_beam_applies,
+    overlap_beam_with_params, solve_lp_mode, Beam, BeamOverlapAnalysis, BeamShape, LpMode, OverlapReport,
+};
 pub use capacitance::{
     capacitance_matrix, capacitance_matrix_applies, capacitance_matrix_with_mesh_and_params,
     capacitance_matrix_with_params, extrapolate_open_box_maxwell, inductance_matrix, inductance_matrix_applies,
     CapacitanceMatrixAnalysis, InductanceMatrixAnalysis, OpenBoxExtrapolation,
 };
 pub use epr::{epr, epr_applies, epr_with_params, is_nonlinear_port, squid_effective_ej, EprAnalysis, EprReport};
+pub use farfield::{
+    farfield_applies, farfield_with_params, medium_from_params, sample_surface, surface_flux, surface_from_params,
+    CellSampler, Equivalence, FarFieldAnalysis, FieldSelection, Medium, Radiator, SampledSurface, Sampling,
+    SurfaceSample, SurfaceSpec,
+};
 pub use hamiltonian::{
     hamiltonian, hamiltonian_applies, hamiltonian_with_params, resolve_sweep_port, FluxSweepPoint, HamiltonianAnalysis,
     HamiltonianReport,
@@ -44,6 +56,10 @@ pub use hamiltonian::{
 pub use modes::{analyze_modes, AnalysisOptions, GroupReport, ModeAnalysis, ModeInput, ModeRow, ResolveAxis, Resolved};
 pub use network::{
     network, network_applies, network_with_params, BbqMode, NetworkAnalysis, NetworkReport, QepMode, S21CircleFit,
+};
+pub use optomechanics::{
+    optomechanics_applies, optomechanics_with_meshes, OptomechanicsAnalysis, OptomechanicsDomainMat,
+    OptomechanicsOptions, OptomechanicsReport, HBAR,
 };
 pub use piezo_resonator::{
     mbvd_admittance, piezo_resonator_applies, piezo_resonator_with_params, PiezoModeMetrics, PiezoResonatorAnalysis,

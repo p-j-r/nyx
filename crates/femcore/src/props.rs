@@ -193,6 +193,8 @@ pub enum TensorKind {
     Conductivity,
     Permittivity,
     PermittivityIm,
+    Permeability,
+    PermeabilityIm,
     Expansion,
 }
 
@@ -202,6 +204,8 @@ impl TensorKind {
             TensorKind::Conductivity => "k",
             TensorKind::Permittivity => "eps_r",
             TensorKind::PermittivityIm => "eps_r_im",
+            TensorKind::Permeability => "mu_r",
+            TensorKind::PermeabilityIm => "mu_r_im",
             TensorKind::Expansion => "alpha",
         }
     }
@@ -210,9 +214,81 @@ impl TensorKind {
             TensorKind::Conductivity => a.conductivity.as_ref(),
             TensorKind::Permittivity => a.permittivity.as_ref(),
             TensorKind::PermittivityIm => a.permittivity_im.as_ref(),
+            TensorKind::Permeability => a.permeability.as_ref(),
+            TensorKind::PermeabilityIm => a.permeability_im.as_ref(),
             TensorKind::Expansion => a.expansion.as_ref(),
         }
     }
+}
+
+/// Exact `3x3` complex matrix inverse.
+pub fn inv3_c(a: &[[crate::linalg::csr::C; 3]; 3]) -> Result<[[crate::linalg::csr::C; 3]; 3], String> {
+    use crate::linalg::csr::c;
+    let c00 = a[1][1] * a[2][2] - a[1][2] * a[2][1];
+    let c01 = a[1][2] * a[2][0] - a[1][0] * a[2][2];
+    let c02 = a[1][0] * a[2][1] - a[1][1] * a[2][0];
+    let det = a[0][0] * c00 + a[0][1] * c01 + a[0][2] * c02;
+    let scale = a.iter().flatten().fold(0.0_f64, |acc, z| acc.max(z.norm())).powi(3);
+    if !det.re.is_finite() || !det.im.is_finite() || det.norm() <= 1e-14 * scale.max(1e-300) {
+        return Err("3x3 complex permeability/permittivity tensor is singular and cannot be inverted".into());
+    }
+    let inv = c(1.0, 0.0) / det;
+    Ok([
+        [
+            c00 * inv,
+            (a[0][2] * a[2][1] - a[0][1] * a[2][2]) * inv,
+            (a[0][1] * a[1][2] - a[0][2] * a[1][1]) * inv,
+        ],
+        [
+            c01 * inv,
+            (a[0][0] * a[2][2] - a[0][2] * a[2][0]) * inv,
+            (a[0][2] * a[1][0] - a[0][0] * a[1][2]) * inv,
+        ],
+        [
+            c02 * inv,
+            (a[0][1] * a[2][0] - a[0][0] * a[2][1]) * inv,
+            (a[0][0] * a[1][1] - a[0][1] * a[1][0]) * inv,
+        ],
+    ])
+}
+
+#[allow(clippy::type_complexity)]
+fn decompose_c3_into_sym_and_gyro(
+    mat: &[[crate::linalg::csr::C; 3]; 3],
+) -> (material::Tensor, Option<material::Tensor>, Option<[f64; 3]>, Option<[f64; 3]>) {
+    let s_re = [
+        [mat[0][0].re, 0.5 * (mat[0][1].re + mat[1][0].re), 0.5 * (mat[0][2].re + mat[2][0].re)],
+        [0.5 * (mat[0][1].re + mat[1][0].re), mat[1][1].re, 0.5 * (mat[1][2].re + mat[2][1].re)],
+        [0.5 * (mat[0][2].re + mat[2][0].re), 0.5 * (mat[1][2].re + mat[2][1].re), mat[2][2].re],
+    ];
+    let s_im = [
+        [-mat[0][0].im, -0.5 * (mat[0][1].im + mat[1][0].im), -0.5 * (mat[0][2].im + mat[2][0].im)],
+        [-0.5 * (mat[0][1].im + mat[1][0].im), -mat[1][1].im, -0.5 * (mat[1][2].im + mat[2][1].im)],
+        [-0.5 * (mat[0][2].im + mat[2][0].im), -0.5 * (mat[1][2].im + mat[2][1].im), -mat[2][2].im],
+    ];
+    let g_re = [
+        0.5 * (mat[2][1].im - mat[1][2].im),
+        0.5 * (mat[0][2].im - mat[2][0].im),
+        0.5 * (mat[1][0].im - mat[0][1].im),
+    ];
+    let g_im = [
+        0.5 * (mat[1][2].re - mat[2][1].re),
+        0.5 * (mat[2][0].re - mat[0][2].re),
+        0.5 * (mat[0][1].re - mat[1][0].re),
+    ];
+    let to_sym = |m: &M3| material::Tensor::Symmetric {
+        xx: m[0][0],
+        yy: m[1][1],
+        zz: m[2][2],
+        xy: m[0][1],
+        yz: m[1][2],
+        xz: m[0][2],
+    };
+    let t_re = to_sym(&s_re);
+    let t_im = s_im.iter().flatten().any(|&v| v != 0.0).then(|| to_sym(&s_im));
+    let gy_re = g_re.iter().any(|&v| v != 0.0).then_some(g_re);
+    let gy_im = g_im.iter().any(|&v| v != 0.0).then_some(g_im);
+    (t_re, t_im, gy_re, gy_im)
 }
 
 impl Materials {
@@ -221,11 +297,66 @@ impl Materials {
         self.pml.values().any(Pml::is_active)
     }
 
-    /// True if any domain carries a non-zero imaginary permittivity (dielectric/optical loss).
+    /// True if any domain has a non-symmetric (gyrotropic / magneto-optic) permittivity or permeability tensor.
+    pub fn is_non_symmetric(&self) -> bool {
+        self.aniso.values().any(Anisotropy::is_non_symmetric)
+    }
+
+    /// True if any domain carries a non-zero imaginary permittivity (dielectric/optical loss or gyrotropy).
     pub fn has_complex_permittivity(&self) -> bool {
         self.default.get("eps_r_im").is_some_and(|v| v.abs() > 0.0)
             || self.domains.values().any(|m| m.get("eps_r_im").is_some_and(|v| v.abs() > 0.0))
-            || self.aniso.values().any(|a| a.permittivity_im.is_some())
+            || self.aniso.values().any(|a| a.permittivity_im.is_some() || a.is_non_symmetric())
+    }
+
+    /// Sets the real electric gyrotropy / Voigt axial vector $\mathbf{g} = (g_x, g_y, g_z)$ on `domain`
+    /// ($\boldsymbol{\varepsilon} = \boldsymbol{\varepsilon}_{\text{sym}} + i \mathbf{G}_\times$, where $\mathbf{G}_\times \mathbf{E} = \mathbf{g} \times \mathbf{E}$).
+    pub fn set_gyrotropy(&mut self, domain: i32, g: [f64; 3]) {
+        self.aniso.entry(domain).or_default().gyrotropy = Some(g);
+    }
+
+    /// Sets the complex electric gyrotropy axial vector $\mathbf{g} = \mathbf{g}_{\text{re}} + i \mathbf{g}_{\text{im}}$ on `domain`.
+    pub fn set_gyrotropy_complex(&mut self, domain: i32, g_re: [f64; 3], g_im: [f64; 3]) {
+        let an = self.aniso.entry(domain).or_default();
+        an.gyrotropy = Some(g_re);
+        an.gyrotropy_im = Some(g_im);
+    }
+
+    /// Sets the real magnetic gyrotropy / Polder axial vector $\mathbf{g}_\mu = (g_{\mu,x}, g_{\mu,y}, g_{\mu,z})$ on `domain`
+    /// ($\boldsymbol{\mu} = \boldsymbol{\mu}_{\text{sym}} + i \mathbf{G}_{\mu,\times}$).
+    pub fn set_mu_gyrotropy(&mut self, domain: i32, g: [f64; 3]) {
+        self.aniso.entry(domain).or_default().mu_gyrotropy = Some(g);
+    }
+
+    /// Sets the complex magnetic gyrotropy axial vector $\mathbf{g}_\mu = \mathbf{g}_{\mu,\text{re}} + i \mathbf{g}_{\mu,\text{im}}$ on `domain`.
+    pub fn set_mu_gyrotropy_complex(&mut self, domain: i32, g_re: [f64; 3], g_im: [f64; 3]) {
+        let an = self.aniso.entry(domain).or_default();
+        an.mu_gyrotropy = Some(g_re);
+        an.mu_gyrotropy_im = Some(g_im);
+    }
+
+    /// Sets an arbitrary 9-entry complex $3 \times 3$ permittivity tensor $\boldsymbol{\varepsilon} \in \mathbb{C}^{3\times 3}$ on `domain`
+    /// (in global coordinates, resetting `euler_deg = [0.0; 3]`).
+    pub fn set_permittivity_tensor_c(&mut self, domain: i32, eps: [[crate::linalg::csr::C; 3]; 3]) {
+        let (t_re, t_im, g_re, g_im) = decompose_c3_into_sym_and_gyro(&eps);
+        let an = self.aniso.entry(domain).or_default();
+        an.euler_deg = [0.0; 3];
+        an.permittivity = Some(t_re);
+        an.permittivity_im = t_im;
+        an.gyrotropy = g_re;
+        an.gyrotropy_im = g_im;
+    }
+
+    /// Sets an arbitrary 9-entry complex $3 \times 3$ permeability tensor $\boldsymbol{\mu} \in \mathbb{C}^{3\times 3}$ on `domain`
+    /// (in global coordinates, resetting `euler_deg = [0.0; 3]`).
+    pub fn set_permeability_tensor_c(&mut self, domain: i32, mu: [[crate::linalg::csr::C; 3]; 3]) {
+        let (t_re, t_im, g_re, g_im) = decompose_c3_into_sym_and_gyro(&mu);
+        let an = self.aniso.entry(domain).or_default();
+        an.euler_deg = [0.0; 3];
+        an.permeability = Some(t_re);
+        an.permeability_im = t_im;
+        an.mu_gyrotropy = g_re;
+        an.mu_gyrotropy_im = g_im;
     }
 
     /// True if any domain carries a non-zero phonon/structural viscosity tensor or scalar `eta`.
@@ -362,6 +493,142 @@ impl Materials {
         let re = self.cell_tensor_skipping(mesh, TensorKind::Permittivity, fallback_re, skip)?;
         let im = self.cell_tensor_skipping(mesh, TensorKind::PermittivityIm, Some(0.0), skip)?;
         Ok(re.into_iter().zip(im).collect())
+    }
+
+    /// Evaluates the full 9-entry complex relative permittivity tensor $\boldsymbol{\varepsilon} = \boldsymbol{\varepsilon}_{\text{sym}} + i \mathbf{G}_\times$
+    /// in the global frame for `domain`.
+    pub fn domain_full_complex_permittivity(
+        &self,
+        domain: i32,
+        fallback_re: Option<f64>,
+    ) -> Result<[[crate::linalg::csr::C; 3]; 3], String> {
+        use crate::linalg::csr::c;
+        let an_opt = self.aniso.get(&domain);
+        let euler = an_opt.map_or([0.0; 3], |a| a.euler_deg);
+        let t_re = match an_opt.and_then(|a| a.permittivity.as_ref()) {
+            Some(t) => material::tensor_global(t, euler),
+            None => {
+                let v = self
+                    .get(domain, "eps_r")
+                    .or(fallback_re)
+                    .ok_or_else(|| format!("domain {domain} has no value for 'eps_r'"))?;
+                material::iso_tensor(v)
+            }
+        };
+        let t_im = match an_opt.and_then(|a| a.permittivity_im.as_ref()) {
+            Some(t) => material::tensor_global(t, euler),
+            None => {
+                let v = self.get(domain, "eps_r_im").unwrap_or(0.0);
+                material::iso_tensor(v)
+            }
+        };
+        let mut out = [[c(0.0, 0.0); 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = c(t_re[i][j], -t_im[i][j]);
+            }
+        }
+        if let Some((g_re, g_im)) = an_opt.and_then(Anisotropy::gyrotropy_global) {
+            // +i * G_x where (G_x E) = g x E and i * (g_re + i g_im) = -g_im + i g_re
+            let ig_x = c(-g_im[0], g_re[0]);
+            let ig_y = c(-g_im[1], g_re[1]);
+            let ig_z = c(-g_im[2], g_re[2]);
+            out[0][1] -= ig_z;
+            out[1][0] += ig_z;
+            out[0][2] += ig_y;
+            out[2][0] -= ig_y;
+            out[1][2] -= ig_x;
+            out[2][1] += ig_x;
+        }
+        Ok(out)
+    }
+
+    /// Evaluates the full 9-entry complex relative permeability tensor $\boldsymbol{\mu} = \boldsymbol{\mu}_{\text{sym}} + i \mathbf{G}_{\mu,\times}$
+    /// in the global frame for `domain`.
+    pub fn domain_full_complex_permeability(
+        &self,
+        domain: i32,
+        fallback_re: Option<f64>,
+    ) -> Result<[[crate::linalg::csr::C; 3]; 3], String> {
+        use crate::linalg::csr::c;
+        let an_opt = self.aniso.get(&domain);
+        let euler = an_opt.map_or([0.0; 3], |a| a.euler_deg);
+        let t_re = match an_opt.and_then(|a| a.permeability.as_ref()) {
+            Some(t) => material::tensor_global(t, euler),
+            None => {
+                let v = self
+                    .get(domain, "mu_r")
+                    .or(fallback_re)
+                    .ok_or_else(|| format!("domain {domain} has no value for 'mu_r'"))?;
+                material::iso_tensor(v)
+            }
+        };
+        let t_im = match an_opt.and_then(|a| a.permeability_im.as_ref()) {
+            Some(t) => material::tensor_global(t, euler),
+            None => {
+                let v = self.get(domain, "mu_r_im").unwrap_or(0.0);
+                material::iso_tensor(v)
+            }
+        };
+        let mut out = [[c(0.0, 0.0); 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                out[i][j] = c(t_re[i][j], -t_im[i][j]);
+            }
+        }
+        if let Some((g_re, g_im)) = an_opt.and_then(Anisotropy::mu_gyrotropy_global) {
+            let ig_x = c(-g_im[0], g_re[0]);
+            let ig_y = c(-g_im[1], g_re[1]);
+            let ig_z = c(-g_im[2], g_re[2]);
+            out[0][1] -= ig_z;
+            out[1][0] += ig_z;
+            out[0][2] += ig_y;
+            out[2][0] -= ig_y;
+            out[1][2] -= ig_x;
+            out[2][1] += ig_x;
+        }
+        Ok(out)
+    }
+
+    /// Global-frame full 9-entry complex permittivity tensor $\boldsymbol{\varepsilon} \in \mathbb{C}^{3\times 3}$ of every cell.
+    pub fn cell_full_complex_permittivity(
+        &self,
+        mesh: &SimplexMesh,
+        fallback_re: Option<f64>,
+    ) -> Result<Vec<[[crate::linalg::csr::C; 3]; 3]>, String> {
+        let mut by_domain = BTreeMap::new();
+        for d in mesh.domain_labels() {
+            by_domain.insert(d, self.domain_full_complex_permittivity(d, fallback_re)?);
+        }
+        Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
+    }
+
+    /// Global-frame full 9-entry complex permeability tensor $\boldsymbol{\mu} \in \mathbb{C}^{3\times 3}$ of every cell.
+    pub fn cell_full_complex_permeability(
+        &self,
+        mesh: &SimplexMesh,
+        fallback_re: Option<f64>,
+    ) -> Result<Vec<[[crate::linalg::csr::C; 3]; 3]>, String> {
+        let mut by_domain = BTreeMap::new();
+        for d in mesh.domain_labels() {
+            by_domain.insert(d, self.domain_full_complex_permeability(d, fallback_re)?);
+        }
+        Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
+    }
+
+    /// Global-frame inverse complex permeability tensor $\boldsymbol{\mu}^{-1} \in \mathbb{C}^{3\times 3}$ of every cell.
+    pub fn cell_full_complex_permeability_inv(
+        &self,
+        mesh: &SimplexMesh,
+        fallback_re: Option<f64>,
+    ) -> Result<Vec<[[crate::linalg::csr::C; 3]; 3]>, String> {
+        let mut by_domain = BTreeMap::new();
+        for d in mesh.domain_labels() {
+            let mu = self.domain_full_complex_permeability(d, fallback_re)?;
+            let inv = inv3_c(&mu).map_err(|e| format!("domain {d}: {e}"))?;
+            by_domain.insert(d, inv);
+        }
+        Ok(mesh.cell_labels.iter().map(|l| by_domain[l]).collect())
     }
 
     /// Global-frame `6x6` dynamic viscosity tensor `eta` (solver Voigt order, `Pa*s`) of every cell.

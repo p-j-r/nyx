@@ -272,5 +272,15 @@ fn example_unit(dim: Dim) -> &'static str {
         Dim::ElectroOptic => "pm/V",
         Dim::DynamicViscosity => "mPa*s",
         Dim::ElectricField => "V/m",
+        Dim::SheetConductivity => "mS",
+        Dim::Time => "ps",
+        Dim::Velocity => "m/s",
+        Dim::MagneticFluxDensity => "T",
+        Dim::CapacitancePerArea => "F/m^2",
+        Dim::NonlinearIndex => "m^2/W",
+        Dim::Chi3Susceptibility => "m^2/V^2",
+        Dim::TwoPhotonAbsorption => "m/W",
+        Dim::Area => "m^2",
+        Dim::Volume => "m^3",
     }
 }

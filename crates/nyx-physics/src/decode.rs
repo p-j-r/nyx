@@ -239,14 +239,262 @@ pub fn materials_by_label_checked(
     let is_quasi_static_electro =
         (spec.physics == "dfs" && spec.study.kind == "electrostatic") || spec.physics == "sms";
     let has_eps_r = props.iter().any(|d| d.name == "eps_r");
-    let find_prop_kind = |name: &str| -> Option<PropKind> {
-        if let Some(d) = props.iter().find(|d| d.name == name) {
-            Some(if name == "loss_tangent" { PropKind::Tensor } else { d.kind })
-        } else if has_eps_r && matches!(name, "loss_tangent" | "tan_delta" | "sigma" | "eps_r_im") {
-            Some(PropKind::Tensor)
-        } else {
-            None
+    let is_gyro_key = |name: &str| {
+        matches!(
+            name,
+            "gyrotropy"
+                | "gyrotropy_im"
+                | "gyro_e"
+                | "gyro_e_im"
+                | "mu_gyrotropy"
+                | "mu_gyrotropy_im"
+                | "gyro_m"
+                | "gyro_m_im"
+        )
+    };
+    let is_eo_pe_key = |name: &str| {
+        spec.physics == "ems"
+            && matches!(
+                name,
+                "r11"
+                    | "r_11"
+                    | "r13"
+                    | "r_13"
+                    | "r22"
+                    | "r_22"
+                    | "r33"
+                    | "r_33"
+                    | "r41"
+                    | "r_41"
+                    | "r42"
+                    | "r_42"
+                    | "r51"
+                    | "r_51"
+                    | "p11"
+                    | "p_11"
+                    | "p12"
+                    | "p_12"
+                    | "p13"
+                    | "p_13"
+                    | "p31"
+                    | "p_31"
+                    | "p33"
+                    | "p_33"
+                    | "p14"
+                    | "p_14"
+                    | "p41"
+                    | "p_41"
+                    | "p44"
+                    | "p_44"
+            )
+    };
+    let is_nl_key = |name: &str| {
+        if spec.physics != "ems" {
+            return false;
         }
+        if matches!(
+            name,
+            "n_2"
+                | "chi3_xxxx"
+                | "chi3_xxyy"
+                | "chi3_xyxy"
+                | "chi3_xyyx"
+                | "b_over_a"
+                | "beta_tpa"
+                | "sigma_fca"
+                | "k_fcd"
+                | "tau_c"
+                | "qpm_sign"
+                | "qpm_period"
+                | "Lambda_qpm"
+                | "qpm_duty_cycle"
+                | "qpm_phase_offset"
+        ) {
+            return true;
+        }
+        let b = name.as_bytes();
+        b.len() == 3 && b[0] == b'd' && (b'1'..=b'3').contains(&b[1]) && (b'1'..=b'6').contains(&b[2])
+    };
+    let apply_nl_scalar = |m: &mut Materials, labels: &[i32], name: &str, v: f64| -> Result<bool, Error> {
+        let b = name.as_bytes();
+        let is_dij = b.len() == 3 && b[0] == b'd' && (b'1'..=b'3').contains(&b[1]) && (b'1'..=b'6').contains(&b[2]);
+        for &l in labels {
+            let nl = m.aniso.entry(l).or_default().nonlinear.get_or_insert_with(femcore::material::Nonlinear::default);
+            if is_dij {
+                let c2 = nl.chi2.get_or_insert_with(|| femcore::material::Chi2 {
+                    source: Vec::new(),
+                    wavelength: None,
+                    kleinman: false,
+                    broken_centrosymmetry: true,
+                    d: [[0.0; 6]; 3],
+                });
+                let i = (b[1] - b'1') as usize;
+                let j = (b[2] - b'1') as usize;
+                c2.d[i][j] = v;
+                continue;
+            }
+            match name {
+                "n_2" => nl.chi3.get_or_insert_with(Default::default).n_2 = Some(v),
+                "chi3_xxxx" => nl.chi3.get_or_insert_with(Default::default).chi3_xxxx = Some(v),
+                "chi3_xxyy" => nl.chi3.get_or_insert_with(Default::default).chi3_xxyy = Some(v),
+                "chi3_xyxy" => nl.chi3.get_or_insert_with(Default::default).chi3_xyxy = Some(v),
+                "chi3_xyyx" => nl.chi3.get_or_insert_with(Default::default).chi3_xyyx = Some(v),
+                "b_over_a" => nl.chi3.get_or_insert_with(Default::default).b_over_a = Some(v),
+                "beta_tpa" => {
+                    if v < 0.0 {
+                        return Err(Error::invalid(format!("beta_tpa must be non-negative, got {v}")));
+                    }
+                    nl.chi3.get_or_insert_with(Default::default).beta_tpa = Some(v);
+                }
+                "sigma_fca" => {
+                    if v < 0.0 {
+                        return Err(Error::invalid(format!("sigma_fca must be non-negative, got {v}")));
+                    }
+                    nl.chi3.get_or_insert_with(Default::default).sigma_fca = Some(v);
+                }
+                "k_fcd" => nl.chi3.get_or_insert_with(Default::default).k_fcd = Some(v),
+                "tau_c" => {
+                    if v < 0.0 {
+                        return Err(Error::invalid(format!("tau_c must be non-negative, got {v}")));
+                    }
+                    nl.chi3.get_or_insert_with(Default::default).tau_c = Some(v);
+                }
+                "qpm_sign" => {
+                    if (v.abs() - 1.0).abs() > 1e-12 {
+                        return Err(Error::invalid(format!("qpm_sign must be +1 or -1, got {v}")));
+                    }
+                    nl.qpm.get_or_insert_with(Default::default).sign = if v < 0.0 { -1.0 } else { 1.0 };
+                }
+                "qpm_period" | "Lambda_qpm" => {
+                    if v <= 0.0 {
+                        return Err(Error::invalid(format!("{name} must be positive, got {v}")));
+                    }
+                    nl.qpm.get_or_insert_with(Default::default).period = Some(v);
+                }
+                "qpm_duty_cycle" => {
+                    if v <= 0.0 || v >= 1.0 {
+                        return Err(Error::invalid(format!("qpm_duty_cycle must lie in (0, 1), got {v}")));
+                    }
+                    nl.qpm.get_or_insert_with(Default::default).duty_cycle = v;
+                }
+                "qpm_phase_offset" => {
+                    nl.qpm.get_or_insert_with(Default::default).phase_offset = v;
+                }
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
+    };
+    let find_prop_kind = |name: &str| -> Option<PropKind> {
+        if has_eps_r
+            && (matches!(name, "loss_tangent" | "tan_delta" | "sigma" | "eps_r_im" | "mu_r_im")
+                || is_gyro_key(name)
+                || (spec.physics == "ems" && name == "mu_r"))
+        {
+            Some(PropKind::Tensor)
+        } else if is_eo_pe_key(name) || is_nl_key(name) {
+            Some(PropKind::Scalar)
+        } else if spec.physics == "ems" && name == "chi2_d" {
+            Some(PropKind::Matrix3x6)
+        } else {
+            props.iter().find(|d| d.name == name).map(|d| d.kind)
+        }
+    };
+    let apply_eo_pe_scalar = |m: &mut Materials, labels: &[i32], name: &str, v: f64| -> bool {
+        for &l in labels {
+            let an = m.aniso.entry(l).or_default();
+            match name {
+                "r11" | "r_11" => an.electro_optic.get_or_insert([[0.0; 3]; 6])[0][0] = v,
+                "r13" | "r_13" => {
+                    let eo = an.electro_optic.get_or_insert([[0.0; 3]; 6]);
+                    eo[0][2] = v;
+                    eo[1][2] = v;
+                }
+                "r22" | "r_22" => {
+                    let eo = an.electro_optic.get_or_insert([[0.0; 3]; 6]);
+                    eo[1][1] = v;
+                    eo[0][1] = -v;
+                    eo[5][0] = -v;
+                }
+                "r33" | "r_33" => an.electro_optic.get_or_insert([[0.0; 3]; 6])[2][2] = v,
+                "r41" | "r_41" => {
+                    let eo = an.electro_optic.get_or_insert([[0.0; 3]; 6]);
+                    eo[3][0] = v;
+                    eo[4][1] = v;
+                    eo[5][2] = v;
+                }
+                "r42" | "r_42" | "r51" | "r_51" => {
+                    let eo = an.electro_optic.get_or_insert([[0.0; 3]; 6]);
+                    eo[3][1] = v;
+                    eo[4][0] = v;
+                }
+                "p11" | "p_11" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[0][0] = v;
+                    pe[1][1] = v;
+                    if pe[2][2] == 0.0 {
+                        pe[2][2] = v;
+                    }
+                }
+                "p12" | "p_12" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[0][1] = v;
+                    pe[1][0] = v;
+                    if pe[0][2] == 0.0 {
+                        pe[0][2] = v;
+                        pe[1][2] = v;
+                        pe[2][0] = v;
+                        pe[2][1] = v;
+                    }
+                }
+                "p13" | "p_13" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[0][2] = v;
+                    pe[1][2] = v;
+                }
+                "p31" | "p_31" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[2][0] = v;
+                    pe[2][1] = v;
+                }
+                "p33" | "p_33" => an.photoelastic.get_or_insert([[0.0; 6]; 6])[2][2] = v,
+                "p14" | "p_14" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[0][3] = v;
+                    pe[1][3] = -v;
+                    pe[5][4] = v;
+                }
+                "p41" | "p_41" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[3][0] = v;
+                    pe[3][1] = -v;
+                    pe[4][5] = v;
+                }
+                "p44" | "p_44" => {
+                    let pe = an.photoelastic.get_or_insert([[0.0; 6]; 6]);
+                    pe[3][3] = v;
+                    pe[4][4] = v;
+                    if pe[5][5] == 0.0 {
+                        pe[5][5] = v;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        true
+    };
+    let apply_gyro_vec = |m: &mut Materials, labels: &[i32], name: &str, g: [f64; 3]| -> bool {
+        for &l in labels {
+            let an = m.aniso.entry(l).or_default();
+            match name {
+                "gyrotropy" | "gyro_e" => an.gyrotropy = Some(g),
+                "gyrotropy_im" | "gyro_e_im" => an.gyrotropy_im = Some(g),
+                "mu_gyrotropy" | "gyro_m" => an.mu_gyrotropy = Some(g),
+                "mu_gyrotropy_im" | "gyro_m_im" => an.mu_gyrotropy_im = Some(g),
+                _ => return false,
+            }
+        }
+        true
     };
     let freq_hz = effective_freq_hz(spec, ctx, is_quasi_static_electro);
     let temp_k = effective_temp_k(spec, ctx);
@@ -273,8 +521,16 @@ pub fn materials_by_label_checked(
                             "region '{region}': property 'loss_tangent' must be non-negative, got {v}"
                         )));
                     }
-                    for &l in &labels {
-                        m.set(l, name, *v);
+                    if is_gyro_key(name) {
+                        apply_gyro_vec(&mut m, &labels, name, [0.0, 0.0, *v]);
+                    } else if is_eo_pe_key(name) {
+                        apply_eo_pe_scalar(&mut m, &labels, name, *v);
+                    } else if is_nl_key(name) {
+                        apply_nl_scalar(&mut m, &labels, name, *v)?;
+                    } else {
+                        for &l in &labels {
+                            m.set(l, name, *v);
+                        }
                     }
                 }
                 if let Some(&td) = map.get("loss_tangent") {
@@ -316,8 +572,16 @@ pub fn materials_by_label_checked(
                                     "region '{region}': property 'loss_tangent' must be non-negative, got {s}"
                                 )));
                             }
-                            for &l in &labels {
-                                m.set(l, name, *s);
+                            if is_gyro_key(name) {
+                                apply_gyro_vec(&mut m, &labels, name, [0.0, 0.0, *s]);
+                            } else if is_eo_pe_key(name) {
+                                apply_eo_pe_scalar(&mut m, &labels, name, *s);
+                            } else if is_nl_key(name) {
+                                apply_nl_scalar(&mut m, &labels, name, *s)?;
+                            } else {
+                                for &l in &labels {
+                                    m.set(l, name, *s);
+                                }
                             }
                         }
                         PropValue::Diag([x, y, z]) => {
@@ -330,6 +594,10 @@ pub fn materials_by_label_checked(
                                 return Err(Error::invalid(format!(
                                     "region '{region}': property '{name}' has a non-finite tensor component"
                                 )));
+                            }
+                            if is_gyro_key(name) {
+                                apply_gyro_vec(&mut m, &labels, name, [*x, *y, *z]);
+                                continue;
                             }
                             if name == "loss_tangent" && (*x < 0.0 || *y < 0.0 || *z < 0.0) {
                                 return Err(Error::invalid(format!(
@@ -400,13 +668,35 @@ pub fn materials_by_label_checked(
                             }
                             let max_abs = mat.iter().flatten().fold(0.0_f64, |acc, x| acc.max(x.abs()));
                             let tol = 1e-12 * max_abs.max(1.0);
-                            if (mat[0][1] - mat[1][0]).abs() > tol
+                            if is_gyro_key(name) {
+                                let g = femcore::material::axial_from_skew(mat);
+                                apply_gyro_vec(&mut m, &labels, name, g);
+                                continue;
+                            }
+                            let is_asym = (mat[0][1] - mat[1][0]).abs() > tol
                                 || (mat[0][2] - mat[2][0]).abs() > tol
-                                || (mat[1][2] - mat[2][1]).abs() > tol
-                            {
+                                || (mat[1][2] - mat[2][1]).abs() > tol;
+                            let allow_non_sym = spec.physics == "ems"
+                                && matches!(name.as_str(), "eps_r" | "eps_r_im" | "mu_r" | "mu_r_im");
+                            if is_asym && !allow_non_sym {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': tensor property '{name}' must be symmetric"
                                 )));
+                            }
+                            if is_asym {
+                                let g_skew = femcore::material::axial_from_skew(mat);
+                                for &l in &labels {
+                                    let an = m.aniso.entry(l).or_default();
+                                    match name.as_str() {
+                                        // Re(eps)_skew = -(g_im)_x => g_im = -axial_from_skew(Re(eps))
+                                        "eps_r" => an.gyrotropy_im = Some([-g_skew[0], -g_skew[1], -g_skew[2]]),
+                                        // Im(eps) = -eps_r_im; if eps = eps_re - i eps_r_im, skew of -eps_r_im is +G_x => g_re = -axial_from_skew(eps_r_im)
+                                        "eps_r_im" => an.gyrotropy = Some([-g_skew[0], -g_skew[1], -g_skew[2]]),
+                                        "mu_r" => an.mu_gyrotropy_im = Some([-g_skew[0], -g_skew[1], -g_skew[2]]),
+                                        "mu_r_im" => an.mu_gyrotropy = Some([-g_skew[0], -g_skew[1], -g_skew[2]]),
+                                        _ => {}
+                                    }
+                                }
                             }
                             if name == "loss_tangent" {
                                 femcore::material::tensor::TensorProp::Symmetric([
@@ -420,18 +710,19 @@ pub fn materials_by_label_checked(
                                 .check(femcore::material::tensor::Requirement::NonNegative, "loss_tangent")
                                 .map_err(|msg| Error::invalid(format!("region '{region}': {msg}")))?;
                             }
-                            if is_isotropic_m3(mat) {
+                            let sym_mat = symmetrize_m3(mat);
+                            if is_isotropic_m3(&sym_mat) && !is_asym {
                                 for &l in &labels {
-                                    m.set(l, name, mat[0][0]);
+                                    m.set(l, name, sym_mat[0][0]);
                                 }
                             } else if name != "loss_tangent" {
                                 let tensor = femcore::material::Tensor::Symmetric {
-                                    xx: mat[0][0],
-                                    yy: mat[1][1],
-                                    zz: mat[2][2],
-                                    xy: 0.5 * (mat[0][1] + mat[1][0]),
-                                    yz: 0.5 * (mat[1][2] + mat[2][1]),
-                                    xz: 0.5 * (mat[0][2] + mat[2][0]),
+                                    xx: sym_mat[0][0],
+                                    yy: sym_mat[1][1],
+                                    zz: sym_mat[2][2],
+                                    xy: sym_mat[0][1],
+                                    yz: sym_mat[1][2],
+                                    xz: sym_mat[0][2],
                                 };
                                 if name == "tan_delta" {
                                     inline_td_tensor = Some(tensor);
@@ -454,6 +745,18 @@ pub fn materials_by_label_checked(
                             if name == "piezo_e" {
                                 for &l in &labels {
                                     m.aniso.entry(l).or_default().piezo_e = Some(*mat);
+                                }
+                            } else if name == "chi2_d" {
+                                for &l in &labels {
+                                    let nl =
+                                        m.aniso.entry(l).or_default().nonlinear.get_or_insert_with(Default::default);
+                                    nl.chi2 = Some(femcore::material::Chi2 {
+                                        source: Vec::new(),
+                                        wavelength: None,
+                                        kleinman: false,
+                                        broken_centrosymmetry: true,
+                                        d: *mat,
+                                    });
                                 }
                             } else {
                                 return Err(Error::invalid(format!(
@@ -826,9 +1129,28 @@ pub fn audit_active_materials(
         } else if (wants_mu_r || wants_sigma)
             && (mat.electrical.permeability.is_some()
                 || mat.electrical.conductivity.is_some()
+                || mat.electrical.conductivity_t.is_some()
                 || mat.electrical.permittivity.is_some())
         {
             collector.record_sources(region, mat_name, "electrical", &mat.electrical.source, &mat.source);
+        }
+        if wants_sigma {
+            if let Some(curve) = &mat.electrical.conductivity_t {
+                let curve_srcs: Vec<Source> = curve.sources().into_iter().cloned().collect();
+                collector.record_sources(region, mat_name, "electrical.conductivity_T", &curve_srcs, &[]);
+                for &t in &check_temps {
+                    if let Some((_, clamps)) = mat.electrical_conductivity_at_checked(Some(t)) {
+                        for (comp, info) in clamps {
+                            collector.record_clamp(
+                                region,
+                                mat_name,
+                                clamp_section("electrical.conductivity_T", comp),
+                                info,
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         if tls_active {
@@ -839,6 +1161,38 @@ pub fn audit_active_materials(
             ] {
                 if let Some(l) = layer {
                     collector.record_sources(region, mat_name, iface_name, &l.source, &mat.source);
+                }
+            }
+        }
+        if spec.physics == "ems"
+            && matches!(spec.study.kind.as_str(), "nonlinear_driven" | "nonlinear_modes" | "dgtd" | "fdtd")
+        {
+            if let Some(nl) = &mat.nonlinear {
+                if !nl.source.is_empty() {
+                    collector.record_sources(region, mat_name, "nonlinear", &nl.source, &mat.source);
+                }
+                if let Some(c2) = &nl.chi2 {
+                    collector.record_sources(
+                        region,
+                        mat_name,
+                        "nonlinear.chi2",
+                        &c2.source,
+                        if nl.source.is_empty() { &mat.source } else { &nl.source },
+                    );
+                }
+                if let Some(c3) = &nl.chi3 {
+                    collector.record_sources(
+                        region,
+                        mat_name,
+                        "nonlinear.chi3",
+                        &c3.source,
+                        if nl.source.is_empty() { &mat.source } else { &nl.source },
+                    );
+                }
+                for &t in &check_temps {
+                    if let Some(info) = nl.check_temperature(t).clamp {
+                        collector.record_clamp(region, mat_name, "nonlinear", info);
+                    }
                 }
             }
         }
@@ -990,6 +1344,8 @@ fn set_inline_tensor(
         match name {
             "eps_r" => an.permittivity = Some(tensor.clone()),
             "eps_r_im" => an.permittivity_im = Some(tensor.clone()),
+            "mu_r" => an.permeability = Some(tensor.clone()),
+            "mu_r_im" => an.permeability_im = Some(tensor.clone()),
             "k" | "sigma" => an.conductivity = Some(tensor.clone()),
             "alpha" => an.expansion = Some(tensor.clone()),
             _ => {
@@ -1094,6 +1450,13 @@ fn named(
                 legacy.remove("alpha");
             }
         }
+        if let Some(st) = mat.electrical_conductivity_at(temp_k) {
+            if let Some(s) = st.as_scalar() {
+                legacy.insert("sigma".into(), s);
+            } else {
+                legacy.remove("sigma");
+            }
+        }
     }
     for (k, v) in &legacy {
         if wants(k)
@@ -1126,7 +1489,10 @@ fn named(
     an.conductivity = if wants("k") {
         keep(&an.conductivity, legacy.get("k").copied())
     } else if wants("sigma") || (wants("eps_r") && !wants("k") && physics != "sms") {
-        let sig_t = mat.electrical.conductivity.as_ref().map(|tp| m3_to_sym_tensor(&tp.matrix()));
+        let sig_t = mat
+            .electrical_conductivity_at(temp_k)
+            .or_else(|| mat.electrical.conductivity.clone())
+            .map(|tp| m3_to_sym_tensor(&tp.matrix()));
         keep(&sig_t, legacy.get("sigma").copied())
     } else {
         None
@@ -1143,10 +1509,17 @@ fn named(
     if !wants("eps_r") {
         an.permittivity = None;
         an.permittivity_im = None;
+        an.permeability = None;
+        an.permeability_im = None;
+        an.gyrotropy = None;
+        an.gyrotropy_im = None;
+        an.mu_gyrotropy = None;
+        an.mu_gyrotropy_im = None;
+        an.nonlinear = None;
     } else {
         // Optical dispersion applies when an optical/THz wavelength (<= 300 um, f >= 1 THz) is given and the material has [optical],
         // never for quasi-static dfs electrostatic or sms solid/piezoelectric studies.
-        if let (false, Some(_), Some(lambda)) =
+        if let (false, Some(opt), Some(lambda)) =
             (is_quasi_static_electro, &mat.optical, ctx.wavelength.filter(|&lam| lam <= 3e-4))
         {
             an.permittivity_im = None;
@@ -1156,16 +1529,28 @@ fn named(
             let eps_glob = mat
                 .optical_permittivity(lambda, temp_k, euler)
                 .map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
-            let re_cryst = [
+            if let Some(g_cryst) =
+                opt.gyrotropy_crystal(lambda).map_err(|e| Error::invalid(format!("region '{region}': {e}")))?
+            {
+                let g_re = [g_cryst[0].re, g_cryst[1].re, g_cryst[2].re];
+                let g_im = [g_cryst[0].im, g_cryst[1].im, g_cryst[2].im];
+                if g_re.iter().any(|&v| v != 0.0) {
+                    an.gyrotropy = Some(g_re);
+                }
+                if g_im.iter().any(|&v| v != 0.0) {
+                    an.gyrotropy_im = Some(g_im);
+                }
+            }
+            let re_cryst = symmetrize_m3(&[
                 [eps_cryst[0][0].re, eps_cryst[0][1].re, eps_cryst[0][2].re],
                 [eps_cryst[1][0].re, eps_cryst[1][1].re, eps_cryst[1][2].re],
                 [eps_cryst[2][0].re, eps_cryst[2][1].re, eps_cryst[2][2].re],
-            ];
-            let re_glob = [
+            ]);
+            let re_glob = symmetrize_m3(&[
                 [eps_glob[0][0].re, eps_glob[0][1].re, eps_glob[0][2].re],
                 [eps_glob[1][0].re, eps_glob[1][1].re, eps_glob[1][2].re],
                 [eps_glob[2][0].re, eps_glob[2][1].re, eps_glob[2][2].re],
-            ];
+            ]);
             if is_isotropic_m3(&re_glob) {
                 for &l in labels {
                     m.set(l, "eps_r", re_glob[0][0]);
@@ -1174,19 +1559,20 @@ fn named(
             } else {
                 an.permittivity = Some(m3_to_sym_tensor(&re_cryst));
             }
-            // In exp(+i omega t), passive optical loss (n - i k)^2 has Im(eps) <= 0, so loss magnitude is -Im(eps).
-            let lossy = eps_cryst.iter().flatten().any(|z| z.im.abs() > 1e-12 * (1.0 + z.re.abs()));
+            // In exp(+i omega t), passive symmetric optical loss (n - i k)^2 has Im(eps_sym) <= 0, so loss magnitude is -Im(eps_sym).
+            let im_cryst = symmetrize_m3(&[
+                [-eps_cryst[0][0].im, -eps_cryst[0][1].im, -eps_cryst[0][2].im],
+                [-eps_cryst[1][0].im, -eps_cryst[1][1].im, -eps_cryst[1][2].im],
+                [-eps_cryst[2][0].im, -eps_cryst[2][1].im, -eps_cryst[2][2].im],
+            ]);
+            let im_glob = symmetrize_m3(&[
+                [-eps_glob[0][0].im, -eps_glob[0][1].im, -eps_glob[0][2].im],
+                [-eps_glob[1][0].im, -eps_glob[1][1].im, -eps_glob[1][2].im],
+                [-eps_glob[2][0].im, -eps_glob[2][1].im, -eps_glob[2][2].im],
+            ]);
+            let max_re = re_cryst.iter().flatten().fold(1.0_f64, |a, v| a.max(v.abs()));
+            let lossy = im_cryst.iter().flatten().any(|z| z.abs() > 1e-12 * max_re);
             if lossy {
-                let im_cryst = [
-                    [-eps_cryst[0][0].im, -eps_cryst[0][1].im, -eps_cryst[0][2].im],
-                    [-eps_cryst[1][0].im, -eps_cryst[1][1].im, -eps_cryst[1][2].im],
-                    [-eps_cryst[2][0].im, -eps_cryst[2][1].im, -eps_cryst[2][2].im],
-                ];
-                let im_glob = [
-                    [-eps_glob[0][0].im, -eps_glob[0][1].im, -eps_glob[0][2].im],
-                    [-eps_glob[1][0].im, -eps_glob[1][1].im, -eps_glob[1][2].im],
-                    [-eps_glob[2][0].im, -eps_glob[2][1].im, -eps_glob[2][2].im],
-                ];
                 if is_isotropic_m3(&im_glob) && an.permittivity.is_none() {
                     for &l in labels {
                         m.set(l, "eps_r_im", im_glob[0][0]);
@@ -1227,13 +1613,25 @@ fn named(
             }
         }
     }
+    if !wants("eps_r") && !wants("E") {
+        an.photoelastic = None;
+        an.electro_optic = None;
+    } else if !wants("eps_r") {
+        an.electro_optic = None;
+    }
     if an.stiffness.is_some()
         || an.viscosity.is_some()
         || an.piezo_e.is_some()
+        || an.photoelastic.is_some()
+        || an.electro_optic.is_some()
         || an.conductivity.is_some()
         || an.permittivity.is_some()
         || an.permittivity_im.is_some()
+        || an.permeability.is_some()
+        || an.permeability_im.is_some()
         || an.expansion.is_some()
+        || an.nonlinear.is_some()
+        || an.is_non_symmetric()
     {
         for &l in labels {
             m.aniso.insert(l, an.clone());

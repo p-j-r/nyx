@@ -6,13 +6,16 @@
 //! `materials` directly until the material files exist (phase 6).
 
 use crate::Dfs;
-use femcore::material::{bcs_surface_impedance, FilmModel};
+use femcore::material::{bcs_surface_impedance, FilmModel, TempCurve, TempTensor};
 use femcore::props::{LinearSolver, Materials, PmlDir};
 use nyx_physics::decode::{
     domain_names_by_label, materials_by_label, resolve_conditions, tls_interfaces_from_spec, Params,
 };
-use nyx_physics::{Ctx, Error, Physics, ProblemSpec, TlsInterfaces};
+use nyx_physics::{Ctx, Error, MaterialAssign, Physics, ProblemSpec, TlsInterfaces};
 use std::collections::BTreeMap;
+
+/// Exact CODATA 2018 Stefan-Boltzmann constant `sigma_SB` in `W / (m^2 K^4)`.
+pub const SIGMA_SB: f64 = 5.670_374_419e-8;
 
 /// Coordinate topology of a domain-applied static Infinite Element (`BcKind::InfiniteElement`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -108,9 +111,13 @@ fn parse_pml_dir(s: &str) -> Result<PmlDir, String> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BcKind {
     Potential(f64),
+    /// fixed electric potential for steady Ohmic conduction, V
+    Voltage(f64),
     Ground,
     /// surface charge density, C/m^2
     SurfaceCharge(f64),
+    /// inward normal current density `-n . J`, A/m^2 (steady conduction)
+    CurrentDensity(f64),
     /// named conductor terminal for multi-RHS capacitance matrix extraction
     Terminal(String),
     /// spherical 1/r asymptotic Robin open boundary (3D electrostatics)
@@ -131,6 +138,12 @@ pub enum BcKind {
     Convection {
         h: f64,
         text: f64,
+    },
+    /// Stefan-Boltzmann radiative cooling/heating `-n . q = emissivity * view_factor * sigma_SB * (T^4 - t_ambient^4)`
+    Radiation {
+        emissivity: f64,
+        t_ambient: f64,
+        view_factor: f64,
     },
     /// thin superconducting sheet with sheet kinetic inductance L_k,sq (H/sq)
     LondonSheet {
@@ -153,8 +166,10 @@ impl BcKind {
     pub fn name(&self) -> &'static str {
         match self {
             BcKind::Potential(_) => "Electric potential",
+            BcKind::Voltage(_) => "Voltage",
             BcKind::Ground => "Ground",
             BcKind::SurfaceCharge(_) => "Surface charge",
+            BcKind::CurrentDensity(_) => "Current density",
             BcKind::Terminal(_) => "Terminal",
             BcKind::Open { .. } => "Open boundary",
             BcKind::FarField { .. } => "Far-field open boundary",
@@ -162,6 +177,7 @@ impl BcKind {
             BcKind::Temperature(_) => "Temperature",
             BcKind::Flux(_) => "Heat flux",
             BcKind::Convection { .. } => "Convective cooling",
+            BcKind::Radiation { .. } => "Thermal radiation",
             BcKind::LondonSheet { .. } => "London superconducting sheet",
             BcKind::CurrentTerminal { .. } => "Current terminal",
             BcKind::FluxLoop { .. } => "Fluxoid / hole loop",
@@ -181,12 +197,17 @@ impl BcKind {
         )
     }
 
+    pub fn is_conduction(&self) -> bool {
+        matches!(self, BcKind::Voltage(_) | BcKind::Potential(_) | BcKind::Ground | BcKind::CurrentDensity(_))
+    }
+
     pub fn is_heat(&self) -> bool {
         matches!(
             self,
             BcKind::Temperature(_)
                 | BcKind::Flux(_)
                 | BcKind::Convection { .. }
+                | BcKind::Radiation { .. }
                 | BcKind::FarField { .. }
                 | BcKind::InfiniteElement(_)
         )
@@ -215,6 +236,8 @@ pub struct Bc {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Study {
     Electrostatic,
+    /// Steady Ohmic conduction `-div(sigma(T) grad V) = 0` with Joule heating export `Q_joule = grad V . sigma grad V`
+    Conduction,
     HeatStationary,
     /// `t0` is an expression in x, y, z (m) for the initial temperature
     HeatTransient {
@@ -233,6 +256,7 @@ impl Study {
     pub fn kind(&self) -> &'static str {
         match self {
             Study::Electrostatic => "electrostatic",
+            Study::Conduction => "conduction",
             Study::HeatStationary => "heat_stationary",
             Study::HeatTransient { .. } => "heat_transient",
             Study::Magnetostatic { .. } => "magnetostatic",
@@ -283,6 +307,20 @@ pub struct Problem {
     pub sheet_thickness_m: BTreeMap<i32, f64>,
     /// optional 1-based boundary label -> substrate over-etch trench depth `t_e` (m) from `LabelMap`
     pub sheet_etch_depth_m: BTreeMap<i32, f64>,
+    /// optional per-domain temperature-dependent thermal conductivity curves `(TempTensor, euler_deg)`
+    pub k_curves: BTreeMap<i32, (TempTensor, [f64; 3])>,
+    /// optional per-domain temperature-dependent specific heat curves `Cp(T)`
+    pub cp_curves: BTreeMap<i32, TempCurve>,
+    /// optional per-domain temperature-dependent electrical conductivity curves `(TempTensor, euler_deg)`
+    pub sigma_curves: BTreeMap<i32, (TempTensor, [f64; 3])>,
+    /// optional imported volumetric heat source field (`W/m^3`, nodal or cellwise) from `FieldLink` `"heat_source"`
+    pub heat_source: Option<Vec<f64>>,
+    /// optional domain-wise conservatively projected per-cell heat source (`nc * nloc(order)`) from cross-mesh `Ctx::transferred_inputs` (`ADR 135`)
+    pub heat_source_cell_nodes: Option<Vec<f64>>,
+    /// optional imported temperature field (`K`, nodal or cellwise) from `FieldLink` `"temperature"`
+    pub temperature_field: Option<Vec<f64>>,
+    /// optional domain-filtered per-cell P2 temperature nodes (`nc * nloc(2)`) from cross-mesh `Ctx::transferred_inputs` (`ADR 135`)
+    pub temperature_cell_nodes: Option<Vec<f64>>,
 }
 
 impl Problem {
@@ -311,7 +349,53 @@ impl Problem {
             farfield_t_inf: 293.15,
             sheet_thickness_m: BTreeMap::new(),
             sheet_etch_depth_m: BTreeMap::new(),
+            k_curves: BTreeMap::new(),
+            cp_curves: BTreeMap::new(),
+            sigma_curves: BTreeMap::new(),
+            heat_source: None,
+            heat_source_cell_nodes: None,
+            temperature_field: None,
+            temperature_cell_nodes: None,
         }
+    }
+
+    /// True if any condition is a non-zero Stefan-Boltzmann `Radiation` boundary condition.
+    pub fn has_radiation(&self) -> bool {
+        self.bcs.iter().any(
+            |bc| matches!(bc.kind, BcKind::Radiation { emissivity, view_factor, .. } if emissivity * view_factor > 0.0),
+        )
+    }
+
+    /// True if stationary or transient heat transfer requires nonlinear SNES Newton iteration.
+    pub fn is_nonlinear_heat(&self) -> bool {
+        self.has_radiation()
+            || !self.k_curves.is_empty()
+            || (matches!(self.study, Study::HeatTransient { .. }) && !self.cp_curves.is_empty())
+    }
+
+    pub fn with_k_curve(mut self, domain: i32, curve: TempTensor, euler_deg: [f64; 3]) -> Self {
+        self.k_curves.insert(domain, (curve, euler_deg));
+        self
+    }
+
+    pub fn with_cp_curve(mut self, domain: i32, curve: TempCurve) -> Self {
+        self.cp_curves.insert(domain, curve);
+        self
+    }
+
+    pub fn with_sigma_curve(mut self, domain: i32, curve: TempTensor, euler_deg: [f64; 3]) -> Self {
+        self.sigma_curves.insert(domain, (curve, euler_deg));
+        self
+    }
+
+    pub fn with_heat_source(mut self, heat_source: Vec<f64>) -> Self {
+        self.heat_source = Some(heat_source);
+        self
+    }
+
+    pub fn with_temperature_field(mut self, temperature_field: Vec<f64>) -> Self {
+        self.temperature_field = Some(temperature_field);
+        self
     }
 
     pub fn with_tls_interfaces(mut self, tls_interfaces: Option<TlsInterfaces>) -> Self {
@@ -420,10 +504,26 @@ impl Problem {
                 return Err(format!("sheet_etch_depth_m of boundary {dom} is {v}: it must be a finite number"));
             }
         }
+        if let Some(ref cv) = self.heat_source_cell_nodes {
+            if cv.iter().any(|v| !v.is_finite()) {
+                return Err("projected cell heat_source field contains NaN or infinity".into());
+            }
+        }
+        if let Some(ref tcn) = self.temperature_cell_nodes {
+            if tcn.iter().any(|v| !v.is_finite()) {
+                return Err("transferred cell temperature field contains NaN or infinity".into());
+            }
+        }
         for (i, bc) in self.bcs.iter().enumerate() {
             let vals: Vec<f64> = match &bc.kind {
-                BcKind::Potential(v) | BcKind::SurfaceCharge(v) | BcKind::Temperature(v) | BcKind::Flux(v) => vec![*v],
+                BcKind::Potential(v)
+                | BcKind::Voltage(v)
+                | BcKind::SurfaceCharge(v)
+                | BcKind::CurrentDensity(v)
+                | BcKind::Temperature(v)
+                | BcKind::Flux(v) => vec![*v],
                 BcKind::Convection { h, text } => vec![*h, *text],
+                BcKind::Radiation { emissivity, t_ambient, view_factor } => vec![*emissivity, *t_ambient, *view_factor],
                 BcKind::LondonSheet { l_k_sq } => vec![*l_k_sq],
                 BcKind::CurrentTerminal { current, direction, .. } => {
                     vec![*current, direction[0], direction[1], direction[2]]
@@ -524,6 +624,39 @@ impl Problem {
                     }
                 }
             }
+            if let BcKind::Radiation { emissivity, t_ambient, view_factor } = &bc.kind {
+                if !(0.0..=1.0).contains(emissivity) {
+                    return Err(format!(
+                        "boundary condition {} (Thermal radiation on boundaries {:?}) has emissivity {emissivity}: it must lie in [0, 1]",
+                        i + 1,
+                        bc.labels
+                    ));
+                }
+                if !(0.0..=1.0).contains(view_factor) {
+                    return Err(format!(
+                        "boundary condition {} (Thermal radiation on boundaries {:?}) has view_factor {view_factor}: it must lie in [0, 1]",
+                        i + 1,
+                        bc.labels
+                    ));
+                }
+                if *t_ambient < 0.0 {
+                    return Err(format!(
+                        "boundary condition {} (Thermal radiation on boundaries {:?}) has t_ambient {t_ambient}: absolute temperature must be >= 0 K",
+                        i + 1,
+                        bc.labels
+                    ));
+                }
+            }
+        }
+        if let Some(ref hs) = self.heat_source {
+            if hs.iter().any(|v| !v.is_finite()) {
+                return Err("imported 'heat_source' field contains NaN or infinity".into());
+            }
+        }
+        if let Some(ref tf) = self.temperature_field {
+            if tf.iter().any(|v| !v.is_finite()) {
+                return Err("imported 'temperature' field contains NaN or infinity".into());
+            }
         }
         if let Study::HeatTransient { t_end, .. } = &self.study {
             if !t_end.is_finite() {
@@ -598,6 +731,7 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             }
             Study::Electrostatic
         }
+        "conduction" => Study::Conduction,
         "heat_stationary" => Study::HeatStationary,
         "heat_transient" => Study::HeatTransient {
             t_end: sp.number("t_end")?,
@@ -617,8 +751,10 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         let p = Params::new(&r.params, &d.params);
         let kind = match r.kind.as_str() {
             "potential" => BcKind::Potential(p.number("value")?),
+            "voltage" => BcKind::Voltage(p.number("value")?),
             "ground" => BcKind::Ground,
             "surface_charge" => BcKind::SurfaceCharge(p.number("density")?),
+            "current_density" => BcKind::CurrentDensity(p.number("value")?),
             "terminal" => {
                 let name = p.text("name")?.trim().to_string();
                 if name.is_empty() {
@@ -736,6 +872,27 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
             "temperature" => BcKind::Temperature(p.number("value")?),
             "flux" => BcKind::Flux(p.number("value")?),
             "convection" => BcKind::Convection { h: p.number("h")?, text: p.number("t_ext")? },
+            "radiation" => {
+                let emissivity = p.number("emissivity")?;
+                let t_ambient = p.number("t_ambient")?;
+                let view_factor = p.number("view_factor")?;
+                if !emissivity.is_finite() || !(0.0..=1.0).contains(&emissivity) {
+                    return Err(Error::invalid(format!(
+                        "radiation condition 'emissivity' must lie in [0, 1], got {emissivity}"
+                    )));
+                }
+                if !view_factor.is_finite() || !(0.0..=1.0).contains(&view_factor) {
+                    return Err(Error::invalid(format!(
+                        "radiation condition 'view_factor' must lie in [0, 1], got {view_factor}"
+                    )));
+                }
+                if !t_ambient.is_finite() || t_ambient < 0.0 {
+                    return Err(Error::invalid(format!(
+                        "radiation condition 't_ambient' must be >= 0 K, got {t_ambient}"
+                    )));
+                }
+                BcKind::Radiation { emissivity, t_ambient, view_factor }
+            }
             "london_sheet" => {
                 let l_k_sq_given = p.number("L_k_sq")?;
                 let mat_name = p.text("material")?;
@@ -803,12 +960,14 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         }
         let ok = match &study {
             Study::Electrostatic => kind.is_electrostatic(),
+            Study::Conduction => kind.is_conduction(),
             Study::HeatStationary | Study::HeatTransient { .. } => kind.is_heat(),
             Study::Magnetostatic { .. } => kind.is_magnetostatic(),
         };
         if !ok {
             let expected = match &study {
                 Study::Electrostatic => "an electrostatics",
+                Study::Conduction => "a steady-conduction",
                 Study::HeatStationary | Study::HeatTransient { .. } => "a heat-transfer",
                 Study::Magnetostatic { .. } => "a magnetostatics",
             };
@@ -859,6 +1018,69 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
     let tls_ifaces = tls_interfaces_from_spec(spec, ctx);
     let tls_interfaces = (!tls_ifaces.is_empty()).then_some(tls_ifaces);
     let materials = materials_by_label(spec, ctx, &dfs.properties())?;
+    let mut k_curves: BTreeMap<i32, (TempTensor, [f64; 3])> = BTreeMap::new();
+    let mut cp_curves: BTreeMap<i32, TempCurve> = BTreeMap::new();
+    let mut sigma_curves: BTreeMap<i32, (TempTensor, [f64; 3])> = BTreeMap::new();
+    if let Some(lib) = ctx.library.as_ref() {
+        let is_nonconst_curve = |c: &TempCurve| !matches!(c, TempCurve::Constant { .. });
+        let is_nonconst_tensor = |t: &TempTensor| match t {
+            TempTensor::Scalar(c) => is_nonconst_curve(c),
+            TempTensor::Uniaxial { perp, par } => is_nonconst_curve(perp) || is_nonconst_curve(par),
+        };
+        for (region, assign) in &spec.materials {
+            let (mat_name, euler) = match assign {
+                MaterialAssign::Named(n) => (n.as_str(), [0.0; 3]),
+                MaterialAssign::Oriented { material, euler_deg } => (material.as_str(), *euler_deg),
+                _ => continue,
+            };
+            let labels = ctx.resolver.domains(region)?;
+            let mat = lib.require(mat_name).map_err(|e| Error::invalid(format!("region '{region}': {e}")))?;
+            if matches!(study, Study::HeatStationary | Study::HeatTransient { .. }) {
+                if let Some(kt) = mat.thermal.conductivity_t.as_ref().filter(|t| is_nonconst_tensor(t)) {
+                    for &l in &labels {
+                        k_curves.insert(l, (kt.clone(), euler));
+                    }
+                }
+                if matches!(study, Study::HeatTransient { .. }) {
+                    if let Some(cpt) = mat.thermal.specific_heat_t.as_ref().filter(|c| is_nonconst_curve(c)) {
+                        for &l in &labels {
+                            cp_curves.insert(l, cpt.clone());
+                        }
+                    }
+                }
+            } else if matches!(study, Study::Conduction) {
+                if let Some(st) = mat.electrical.conductivity_t.as_ref().filter(|t| is_nonconst_tensor(t)) {
+                    for &l in &labels {
+                        sigma_curves.insert(l, (st.clone(), euler));
+                    }
+                }
+            }
+        }
+    }
+    let heat_source = if matches!(study, Study::HeatStationary | Study::HeatTransient { .. }) {
+        if let Some(hs) = ctx.inputs.get("heat_source") {
+            if hs.iter().any(|v| !v.is_finite()) {
+                return Err(Error::NonFinite("imported 'heat_source' field contains NaN or infinity".into()));
+            }
+            Some(hs.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let temperature_field = if matches!(study, Study::Conduction) {
+        if let Some(tf) = ctx.inputs.get("temperature") {
+            if tf.iter().any(|v| !v.is_finite()) {
+                return Err(Error::NonFinite("imported 'temperature' field contains NaN or infinity".into()));
+            }
+            Some(tf.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     if matches!(study, Study::Electrostatic)
         && flux_bounds != "none"
         && (materials.default.get("rho_v").copied().unwrap_or(0.0).abs() > 0.0
@@ -892,5 +1114,12 @@ pub fn decode(spec: &ProblemSpec, ctx: &Ctx) -> Result<Problem, Error> {
         farfield_t_inf,
         sheet_thickness_m: ctx.resolver.sheet_thickness_m(),
         sheet_etch_depth_m: ctx.resolver.sheet_etch_depth_m(),
+        k_curves,
+        cp_curves,
+        sigma_curves,
+        heat_source,
+        heat_source_cell_nodes: None,
+        temperature_field,
+        temperature_cell_nodes: None,
     })
 }

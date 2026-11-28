@@ -52,6 +52,11 @@ pub(crate) fn collect_pre_solve_temperatures(spec: &ProblemSpec, ctx: &Ctx) -> V
                         push_finite(v);
                     }
                 }
+                "radiation" => {
+                    if let Some(v) = bc.params.get("t_ambient").and_then(Value::as_f64) {
+                        push_finite(v);
+                    }
+                }
                 "far_field" => {
                     has_farfield = true;
                     if let Some(v) = bc.params.get("t_inf").and_then(Value::as_f64) {
