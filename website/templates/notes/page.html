@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ page.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <article>
+    <header class="note-header">
+      <div class="kicker">
+        <span class="kicker-rule" aria-hidden="true"></span>
+        <span>{{ page.extra.kicker | default(value="ENGINEERING NOTE") }}</span>
+      </div>
+      <h1>{{ page.title }}</h1>
+      {% if page.description %}
+        <p class="lead">{{ page.description }}</p>
+      {% endif %}
+
+      <div class="note-meta-strip tabular">
+        {% if page.date %}
+          <span>Published {{ page.date | date(format="%Y-%m-%d") }}</span>
+        {% endif %}
+        <span>{{ page.reading_time }} min read</span>
+        <span>{{ page.word_count }} words</span>
+        {% if page.extra.author %}
+          <span>Author: {{ page.extra.author }}</span>
+        {% endif %}
+        <a href="{{ get_url(path='/notes/') }}">All Engineering Notes</a>
+      </div>
+    </header>
+
+    <div class="note-article">
+      {% if page.toc | length > 0 %}
+        <nav class="note-toc" aria-label="Table of contents">
+          <div class="note-toc-title">Contents</div>
+          <ol>
+            {% for h1 in page.toc %}
+              <li>
+                <a href="{{ h1.permalink | safe }}">{{ h1.title }}</a>
+                {% if h1.children | length > 0 %}
+                  <ol>
+                    {% for h2 in h1.children %}
+                      <li><a href="{{ h2.permalink | safe }}">{{ h2.title }}</a></li>
+                    {% endfor %}
+                  </ol>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ol>
+        </nav>
+      {% endif %}
+
+      <div class="note-body prose">
+        {{ page.content | safe }}
+      </div>
+
+      {% if page.lower or page.higher %}
+        <nav class="note-pager" aria-label="Adjacent engineering notes">
+          {% if page.lower %}
+            <a class="note-pager-link" href="{{ page.lower.permalink }}">
+              <span class="note-pager-dir">← Previous Note</span>
+              <span class="note-pager-title">{{ page.lower.title }}</span>
+            </a>
+          {% else %}
+            <div></div>
+          {% endif %}
+
+          {% if page.higher %}
+            <a class="note-pager-link" href="{{ page.higher.permalink }}" style="text-align: right;">
+              <span class="note-pager-dir">Next Note →</span>
+              <span class="note-pager-title">{{ page.higher.title }}</span>
+            </a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    </div>
+  </article>
+</div>
+{% endblock content %}

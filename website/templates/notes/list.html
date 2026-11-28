@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>{{ section.extra.kicker | default(value="MONOGRAPH SERIES · ENGINEERING NOTES") }}</span>
+    </div>
+    <h1>{{ section.title }}</h1>
+    {% if section.description %}
+      <p class="lead">{{ section.description }}</p>
+    {% endif %}
+  </header>
+
+  {% if section.content %}
+    <div class="prose" style="margin-bottom: 2rem;">
+      {{ section.content | safe }}
+    </div>
+  {% endif %}
+
+  {% if section.pages | length > 0 %}
+    <div>
+      {% for note in section.pages %}
+        <article class="note-list-item">
+          <div class="note-list-index tabular">
+            <div>NOTE {% if loop.index < 10 %}0{% endif %}{{ loop.index }}</div>
+            {% if note.date %}
+              <div>{{ note.date | date(format="%Y-%m-%d") }}</div>
+            {% endif %}
+            <div>{{ note.reading_time }} min read</div>
+          </div>
+          <div>
+            {% if note.extra.kicker %}
+              <div class="kicker" style="margin-bottom: 0.35rem;">
+                <span>{{ note.extra.kicker }}</span>
+              </div>
+            {% endif %}
+            <h2 style="margin-bottom: 0.45rem;">
+              <a href="{{ note.permalink }}" style="text-decoration: none; color: var(--color-text);">{{ note.title }}</a>
+            </h2>
+            {% if note.description %}
+              <p style="color: var(--color-muted); max-width: 64ch; margin-bottom: 0.65rem;">{{ note.description }}</p>
+            {% endif %}
+            <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;">
+              <a class="btn btn-mono" href="{{ note.permalink }}">Read note →</a>
+              {% if note.taxonomies.tags is defined %}
+                {% for tag in note.taxonomies.tags %}
+                  <span class="chip">{{ tag }}</span>
+                {% endfor %}
+              {% endif %}
+            </div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state">
+      No engineering notes published yet.
+    </div>
+  {% endif %}
+</div>
+{% endblock content %}

@@ -1,0 +1,260 @@
+// Fallback custom properties matching docs/ux/tokens.json (augmented by _tokens.scss)
+:root {
+  --color-page: #F8F6F8;
+  --color-card: #FFFFFF;
+  --color-raised: #F1EEF2;
+  --color-separator: #E6E4E6;
+  --color-control-edge: #8A8091;
+  --color-control-edge-high: #6B6173;
+  --color-text: #1D1224;
+  --color-muted: #5C5062;
+  --color-accent: #820C4F;
+  --color-on-accent: #FFFFFF;
+  --color-tint: #F1E4EC;
+  --color-brand-shadow: #531F55;
+  --color-activity: #FFBD59;
+  --color-on-activity: #1D1224;
+  --color-activity-text: #6B4300;
+  --color-activity-tint: #FFF1DC;
+  --color-success: #1F6B43;
+  --color-success-tint: #E7F4EC;
+  --color-danger: #A32020;
+  --color-danger-tint: #FCEAEA;
+
+  // Specimen plate viewport: ALWAYS dark #181A1E regardless of page theme (decision D2)
+  --color-canvas: #181A1E;
+  --color-plate-bg: #181A1E;
+  --color-plate-border: #2E2A35;
+  --color-plate-text: #ECE7EF;
+  --color-plate-muted: #A9A0B1;
+
+  --font-serif: "Newsreader", "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-hairline: 2px;
+  --radius-card: 3px;
+  --shadow-offset: 3px 3px 0 var(--color-brand-shadow);
+  --shadow-offset-sm: 2px 2px 0 var(--color-brand-shadow);
+
+  --container-max: 1220px;
+  --measure: 68ch;
+  --header-height: 60px;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --color-page: #141218;
+  --color-card: #1D1A22;
+  --color-raised: #262230;
+  --color-separator: #2E2A35;
+  --color-control-edge: #6E6578;
+  --color-control-edge-high: #9A91A5;
+  --color-text: #ECE7EF;
+  --color-muted: #A9A0B1;
+  --color-accent: #D96AA4;
+  --color-on-accent: #1D1224;
+  --color-tint: #33202F;
+  --color-brand-shadow: #33202F;
+  --color-activity: #F2B35E;
+  --color-on-activity: #1D1224;
+  --color-activity-text: #F2B35E;
+  --color-activity-tint: #3D2D1A;
+  --color-success: #5FC08C;
+  --color-success-tint: #193024;
+  --color-danger: #F27A7A;
+  --color-danger-tint: #3A1D21;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+::selection {
+  background: var(--color-tint);
+  color: var(--color-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1000;
+  padding: 0.5rem 0.9rem;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 0.75rem;
+  top: 0.75rem;
+}
+
+h1, h2, h3, h4 {
+  color: var(--color-text);
+  margin-top: 0;
+  letter-spacing: -0.015em;
+}
+
+h1, h2 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+h1 {
+  font-size: clamp(2rem, 3.6vw, 2.95rem);
+  margin-bottom: 1rem;
+}
+
+h2 {
+  font-size: clamp(1.45rem, 2.3vw, 1.95rem);
+  margin-bottom: 0.75rem;
+}
+
+h3 {
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: 0.5rem;
+}
+
+h4 {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.4rem;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
+code {
+  font-size: 0.875em;
+  background: var(--color-raised);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-hairline);
+  padding: 0.08em 0.35em;
+}
+
+pre {
+  background: var(--color-plate-bg);
+  color: var(--color-plate-text);
+  border: 1px solid var(--color-plate-border);
+  border-radius: var(--radius-card);
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  margin: 1.25rem 0;
+}
+
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+// Zola CSS syntax highlighting classes (light/dark safe on dark specimen pre background)
+.z-code {
+  color: #ECE7EF;
+}
+.z-comment, .z-punctuation.z-definition.z-comment { color: #8E8799; font-style: italic; }
+.z-keyword, .z-storage { color: #E288B8; }
+.z-string, .z-constant.z-other { color: #8BD5A9; }
+.z-constant.z-numeric, .z-constant.z-language { color: #F2B35E; }
+.z-entity.z-name.z-function, .z-support.z-function { color: #7CC8E8; }
+.z-entity.z-name.z-type, .z-support.z-type { color: #C5A3F7; }
+.z-variable.z-parameter { color: #E8C798; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--color-separator);
+  margin: 2rem 0;
+}
+
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

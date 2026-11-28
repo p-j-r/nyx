@@ -1,0 +1,39 @@
+base_url = "https://p-j-r.github.io/nyx/"
+title = "nyx"
+description = "Coupled multiphysics & cQED finite-element simulation workbench in pure Rust"
+compile_sass = true
+minify_html = false
+build_search_index = true
+generate_feeds = true
+feed_filenames = ["atom.xml"]
+
+[markdown]
+render_emoji = false
+smart_punctuation = true
+
+[markdown.highlighting]
+theme = "catppuccin-mocha"
+
+[search]
+include_title = true
+include_description = true
+include_content = true
+
+[extra]
+version = "v0.1.0"
+repo_url = "https://github.com/p-j-r/nyx"
+licence = "AGPL-3.0-only OR LicenseRef-nyx-Commercial"
+catalog_hash = "b3:60697136d596a5b047f70971b85b0f54"
+command_count = 114
+crate_count = 15
+rust_version = "1.99.1"
+
+nav = [
+  { name = "Overview", url = "/" },
+  { name = "Specimens", url = "/specimens/" },
+  { name = "Benchmarks", url = "/benchmarks/" },
+  { name = "Materials", url = "/materials/" },
+  { name = "Notes", url = "/notes/" },
+  { name = "API", url = "/api/" },
+  { name = "Install", url = "/install/" },
+]

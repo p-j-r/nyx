@@ -1,0 +1,15 @@
+<div class="solver-log">
+  <div class="solver-log-head">
+    <span class="solver-log-title">{{ title | default(value="SOLVER STDOUT") }}</span>
+    <button type="button"
+            class="btn-copy"
+            data-copy-btn
+            data-copy-text="{% if cmd %}{{ cmd }}{% else %}{{ body | trim }}{% endif %}">Copy</button>
+  </div>
+  {% if cmd %}
+  <div class="solver-log-cmd">
+    <code>$ {{ cmd }}</code>
+  </div>
+  {% endif %}
+  <pre class="solver-log-pre"><code>{{ body | trim }}</code></pre>
+</div>

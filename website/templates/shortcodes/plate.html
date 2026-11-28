@@ -1,0 +1,12 @@
+<figure class="specimen-plate">
+  <div class="specimen-plate-bar">
+    <span class="specimen-plate-id">{{ number | default(value="PLATE") }}</span>
+    {% if meta %}<span>{{ meta }}</span>{% endif %}
+  </div>
+  <div class="specimen-plate-media">
+    <img src="{{ get_url(path=src) }}" alt="{{ alt }}" loading="lazy">
+  </div>
+  {% if caption %}
+  <figcaption class="specimen-plate-caption">{{ caption | markdown(inline=true) | safe }}</figcaption>
+  {% endif %}
+</figure>

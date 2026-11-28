@@ -1,0 +1,10 @@
+{% set kind_norm = kind | default(value="note") %}
+<aside class="callout callout--{{ kind_norm }}">
+  <div class="callout-title">
+    <span aria-hidden="true">{% if kind_norm == "theorem" %}■{% elif kind_norm == "limit" %}▲{% else %}§{% endif %}</span>
+    <span>{{ title | default(value=kind_norm | upper) }}</span>
+  </div>
+  <div class="callout-body">
+    {{ body | trim | markdown | safe }}
+  </div>
+</aside>

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}404 — Route not found — {{ config.title }}{% endblock title %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>STATUS 404 · MONOGRAPH INDEX</span>
+    </div>
+    <h1>Specimen or document not found</h1>
+    <p class="lead">The requested path does not exist in this build of the <code>nyx</code> monograph.</p>
+  </header>
+
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="{{ get_url(path='/') }}">Return to Overview</a>
+    <a class="btn" href="{{ get_url(path='/specimens/') }}">Specimens</a>
+    <a class="btn" href="{{ get_url(path='/api/') }}">API Catalogue</a>
+  </div>
+</div>
+{% endblock content %}
