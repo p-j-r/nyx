@@ -108,7 +108,7 @@ fn repeated_save_results_and_nyx_archives_are_byte_identical_and_omit_created_ut
 
     let mut za = ZipArchive::new(std::io::Cursor::new(&nyx_a)).unwrap();
     let h5_entry_name = (0..za.len())
-        .map(|i| za.by_index(i).unwrap().name().to_string())
+        .map(|i| za.by_index(i).unwrap().name().unwrap().into_owned())
         .find(|n| n.ends_with("/results.h5"))
         .expect("results.h5 inside .nyx archive");
     let mut archived_h5 = Vec::new();
