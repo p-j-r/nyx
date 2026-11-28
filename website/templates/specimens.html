@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>{{ section.extra.kicker | default(value="SPECIMEN GALLERY · examples/*.nyx.json") }}</span>
+    </div>
+    <h1>{{ section.title }}</h1>
+    {% if section.description %}
+      <p class="lead">{{ section.description }}</p>
+    {% endif %}
+  </header>
+
+  {% if section.content %}
+    <div class="prose" style="margin-bottom: 2rem;">
+      {{ section.content | safe }}
+    </div>
+  {% endif %}
+
+  {% set raw = load_data(path="data/examples.json", required=false) %}
+  {% set items = [] %}
+  {% if raw %}
+    {% if raw.examples is defined %}
+      {% set items = raw.examples %}
+    {% elif raw.items is defined %}
+      {% set items = raw.items %}
+    {% else %}
+      {% set items = raw %}
+    {% endif %}
+  {% endif %}
+
+  <div data-filter-root>
+    <div class="filter-toolbar">
+      <div class="filter-pills" role="group" aria-label="Filter specimens by domain">
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="all" aria-pressed="true">All</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="photonics" aria-pressed="false">Photonics &amp; Waveguides</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="cqed" aria-pressed="false">cQED &amp; EM</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="mechanics" aria-pressed="false">Mechanics &amp; Anchor Loss</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="electrostatics" aria-pressed="false">Electrostatics &amp; Thermal</button>
+      </div>
+
+      <div class="search-wrap">
+        <label class="sr-only" for="specimen-search">Search specimens</label>
+        <input id="specimen-search" class="search-input" type="search" data-filter-search placeholder="Filter specimens (press /)..." autocomplete="off">
+        <span class="filter-count tabular" data-filter-count>{{ items | length }} / {{ items | length }}</span>
+      </div>
+    </div>
+
+    {% if items | length > 0 %}
+      <div class="grid-3">
+        {% for ex in items %}
+          {% set title = ex.title | default(value=ex.name | default(value=ex.id | default(value="Specimen"))) %}
+          {% set physics_list = ex.physics | default(value=[]) %}
+          {% if physics_list is string %}{% set physics_str = physics_list %}{% else %}{% set physics_str = physics_list | join(sep=", ") %}{% endif %}
+          {% set cat_raw = ex.category | default(value="") | lower %}
+          {% set cat_tokens = cat_raw ~ " " ~ (ex.id | default(value="") | lower) ~ " " ~ (physics_str | lower) ~ " " ~ (ex.study | default(value="") | lower) %}
+          {% if "photonic" in cat_tokens or "waveguide" in cat_tokens or "soi" in cat_tokens or "wgm" in cat_tokens %}
+            {% set cat_tokens = cat_tokens ~ " photonics" %}
+          {% endif %}
+          {% if "cavity" in cat_tokens or "cqed" in cat_tokens or "ems" in cat_tokens or "pml_slab" in cat_tokens or "wr90" in cat_tokens %}
+            {% set cat_tokens = cat_tokens ~ " cqed" %}
+          {% endif %}
+          {% if "sms" in cat_tokens or "mechanic" in cat_tokens or "cantilever" in cat_tokens or "anchor" in cat_tokens or "plate_with_hole" in cat_tokens or "drilled_plate" in cat_tokens %}
+            {% set cat_tokens = cat_tokens ~ " mechanics" %}
+          {% endif %}
+          {% if "dfs" in cat_tokens or "electro" in cat_tokens or "thermal" in cat_tokens or "heat" in cat_tokens or "capacitor" in cat_tokens %}
+            {% set cat_tokens = cat_tokens ~ " electrostatics" %}
+          {% endif %}
+          {% set cmd = ex.command | default(value="nyx --batch examples/" ~ ex.id ~ ".nyx.json") %}
+          {% set search_blob = (title ~ " " ~ ex.id | default(value="") ~ " " ~ physics_str ~ " " ~ ex.study | default(value="") ~ " " ~ ex.description | default(value="") ~ " " ~ cat_raw) | lower %}
+
+          <article class="specimen-card"
+                   data-filter-item
+                   data-category="{{ cat_tokens }}"
+                   data-search="{{ search_blob }}">
+            {% set img_path = ex.plate | default(value=ex.figure | default(value=ex.image | default(value=""))) %}
+            {% if img_path %}
+              <div class="specimen-thumb">
+                <img src="{{ get_url(path=img_path) }}" alt="{{ title }}" loading="lazy">
+              </div>
+            {% endif %}
+
+            <div class="card-kicker">
+              <span>{{ ex.id | default(value="SPECIMEN") }}</span>
+              <span>{{ physics_str | upper }}</span>
+            </div>
+
+            <h2 class="card-title">{{ title }}</h2>
+
+            {% if ex.description %}
+              <p class="card-desc">{{ ex.description }}</p>
+            {% endif %}
+
+            <div class="card-meta-row">
+              {% if ex.study %}<span class="chip chip--accent">{{ ex.study }}</span>{% endif %}
+              {% if ex.dimension %}<span class="chip">{{ ex.dimension }}</span>{% endif %}
+              {% if ex.domains %}<span class="chip">{{ ex.domains | length }} domains</span>{% endif %}
+            </div>
+
+            <div class="solver-log" style="margin: 0.25rem 0 0;">
+              <div class="solver-log-cmd" style="border-bottom: 0; justify-content: space-between;">
+                <code>{{ cmd }}</code>
+                <button type="button" class="btn-copy" data-copy-btn data-copy-text="{{ cmd }}">Copy</button>
+              </div>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+      <div class="empty-state" data-filter-empty hidden>No specimens match the selected domain or search query.</div>
+    {% else %}
+      <div class="empty-state">
+        Specimen catalogue <code>website/data/examples.json</code> has not been generated yet. Run the site-prep extractor to populate all verified example models.
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock content %}

@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>{{ section.extra.kicker | default(value="ASME V&V 20 · SQUADDS PARITY SCORECARD") }}</span>
+    </div>
+    <h1>{{ section.title }}</h1>
+    {% if section.description %}
+      <p class="lead">{{ section.description }}</p>
+    {% endif %}
+  </header>
+
+  <section class="vv-banner" aria-labelledby="vv20-rule-heading">
+    <div class="card-kicker" style="margin-bottom: 0.45rem;">
+      <span>ASME V&amp;V 20 QUANTITATIVE VALIDATION GATE</span>
+      <span class="status-badge status-badge--pass">✓ EXPLICIT AND RULE</span>
+    </div>
+    <h2 id="vv20-rule-heading" style="margin-bottom: 0.5rem;">Never report a simulation number without a quantified numerical error estimate</h2>
+    <p style="margin-bottom: 0.65rem; max-width: 78ch;">
+      Every benchmark is governed by the validation comparison error $E = S - D$ against validation uncertainty $u_{\text{val}} = \sqrt{u_{\text{num}}^2 + u_{\text{input}}^2 + u_D^2}$. A result passes <strong>only</strong> when both conditions hold simultaneously (<code>passed: rows_passed &amp;&amp; top_passed</code> in <code>nyx-engine::validated</code>):
+    </p>
+    <div class="grid-2" style="gap: 0.85rem;">
+      <div class="chip" style="white-space: normal; padding: 0.55rem 0.75rem; justify-content: flex-start;">
+        <strong>1.</strong>&nbsp;<span>$|E| \le k\,u_{\text{val}}$ ($k = 2$ for ~95% coverage) across every tracked scalar &amp; eigenvalue</span>
+      </div>
+      <div class="chip" style="white-space: normal; padding: 0.55rem 0.75rem; justify-content: flex-start;">
+        <strong>AND 2.</strong>&nbsp;<span>$u_{\text{num}}$ (3-grid Roache GCI or Prager–Synge equilibrated flux bound) is explicitly computed, bounded, and reported alongside $E$</span>
+      </div>
+    </div>
+  </section>
+
+  <section style="margin-bottom: 2.25rem;" aria-label="SQuADDS benchmark parity scorecard">
+    <div class="section-head">
+      <div>
+        <div class="kicker"><span class="kicker-rule" aria-hidden="true"></span><span>UNMODIFIED HEAD · 418-RUN SQUADDS PROTOCOL</span></div>
+        <h2>Verified Parity Scorecard</h2>
+      </div>
+      <span class="chip">Seed SHA256("nyx-squadds-v2")</span>
+    </div>
+
+    <div class="scorecard-grid">
+      <article class="scorecard-tile">
+        <div class="scorecard-label">S1.1–S1.3 Electrostatics</div>
+        <div class="scorecard-metric">1.11%</div>
+        <div class="status-badge status-badge--pass" style="margin-bottom: 0.45rem;">✓ 60 / 60 ok</div>
+        <p class="scorecard-note">Unweighted self-capacitance median error vs. Ansys Q3D (1.04% Horvitz–Thompson; MAE 1.369 fF; p_obs = 2.00).</p>
+      </article>
+
+      <article class="scorecard-tile">
+        <div class="scorecard-label">Prager–Synge Brackets</div>
+        <div class="scorecard-metric">68 / 69</div>
+        <div class="status-badge status-badge--pass" style="margin-bottom: 0.45rem;">✓ 98.6% certified</div>
+        <p class="scorecard-note">Goal-oriented <code>flux_jump_goal</code> AMR + H(div) <code>flux_bounds</code> strictly bracketing Ansys Q3D across S1.1–S1.4.</p>
+      </article>
+
+      <article class="scorecard-tile">
+        <div class="scorecard-label">WM1 Readout (W1 PEC)</div>
+        <div class="scorecard-metric">1.32%</div>
+        <div class="status-badge status-badge--pass" style="margin-bottom: 0.45rem;">✓ 2.3× vs HFSS</div>
+        <p class="scorecard-note">Cryogenic RMSRE across Q1..Q6 on MIT-LL 6-qubit WM1 (0.97%–1.69%), vs. 3.0% published SQuADDS HFSS reference.</p>
+      </article>
+
+      <article class="scorecard-tile">
+        <div class="scorecard-label">Kubo TRK Sum Rule</div>
+        <div class="scorecard-metric">1.000000000000</div>
+        <div class="status-badge status-badge--pass" style="margin-bottom: 0.45rem;">✓ 12 / 12 ±2.7e-10</div>
+        <p class="scorecard-note">Unified 4-way <code>QubitCavity</code> equivalence (Craig–Bampton M1, QEP M2, 3-port Schur BBQ M3) with med |Δα| ≤ 0.0056%.</p>
+      </article>
+
+      <article class="scorecard-tile">
+        <div class="scorecard-label">dfs Thread Determinism</div>
+        <div class="scorecard-metric">0.000e0</div>
+        <div class="status-badge status-badge--pass" style="margin-bottom: 0.45rem;">✓ Bitwise exact</div>
+        <p class="scorecard-note"><code>NYX_THREADS=1</code> vs. <code>8</code> AMG determinism (3.08×–3.67× speedup at 8 threads; <code>ems</code> direct LU noted in limits below).</p>
+      </article>
+    </div>
+  </section>
+
+  <aside class="callout callout--limit" style="margin-bottom: 2.25rem;">
+    <div class="callout-title">
+      <span aria-hidden="true">▲</span>
+      <span>Honest Known Limits on Unmodified HEAD (Documented in SQUADDS Report §1.2)</span>
+    </div>
+    <div class="callout-body">
+      <ul>
+        <li><strong>S1.4 / Ref.0 Narrow-Gap Volumetric Locking:</strong> Ruppert 2D refinement near dense 200–300 nm fillet chords in <code>sheet3d</code> exhausts <code>max_steiner_multiplier</code> (<code>365.6%</code> error on S1.4 volumetric FEM); 3-layer <code>planar_bem</code> bypasses this at <code>4.04%</code> self-capacitance median error in <code>1.03 s</code>.</li>
+        <li><strong><code>ems::cavity</code> Port-Exclusion Box on P1 Narrow Gaps:</strong> Guarding <code>rank1</code> lumped port/JJ sheets prevents Krylov–Schur stalls (163/163 EM ok) but caps local port capacitance accuracy (<code>kappa</code> HT median <code>435.8%</code>).</li>
+        <li><strong>3D <code>ems</code> Parallel <code>faer</code> Direct Factorisation Drift:</strong> While <code>dfs</code> AMG is bitwise identical (<code>0.000e0</code>), 3D <code>ems</code> parallel sparse LU/LDL<sup>T</sup> exhibits <code>3.59e-10</code> to <code>1.15e-7</code> relative drift between <code>NYX_THREADS=1</code> and <code>8</code>.</li>
+        <li><strong><code>WM1 W2</code> BCS Reactance &amp; <code>MUNINN</code> P1 TLS Concentration:</strong> Coarse ~135 µm P1 CPW edges with lossless BCS <code>ibc_tris</code> shift <code>f_r</code> by <code>-9.6%</code>; P1 Nédélec without edge singularity grading under-concentrates <code>p_interface</code> while preserving exact experimental T<sub>1</sub> ordering (<code>Ancilla 12.82 ms &gt; Qubit 11.22 ms &gt; Env 8.19 ms</code>).</li>
+      </ul>
+    </div>
+  </aside>
+
+  {% if section.content %}
+    <div class="prose" style="margin-bottom: 2rem;">
+      {{ section.content | safe }}
+    </div>
+  {% endif %}
+
+  {% set raw = load_data(path="data/benchmarks.json", required=false) %}
+  {% set targets = [] %}
+  {% if raw %}
+    {% if raw.targets is defined %}
+      {% set targets = raw.targets %}
+    {% elif raw.benchmarks is defined %}
+      {% set targets = raw.benchmarks %}
+    {% elif raw.items is defined %}
+      {% set targets = raw.items %}
+    {% else %}
+      {% set targets = raw %}
+    {% endif %}
+  {% endif %}
+
+  <section aria-labelledby="validation-targets-heading">
+    <div class="section-head">
+      <div>
+        <div class="kicker"><span class="kicker-rule" aria-hidden="true"></span><span>BENCHMARK REGISTRY · benchmarks/validation/*.json</span></div>
+        <h2 id="validation-targets-heading">Validation Targets</h2>
+      </div>
+    </div>
+
+    <div data-filter-root>
+      <div class="filter-toolbar">
+        <div class="filter-pills" role="group" aria-label="Filter validation targets by suite">
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="suite" data-filter-value="all" aria-pressed="true">All Suites</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="suite" data-filter-value="photonics" aria-pressed="false">Photonics</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="suite" data-filter-value="cqed" aria-pressed="false">cQED</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="suite" data-filter-value="solid" aria-pressed="false">Mechanics &amp; Piezo</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="suite" data-filter-value="thermal" aria-pressed="false">Thermal &amp; NAFEMS</button>
+        </div>
+
+        <div class="search-wrap">
+          <label class="sr-only" for="bench-search">Search validation targets</label>
+          <input id="bench-search" class="search-input" type="search" data-filter-search placeholder="Filter target ID, quantity, reference..." autocomplete="off">
+          <span class="filter-count tabular" data-filter-count>{{ targets | length }} / {{ targets | length }}</span>
+        </div>
+      </div>
+
+      {% if targets | length > 0 %}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Target ID</th>
+                <th>Suite</th>
+                <th>Quantity</th>
+                <th>Reference</th>
+                <th>Tol / u<sub>val</sub></th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in targets %}
+                {% set suite_raw = t.suite | default(value=t.benchmark_suite | default(value="")) | lower %}
+                {% set suite_tokens = suite_raw %}
+                {% if "photonic" in suite_raw %}{% set suite_tokens = suite_tokens ~ " photonics" %}{% endif %}
+                {% if "cqed" in suite_raw or "squadds" in suite_raw or "park" in suite_raw or "scqubits" in suite_raw %}{% set suite_tokens = suite_tokens ~ " cqed" %}{% endif %}
+                {% if "solid" in suite_raw or "mems" in suite_raw or "piezo" in suite_raw %}{% set suite_tokens = suite_tokens ~ " solid" %}{% endif %}
+                {% if "thermal" in suite_raw or "nafems" in suite_raw %}{% set suite_tokens = suite_tokens ~ " thermal" %}{% endif %}
+                {% set search_blob = (t.id | default(value="") ~ " " ~ suite_raw ~ " " ~ t.quantity | default(value="") ~ " " ~ t.description | default(value="")) | lower %}
+                <tr data-filter-item data-suite="{{ suite_tokens }}" data-search="{{ search_blob }}">
+                  <td class="tabular"><code>{{ t.id | default(value="—") }}</code></td>
+                  <td><span class="chip">{{ t.suite | default(value=t.benchmark_suite | default(value="suite")) }}</span></td>
+                  <td><code>{{ t.quantity | default(value="—") }}</code></td>
+                  <td class="tabular">
+                    {% if t.reference_value is defined %}{{ t.reference_value }}{% if t.unit %} {{ t.unit }}{% endif %}{% else %}—{% endif %}
+                  </td>
+                  <td class="tabular">
+                    {% if t.tol_rel is defined and t.tol_rel %}
+                      tol<sub>rel</sub>={{ t.tol_rel }}
+                    {% elif t.tol_abs is defined and t.tol_abs %}
+                      tol<sub>abs</sub>={{ t.tol_abs }}
+                    {% else %}
+                      —
+                    {% endif %}
+                    {% if t.coverage_k is defined %} (k={{ t.coverage_k }}){% endif %}
+                  </td>
+                  <td>{{ t.description | default(value="") }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="empty-state" data-filter-empty hidden>No validation targets match your filter.</div>
+      {% else %}
+        <div class="empty-state">
+          Validation target registry <code>website/data/benchmarks.json</code> has not been generated yet. Run the site-prep extractor to populate benchmark targets.
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock content %}

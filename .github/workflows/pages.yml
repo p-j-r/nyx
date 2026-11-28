@@ -12,6 +12,17 @@ on:
       - "examples/**"
       - "benchmarks/validation/**"
       - ".github/workflows/pages.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "website/**"
+      - "docs/ux/tokens.json"
+      - "docs/api/**"
+      - "materials/**"
+      - "examples/**"
+      - "benchmarks/validation/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -61,12 +72,14 @@ jobs:
         run: zola --root website build
 
       - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: website/public
 
   deploy:
     name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -1,0 +1,48 @@
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand-lockup" href="{{ get_url(path='/') }}">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="1.5" y="1.5" width="13" height="13" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M4 12V4L12 12V4" stroke="var(--color-accent)" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter"/>
+        </svg>
+      </span>
+      <span class="brand-wordmark">{{ config.title }}</span>
+      <span class="brand-stamp">{{ config.extra.version | default(value="v0.1.0") }} · RUST {{ config.extra.rust_version | default(value="1.99.1") }}</span>
+    </a>
+
+    {% set path_now = current_path | default(value="/") %}
+    <nav class="header-nav" id="primary-nav" data-nav-menu aria-label="Primary navigation">
+      {% for item in config.extra.nav %}
+        {% set is_active = false %}
+        {% if item.url == "/" %}
+          {% if path_now == "/" %}{% set is_active = true %}{% endif %}
+        {% elif path_now is starting_with(pat=item.url) %}
+          {% set is_active = true %}
+        {% endif %}
+        <a class="nav-link{% if is_active %} is-active{% endif %}"
+           href="{{ get_url(path=item.url) }}"
+           {% if is_active %}aria-current="page"{% endif %}>{{ item.name }}</a>
+      {% endfor %}
+    </nav>
+
+    <div class="header-actions">
+      <button type="button"
+              class="theme-toggle"
+              data-theme-toggle
+              aria-pressed="false"
+              title="Toggle light or dark monograph theme">
+        <span aria-hidden="true">◐</span>
+        <span data-theme-label>Light</span>
+      </button>
+      <button type="button"
+              class="nav-toggle"
+              data-nav-toggle
+              aria-controls="primary-nav"
+              aria-expanded="false"
+              aria-label="Toggle navigation menu">
+        Menu
+      </button>
+    </div>
+  </div>
+</header>

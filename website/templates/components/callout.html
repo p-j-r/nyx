@@ -1,0 +1,12 @@
+{% component callout(title: string = "", kind: string = "note") %}
+{% set kind_norm = kind | default(value="note") %}
+<aside class="callout callout--{{ kind_norm }}">
+  <div class="callout-title">
+    <span aria-hidden="true">{% if kind_norm == "theorem" %}■{% elif kind_norm == "limit" %}▲{% else %}§{% endif %}</span>
+    <span>{% if title %}{{ title }}{% else %}{{ kind_norm | upper }}{% endif %}</span>
+  </div>
+  <div class="callout-body">
+    {{ body | trim | markdown | safe }}
+  </div>
+</aside>
+{% endcomponent callout %}

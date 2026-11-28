@@ -1,0 +1,38 @@
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-heading">nyx · Pure-Rust Multiphysics Workbench</div>
+        <p style="font-size: 0.875rem; color: var(--color-muted); max-width: 44ch;">
+          Fifteen crates in Rust {{ config.extra.rust_version | default(value="1.99.1") }}. One engine driving the desktop window, <code>*.nys</code> scripts, and the stdio MCP server with identical JSON Schemas and pure-Rust HDF5 output.
+        </p>
+      </div>
+
+      <div>
+        <div class="footer-heading">Sections</div>
+        <ul class="footer-list">
+          <li><a href="{{ get_url(path='/specimens/') }}">Specimens &amp; Examples</a></li>
+          <li><a href="{{ get_url(path='/benchmarks/') }}">V&amp;V &amp; SQuADDS Benchmarks</a></li>
+          <li><a href="{{ get_url(path='/materials/') }}">Material Library (41 public TOML)</a></li>
+          <li><a href="{{ get_url(path='/notes/') }}">Engineering Notes</a></li>
+          <li><a href="{{ get_url(path='/api/') }}">Command Catalogue ({{ config.extra.command_count | default(value=114) }})</a></li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="footer-heading">Provenance &amp; Licence</div>
+        <ul class="footer-list">
+          <li><a href="{{ config.extra.repo_url | default(value='https://github.com/p-j-r/nyx') }}" rel="noopener">GitHub Repository</a></li>
+          <li><a href="{{ get_url(path='/install/') }}">Install &amp; AI Host Setup</a></li>
+          <li><a href="{{ get_url(path='/atom.xml') }}">Atom Feed</a></li>
+          <li style="color: var(--color-muted); font-size: 0.8rem;">{{ config.extra.licence | default(value="AGPL-3.0-only OR LicenseRef-nyx-Commercial") }}</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <span>Copyright &copy; 2026 p-j-r · SI units (metres) · Wafer frame (x, y propagation, z normal)</span>
+      <span>API Catalog: <code>{{ config.extra.catalog_hash | default(value="b3:60697136d596a5b047f70971b85b0f54") }}</code></span>
+    </div>
+  </div>
+</footer>
