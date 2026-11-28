@@ -1,0 +1,296 @@
+{
+  "count": 18,
+  "categories": [
+    "Diffusion & Thermal",
+    "Electromagnetics",
+    "Solid Mechanics"
+  ],
+  "examples": [
+    {
+      "id": "01_capacitor",
+      "slug": "01-capacitor",
+      "title": "Parallel-plate capacitor with two dielectrics (electrostatics, 2D)",
+      "category": "Diffusion & Thermal",
+      "physics": "dfs",
+      "study": "electrostatic",
+      "description": "2D dfs `electrostatic` study, P2 elements across regions [left, right] with 2 boundary conditions.",
+      "file": "examples/01_capacitor.nyx.json",
+      "command": "nyx --batch examples/01_capacitor.nyx.json",
+      "domains": [
+        "left",
+        "right"
+      ],
+      "plate": null
+    },
+    {
+      "id": "02_cantilever",
+      "slug": "02-cantilever",
+      "title": "Cantilever beam (solid mechanics, static, 2D plane stress)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "static",
+      "description": "2D sms `static` study, P2 elements across regions [plate] with 2 boundary conditions.",
+      "file": "examples/02_cantilever.nyx.json",
+      "command": "nyx --batch examples/02_cantilever.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "03_heated_plate",
+      "slug": "03-heated-plate",
+      "title": "Heated plate with convective cooling (heat transfer, 2D, transient)",
+      "category": "Diffusion & Thermal",
+      "physics": "dfs",
+      "study": "heat_transient",
+      "description": "2D dfs `heat_transient` study, P2 elements across regions [plate] with 2 boundary conditions.",
+      "file": "examples/03_heated_plate.nyx.json",
+      "command": "nyx --batch examples/03_heated_plate.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "04_thermal_bar",
+      "slug": "04-thermal-bar",
+      "title": "Thermal expansion of a bar (heat + solid, 2D)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "static",
+      "description": "2D sms `static` study (coupled: dfs + sms), P2 elements across regions [plate] with 1 boundary condition.",
+      "file": "examples/04_thermal_bar.nyx.json",
+      "command": "nyx --batch examples/04_thermal_bar.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "05_block_cantilever",
+      "slug": "05-block-cantilever",
+      "title": "Block cantilever (solid mechanics, 3D, a square section swept along y)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "static",
+      "description": "2D sms `static` study, P2 elements across regions [plate] with 2 boundary conditions.",
+      "file": "examples/05_block_cantilever.nyx.json",
+      "command": "nyx --batch examples/05_block_cantilever.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "06_wr90_waveguide",
+      "slug": "06-wr90-waveguide",
+      "title": "WR-90 rectangular waveguide modes (EM waves, 2D cross-section)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "modes",
+      "description": "2D ems `modes` study, P2 elements across regions [plate].",
+      "file": "examples/06_wr90_waveguide.nyx.json",
+      "command": "nyx --batch examples/06_wr90_waveguide.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "07_loaded_waveguide",
+      "slug": "07-loaded-waveguide",
+      "title": "Dielectric-loaded waveguide (EM waves, 2D cross-section)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "modes",
+      "description": "2D ems `modes` study, P2 elements across regions [air, dielectric].",
+      "file": "examples/07_loaded_waveguide.nyx.json",
+      "command": "nyx --batch examples/07_loaded_waveguide.nyx.json",
+      "domains": [
+        "air",
+        "dielectric"
+      ],
+      "plate": null
+    },
+    {
+      "id": "09_pml_slab",
+      "slug": "09-pml-slab",
+      "title": "Dielectric slab guide with PML ends (EM waves, complex modes)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "modes",
+      "description": "2D ems `modes` study, P2 elements across regions [air*, slab] with 2 boundary conditions.",
+      "file": "examples/09_pml_slab.nyx.json",
+      "command": "nyx --batch examples/09_pml_slab.nyx.json",
+      "domains": [
+        "air*",
+        "slab"
+      ],
+      "plate": null
+    },
+    {
+      "id": "10_plate_with_hole",
+      "slug": "10-plate-with-hole",
+      "title": "Plate with a hole (solid mechanics, stress concentration)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "static",
+      "description": "2D sms `static` study, P2 elements across regions [plate] with 3 boundary conditions.",
+      "file": "examples/10_plate_with_hole.nyx.json",
+      "command": "nyx --batch examples/10_plate_with_hole.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "11_anchor_loss",
+      "slug": "11-anchor-loss",
+      "title": "Beam on a PML substrate: anchor loss (solid eigenfrequencies, complex frequency and Q)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "eigenfrequency",
+      "description": "2D sms `eigenfrequency` study, P2 elements across regions [beam, substrate*] with 5 boundary conditions.",
+      "file": "examples/11_anchor_loss.nyx.json",
+      "command": "nyx --batch examples/11_anchor_loss.nyx.json",
+      "domains": [
+        "beam",
+        "substrate*"
+      ],
+      "plate": "figures/anchor_loss_modes.png"
+    },
+    {
+      "id": "12_drilled_plate",
+      "slug": "12-drilled-plate",
+      "title": "Plate with a drilled hole in 3D, the section swept along y (solid mechanics, stress concentration)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "static",
+      "description": "2D sms `static` study, P2 elements across regions [plate] with 2 boundary conditions.",
+      "file": "examples/12_drilled_plate.nyx.json",
+      "command": "nyx --batch examples/12_drilled_plate.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "14_box_cavity",
+      "slug": "14-box-cavity",
+      "title": "Rectangular cavity: 3D electromagnetic eigenmodes (40 x 30 x 20 mm, perfect conductor walls)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "cavity",
+      "description": "2D ems `cavity` study, P2 elements across regions [plate].",
+      "file": "examples/14_box_cavity.nyx.json",
+      "command": "nyx --batch examples/14_box_cavity.nyx.json",
+      "domains": [
+        "plate"
+      ],
+      "plate": null
+    },
+    {
+      "id": "15_soi_wire",
+      "slug": "15-soi-wire",
+      "title": "Silicon wire on 300 nm SOI at 1550 nm: TE0 and TM0 modes with Stokes parameters and Poincare sphere (EM waves, 2D cross-section)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "modes",
+      "description": "2D ems `modes` study, P2 elements across regions [BOX, BOX_near, Si, clad, clad_near].",
+      "file": "examples/15_soi_wire.nyx.json",
+      "command": "nyx --batch examples/15_soi_wire.nyx.json",
+      "domains": [
+        "BOX",
+        "BOX_near",
+        "Si",
+        "clad",
+        "clad_near"
+      ],
+      "plate": "figures/soi_wire_modes.png"
+    },
+    {
+      "id": "16_soi_hybrid_wire",
+      "slug": "16-soi-hybrid-wire",
+      "title": "300 nm SOI wire with a sloped left wall: hybrid modes tilted on the Poincare sphere (EM waves, 2D cross-section)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "modes",
+      "description": "2D ems `modes` study, P2 elements across regions [BOX, BOX_near, Si, clad, clad_near].",
+      "file": "examples/16_soi_hybrid_wire.nyx.json",
+      "command": "nyx --batch examples/16_soi_hybrid_wire.nyx.json",
+      "domains": [
+        "BOX",
+        "BOX_near",
+        "Si",
+        "clad",
+        "clad_near"
+      ],
+      "plate": null
+    },
+    {
+      "id": "17_disk_anchor_loss",
+      "slug": "17-disk-anchor-loss",
+      "title": "Disk on a post on a substrate: anchor loss of a body of revolution (axisymmetric solid eigenfrequencies, complex frequency and Q)",
+      "category": "Solid Mechanics",
+      "physics": "sms",
+      "study": "axisymmetric_eigenfrequency",
+      "description": "2D sms `axisymmetric_eigenfrequency` study, P2 elements across regions [disk, post, substrate*] with 3 boundary conditions.",
+      "file": "examples/17_disk_anchor_loss.nyx.json",
+      "command": "nyx --batch examples/17_disk_anchor_loss.nyx.json",
+      "domains": [
+        "disk",
+        "post",
+        "substrate*"
+      ],
+      "plate": null
+    },
+    {
+      "id": "18_wgm_cylindrical_pml",
+      "slug": "18-wgm-cylindrical-pml",
+      "title": "Dielectric cylinder with outward cylindrical PML annulus (EM waves, 2D cylindrical Quad shells)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "modes",
+      "description": "2D ems `modes` study, P2 elements across regions [cladding*, core] with 1 boundary condition.",
+      "file": "examples/18_wgm_cylindrical_pml.nyx.json",
+      "command": "nyx --batch examples/18_wgm_cylindrical_pml.nyx.json",
+      "domains": [
+        "cladding*",
+        "core"
+      ],
+      "plate": "figures/wgm_cyl_pml.png"
+    },
+    {
+      "id": "19_sphere_axisym_pml",
+      "slug": "19-sphere-axisym-pml",
+      "title": "Axisymmetric dielectric sphere with outward spherical PML shell (EM waves, axisymmetric modes)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "axisymmetric_modes",
+      "description": "2D ems `axisymmetric_modes` study, P2 elements across regions [air*, sphere] with 1 boundary condition.",
+      "file": "examples/19_sphere_axisym_pml.nyx.json",
+      "command": "nyx --batch examples/19_sphere_axisym_pml.nyx.json",
+      "domains": [
+        "air*",
+        "sphere"
+      ],
+      "plate": null
+    },
+    {
+      "id": "20_cavity_3d_spherical_pml",
+      "slug": "20-cavity-3d-spherical-pml",
+      "title": "3D open spherical resonator with outward spherical PML shell (EM waves, 3D cavity eigenfrequencies)",
+      "category": "Electromagnetics",
+      "physics": "ems",
+      "study": "cavity",
+      "description": "3D ems `cavity` study, P1 elements across regions [air*] with 1 boundary condition.",
+      "file": "examples/20_cavity_3d_spherical_pml.nyx.json",
+      "command": "nyx --batch examples/20_cavity_3d_spherical_pml.nyx.json",
+      "domains": [
+        "air*"
+      ],
+      "plate": "figures/cavity_3d_cutaway.png"
+    }
+  ]
+}
