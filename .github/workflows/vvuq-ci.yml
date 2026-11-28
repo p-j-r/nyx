@@ -44,24 +44,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install pinned Rust toolchain (1.99.1)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-          components: clippy, rustfmt
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Python h5py & numpy for HDF5 interop tests
-        run: python -m pip install --quiet h5py numpy
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Detect crates/app changes on PRs
+      - name: Detect Rust and crates/app changes on PRs
         id: changes
         if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@v3
@@ -71,12 +54,47 @@ jobs:
               - 'crates/app/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
+            rust:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'materials/**'
+              - 'examples/**'
+              - 'benchmarks/**'
+              - 'docs/api/**'
+              - 'docs/architecture/contracts/**'
+              - 'docs/ux/tokens.json'
+              - 'tools/vvuq_telemetry.py'
+              - '.github/workflows/vvuq-ci.yml'
+
+      - name: Install pinned Rust toolchain (1.99.1)
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+
+      - name: Set up Python 3.12
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python h5py & numpy for HDF5 interop tests
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        run: python -m pip install --quiet h5py numpy
+
+      - name: Cache Cargo artifacts
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
+        uses: Swatinem/rust-cache@v2
 
       - name: ADR governance check (Linux)
         if: runner.os == 'Linux'
         run: bash docs/architecture/check_code_to_adr.sh
 
       - name: ADR 65 formatting check (7 crates)
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         run: cargo fmt --check -p geom -p nyx-physics -p nyx-dfs -p nyx-sms -p nyx-ems -p nyx-analysis -p nyx-engine
 
       - name: Clippy (--release, warnings denied)
@@ -84,16 +102,18 @@ jobs:
         run: cargo clippy --release --workspace --all-targets --no-deps -- -D warnings
 
       - name: Clippy (--release, path-filtered --exclude nyx on PR)
-        if: github.event_name == 'pull_request' && steps.changes.outputs.app != 'true'
+        if: github.event_name == 'pull_request' && steps.changes.outputs.rust == 'true' && steps.changes.outputs.app != 'true'
         run: cargo clippy --release --workspace --exclude nyx --all-targets --no-deps -- -D warnings
 
       - name: Build nyx-script worker, nyx-worker & nyx-connect fake_mcp binaries
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         run: |
           cargo build --release -p nyx-script
           cargo build --release -p nyx-engine --bin nyx-worker
           cargo build --release -p nyx-connect --example fake_mcp
 
       - name: Layering, contracts, API docs, path_guard, format, h5 & vvuq_report
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         shell: bash
         run: |
           cargo test --release -p nyx-engine --test layering --test contracts --test geomdesc --test api_docs --test path_guard --test format --test vvuq_phase5_report --test h5
@@ -102,6 +122,7 @@ jobs:
           cargo test --release -p nyx-script --test contract
 
       - name: Soundness, SSRF, finite_guard, telemetry dry-run & deterministic proptest/bolero regressions
+        if: github.event_name != 'pull_request' || steps.changes.outputs.rust == 'true'
         shell: bash
         run: |
           python3 tools/vvuq_telemetry.py --dry-run
