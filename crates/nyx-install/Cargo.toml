@@ -31,7 +31,7 @@ serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 anyhow = { workspace = true }
 blake3 = "1"
 flate2 = { workspace = true }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 eframe = { version = "0.37", optional = true, default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
 rfd = { version = "0.17", optional = true }

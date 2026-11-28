@@ -42,6 +42,7 @@ debug = false
 hdf5-pure = { version = "=0.48.0", default-features = true }
 # Unify flate2 across the entire workspace onto 100% pure-Rust SIMD zlib-rs (v0.6.8)
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 anyhow = "1"
 rayon = "1"
 serde = { version = "1", features = ["derive"] }

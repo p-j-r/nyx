@@ -37,6 +37,7 @@ const KNOWN_SPDX_IDS: &[&str] = &[
     "NCSA",
     "OFL-1.1",
     "OpenSSL",
+    "Python-2.0.1",
     "Ubuntu-font-1.0",
     "Unicode-3.0",
     "Unicode-DFS-2016",
