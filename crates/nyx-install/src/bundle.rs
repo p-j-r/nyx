@@ -921,12 +921,16 @@ fn inspect_zip(path: &Path) -> Result<OpenedPayload> {
         if f.is_dir() {
             continue;
         }
+        let name = f.name()?.into_owned();
         if f.is_symlink() {
-            bail!("zip archive contains unsupported symlink '{}'", f.name());
+            bail!("zip archive contains unsupported symlink '{name}'");
         }
-        let (base, rel_path, role, mode) = classify_zip_or_dir_rel(f.name(), os)?;
+        if f.encrypted() {
+            bail!("zip archive contains encrypted entry '{name}'");
+        }
+        let (base, rel_path, role, mode) = classify_zip_or_dir_rel(&name, os)?;
         if f.size() > MAX_SINGLE_FILE_BYTES {
-            bail!("zip entry '{}' exceeds size limit", f.name());
+            bail!("zip entry '{name}' exceeds size limit");
         }
         total = total.checked_add(f.size()).context("zip total overflow")?;
         if total > MAX_TOTAL_PAYLOAD_BYTES {
@@ -970,10 +974,14 @@ fn extract_zip(
         if f.is_dir() {
             continue;
         }
+        let name = f.name()?.into_owned();
         if f.is_symlink() {
-            bail!("zip contains symlink entry '{}'", f.name());
+            bail!("zip contains symlink entry '{name}'");
         }
-        let (base, rel_path, role, mode) = classify_zip_or_dir_rel(f.name(), os)?;
+        if f.encrypted() {
+            bail!("zip contains encrypted entry '{name}'");
+        }
+        let (base, rel_path, role, mode) = classify_zip_or_dir_rel(&name, os)?;
         on_entry(i + 1, count, &rel_path);
         let sub = match base {
             FileBase::Bin => stage_dir.join("bin"),

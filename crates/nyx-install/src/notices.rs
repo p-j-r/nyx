@@ -37,6 +37,7 @@ const KNOWN_SPDX_IDS: &[&str] = &[
     "NCSA",
     "OFL-1.1",
     "OpenSSL",
+    "Python-2.0.1",
     "Ubuntu-font-1.0",
     "Unicode-3.0",
     "Unicode-DFS-2016",
@@ -97,26 +98,19 @@ pub fn collect_third_party_licenses(
 ) -> Result<Vec<CrateLicense>> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let manifest_path = repo_root.join("Cargo.toml");
-    let run_metadata = |offline: bool| -> Result<std::process::Output> {
-        let mut cmd = Command::new(&cargo);
-        cmd.arg("metadata").arg("--format-version").arg("1").arg("--locked");
-        if offline {
-            cmd.arg("--offline");
-        }
-        cmd.arg("--manifest-path").arg(&manifest_path);
-        if let Some(triple) = target_triple.filter(|s| !s.trim().is_empty()) {
-            cmd.arg("--filter-platform").arg(triple);
-        }
-        cmd.output()
-            .with_context(|| format!("running cargo metadata in {}", repo_root.display()))
-    };
-    let mut out = run_metadata(true)?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if stderr.contains("--offline") || stderr.contains("HTTP request") {
-            out = run_metadata(false)?;
-        }
+    let mut cmd = Command::new(&cargo);
+    cmd.arg("metadata")
+        .arg("--format-version")
+        .arg("1")
+        .arg("--offline")
+        .arg("--manifest-path")
+        .arg(&manifest_path);
+    if let Some(triple) = target_triple.filter(|s| !s.trim().is_empty()) {
+        cmd.arg("--filter-platform").arg(triple);
     }
+    let out = cmd
+        .output()
+        .with_context(|| format!("running cargo metadata in {}", repo_root.display()))?;
     if !out.status.success() {
         bail!(
             "cargo metadata failed: {}",
