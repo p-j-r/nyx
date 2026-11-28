@@ -1,0 +1,14 @@
+[package]
+name = "site-prep"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only OR LicenseRef-nyx-Commercial"
+description = "Single-source-of-truth data extraction and confidentiality gate for the nyx project website"
+
+# Standalone package: intentionally excluded from the root workspace Cargo.toml.
+[workspace]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "0.8.2"

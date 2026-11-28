@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>{{ section.extra.kicker | default(value="ENGINE COMMAND CATALOGUE · docs/api") }}</span>
+    </div>
+    <h1>{{ section.title }}</h1>
+    {% if section.description %}
+      <p class="lead">{{ section.description }}</p>
+    {% endif %}
+    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem;">
+      <span class="chip chip--accent">{{ config.extra.command_count | default(value=114) }} commands</span>
+      <span class="chip">Catalog hash: <code>{{ config.extra.catalog_hash | default(value="b3:60697136d596a5b047f70971b85b0f54") }}</code></span>
+      <span class="chip">CLI parity: <code>nyx api list</code> / <code>nyx api show &lt;cmd&gt;</code></span>
+    </div>
+  </header>
+
+  {% if section.content %}
+    <div class="prose" style="margin-bottom: 1.75rem;">
+      {{ section.content | safe }}
+    </div>
+  {% endif %}
+
+  {% set raw = load_data(path="data/api.json", required=false) %}
+  {% set cmds = [] %}
+  {% if raw %}
+    {% if raw.commands is defined %}
+      {% set cmds = raw.commands %}
+    {% elif raw.items is defined %}
+      {% set cmds = raw.items %}
+    {% else %}
+      {% set cmds = raw %}
+    {% endif %}
+  {% endif %}
+
+  <div data-filter-root>
+    <div class="filter-toolbar" style="flex-direction: column; align-items: stretch;">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem;">
+        <div class="filter-pills" role="group" aria-label="Filter commands by category">
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="all" aria-pressed="true">All Categories</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="geometry" aria-pressed="false">Geometry</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="physics" aria-pressed="false">Physics &amp; Mesh</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="solve" aria-pressed="false">Solve &amp; Jobs</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="analysis" aria-pressed="false">Analysis &amp; Fields</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="materials" aria-pressed="false">Materials</button>
+          <button type="button" class="filter-pill" data-filter-btn data-filter-group="category" data-filter-value="project" aria-pressed="false">Project &amp; VVUQ</button>
+        </div>
+
+        <div class="search-wrap">
+          <label class="sr-only" for="api-search">Search commands</label>
+          <input id="api-search" class="search-input" type="search" data-filter-search placeholder="Search 114 commands (press /)..." autocomplete="off">
+          <span class="filter-count tabular" data-filter-count>{{ cmds | length }} / {{ cmds | length }}</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; border-top: 1px solid var(--color-separator); padding-top: 0.65rem;">
+        <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-muted); margin-right: 0.35rem;">ACCESS:</span>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="access" data-filter-value="all" aria-pressed="true">All</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="access" data-filter-value="read" aria-pressed="false">read</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="access" data-filter-value="edit" aria-pressed="false">edit</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="access" data-filter-value="expensive" aria-pressed="false">expensive</button>
+      </div>
+    </div>
+
+    {% if cmds | length > 0 %}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Access</th>
+              <th>Category</th>
+              <th>Summary &amp; Schema</th>
+              <th>Inspect</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in cmds %}
+              {% set cname = c.name | default(value=c.command | default(value="cmd")) %}
+              {% set access = c.access | default(value="read") | lower %}
+              {% set cat_raw = c.category | default(value="") | lower %}
+              {% set cat_tokens = cat_raw %}
+              {% if "geometry" in cat_raw %}{% set cat_tokens = cat_tokens ~ " geometry" %}{% endif %}
+              {% if "physics" in cat_raw or "material" in cat_raw %}{% set cat_tokens = cat_tokens ~ " physics materials" %}{% endif %}
+              {% if "solv" in cat_raw or "jobs" in cat_raw %}{% set cat_tokens = cat_tokens ~ " solve" %}{% endif %}
+              {% if "analy" in cat_raw %}{% set cat_tokens = cat_tokens ~ " analysis" %}{% endif %}
+              {% if "project" in cat_raw or "discover" in cat_raw %}{% set cat_tokens = cat_tokens ~ " project" %}{% endif %}
+              {% set summary = c.summary | default(value=c.description | default(value="")) %}
+              {% set search_blob = (cname ~ " " ~ access ~ " " ~ cat_raw ~ " " ~ summary) | lower %}
+              <tr data-filter-item data-category="{{ cat_tokens }}" data-access="{{ access }}" data-search="{{ search_blob }}">
+                <td><code>{{ cname }}</code></td>
+                <td>
+                  {% if access == "expensive" %}
+                    <span class="chip" style="background: var(--color-activity-tint); color: var(--color-activity-text);">{{ access }}</span>
+                  {% elif access == "edit" %}
+                    <span class="chip chip--accent">{{ access }}</span>
+                  {% else %}
+                    <span class="chip">{{ access }}</span>
+                  {% endif %}
+                </td>
+                <td><span class="chip">{{ cat_raw }}</span></td>
+                <td>
+                  <div>{{ summary }}</div>
+                  <div id="api-detail-{{ loop.index }}" class="detail-panel" hidden>
+                    {% if c.signature %}
+                      <div style="margin-bottom: 0.5rem;"><strong>Signature:</strong> <code>{{ c.signature }}</code></div>
+                    {% endif %}
+                    {% set arg_list = c.arguments | default(value=c.args | default(value=[])) %}
+                    {% if arg_list and arg_list | length > 0 %}
+                      <div style="margin-bottom: 0.5rem;">
+                        <strong>Arguments:</strong>
+                        <ul style="margin: 0.3rem 0 0; padding-left: 1.2rem;">
+                          {% for arg in arg_list %}
+                            <li>
+                              <code>{{ arg.name }}</code>
+                              {% if arg.type %} (<code>{{ arg.type }}</code>){% endif %}
+                              {% if arg.required %} <strong>required</strong>{% endif %}
+                              {% if arg.description %} — {{ arg.description }}{% endif %}
+                            </li>
+                          {% endfor %}
+                        </ul>
+                      </div>
+                    {% endif %}
+                    {% if c.example %}
+                      <div style="margin-top: 0.45rem;">
+                        <strong>Example JSON:</strong>
+                        <pre style="margin: 0.35rem 0 0;"><code>{{ c.example }}</code></pre>
+                      </div>
+                    {% endif %}
+                    <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                      <code>nyx api show {{ cname }}</code>
+                      <button type="button" class="btn-copy btn-copy--surface" data-copy-btn data-copy-text="nyx api show {{ cname }}">Copy CLI</button>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <button type="button"
+                          class="btn btn-mono"
+                          data-expand-btn
+                          aria-controls="api-detail-{{ loop.index }}"
+                          aria-expanded="false">Details</button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="empty-state" data-filter-empty hidden>No commands match your category, access level, or search query.</div>
+    {% else %}
+      <div class="empty-state">
+        Command catalogue <code>website/data/api.json</code> has not been generated yet. Run the site-prep extractor to populate all {{ config.extra.command_count | default(value=114) }} commands.
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock content %}

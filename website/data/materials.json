@@ -1,0 +1,1895 @@
+{
+  "count": 41,
+  "kinds": [
+    "amorphous",
+    "crystalline",
+    "fluid",
+    "metal",
+    "polycrystalline",
+    "semiconductor",
+    "superconductor"
+  ],
+  "materials": [
+    {
+      "id": "air",
+      "name": "air",
+      "kind": "fluid",
+      "point_group": "isotropic",
+      "reference_temperature": "300 K",
+      "density": "1.2 kg/m^3",
+      "description": "Dry air idealized optically as vacuum (n = 1.0, eps_r = 1.0, rho = 1.2 kg/m^3 at 300 K) — lossless background cladding baseline.",
+      "capabilities": [
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below. Density 1.2 kg/m^3 is the usual room-temperature figure: APPROXIMATE, not checked against a reference in this library"
+        },
+        {
+          "cite": "Defined: air is treated as vacuum (relative permittivity and permeability 1); the true permittivity of air at 1 atm is 1.0006",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "Defined: n = 1 (vacuum). Real air at 1 atm is about 1.0003; use a constant model with that value if it matters",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE and UNVERIFIED handbook-type values for dry air near 300 K (conductivity 0.026 W/(m K), specific heat 1005 J/(kg K)); not compared with a source in this library",
+          "verified": "2026-11-04"
+        }
+      ]
+    },
+    {
+      "id": "aluminium",
+      "name": "aluminium",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "2700 kg/m^3",
+      "description": "Evaporated/MEMS aluminium at 293 K (Rakic 1998 Lorentz-Drude 0.06-248 um; E=70 GPa, k=237 W/(m*K)) — room-temperature normal-metal/electrode baseline vs mK superconducting aluminium_sc_emft.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical",
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE bulk/MEMS aluminium mechanics/thermal/electrical at 293 K + verified Rakic et al. 1998 [optical] fit (0.062-248 um)",
+          "doi": "10.1364/AO.37.005271"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline aluminium / MEMSCAP PiezoMUMPs PADMETAL film values at 293 K (E ~ 68-70 GPa, nu = 0.35)"
+        },
+        {
+          "cite": "APPROXIMATE pure bulk aluminium DC conductivity at 293 K (sheet resistance drops >10x for evaporated thin films below 4 K)"
+        },
+        {
+          "cite": "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them",
+          "doi": "10.1364/AO.37.005271",
+          "url": "https://refractiveindex.info/?shelf=main&book=Al&page=Rakic-LD",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "M. Tinkham, Introduction to Superconductivity, 2nd ed. (McGraw-Hill, 1996) and C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005): Al T_c = 1.20 K, Delta(0) = 180 ueV, London depth lambda_L(0) = 16 nm, BCS coherence length xi_0 = 1600 nm; APPROXIMATE thin-film cryogenic normal conductivity sigma_n = 3.8e7 S/m",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE pure bulk aluminium thermophysical values at 300 K"
+        }
+      ]
+    },
+    {
+      "id": "aluminium_sc_emft",
+      "name": "aluminium_sc_emft",
+      "kind": "superconductor",
+      "point_group": "isotropic",
+      "reference_temperature": "0.01 K",
+      "density": "2700 kg/m^3",
+      "description": "Evaporated 150 nm Al superconducting film on FZ-Si at <1 K (standard_die.materials.AL: Tc=1.20 K, lambda_L=70 nm, Lk=0.20 pH/sq, E=77.5 GPa) — Josephson junction and mK CPW film vs 293 K aluminium.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical",
+        "superconducting",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE thin-film cryogenic Al compilation from standard_die.materials.AL & McRae et al., Rev. Sci. Instrum. 91, 091101 (2020) + Kamm & Alers 1964 4.2 K Al mechanics",
+          "doi": "10.1063/5.0017378"
+        },
+        {
+          "cite": "APPROXIMATE 4.2 K polycrystalline Al thin-film isotropic stiffness inferred from G. N. Kamm and G. A. Alers, J. Appl. Phys. 35, 327 (1964)",
+          "doi": "10.1063/1.1713309"
+        },
+        {
+          "cite": "APPROXIMATE pure bulk aluminium DC conductivity at 293 K (sheet resistance drops >10x for evaporated thin films below 4 K)"
+        },
+        {
+          "cite": "APPROXIMATE native AlOx amorphous surface oxide TLS loss layer (~2-4 nm); see Martinis et al., Phys. Rev. Lett. 95, 210503 (2005)",
+          "doi": "10.1103/PhysRevLett.95.210503"
+        },
+        {
+          "cite": "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them",
+          "doi": "10.1364/AO.37.005271",
+          "url": "https://refractiveindex.info/?shelf=main&book=Al&page=Rakic-LD",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE evaporated 150 nm Al superconducting film parameters from standard_die.materials.AL & McRae et al., Rev. Sci. Instrum. 91, 091101 (2020)",
+          "doi": "10.1063/5.0017378"
+        },
+        {
+          "cite": "APPROXIMATE thin-film 4 K normal-state aluminium thermal properties (quasiparticle electronic thermal conductivity drops exponentially below Tc = 1.20 K)"
+        }
+      ]
+    },
+    {
+      "id": "aluminum_nitride",
+      "name": "aluminum_nitride",
+      "kind": "crystalline",
+      "point_group": "6mm",
+      "reference_temperature": "293.15 K",
+      "density": "3260 kg/m^3",
+      "description": "Single-crystal wurtzite AlN (Tsubouchi 1985 hexagonal c33=389 GPa + Pastrnak 1966 uniaxial Sellmeier 0.22-5.0 um, no=2.119 at 1.55 um) — bulk/epitaxial piezo-optomechanics benchmark vs sputtered aluminum_nitride_piezomumps and scaln_30.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic",
+        "electro_optic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "K. Tsubouchi and N. Mikoshiba, Zero-temperature-coefficient SAW delay line on AlN epitaxial films, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985): density 3260 kg/m^3",
+          "doi": "10.1109/T-SU.1985.31647",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. Pastrnak and L. Roskovcova, Phys. Stat. Sol. 14, K5-K8 (1966)",
+          "doi": "10.1002/pssb.19660140127",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "K. Tsubouchi and N. Mikoshiba, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985), clamped/RF relative permittivity of wurtzite AlN",
+          "doi": "10.1109/T-SU.1985.31647",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE epitaxial wurtzite AlN microwave dielectric loss tangent near 10 GHz"
+        },
+        {
+          "cite": "K. Tsubouchi and N. Mikoshiba, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985), Table I, hexagonal wurtzite stiffness C^E of epitaxial AlN",
+          "doi": "10.1109/T-SU.1985.31647",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE wurtzite AlN clamped linear electro-optic Pockels coefficients (Graupner et al. 1992)"
+        },
+        {
+          "cite": "J. Pastrnak and L. Roskovcova, Refraction index measurements on AlN single crystals, Phys. Stat. Sol. 14, K5-K8 (1966), refractiveindex.info (main/AlN/Pastrnak-o and Pastrnak-e, CC0)",
+          "doi": "10.1002/pssb.19660140127",
+          "url": "https://refractiveindex.info/?shelf=main&book=AlN&page=Pastrnak-o",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE wurtzite AlN photoelastic tensor (Davydov 2002 / NumBAT AlN)"
+        },
+        {
+          "cite": "K. Tsubouchi and N. Mikoshiba, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985), Table I, piezoelectric stress constants e_iJ of epitaxial wurtzite AlN",
+          "doi": "10.1109/T-SU.1985.31647",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "G. A. Slack et al., The intrinsic thermal conductivity of AlN, J. Phys. Chem. Solids 48, 641-647 (1987); specific heat and expansion (APPROXIMATE thin-film/orientation average)",
+          "doi": "10.1016/0022-3697(87)90153-3"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature wurtzite AlN Akhiezer phonon viscosity tensor"
+        }
+      ]
+    },
+    {
+      "id": "aluminum_nitride_piezomumps",
+      "name": "aluminum_nitride_piezomumps",
+      "kind": "polycrystalline",
+      "point_group": "6mm",
+      "reference_temperature": "293.15 K",
+      "density": "3260 kg/m^3",
+      "description": "Reactive-sputtered c-axis polycrystalline AlN thin film (MEMSCAP PiezoMUMPs E=330 GPa + Beliaev 2021 n=2.018 at 1.55 um) — softer foundry MEMS/waveguide film vs single-crystal aluminum_nitride and alloyed scaln_30.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE sputtered AlN film mechanics/thermal/electrical from A. Cowen et al., PiezoMUMPs Design Handbook Rev. 1.3 (MEMSCAP Inc.)",
+          "url": "https://www.memscap.com/products/mumps/piezomumps"
+        },
+        {
+          "cite": "L. Yu. Beliaev, E. Shkondin, A. V. Lavrinenko, O. Takayama, J. Vac. Sci. Technol. A 39, 043408 (2021) / Erratum 40, 027001 (2022) [optical]",
+          "doi": "10.1116/6.0000884",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE low-frequency/RF relative permittivity along c-axis of PiezoMUMPs sputtered AlN (9.5-10.2 across foundry runs; tan delta < 0.003)"
+        },
+        {
+          "cite": "APPROXIMATE effective isotropic modulus of sputtered c-axis textured AlN in MEMSCAP PiezoMUMPs Design Handbook Rev. 1.3 (310-345 GPa, columnar grain compliance softens effective in-plane modulus relative to epitaxial crystal)",
+          "url": "https://www.memscap.com/products/mumps/piezomumps"
+        },
+        {
+          "cite": "L. Yu. Beliaev, E. Shkondin, A. V. Lavrinenko, O. Takayama, Thickness-dependent optical properties of aluminum nitride films for mid-infrared wavelengths, J. Vac. Sci. Technol. A 39, 043408 (2021) / Erratum 40, 027001 (2022), 303 nm reactive sputtered AlN, refractiveindex.info (AlN, Beliaev1, CC0)",
+          "doi": "10.1116/6.0000884",
+          "url": "https://refractiveindex.info/?shelf=main&book=AlN&page=Beliaev1",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "Erratum DOI",
+          "doi": "10.1116/6.0001574",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE c-axis textured sputtered AlN piezoelectric strain-charge coefficients in MEMSCAP PiezoMUMPs Design Handbook Rev. 1.3 (d31 ~ -2.0 pC/N, d33 ~ 4.5 pC/N)",
+          "url": "https://www.memscap.com/products/mumps/piezomumps"
+        },
+        {
+          "cite": "APPROXIMATE grain-boundary-limited thermal conductivity (~20-80 W/(m*K) in 0.5 um sputtered AlN films vs 285 W/(m*K) single crystal)"
+        }
+      ]
+    },
+    {
+      "id": "beta_tin_sc",
+      "name": "beta_tin_sc",
+      "kind": "superconductor",
+      "point_group": "isotropic",
+      "reference_temperature": "1.5 K",
+      "density": "7287 kg/m^3",
+      "description": "Clean Type-I superconducting beta-Sn (white tin) compared with Nb and Al for low-Tc BCS benchmarks and RF joints",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE representative beta-Sn superconducting and mechanical dataset (Kittel / Poole Handbook of Superconductivity)"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline white tin elastic moduli at cryogenic temperature (CRC / Rayne 1960)"
+        },
+        {
+          "cite": "APPROXIMATE beta-Sn BCS parameters (Tinkham / Biondi & Garfunkel 1959)"
+        },
+        {
+          "cite": "APPROXIMATE cryogenic beta-Sn thermal transport near 1.5-4 K (NIST Cryogenic Properties / UNVERIFIED)"
+        }
+      ]
+    },
+    {
+      "id": "copper",
+      "name": "copper",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "8960 kg/m^3",
+      "description": "Copper at 293 K (Rakic 1998 Lorentz-Drude 0.21-12.4 um; E=130 GPa, k=401 W/(m*K), Cp=385 J/(kg*K)) — room-temperature normal-metal baseline vs RRR=100 cryogenic copper_4k.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE bulk OFHC polycrystalline mechanics/thermal/electrical at 293 K + verified Rakic et al. 1998 [optical] fit (0.207-12.4 um)",
+          "doi": "10.1364/AO.37.005271"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline bulk OFHC copper elastic constants at 293 K (Ledbetter & Naimon 1974 VRH baseline ~129.8 GPa)"
+        },
+        {
+          "cite": "APPROXIMATE annealed pure copper DC conductivity at 293 K"
+        },
+        {
+          "cite": "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them",
+          "doi": "10.1364/AO.37.005271",
+          "url": "https://refractiveindex.info/?shelf=main&book=Cu&page=Rakic-LD",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE pure bulk copper thermophysical values at 300 K"
+        }
+      ]
+    },
+    {
+      "id": "copper_4k",
+      "name": "copper_4k",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "4.0 K",
+      "density": "8960 kg/m^3",
+      "description": "Cryogenic OFHC copper (RRR=100) at 4 K (NIST Cryo DB k=642.3 W/(m*K), Cp=0.0994 J/(kg*K), Ledbetter 1974 E=138 GPa) — dilution-refrigerator thermalisation metal vs 293 K copper.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "Cryogenic 4 K properties for OFHC copper (RRR = 100); [optical] inherited from Rakic 1998 copper",
+          "url": "https://trc.nist.gov/cryogenics/materials/OFHC%20Copper/OFHC_Copper_rev1.htm",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "H. M. Ledbetter and E. R. Naimon, Elastic properties of metals and alloys II. Copper, J. Phys. Chem. Ref. Data 3, 897-935 (1974): 4 K polycrystalline Young's modulus ~138 GPa",
+          "doi": "10.1063/1.3253150",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE 4 K DC electrical conductivity of RRR = 100 OFHC copper (~100x residual resistivity ratio over 293 K annealed copper 5.96e7 S/m; scales proportionally with RRR)"
+        },
+        {
+          "cite": "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them",
+          "doi": "10.1364/AO.37.005271",
+          "url": "https://refractiveindex.info/?shelf=main&book=Cu&page=Rakic-LD",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "NIST Cryogenic Material Properties Database, OFHC Copper UNS C10100/C10200 (RRR = 100) official logarithmic rational/polynomial curve fits evaluated at T = 4.0 K",
+          "url": "https://trc.nist.gov/cryogenics/materials/OFHC%20Copper/OFHC_Copper_rev1.htm",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE 4-293 K RRR=100 thermal conductivity_T table and cryogenic specific_heat_T NIST-style log10 polynomial fit"
+        }
+      ]
+    },
+    {
+      "id": "diamond",
+      "name": "diamond",
+      "kind": "crystalline",
+      "point_group": "m-3m",
+      "reference_temperature": "298.15 K",
+      "density": "3515 kg/m^3",
+      "description": "Single-crystal IIa/CVD diamond (McSkimin & Andreatch 1972 cubic c11=1076.4 GPa + Phillip & Taft 1964 UV-MIR table n=2.3878 at 1.55 um) — highest acoustic velocity (~17.5 km/s) and thermal conductivity (2200 W/(m*K)).",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "H. J. McSkimin and P. Andreatch Jr., Elastic moduli of diamond as a function of pressure and temperature, J. Appl. Phys. 43, 2944-2948 (1972): density 3515 kg/m^3",
+          "doi": "10.1063/1.1661636",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "H. R. Phillip and E. A. Taft, Phys. Rev. 136, A1445-A1448 (1964) [optical]",
+          "doi": "10.1103/PhysRev.136.A1445",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. Fontanella et al., Temperature and pressure variation of the dielectric constant of diamond, Appl. Opt. / J. Chem. Phys. (static/RF relative permittivity eps_r = 5.70 and ultralow microwave loss of IIa diamond at 300 K; APPROXIMATE)",
+          "doi": "10.1063/1.323980"
+        },
+        {
+          "cite": "H. J. McSkimin and P. Andreatch Jr., J. Appl. Phys. 43, 2944-2948 (1972), ultrasonic pulse-superposition elastic moduli of type IIa diamond at 298 K",
+          "doi": "10.1063/1.1661636",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "H. R. Phillip and E. A. Taft, Kramers-Kronig analysis of reflectance data for diamond, Phys. Rev. 136, A1445-A1448 (1964), transparent UV-MIR rows (0.221-10 um), refractiveindex.info (main/C/Phillip, CC0)",
+          "doi": "10.1103/PhysRev.136.A1445",
+          "url": "https://refractiveindex.info/?shelf=main&book=C&page=Phillip",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE single-crystal diamond cubic Pockels photoelastic constants (M. H. Grimsditch and A. K. Ramdas, Phys. Rev. B 11, 3139, 1975)",
+          "doi": "10.1103/PhysRevB.11.3139"
+        },
+        {
+          "cite": "APPROXIMATE pure type-IIa / electronic-grade single-crystal diamond at 300 K (nitrogen impurities and polycrystalline grain boundaries reduce CVD diamond thermal conductivity to 1000-1800 W/(m*K))"
+        },
+        {
+          "cite": "APPROXIMATE single-crystal type-IIa diamond room-temperature Akhiezer acoustic viscosity tensor"
+        }
+      ]
+    },
+    {
+      "id": "gallium_arsenide",
+      "name": "gallium_arsenide",
+      "kind": "semiconductor",
+      "point_group": "-43m",
+      "reference_temperature": "295.15 K",
+      "density": "5317 kg/m^3",
+      "description": "Undoped bulk GaAs cubic crystal (Blakemore 1982 elastic c11=118.8 GPa + Skauli 2003 IR Sellmeier 0.97-17 um, n=3.3702 at 1.55 um) — sub-bandgap III-V photonics/SAW baseline vs absorbing gallium_arsenide_papatryfonos.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic",
+        "electro_optic"
+      ],
+      "sources": [
+        {
+          "cite": "J. S. Blakemore, Semiconducting and other major properties of gallium arsenide, J. Appl. Phys. 53, R123-R181 (1982): density 5317 kg/m^3 at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "T. Skauli et al., Improved dispersion relations for GaAs and applications to nonlinear optics, J. Appl. Phys. 94, 6447-6455 (2003)",
+          "doi": "10.1063/1.1621740",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): low-frequency relative permittivity of GaAs at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE semi-insulating GaAs microwave dielectric loss tangent near 10 GHz"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982), Table of cubic elastic stiffness constants C^E of GaAs along [100] at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE cubic GaAs clamped linear electro-optic Pockels coefficient r41 at 1550 nm"
+        },
+        {
+          "cite": "T. Skauli, P. S. Kuo, K. L. Vodopyanov, T. J. Pinguet, O. Levi, L. A. Eyres, J. S. Harris, M. M. Fejer, B. Gerard, L. Becouarn, E. Lallier, J. Appl. Phys. 94, 6447-6455 (2003), 22 degC, refractiveindex.info (main/GaAs/Skauli, CC0)",
+          "doi": "10.1063/1.1621740",
+          "url": "https://refractiveindex.info/?shelf=main&book=GaAs&page=Skauli",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE cubic GaAs Pockels photoelastic constants at 1.15 um (Dixon 1967 / NumBAT GaAs)"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): zincblende GaAs piezoelectric stress constant e14 = -0.16 C/m^2 at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): undoped GaAs thermal conductivity, specific heat and linear thermal expansion at 300 K (APPROXIMATE — doping lowers thermal conductivity)",
+          "doi": "10.1063/1.331665"
+        }
+      ]
+    },
+    {
+      "id": "gallium_arsenide_papatryfonos",
+      "name": "gallium_arsenide_papatryfonos",
+      "kind": "semiconductor",
+      "point_group": "-43m",
+      "reference_temperature": "295.15 K",
+      "density": "5317 kg/m^3",
+      "description": "MBE GaAs UV-SWIR complex n,k table (Papatryfonos 2021 ellipsometry, 0.26-1.88 um) — resolves the 870 nm direct-bandgap absorption edge unlike sub-bandgap lossless Skauli gallium_arsenide.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic",
+        "electro_optic"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from gallium_arsenide; [optical] complex n,k ellipsometry from Papatryfonos et al. 2021 (refractiveindex.info main/GaAs/Papatryfonos, CC0)",
+          "doi": "10.1063/5.0039631",
+          "url": "https://refractiveindex.info/?shelf=main&book=GaAs&page=Papatryfonos",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): low-frequency relative permittivity of GaAs at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE semi-insulating GaAs microwave dielectric loss tangent near 10 GHz"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982), Table of cubic elastic stiffness constants C^E of GaAs along [100] at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE cubic GaAs clamped linear electro-optic Pockels coefficient r41 at 1550 nm"
+        },
+        {
+          "cite": "K. Papatryfonos et al., Refractive indices of MBE-grown AlGaAs ternary alloys in the transparent wavelength region, AIP Adv. 11, 025327 (2021), sampled across 0.26-1.88 um from refractiveindex.info (GaAs, Papatryfonos, CC0)",
+          "doi": "10.1063/5.0039631",
+          "url": "https://refractiveindex.info/?shelf=main&book=GaAs&page=Papatryfonos",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE cubic GaAs Pockels photoelastic constants at 1.15 um (Dixon 1967 / NumBAT GaAs)"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): zincblende GaAs piezoelectric stress constant e14 = -0.16 C/m^2 at 300 K",
+          "doi": "10.1063/1.331665",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. S. Blakemore, J. Appl. Phys. 53, R123-R181 (1982): undoped GaAs thermal conductivity, specific heat and linear thermal expansion at 300 K (APPROXIMATE — doping lowers thermal conductivity)",
+          "doi": "10.1063/1.331665"
+        }
+      ]
+    },
+    {
+      "id": "gold",
+      "name": "gold",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "19300 kg/m^3",
+      "description": "Evaporated Au wide-band Lorentz-Drude fit at 293 K (Rakic 1998, 0.25-6.2 um; E=78 GPa, sigma=4.52e7 S/m) — broadband analytical baseline vs lower-loss NIR experimental gold_johnson.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE bulk polycrystalline mechanics/thermal/electrical + verified Rakic et al. 1998 [optical] fit (0.248-6.2 um)",
+          "doi": "10.1364/AO.37.005271"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline bulk gold handbook values at 293 K (electroplated/evaporated thin films show grain-texture variation E ~ 70-82 GPa)"
+        },
+        {
+          "cite": "APPROXIMATE bulk pure gold DC conductivity at 293 K; thin films have lower conductivity from surface and grain-boundary scattering"
+        },
+        {
+          "cite": "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them",
+          "doi": "10.1364/AO.37.005271",
+          "url": "https://refractiveindex.info/?shelf=main&book=Au&page=Rakic-LD",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE standard bulk gold thermophysical handbook values at 300 K (thin films exhibit lower electron thermal conductivity)"
+        }
+      ]
+    },
+    {
+      "id": "gold_johnson",
+      "name": "gold_johnson",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "19300 kg/m^3",
+      "description": "Evaporated Au thin-film experimental n,k table (Johnson & Christy 1972, 0.188-1.937 um) — lower intraband damping above 600 nm than Rakic 1998 Drude-Lorentz gold; standard visible/NIR plasmonics benchmark.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from gold; [optical] Johnson & Christy 1972 evaporated Au table (refractiveindex.info main/Au/Johnson, CC0)",
+          "doi": "10.1103/PhysRevB.6.4370",
+          "url": "https://refractiveindex.info/?shelf=main&book=Au&page=Johnson",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline bulk gold handbook values at 293 K (electroplated/evaporated thin films show grain-texture variation E ~ 70-82 GPa)"
+        },
+        {
+          "cite": "APPROXIMATE bulk pure gold DC conductivity at 293 K; thin films have lower conductivity from surface and grain-boundary scattering"
+        },
+        {
+          "cite": "P. B. Johnson and R. W. Christy, Optical constants of the noble metals, Phys. Rev. B 6, 4370-4379 (1972), refractiveindex.info (Au, Johnson, CC0)",
+          "doi": "10.1103/PhysRevB.6.4370",
+          "url": "https://refractiveindex.info/?shelf=main&book=Au&page=Johnson",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE standard bulk gold thermophysical handbook values at 300 K (thin films exhibit lower electron thermal conductivity)"
+        }
+      ]
+    },
+    {
+      "id": "granular_aluminium",
+      "name": "granular_aluminium",
+      "kind": "superconductor",
+      "point_group": null,
+      "reference_temperature": null,
+      "density": "2700 kg/m^3",
+      "description": "Granular aluminium (grAl) dirty-limit superinductor film (Maleeva 2018 / Gruenhaupt 2019: Tc=1.90 K, Delta_0=0.30 meV, sigma_n=2.5e4 S/m) — compact alias of granular_aluminium_sc.",
+      "capabilities": [
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below (dirty-limit grAl film parameters from Maleeva et al. 2018 and Gruenhaupt et al. 2019)",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "N. Maleeva et al., Circuit quantum electrodynamics of granular aluminum resonators, Nat. Commun. 9, 3889 (2018) and L. Gruenhaupt et al., Granular aluminium as a superconducting material for high-impedance quantum circuits, Nat. Mater. 18, 816-820 (2019): dirty-limit grAl film T_c = 1.90 K, Delta(0) = 0.30 meV, normal conductivity sigma_n = 2.5e4 S/m (rho_n = 4000 uOhm cm, APPROXIMATE representative oxygenation point)",
+          "doi": "10.1038/s41467-018-06386-9",
+          "verified": "2026-11-21"
+        }
+      ]
+    },
+    {
+      "id": "granular_aluminium_sc",
+      "name": "granular_aluminium_sc",
+      "kind": "superconductor",
+      "point_group": "isotropic",
+      "reference_temperature": "0.02 K",
+      "density": "3000 kg/m^3",
+      "description": "Nano-granular Al/AlOx superconducting superinductor film grAl (Grunhaupt 2019 / Maleeva 2018: Tc=1.8-2.1 K, Lk=200-2500 pH/sq) — high-impedance fluxonium superinductor vs clean low-Lk aluminium_sc_emft.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "superconducting",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE granular aluminum compilation from L. Grunhaupt et al., Nat. Mater. 18, 816-819 (2019) & N. Maleeva et al., Nat. Commun. 9, 3889 (2018)",
+          "doi": "10.1038/s41563-019-0350-3"
+        },
+        {
+          "cite": "APPROXIMATE Al nanocrystal / amorphous AlOx matrix composite film elastic modulus (oxygen content tunes modulus between Al ~77 GPa and am-AlOx ~150 GPa)"
+        },
+        {
+          "cite": "APPROXIMATE AlOx native oxide capping on reactive-evaporated granular aluminum"
+        },
+        {
+          "cite": "APPROXIMATE dirty-limit granular Al/AlOx superinductor parameters (rho_n ~ 1000 uOhm*cm) from L. Grunhaupt et al., Nat. Mater. 18, 816-819 (2019)",
+          "doi": "10.1038/s41563-019-0350-3"
+        },
+        {
+          "cite": "APPROXIMATE high-resistivity granular Al/AlOx thin-film thermal properties at 4 K (Wiedemann-Franz thermal conductivity strongly suppressed below Tc = 1.9 K)"
+        }
+      ]
+    },
+    {
+      "id": "lithium_niobate",
+      "name": "lithium_niobate",
+      "kind": "crystalline",
+      "point_group": "3m",
+      "reference_temperature": "294.15 K",
+      "density": "4640 kg/m^3",
+      "description": "Congruent bulk/TFLN LiNbO3 at 294 K (Weis & Gaylord 1985 trigonal c11=203 GPa + Zelmon 1997 uniaxial Sellmeier 0.4-5 um, ne=2.1376 at 1.55 um) — undoped baseline vs photorefractive-resistant lithium_niobate_mgo and cryogenic lithium_niobate_4k.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic",
+        "electro_optic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "R. S. Weis and T. K. Gaylord, Lithium niobate: Summary of physical properties and crystal structure, Appl. Phys. A 37, 191-203 (1985): density 4640 kg/m^3 (Kushibiki et al. 1999 SAW-grade Archimedes measurement is 4642.8 kg/m^3)",
+          "doi": "10.1007/BF00614817",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "D. E. Zelmon, D. L. Small, D. Jundt, J. Opt. Soc. Am. B 14, 3319-3322 (1997), optical Sellmeier verified 2026-11-04",
+          "doi": "10.1364/JOSAB.14.003319",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "R. S. Weis and T. K. Gaylord, Appl. Phys. A 37, 191-203 (1985), Table 1 (p. 197), mechanically free (low-frequency) relative permittivity eps^T/eps0",
+          "doi": "10.1007/BF00614817",
+          "url": "https://lithium-niobate.com/data/",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE Weis & Gaylord 1985 clamped GHz permittivity eps^S (~44.3 perp, ~27.9 par) and room-temperature microwave loss tangent"
+        },
+        {
+          "cite": "R. S. Weis and T. K. Gaylord, Lithium niobate: Summary of physical properties and crystal structure, Appl. Phys. A 37, 191-203 (1985), Table 6 (p. 200), constant-electric-field stiffness C^E in IRE-1949 crystal frame",
+          "doi": "10.1007/BF00614817",
+          "url": "https://lithium-niobate.com/data/",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)"
+        },
+        {
+          "cite": "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, as in the refractiveindex.info database (LiNbO3, Zelmon-o and Zelmon-e, CC0)",
+          "doi": "10.1364/JOSAB.14.003319",
+          "url": "https://refractiveindex.info/?shelf=main&book=LiNbO3&page=Zelmon-o",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 Pockels photoelastic constants at 633 nm (Weis & Gaylord 1985 / Dixon 1967)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 strain-charge piezoelectric coefficients (Weis & Gaylord 1985 Table 2 / Warner, Onoe & Coquin 1967)",
+          "doi": "10.1007/BF00614817"
+        },
+        {
+          "cite": "T. Volk and M. Wohlecke, Lithium Niobate: Defects, Photorefraction and Ferroelectric Switching, Springer Series in Materials Science 115 (2009), Table 1.1 (p. 3) congruent LiNbO3 near 300 K",
+          "doi": "10.1007/978-3-540-70766-0",
+          "url": "https://lithium-niobate.com/data/",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature congruent LiNbO3 effective acoustic viscosity (order-of-magnitude GHz BAW attenuation baseline)"
+        }
+      ]
+    },
+    {
+      "id": "lithium_niobate_4k",
+      "name": "lithium_niobate_4k",
+      "kind": "crystalline",
+      "point_group": "3m",
+      "reference_temperature": "4.0 K",
+      "density": "4640 kg/m^3",
+      "description": "Cryogenic congruent LiNbO3 at 4 K (~2.5% stiffened trigonal C^E c33=248 GPa, clamped cryo eps=[44.3, 44.3, 26.5]) — mK piezo-optomechanical transducer model vs room-temperature lithium_niobate.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic",
+        "electro_optic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE 4 K extrapolated thermoelastic stiffening and clamped microwave permittivity + inherited lithium_niobate density and Zelmon [optical]"
+        },
+        {
+          "cite": "APPROXIMATE GHz clamped low-temperature relative permittivity (~44.3 perp, ~26.5 par) and cryogenic microwave TLS loss tangent of congruent LiNbO3"
+        },
+        {
+          "cite": "APPROXIMATE 4 K trigonal stiffness C^E (~2.5% thermoelastic stiffening over Weis & Gaylord 1985 298 K values using R. T. Smith & F. S. Welsh temperature coefficients, J. Appl. Phys. 42, 2219 (1971))",
+          "doi": "10.1063/1.1660528"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)"
+        },
+        {
+          "cite": "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, as in the refractiveindex.info database (LiNbO3, Zelmon-o and Zelmon-e, CC0)",
+          "doi": "10.1364/JOSAB.14.003319",
+          "url": "https://refractiveindex.info/?shelf=main&book=LiNbO3&page=Zelmon-o",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 Pockels photoelastic constants at 633 nm (Weis & Gaylord 1985 / Dixon 1967)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 strain-charge piezoelectric coefficients (Weis & Gaylord 1985 Table 2 / Warner, Onoe & Coquin 1967)",
+          "doi": "10.1007/BF00614817"
+        },
+        {
+          "cite": "APPROXIMATE 4 K congruent LiNbO3 thermal conductivity and specific heat in the phonon boundary-scattering regime"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature congruent LiNbO3 effective acoustic viscosity (order-of-magnitude GHz BAW attenuation baseline)"
+        }
+      ]
+    },
+    {
+      "id": "lithium_niobate_mgo",
+      "name": "lithium_niobate_mgo",
+      "kind": "crystalline",
+      "point_group": "3m",
+      "reference_temperature": "294.15 K",
+      "density": "4640 kg/m^3",
+      "description": "5 mol% MgO-doped congruent LiNbO3 uniaxial Sellmeier (Zelmon 1997, 0.4-5.0 um, ne=2.1299 at 1.55 um) — optical-damage-resistant nonlinear variant (lower ne than undoped congruent lithium_niobate).",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic",
+        "electro_optic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from congruent lithium_niobate; [optical] from Zelmon et al. 1997 5 mol% MgO:LiNbO3 (refractiveindex.info MgO-LiNbO3, CC0)",
+          "doi": "10.1364/JOSAB.14.003319",
+          "url": "https://refractiveindex.info/?shelf=other&book=MgO-LiNbO3&page=Zelmon-o",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "R. S. Weis and T. K. Gaylord, Appl. Phys. A 37, 191-203 (1985), Table 1 (p. 197), mechanically free (low-frequency) relative permittivity eps^T/eps0",
+          "doi": "10.1007/BF00614817",
+          "url": "https://lithium-niobate.com/data/",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE Weis & Gaylord 1985 clamped GHz permittivity eps^S (~44.3 perp, ~27.9 par) and room-temperature microwave loss tangent"
+        },
+        {
+          "cite": "R. S. Weis and T. K. Gaylord, Lithium niobate: Summary of physical properties and crystal structure, Appl. Phys. A 37, 191-203 (1985), Table 6 (p. 200), constant-electric-field stiffness C^E in IRE-1949 crystal frame",
+          "doi": "10.1007/BF00614817",
+          "url": "https://lithium-niobate.com/data/",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 linear electro-optic Pockels tensor at 633 nm (Weis & Gaylord 1985 Table 4)"
+        },
+        {
+          "cite": "D. E. Zelmon, D. L. Small, D. Jundt, Infrared corrected Sellmeier coefficients for congruently grown lithium niobate and 5 mol.% magnesium oxide-doped lithium niobate, J. Opt. Soc. Am. B 14, 3319-3322 (1997), 21 degC, refractiveindex.info (MgO-LiNbO3, Zelmon-o and Zelmon-e, CC0)",
+          "doi": "10.1364/JOSAB.14.003319",
+          "url": "https://refractiveindex.info/?shelf=other&book=MgO-LiNbO3&page=Zelmon-o",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 Pockels photoelastic constants at 633 nm (Weis & Gaylord 1985 / Dixon 1967)"
+        },
+        {
+          "cite": "APPROXIMATE congruent LiNbO3 strain-charge piezoelectric coefficients (Weis & Gaylord 1985 Table 2 / Warner, Onoe & Coquin 1967)",
+          "doi": "10.1007/BF00614817"
+        },
+        {
+          "cite": "T. Volk and M. Wohlecke, Lithium Niobate: Defects, Photorefraction and Ferroelectric Switching, Springer Series in Materials Science 115 (2009), Table 1.1 (p. 3) congruent LiNbO3 near 300 K",
+          "doi": "10.1007/978-3-540-70766-0",
+          "url": "https://lithium-niobate.com/data/",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature congruent LiNbO3 effective acoustic viscosity (order-of-magnitude GHz BAW attenuation baseline)"
+        }
+      ]
+    },
+    {
+      "id": "nbn",
+      "name": "nbn",
+      "kind": "superconductor",
+      "point_group": null,
+      "reference_temperature": null,
+      "density": "8470 kg/m^3",
+      "description": "Niobium nitride (NbN) disordered superconducting thin film (Semenov 2009 / Wang 1996: Tc=14.5 K, Delta_0=2.40 meV, lambda_L=50 nm, xi_0=5 nm, sigma_n=5.0e5 S/m) — compact alias vs 16 K nbn_sc.",
+      "capabilities": [
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below. Density 8470 kg/m^3 (APPROXIMATE stoichiometric delta-NbN density)",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "A. D. Semenov et al., Spectral design of superconducting nanowire single-photon detectors, Phys. Rev. B 80, 054510 (2009) and Z. Wang et al., Superconducting properties of NbN thin films, J. Appl. Phys. 79, 7837 (1996): NbN film T_c = 14.5 K, Delta(0) = 2.40 meV, lambda_L(0) = 50 nm, xi_0 = 5.0 nm, mean_free_path = 0.5 nm, sigma_n = 5.0e5 S/m (APPROXIMATE film values depending on stoichiometry and thickness)",
+          "doi": "10.1103/PhysRevB.80.054510",
+          "verified": "2026-11-21"
+        }
+      ]
+    },
+    {
+      "id": "nbn_sc",
+      "name": "nbn_sc",
+      "kind": "superconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "4.0 K",
+      "density": "8400 kg/m^3",
+      "description": "High-kinetic-inductance B1 rocksalt NbN thin film compared with Nb and TiN for SNSPDs and compact resonators",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "superconducting",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE representative sputtered delta-NbN thin-film superconducting RF dataset (Kamlapure 2010; Annunziata 2010)"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline B1 NbN thin-film elastic moduli (Chen 2005 / NIST)"
+        },
+        {
+          "cite": "APPROXIMATE native NbOxNy/Nb2O5 surface oxide TLS parameters"
+        },
+        {
+          "cite": "APPROXIMATE representative NbN BCS/kinetic-inductance parameters (Kamlapure 2010, Appl. Phys. Lett. 96)"
+        },
+        {
+          "cite": "APPROXIMATE cryogenic NbN film thermal properties at 4 K (UNVERIFIED order-of-magnitude)"
+        }
+      ]
+    },
+    {
+      "id": "niobium",
+      "name": "niobium",
+      "kind": "superconductor",
+      "point_group": null,
+      "reference_temperature": null,
+      "density": "8570 kg/m^3",
+      "description": "Niobium sputtered superconducting film (Park 2026 / Maxfield & McLean 1965: Tc=9.2 K, Delta_0=1.395 meV, lambda_L=33.3 nm, xi_0=39.0 nm, sigma_n=5.5e7 S/m) — compact BCS alias of niobium_sc.",
+      "capabilities": [
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below. Density 8570 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. Park et al., npj Quantum Information (2026), Fig. 1d-e and B. W. Maxfield, W. L. McLean, Superconducting penetration depth of niobium, Phys. Rev. 139, A1515 (1965): Nb film T_c = 9.2 K, Delta(0) = 1.395 meV, London depth lambda_L(0) = 33.3 nm, BCS coherence length xi_0 = 39.0 nm, cryogenic normal conductivity sigma_n = 5.5e7 S/m",
+          "doi": "10.1103/PhysRev.139.A1515",
+          "verified": "2026-11-21"
+        }
+      ]
+    },
+    {
+      "id": "niobium_sc",
+      "name": "niobium_sc",
+      "kind": "superconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "4.2 K",
+      "density": "8570 kg/m^3",
+      "description": "Nb superconducting film/crystal at 4.2 K (Carroll 1965 BCC c11=252.7 GPa + Golovashkin 1969 4.2 K n,k 0.4-9.2 um; Tc=9.2 K, lambda_L=90 nm, Lk=0.09 pH/sq) — highest elemental Tc for SFQ and cQED resonators.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "optical",
+        "superconducting",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "K. J. Carroll, Elastic constants of niobium from 4.2 to 300 K, J. Appl. Phys. 36, 3689-3690 (1965): density 8570 kg/m^3",
+          "doi": "10.1063/1.1703072",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "A. I. Golovashkin et al., Sov. Phys. JETP 29, 27-34 (1969) [optical at 4.2 K] & S. K. Tolpygo et al., IEEE Trans. Appl. Supercond. 25, 1100905 (2015) [SFQ5ee notes]",
+          "doi": "10.1109/TASC.2014.2374836",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "K. J. Carroll, Elastic constants of niobium from 4.2 to 300 K, J. Appl. Phys. 36, 3689-3690 (1965), BCC single crystal at 4.2 K",
+          "doi": "10.1063/1.1703072",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE native pentoxide Nb2O5 (~4-5 nm) surface TLS dielectric loss layer dominant in planar Nb resonators; BOE strip reduces thickness"
+        },
+        {
+          "cite": "A. I. Golovashkin, I. E. Leksina, G. P. Motulevich, A. A. Shubin, Optical properties of niobium, Sov. Phys. JETP 29, 27-34 (1969), 4.2 K table, refractiveindex.info (main/Nb/Golovashkin-4.2K, CC0)",
+          "url": "https://refractiveindex.info/?shelf=main&book=Nb&page=Golovashkin-4.2K",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE thin-film mK loss extensions + Park et al., npj Quantum Inf. (2026) Fig. 1d-e Nb BCS parameters (Tc = 9.2 K, Delta_0 = 1.395 meV, lambda_L = 33.3 nm, xi_0 = 39.0 nm, sigma_n = 5.5e7 S/m)"
+        },
+        {
+          "cite": "APPROXIMATE 4-10 K thin-film/moderate-RRR Nb thermal properties (depends strongly on RRR and superconducting gap suppression below Tc = 9.2 K)"
+        }
+      ]
+    },
+    {
+      "id": "niobium_titanium_nitride_sc",
+      "name": "niobium_titanium_nitride_sc",
+      "kind": "superconductor",
+      "point_group": "isotropic",
+      "reference_temperature": "4.0 K",
+      "density": "7800 kg/m^3",
+      "description": "Disordered NbTiN superconducting thin film at 4 K (Samkharadze 2016: Tc=12.5-14.8 K, Bc2>10 T, Lk=3-40 pH/sq) — magnetic-field-resilient spin/hybrid cQED and TWPA film vs titanium_nitride_sc and niobium_sc.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE disordered NbTiN film compilation from N. Samkharadze et al., Phys. Rev. Appl. 5, 044004 (2016)",
+          "doi": "10.1103/PhysRevApplied.5.044004"
+        },
+        {
+          "cite": "APPROXIMATE rocksalt NbTiN sputtered thin-film elastic modulus (interpolated from refractory transition-metal nitrides)"
+        },
+        {
+          "cite": "APPROXIMATE disordered NbTiN kinetic-inductance film parameters from N. Samkharadze et al., Phys. Rev. Appl. 5, 044004 (2016)",
+          "doi": "10.1103/PhysRevApplied.5.044004"
+        },
+        {
+          "cite": "APPROXIMATE disordered NbTiN thin-film thermal properties at 4 K"
+        }
+      ]
+    },
+    {
+      "id": "polysilicon_polymumps",
+      "name": "polysilicon_polymumps",
+      "kind": "polycrystalline",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "2330 kg/m^3",
+      "description": "LPCVD polycrystalline silicon structural film (MEMSCAP PolyMUMPs Rev. 13.0, E=158 GPa, nu=0.22, rho=2330 kg/m^3) — isotropic grain-averaged MEMS resonator film vs anisotropic single-crystal [100] silicon.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric"
+      ],
+      "sources": [
+        {
+          "cite": "D. Koester, A. Cowen, R. Mahadevan, M. Stonefield, B. Hardy, PolyMUMPs Design Handbook Rev. 13.0 (MEMSCAP Inc.); Sharpe et al., JMEMS 1997 (APPROXIMATE grain-size-dependent polysilicon film properties)",
+          "doi": "10.1109/84.623107",
+          "url": "https://www.memscap.com/products/mumps/polymumps"
+        },
+        {
+          "cite": "APPROXIMATE static relative permittivity of doped polycrystalline silicon (handbook Si value; conductive layers in PolyMUMPs have Rs ~ 10-30 Ohm/sq)"
+        },
+        {
+          "cite": "MEMSCAP PolyMUMPs Design Handbook Rev. 13.0 (POLY1/POLY2 annealed at 1050 C: E = 158 +/- 10 GPa, nu = 0.22) & W. N. Sharpe et al., J. Microelectromech. Syst. 6, 193-199 (1997), verified 2026-11-21",
+          "doi": "10.1109/84.623107",
+          "url": "https://www.memscap.com/products/mumps/polymumps",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE doped LPCVD polysilicon thin-film thermal properties (grain-boundary and phosphorus-doping scattering reduce thermal conductivity well below single-crystal Si)"
+        }
+      ]
+    },
+    {
+      "id": "quartz_alpha",
+      "name": "quartz_alpha",
+      "kind": "crystalline",
+      "point_group": "32",
+      "reference_temperature": "293.15 K",
+      "density": "2648.5 kg/m^3",
+      "description": "Single-crystal alpha-quartz SiO2 (Bechmann 1958 trigonal c11=86.74 GPa + Ghosh 1999 uniaxial Sellmeier 0.198-2.05 um, no=1.5277 at 1.55 um) — anisotropic piezoelectric SAW/BAW crystal vs amorphous fused silica.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "piezoelectric",
+        "photoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "R. Bechmann, Elastic and piezoelectric constants of alpha-quartz, Phys. Rev. 110, 1060-1061 (1958): density 2648.5 kg/m^3",
+          "doi": "10.1103/PhysRev.110.1060",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "G. Ghosh, Opt. Commun. 163, 95-102 (1999)",
+          "doi": "10.1016/S0030-4018(99)00091-7",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "R. Bechmann, Phys. Rev. 110, 1060-1061 (1958): low-frequency free relative permittivity eps^T (perp = 4.52, par = 4.63)",
+          "doi": "10.1103/PhysRev.110.1060",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE synthetic alpha-quartz microwave loss tangent near 10 GHz"
+        },
+        {
+          "cite": "R. Bechmann, Elastic and piezoelectric constants of alpha-quartz, Phys. Rev. 110, 1060-1061 (1958), right-handed trigonal class 32 constant-E stiffness C^E",
+          "doi": "10.1103/PhysRev.110.1060",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "G. Ghosh, Dispersion-equation coefficients for the refractive index and birefringence of calcite and quartz crystals, Opt. Commun. 163, 95-102 (1999), refractiveindex.info (main/SiO2/Ghosh-o and Ghosh-e, CC0)",
+          "doi": "10.1016/S0030-4018(99)00091-7",
+          "url": "https://refractiveindex.info/?shelf=main&book=SiO2&page=Ghosh-o",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE single-crystal alpha-quartz Pockels photoelastic constants (Narasimhamurty / Pockels 1889 / Dixon 1967 compilation)"
+        },
+        {
+          "cite": "APPROXIMATE Bechmann 1958 right-handed alpha-quartz piezoelectric constants (d11 = 2.31, d14 = -0.727 pC/N)",
+          "doi": "10.1103/PhysRev.110.1060"
+        },
+        {
+          "cite": "APPROXIMATE crystalline alpha-quartz thermal properties near 300 K (anisotropic thermal conductivity 6.2 perp / 10.7 par W/(m*K) from handbook compilations)"
+        }
+      ]
+    },
+    {
+      "id": "scaln_30",
+      "name": "scaln_30",
+      "kind": "crystalline",
+      "point_group": "6mm",
+      "reference_temperature": "293.15 K",
+      "density": "3380 kg/m^3",
+      "description": "30% Sc-alloyed wurtzite Sc0.30Al0.70N film (Caro 2015 / Akiyama 2009, softened c33=260 GPa, eps_par=15) — high-coupling BAW/FBAR piezoelectric (kt^2 ~ 15-22%) vs stiffer lower-coupling aluminum_nitride.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "piezoelectric",
+        "electro_optic"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE 30% Sc-alloyed wurtzite Sc0.30Al0.70N compilation from M. A. Caro et al., J. Phys.: Condens. Matter 27, 245901 (2015) and M. Akiyama et al., Adv. Mater. 21, 593 (2009); film stoichiometry and stress strongly affect actual constants",
+          "doi": "10.1088/0953-8984/27/24/245901"
+        },
+        {
+          "cite": "APPROXIMATE clamped RF relative permittivity and loss tangent of Sc0.30Al0.70N (~13-16 eps_r, increasing above pure AlN ~9.0 with Sc fraction; Akiyama et al. 2009 / Caro et al. 2015)",
+          "doi": "10.1002/adma.200802611"
+        },
+        {
+          "cite": "APPROXIMATE wurtzite Sc0.30Al0.70N elastic constants interpolated from Caro et al. (2015) DFT fits; c33 softens ~33% relative to pure AlN (389 GPa)",
+          "doi": "10.1088/0953-8984/27/24/245901"
+        },
+        {
+          "cite": "APPROXIMATE Sc0.30Al0.70N linear electro-optic Pockels coefficients at 1550 nm"
+        },
+        {
+          "cite": "APPROXIMATE wurtzite Sc0.30Al0.70N piezoelectric stress constants interpolated from Caro et al., J. Phys.: Condens. Matter 27, 245901 (2015)",
+          "doi": "10.1088/0953-8984/27/24/245901"
+        },
+        {
+          "cite": "APPROXIMATE alloy-disordered ScAlN thin-film thermal properties (mass-disorder phonon scattering reduces k sharply below pure AlN)"
+        }
+      ]
+    },
+    {
+      "id": "silica",
+      "name": "silica",
+      "kind": "amorphous",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "2201 kg/m^3",
+      "description": "Fused silica glass (Corning HPFS 7980, E=72.7 GPa, Malitson 1965 Sellmeier 0.21-6.7 um, n=1.4440 at 1.55 um) — bulk baseline vs silica_thermal_box, silica_4k, and crystalline quartz_alpha.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below. Density 2201 kg/m^3: Corning 7980 data sheet as reproduced by Abrisa Technologies (2.201 g/cm^3); Corning HPFS brochure gives 2.20 g/cm^3",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE low-frequency relative permittivity: the AZoM fused silica data page gives the range 3.6 to 3.9; 3.75 is its midpoint, not a measurement of a particular grade",
+          "url": "https://www.azom.com/properties.aspx?ArticleID=1387",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature fused silica microwave loss tangent at 10 GHz"
+        },
+        {
+          "cite": "Corning 7980 data sheet (Abrisa Technologies copy): Young's modulus 72.7 GPa, Poisson's ratio 0.16, shear modulus 31.4 GPa; the Corning HPFS brochure (2015) gives 73 GPa and 0.16",
+          "url": "https://abrisatechnologies.com/media/Corning-7980.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "I. H. Malitson, Interspecimen comparison of the refractive index of fused silica, J. Opt. Soc. Am. 55, 1205-1208 (1965), 0.21 to 3.71 um at 20 degC; validity to 6.7 um from C. Z. Tan, J. Non-Cryst. Solids 223, 158 (1998); as in the refractiveindex.info database (SiO2, Malitson, CC0)",
+          "doi": "10.1364/JOSA.55.001205",
+          "url": "https://refractiveindex.info/?shelf=main&book=SiO2&page=Malitson",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "dn_dT: 9.7e-6 1/K at 1530 nm (22 degC), Corning HPFS 7979/7980/8655 brochure, Sellmeier table (the coefficient is wavelength dependent: 8.7 to 22 ppm/K between 2.3 um and 185 nm); applied as a constant shift",
+          "url": "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE fused silica isotropic Pockels photoelastic constants (Dixon 1967 / NumBAT SiO2)"
+        },
+        {
+          "cite": "Corning HPFS 7979/7980/8655 brochure (2015): specific heat 0.770 J/(g K), thermal conductivity 1.38 W/(m K), thermal expansion 0.52e-6 1/K (5 to 35 degC)",
+          "url": "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature fused silica acoustic viscosity tensor (NumBAT SiO2 / Pine 1969)"
+        }
+      ]
+    },
+    {
+      "id": "silica_4k",
+      "name": "silica_4k",
+      "kind": "amorphous",
+      "point_group": "isotropic",
+      "reference_temperature": "4.0 K",
+      "density": "2203 kg/m^3",
+      "description": "Cryogenic fused silica SiO2 at 4 K (Fine 1954 / Hunklinger anomalous -4.5% glass softening E=70.0 GPa + TLS k=0.09 W/(m*K)) — softer glass mechanics and TLS thermal bottleneck vs 293 K silica.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE 4 K fused silica mechanics/thermal/permittivity + inherited room-temperature Malitson [optical]; see M. E. Fine, H. Van Duyne, N. T. Kenney, J. Appl. Phys. 25, 402 (1954)",
+          "doi": "10.1063/1.1721651"
+        },
+        {
+          "cite": "APPROXIMATE 4 K / mK amorphous SiO2 microwave relative permittivity, loss tangent, and Two-Level System TLS parameters (Martinis et al., Phys. Rev. Lett. 95, 210503, 2005)"
+        },
+        {
+          "cite": "APPROXIMATE 4 K fused silica modulus (~4.5% anomalous softening vs 293 K E = 72.7 GPa via tunneling states; M. E. Fine et al., J. Appl. Phys. 25, 402-405 (1954) & S. Hunklinger)",
+          "doi": "10.1063/1.1721651"
+        },
+        {
+          "cite": "I. H. Malitson, Interspecimen comparison of the refractive index of fused silica, J. Opt. Soc. Am. 55, 1205-1208 (1965), 0.21 to 3.71 um at 20 degC; validity to 6.7 um from C. Z. Tan, J. Non-Cryst. Solids 223, 158 (1998); as in the refractiveindex.info database (SiO2, Malitson, CC0)",
+          "doi": "10.1364/JOSA.55.001205",
+          "url": "https://refractiveindex.info/?shelf=main&book=SiO2&page=Malitson",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "dn_dT: 9.7e-6 1/K at 1530 nm (22 degC), Corning HPFS 7979/7980/8655 brochure, Sellmeier table (the coefficient is wavelength dependent: 8.7 to 22 ppm/K between 2.3 um and 185 nm); applied as a constant shift",
+          "url": "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE fused silica isotropic Pockels photoelastic constants (Dixon 1967 / NumBAT SiO2)"
+        },
+        {
+          "cite": "APPROXIMATE 4 K amorphous SiO2 glassy thermal conductivity plateau (~0.08-0.10 W/(m*K)) and TLS linear specific heat excess (~0.25-0.35 J/(kg*K)) from Zeller & Pohl, Phys. Rev. B 4, 2029 (1971)",
+          "doi": "10.1103/PhysRevB.4.2029"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature fused silica acoustic viscosity tensor (NumBAT SiO2 / Pine 1969)"
+        }
+      ]
+    },
+    {
+      "id": "silica_thermal_box",
+      "name": "silica_thermal_box",
+      "kind": "amorphous",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "2200 kg/m^3",
+      "description": "Thermally grown SOI buried/pad oxide SiO2 (Hopcroft 2010 / MEMSCAP PADOXIDE, rho=2200 kg/m^3, E=70.0 GPa, nu=0.17, eps_r=3.9) — slightly softer wet/dry thin-film oxide vs bulk fused-quartz silica (E=72.7 GPa) and softened silica_4k.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "Thermal and optical properties inherited from silica; density, [elastic] and [dielectric] set to MEMSCAP PiezoMUMPs / SOI buried-oxide thin-film values",
+          "url": "https://www.memscap.com/products/mumps/piezomumps",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "Static/low-frequency relative permittivity eps_r = 3.9 of thermally grown SiO2 (MEMSCAP PiezoMUMPs Design Handbook Rev. 1.3; APPROXIMATE typical value)",
+          "url": "https://www.memscap.com/products/mumps/piezomumps"
+        },
+        {
+          "cite": "APPROXIMATE thermal SiO2 microwave loss tangent at 10 GHz"
+        },
+        {
+          "cite": "A. Cowen et al., PiezoMUMPs Design Handbook Rev. 1.3 (MEMSCAP Inc.), PADOXIDE/BOX thermal SiO2: E = 70 GPa, nu = 0.17; residual stress ~ -250 to -300 MPa (APPROXIMATE thin-film oxide modulus)",
+          "url": "https://www.memscap.com/products/mumps/piezomumps"
+        },
+        {
+          "cite": "I. H. Malitson, Interspecimen comparison of the refractive index of fused silica, J. Opt. Soc. Am. 55, 1205-1208 (1965), 0.21 to 3.71 um at 20 degC; validity to 6.7 um from C. Z. Tan, J. Non-Cryst. Solids 223, 158 (1998); as in the refractiveindex.info database (SiO2, Malitson, CC0)",
+          "doi": "10.1364/JOSA.55.001205",
+          "url": "https://refractiveindex.info/?shelf=main&book=SiO2&page=Malitson",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "dn_dT: 9.7e-6 1/K at 1530 nm (22 degC), Corning HPFS 7979/7980/8655 brochure, Sellmeier table (the coefficient is wavelength dependent: 8.7 to 22 ppm/K between 2.3 um and 185 nm); applied as a constant shift",
+          "url": "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE fused silica isotropic Pockels photoelastic constants (Dixon 1967 / NumBAT SiO2)"
+        },
+        {
+          "cite": "Corning HPFS 7979/7980/8655 brochure (2015): specific heat 0.770 J/(g K), thermal conductivity 1.38 W/(m K), thermal expansion 0.52e-6 1/K (5 to 35 degC)",
+          "url": "https://www.corning.com/media/worldwide/csm/documents/HPFS_Product_Brochure_All_Grades_2015_07_21.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature fused silica acoustic viscosity tensor (NumBAT SiO2 / Pine 1969)"
+        }
+      ]
+    },
+    {
+      "id": "silicon",
+      "name": "silicon",
+      "kind": "semiconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "293.15 K",
+      "density": "2329 kg/m^3",
+      "description": "Single-crystal Si [100] at 293 K (Hopcroft 2010 cubic elastic + Li 1980 IR index 1.2-14 um, n=3.4757 at 1.55 um) — baseline vs silicon_salzberg, silicon_palik, silicon_mcskimin, silicon_4k.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below. Density 2329 kg/m^3 (2.329 g/cm^3): El-Cat silicon properties page and Sydor/Ohara data sheet (2.33 g/cm^3), checked 2026-11-04",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)",
+          "url": "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature high-resistivity silicon microwave loss tangent (~5e-6 at 10 GHz)"
+        },
+        {
+          "cite": "M. A. Hopcroft, W. D. Nix, T. W. Kenny, What is the Young's modulus of silicon?, J. Microelectromech. Syst. 19, 229-238 (2010), table of elastic constants (c11 165.6, c12 63.9, c44 79.5 GPa, rounded as in the paper)",
+          "url": "https://sites.engineering.ucsb.edu/~sumita/courses/Courses/ME141B/HopcroftJMEMS.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "H. H. Li, Refractive index of silicon and germanium and its wavelength and temperature derivatives, J. Phys. Chem. Ref. Data 9, 561 (1980); table for 293 K as in the refractiveindex.info database (Si, Li-293K, CC0)",
+          "doi": "10.1063/1.555624",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si&page=Li-293K",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "dn_dT: 1.87e-4 1/K at 295 K and 1.55 um, D. B. Frey, D. B. Leviton, T. J. Madison, Temperature-dependent refractive index of silicon and germanium, Proc. SPIE 6273 (2006), arXiv:physics/0606168, as quoted in a secondary compilation (photonica.io); Komma et al., Appl. Phys. Lett. 101, 041905 (2012) measured it at 1550 nm. It varies with wavelength and temperature, so it is applied as a constant shift",
+          "url": "https://arxiv.org/abs/physics/0606168",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si photoelastic constants at 1.15-3.39 um (Biegelsen 1974 / Dixon 1967 / NumBAT library)"
+        },
+        {
+          "cite": "Thermal expansion 2.6e-6 1/K and specific heat 0.7 J/(g K): BYU cleanroom semiconductor constants; expansion also PVEducation general properties of silicon",
+          "url": "https://cleanroom.byu.edu/Semiconductor-Constants",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE thermal conductivity at 300 K: 148 W/(m K) (El-Cat silicon properties); other compilations give 130 (Ioffe NSM), 150 (PVEducation), 156; it depends on doping, isotopes and temperature",
+          "url": "https://www.el-cat.com/silicon-properties.htm",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature silicon Akhiezer phonon viscosity tensor (Mason & Bateman 1964 / NumBAT Si)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_4k",
+      "name": "silicon_4k",
+      "kind": "semiconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "4.0 K",
+      "density": "2330.5 kg/m^3",
+      "description": "Cryogenic high-resistivity FZ Si [100] at 4-10 K (McSkimin 1953 elastic c11=167.72 GPa + Franta/Frey 10 K index n=3.4488 at 1.55 um + Krupka eps_r=11.45) — ~1.3% stiffer and -0.027 lower n than 293 K silicon.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "H. J. McSkimin, J. Appl. Phys. 24, 988-997 (1953) low-T elastic limit",
+          "doi": "10.1063/1.1721449",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "D. Franta et al., Appl. Surf. Sci. 421, 405-419 (2017) & J. Appl. Phys. 123, 185707 (2018) incorporating B. J. Frey, D. B. Leviton, T. J. Madison (2006) 10 K optical data",
+          "doi": "10.1063/1.5026195",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "J. Krupka, J. Breeze, A. Centeno, N. Alford, T. Claussen, L. Jensen, Measurements of permittivity, dielectric loss tangent, and resistivity of float-zone silicon at microwave frequencies, IEEE Trans. Microw. Theory Tech. 54, 3995-4001 (2006): cryogenic high-resistivity FZ-Si eps_r = 11.45",
+          "doi": "10.1109/TMTT.2006.883655",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE mK high-resistivity FZ-Si microwave bulk loss tangent and TLS parameters"
+        },
+        {
+          "cite": "H. J. McSkimin, Measurement of elastic constants at low temperatures by means of ultrasonic waves — data for silicon and germanium single crystals, J. Appl. Phys. 24, 988-997 (1953), low-temperature saturation limit (~4.2-77 K)",
+          "doi": "10.1063/1.1721449",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE metal-substrate (Si/AlOx) interface dielectric thickness and cryogenic TLS loss parameters; see Woods et al., Phys. Rev. Applied 12, 014012 (2019) & Melville et al., Appl. Phys. Lett. 117, 124004 (2020)",
+          "doi": "10.1103/PhysRevApplied.12.014012"
+        },
+        {
+          "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and cryogenic TLS loss parameters"
+        },
+        {
+          "cite": "D. Franta et al., Temperature-dependent dispersion model of float zone crystalline silicon, Appl. Surf. Sci. 421, 405-419 (2017) & J. Appl. Phys. 123, 185707 (2018), 10 K IR rows from refractiveindex.info (main/Si/Franta-10K, CC0)",
+          "doi": "10.1063/1.5026195",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si&page=Franta-10K",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "Incorporates B. J. Frey, D. B. Leviton, T. J. Madison, Temperature-dependent refractive index of silicon and germanium, Proc. SPIE 6273, 62732J (2006)",
+          "doi": "10.1117/12.672850",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE 4 K cryogenic crystalline Si thermal values (k ~ 100-400 W/(m*K) limited by sample thickness in Casimir boundary-scattering regime; Cp ~ 0.0185 J/(kg*K) T^3 Debye limit + representative specific_heat_T table)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_mcskimin",
+      "name": "silicon_mcskimin",
+      "kind": "semiconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "293.15 K",
+      "density": "2329 kg/m^3",
+      "description": "High-purity single-crystal Si [100] ultrasonic stiffness (McSkimin 1953, c11=165.7, c12=63.9, c44=79.6 GPa at 298 K) — acoustic pulse-echo reference vs Hopcroft 2010 MEMS silicon and cryogenic silicon_4k.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "Density, thermal, electrical and optical properties inherited from silicon; [elastic] from H. J. McSkimin, J. Appl. Phys. 24, 988-997 (1953) at 298 K",
+          "doi": "10.1063/1.1721449",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)",
+          "url": "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature high-resistivity silicon microwave loss tangent (~5e-6 at 10 GHz)"
+        },
+        {
+          "cite": "H. J. McSkimin, Measurement of elastic constants at low temperatures by means of ultrasonic waves — data for silicon and germanium single crystals, J. Appl. Phys. 24, 988-997 (1953), 25 degC",
+          "doi": "10.1063/1.1721449",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "H. H. Li, Refractive index of silicon and germanium and its wavelength and temperature derivatives, J. Phys. Chem. Ref. Data 9, 561 (1980); table for 293 K as in the refractiveindex.info database (Si, Li-293K, CC0)",
+          "doi": "10.1063/1.555624",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si&page=Li-293K",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "dn_dT: 1.87e-4 1/K at 295 K and 1.55 um, D. B. Frey, D. B. Leviton, T. J. Madison, Temperature-dependent refractive index of silicon and germanium, Proc. SPIE 6273 (2006), arXiv:physics/0606168, as quoted in a secondary compilation (photonica.io); Komma et al., Appl. Phys. Lett. 101, 041905 (2012) measured it at 1550 nm. It varies with wavelength and temperature, so it is applied as a constant shift",
+          "url": "https://arxiv.org/abs/physics/0606168",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si photoelastic constants at 1.15-3.39 um (Biegelsen 1974 / Dixon 1967 / NumBAT library)"
+        },
+        {
+          "cite": "Thermal expansion 2.6e-6 1/K and specific heat 0.7 J/(g K): BYU cleanroom semiconductor constants; expansion also PVEducation general properties of silicon",
+          "url": "https://cleanroom.byu.edu/Semiconductor-Constants",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE thermal conductivity at 300 K: 148 W/(m K) (El-Cat silicon properties); other compilations give 130 (Ioffe NSM), 150 (PVEducation), 156; it depends on doping, isotopes and temperature",
+          "url": "https://www.el-cat.com/silicon-properties.htm",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature silicon Akhiezer phonon viscosity tensor (Mason & Bateman 1964 / NumBAT Si)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_nitride",
+      "name": "silicon_nitride",
+      "kind": "amorphous",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "3100 kg/m^3",
+      "description": "Stoichiometric LPCVD Si3N4 film at 293 K (Luke 2015 Sellmeier 0.31-5.5 um, n=1.9963 at 1.55 um; E=290 GPa) — low-loss photonic baseline vs UV-VIS silicon_nitride_philipp and higher-index silicon_nitride_pecvd.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE thin-film compilation: [optical] verified from Luke et al. 2015; density 3100 kg/m^3 and mechanical/thermal/electrical are representative stoichiometric LPCVD Si3N4 film values that depend on furnace stress and stoichiometry",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Luke"
+        },
+        {
+          "cite": "APPROXIMATE static/RF relative permittivity and TLS dielectric loss of stoichiometric LPCVD Si3N4 (~7.0-8.0 across foundry PDKs)"
+        },
+        {
+          "cite": "APPROXIMATE typical LPCVD stoichiometric Si3N4 thin-film modulus (250-290 GPa reported across MEMS handbooks depending on residual tensile stress ~0.9-1.2 GPa and Si:N ratio)"
+        },
+        {
+          "cite": "K. Luke, Y. Okawachi, M. R. E. Lamont, A. L. Gaeta, M. Lipson, Broadband mid-infrared frequency comb generation in a Si3N4 microresonator, Opt. Lett. 40, 4823-4826 (2015): Sellmeier fit of a 340 nm film on 3.1 um thermal SiO2, as in the refractiveindex.info database (Si3N4, Luke, CC0). Film index depends on deposition (stoichiometry): use your own ellipsometry for quantitative work",
+          "doi": "10.1364/OL.40.004823",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Luke",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE stoichiometric LPCVD Si3N4 isotropic photoelastic constants at 1550 nm (Gyger et al., Phys. Rev. Lett. 124, 013902, 2020)"
+        },
+        {
+          "cite": "APPROXIMATE thin-film LPCVD Si3N4 thermal properties (phonon-boundary scattering lowers k below bulk ~30 W/(m*K) beta-Si3N4)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_nitride_pecvd",
+      "name": "silicon_nitride_pecvd",
+      "kind": "amorphous",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "2850 kg/m^3",
+      "description": "Low-stress Si-rich PECVD SiNx film (Vogt 2015 ellipsometry 0.25-1.70 um, n=2.051 at 1.55 um, E=210 GPa) — higher-index 300 C CMOS-compatible film vs stoichiometric LPCVD silicon_nitride (n=1.9963, E=270 GPa).",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE PECVD SiNx density/mechanics/thermal/electrical + verified Vogt 2015 [optical] ellipsometry table (refractiveindex.info main/Si3N4/Vogt-2, CC0)",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Vogt-2"
+        },
+        {
+          "cite": "APPROXIMATE static/RF relative permittivity and loss tangent of low-stress PECVD SiNx (varies with SiH4/NH3 precursor ratio)"
+        },
+        {
+          "cite": "APPROXIMATE typical low-temperature PECVD SiNx film modulus (lower than stoichiometric 800 C LPCVD Si3N4 due to Si-H/N-H incorporation and non-stoichiometric Si excess)"
+        },
+        {
+          "cite": "M. R. Vogt, Development of physical models for the simulation of optical properties of solar cell modules, PhD Thesis (2015), 67 nm Si-rich PECVD SiN film on Si (n = 2.089 at 630 nm), refractiveindex.info (Si3N4, Vogt-2, CC0)",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Vogt-2",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE amorphous PECVD SiNx thin-film thermal properties (much lower thermal conductivity than crystalline/LPCVD silicon nitride)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_nitride_philipp",
+      "name": "silicon_nitride_philipp",
+      "kind": "amorphous",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "3100 kg/m^3",
+      "description": "Stoichiometric Si3N4 visible/NIR 1-term Sellmeier (Philipp 1973 / Baak 1982, 0.207-1.24 um, n=2.011 at 0.633 um) — classic visible-band fit vs Luke 2015 telecom/MIR silicon_nitride and Si-rich silicon_nitride_pecvd.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from silicon_nitride; [optical] from Philipp 1973 / Baak 1982 (refractiveindex.info main/Si3N4/Philipp, CC0)",
+          "doi": "10.1149/1.2403440",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Philipp",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE static/RF relative permittivity and TLS dielectric loss of stoichiometric LPCVD Si3N4 (~7.0-8.0 across foundry PDKs)"
+        },
+        {
+          "cite": "APPROXIMATE typical LPCVD stoichiometric Si3N4 thin-film modulus (250-290 GPa reported across MEMS handbooks depending on residual tensile stress ~0.9-1.2 GPa and Si:N ratio)"
+        },
+        {
+          "cite": "H. R. Philipp, Optical properties of silicon nitride, J. Electrochem. Soc. 120, 295-300 (1973); Sellmeier fit by T. Baak, Appl. Opt. 21, 1069-1072 (1982), refractiveindex.info (Si3N4, Philipp, CC0)",
+          "doi": "10.1149/1.2403440",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Philipp",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "T. Baak Sellmeier formula DOI",
+          "doi": "10.1364/AO.21.001069",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE stoichiometric LPCVD Si3N4 isotropic photoelastic constants at 1550 nm (Gyger et al., Phys. Rev. Lett. 124, 013902, 2020)"
+        },
+        {
+          "cite": "APPROXIMATE thin-film LPCVD Si3N4 thermal properties (phonon-boundary scattering lowers k below bulk ~30 W/(m*K) beta-Si3N4)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_palik",
+      "name": "silicon_palik",
+      "kind": "semiconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "293.15 K",
+      "density": "2329 kg/m^3",
+      "description": "Crystalline Si tabulated complex n,k (Palik 1985 / Aspnes & Studna 1983, 0.25-2.5 um) — captures UV/visible interband absorption k above 1.1 um bandgap unlike lossless IR silicon and silicon_salzberg.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from silicon; [optical] tabulated complex n,k from Palik Handbook of Optical Constants of Solids (Aspnes & Studna 1983 UV-NIR + Edwards NIR)",
+          "doi": "10.1103/PhysRevB.27.985",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si&page=Aspnes",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)",
+          "url": "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature high-resistivity silicon microwave loss tangent (~5e-6 at 10 GHz)"
+        },
+        {
+          "cite": "M. A. Hopcroft, W. D. Nix, T. W. Kenny, What is the Young's modulus of silicon?, J. Microelectromech. Syst. 19, 229-238 (2010), table of elastic constants (c11 165.6, c12 63.9, c44 79.5 GPa, rounded as in the paper)",
+          "url": "https://sites.engineering.ucsb.edu/~sumita/courses/Courses/ME141B/HopcroftJMEMS.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "E. D. Palik (Ed.), Handbook of Optical Constants of Solids (Academic Press, 1985), Si.nk compilation; UV-VIS (0.25-0.83 um) from D. E. Aspnes and A. A. Studna, Phys. Rev. B 27, 985-1009 (1983); transparent IR rows set k=0",
+          "doi": "10.1103/PhysRevB.27.985",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si photoelastic constants at 1.15-3.39 um (Biegelsen 1974 / Dixon 1967 / NumBAT library)"
+        },
+        {
+          "cite": "Thermal expansion 2.6e-6 1/K and specific heat 0.7 J/(g K): BYU cleanroom semiconductor constants; expansion also PVEducation general properties of silicon",
+          "url": "https://cleanroom.byu.edu/Semiconductor-Constants",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE thermal conductivity at 300 K: 148 W/(m K) (El-Cat silicon properties); other compilations give 130 (Ioffe NSM), 150 (PVEducation), 156; it depends on doping, isotopes and temperature",
+          "url": "https://www.el-cat.com/silicon-properties.htm",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature silicon Akhiezer phonon viscosity tensor (Mason & Bateman 1964 / NumBAT Si)"
+        }
+      ]
+    },
+    {
+      "id": "silicon_salzberg",
+      "name": "silicon_salzberg",
+      "kind": "semiconductor",
+      "point_group": "m-3m",
+      "reference_temperature": "293.15 K",
+      "density": "2329 kg/m^3",
+      "description": "Float-zone Si NIR/MIR 3-term Sellmeier (Salzberg & Villa 1957, 1.36-11 um, n=3.4777 at 1.55 um) — classic refractiveindex.info fit (+0.0020 above Li 1980 baseline silicon; lossless vs silicon_palik).",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "dielectric",
+        "optical",
+        "photoelastic",
+        "viscoelastic",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from silicon; [optical] updated to Salzberg & Villa 1957 / Tatian 1984 Sellmeier fit (refractiveindex.info main/Si/Salzberg, CC0)",
+          "doi": "10.1364/JOSA.47.000244",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si&page=Salzberg",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE static relative permittivity: 11.7 (PVEducation, Ioffe NSM); 11.9 is also quoted (El-Cat)",
+          "url": "https://www.pveducation.org/pvcdrom/materials/general-properties-of-silicon",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature high-resistivity silicon microwave loss tangent (~5e-6 at 10 GHz)"
+        },
+        {
+          "cite": "M. A. Hopcroft, W. D. Nix, T. W. Kenny, What is the Young's modulus of silicon?, J. Microelectromech. Syst. 19, 229-238 (2010), table of elastic constants (c11 165.6, c12 63.9, c44 79.5 GPa, rounded as in the paper)",
+          "url": "https://sites.engineering.ucsb.edu/~sumita/courses/Courses/ME141B/HopcroftJMEMS.pdf",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE native SiO2 substrate-air surface oxide thickness and TLS loss parameters"
+        },
+        {
+          "cite": "C. D. Salzberg and J. J. Villa, J. Opt. Soc. Am. 47, 244-246 (1957); Sellmeier parameterization by B. Tatian, Appl. Opt. 23, 4477-4485 (1984), 26 degC, refractiveindex.info (Si, Salzberg, CC0)",
+          "doi": "10.1364/JOSA.47.000244",
+          "url": "https://refractiveindex.info/?shelf=main&book=Si&page=Salzberg",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "Tatian formula DOI",
+          "doi": "10.1364/AO.23.004477",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE crystalline Si photoelastic constants at 1.15-3.39 um (Biegelsen 1974 / Dixon 1967 / NumBAT library)"
+        },
+        {
+          "cite": "Thermal expansion 2.6e-6 1/K and specific heat 0.7 J/(g K): BYU cleanroom semiconductor constants; expansion also PVEducation general properties of silicon",
+          "url": "https://cleanroom.byu.edu/Semiconductor-Constants",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE thermal conductivity at 300 K: 148 W/(m K) (El-Cat silicon properties); other compilations give 130 (Ioffe NSM), 150 (PVEducation), 156; it depends on doping, isotopes and temperature",
+          "url": "https://www.el-cat.com/silicon-properties.htm",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE room-temperature silicon Akhiezer phonon viscosity tensor (Mason & Bateman 1964 / NumBAT Si)"
+        }
+      ]
+    },
+    {
+      "id": "silver",
+      "name": "silver",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "10490 kg/m^3",
+      "description": "Evaporated Ag wide-band Lorentz-Drude fit at 293 K (Rakic 1998, 0.25-12.4 um; E=83 GPa, sigma=6.30e7 S/m) — broadband analytical baseline vs sharper NIR experimental silver_johnson.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE bulk polycrystalline mechanics/thermal/electrical + verified Rakic et al. 1998 [optical] fit (0.248-12.4 um)",
+          "doi": "10.1364/AO.37.005271"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline bulk silver handbook values at 293 K (thin-film modulus depends on grain size and deposition conditions)"
+        },
+        {
+          "cite": "APPROXIMATE bulk pure silver DC conductivity at 293 K"
+        },
+        {
+          "cite": "A. D. Rakic, A. B. Djurisic, J. M. Elazar, M. L. Majewski, Optical properties of metallic films for vertical-cavity optoelectronic devices, Appl. Opt. 37, 5271-5283 (1998), Lorentz-Drude (LD) model; parameters in eV; compared with the n,k table the refractiveindex.info database computes from them",
+          "doi": "10.1364/AO.37.005271",
+          "url": "https://refractiveindex.info/?shelf=main&book=Ag&page=Rakic-LD",
+          "verified": "2026-11-04"
+        },
+        {
+          "cite": "APPROXIMATE standard bulk silver thermophysical handbook values at 300 K"
+        }
+      ]
+    },
+    {
+      "id": "silver_johnson",
+      "name": "silver_johnson",
+      "kind": "metal",
+      "point_group": "isotropic",
+      "reference_temperature": "293.15 K",
+      "density": "10490 kg/m^3",
+      "description": "Evaporated Ag thin-film experimental n,k table (Johnson & Christy 1972, 0.188-1.937 um) — sharper low-loss NIR plasmonics table vs wide-band Rakic 1998 analytical Drude-Lorentz silver.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "electrical",
+        "optical"
+      ],
+      "sources": [
+        {
+          "cite": "Mechanical, thermal and electrical properties inherited from silver; [optical] Johnson & Christy 1972 evaporated Ag table (refractiveindex.info main/Ag/Johnson, CC0)",
+          "doi": "10.1103/PhysRevB.6.4370",
+          "url": "https://refractiveindex.info/?shelf=main&book=Ag&page=Johnson",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE polycrystalline bulk silver handbook values at 293 K (thin-film modulus depends on grain size and deposition conditions)"
+        },
+        {
+          "cite": "APPROXIMATE bulk pure silver DC conductivity at 293 K"
+        },
+        {
+          "cite": "P. B. Johnson and R. W. Christy, Optical constants of the noble metals, Phys. Rev. B 6, 4370-4379 (1972), refractiveindex.info (Ag, Johnson, CC0)",
+          "doi": "10.1103/PhysRevB.6.4370",
+          "url": "https://refractiveindex.info/?shelf=main&book=Ag&page=Johnson",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "APPROXIMATE standard bulk silver thermophysical handbook values at 300 K"
+        }
+      ]
+    },
+    {
+      "id": "tin",
+      "name": "tin",
+      "kind": "superconductor",
+      "point_group": null,
+      "reference_temperature": null,
+      "density": "7265 kg/m^3",
+      "description": "White tin (beta-Sn) superconducting film (Tinkham 1996 / Kittel 2005: Tc=3.72 K, Delta_0=0.575 meV, lambda_L=34 nm, xi_0=230 nm, sigma_n=4.0e7 S/m) — compact BCS alias of beta_tin_sc.",
+      "capabilities": [
+        "superconducting"
+      ],
+      "sources": [
+        {
+          "cite": "Compiled from the per-table sources below. Density 7265 kg/m^3: C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005)",
+          "verified": "2026-11-21"
+        },
+        {
+          "cite": "M. Tinkham, Introduction to Superconductivity, 2nd ed. (McGraw-Hill, 1996) and C. Kittel, Introduction to Solid State Physics, 8th ed. (Wiley, 2005): beta-Sn T_c = 3.72 K, Delta(0) = 0.575 meV, London penetration depth lambda_L(0) = 34 nm, BCS coherence length xi_0 = 230 nm; APPROXIMATE cryogenic film normal conductivity sigma_n = 4.0e7 S/m",
+          "verified": "2026-11-21"
+        }
+      ]
+    },
+    {
+      "id": "titanium_nitride_sc",
+      "name": "titanium_nitride_sc",
+      "kind": "superconductor",
+      "point_group": "isotropic",
+      "reference_temperature": "0.02 K",
+      "density": "5220 kg/m^3",
+      "description": "Superconducting TiN thin film at <1 K (Leduc 2010 / Melville 2020: Tc=2.8-4.8 K, Lk=5-150 pH/sq, E=450 GPa) — ultra-high-Qi kinetic-inductance resonator/MKID nitride vs low-Lk aluminium_sc_emft.",
+      "capabilities": [
+        "elastic",
+        "thermal",
+        "superconducting",
+        "interfaces"
+      ],
+      "sources": [
+        {
+          "cite": "APPROXIMATE superconducting TiN film compilation from H. G. Leduc et al., Appl. Phys. Lett. 97, 102509 (2010) & A. Melville et al., Appl. Phys. Lett. 117, 124004 (2020) + Kim et al. 1992",
+          "doi": "10.1063/1.3480420"
+        },
+        {
+          "cite": "APPROXIMATE rocksalt TiN thin-film modulus (~400-500 GPa; J. O. Kim et al., J. Appl. Phys. 72, 1805 (1992), stoichiometric single-crystal/film range)",
+          "doi": "10.1063/1.351651"
+        },
+        {
+          "cite": "APPROXIMATE thin titanium oxynitride native surface layer yielding high internal Q"
+        },
+        {
+          "cite": "APPROXIMATE superconducting TiN thin-film parameters from H. G. Leduc et al., Appl. Phys. Lett. 97, 102509 (2010) & A. Melville et al., Appl. Phys. Lett. 117, 124004 (2020)",
+          "doi": "10.1063/1.3480420"
+        },
+        {
+          "cite": "APPROXIMATE dirty-limit TiN thin-film thermal properties at 4 K (depends strongly on stoichiometry N/Ti and film thickness)"
+        }
+      ]
+    }
+  ]
+}

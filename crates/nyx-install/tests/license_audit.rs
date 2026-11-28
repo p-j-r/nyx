@@ -12,7 +12,8 @@ fn default_installer_crate_has_zero_c_sys_or_wgpu_dependencies() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
 
-    // Normal runtime dependency tree must contain ZERO *-sys, C builders, or GUI/wgpu crates.
+    // Normal runtime dependency tree must contain ZERO native C *-sys wrappers, C builders, or GUI/wgpu crates.
+    // (`windows-sys` is pure-Rust Win32 FFI bindings pulled unconditionally on Windows by `zip >= 9`.)
     let normal_out = Command::new(&cargo)
         .current_dir(&manifest_dir)
         .args(["tree", "--offline", "-e", "normal", "-p", "nyx-install"])
@@ -20,8 +21,14 @@ fn default_installer_crate_has_zero_c_sys_or_wgpu_dependencies() {
         .expect("run cargo tree -e normal");
     assert!(normal_out.status.success());
     let normal_tree = String::from_utf8_lossy(&normal_out.stdout);
+    let has_c_sys = normal_tree
+        .lines()
+        .any(|line| line.contains("-sys v") && !line.contains("windows-sys v"));
+    assert!(
+        !has_c_sys,
+        "forbidden runtime dep '-sys v':\n{normal_tree}"
+    );
     for forbidden in [
-        "-sys v",
         " cc ",
         " cmake ",
         " bindgen ",

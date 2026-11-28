@@ -1,0 +1,38 @@
+// Print stylesheet — monograph paper readability
+@media print {
+  .site-header,
+  .site-footer,
+  .filter-toolbar,
+  .plate-controls,
+  .btn-copy,
+  .theme-toggle,
+  .nav-toggle,
+  .note-pager {
+    display: none !important;
+  }
+
+  body {
+    background: #FFFFFF;
+    color: #000000;
+    font-size: 10.5pt;
+  }
+
+  .sidenote {
+    display: block !important;
+    float: right;
+    clear: right;
+    width: 24ch;
+    margin-right: -28ch;
+    border-left: 1pt solid #999999;
+    padding-left: 0.75em;
+    color: #333333;
+    background: transparent !important;
+  }
+
+  .specimen-plate,
+  .solver-log,
+  pre {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+}

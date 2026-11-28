@@ -1,0 +1,606 @@
+// Swiss Lab Monograph Components — Cards, Plates, Filters, Tables, Callouts, Tabs
+
+// Buttons
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.56rem 1.05rem;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  border-radius: var(--radius-hairline);
+  border: 1px solid var(--color-control-edge);
+  background: var(--color-card);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.btn:hover {
+  background: var(--color-raised);
+  border-color: var(--color-control-edge-high);
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-offset-sm);
+}
+
+.btn-primary:hover {
+  background: var(--color-accent);
+  filter: brightness(1.06);
+  border-color: var(--color-accent);
+}
+
+.btn-mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 0.36rem 0.7rem;
+}
+
+.btn-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-plate-text);
+  background: #24272D;
+  border: 1px solid #484252;
+  border-radius: var(--radius-hairline);
+  cursor: pointer;
+}
+
+.btn-copy:hover {
+  background: #2E323A;
+  border-color: #7D738C;
+}
+
+.btn-copy.is-copied {
+  color: #5FC08C;
+  border-color: #5FC08C;
+}
+
+.btn-copy--surface {
+  color: var(--color-text);
+  background: var(--color-card);
+  border-color: var(--color-control-edge);
+}
+
+.btn-copy--surface:hover {
+  background: var(--color-raised);
+  border-color: var(--color-control-edge-high);
+}
+
+.btn-copy--surface.is-copied {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+// Specimen Cards
+.card,
+.specimen-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-card);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.card--shadow,
+.specimen-card--featured {
+  border-color: var(--color-control-edge);
+  box-shadow: var(--shadow-offset);
+}
+
+.card-kicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.card-title {
+  font-family: var(--font-serif);
+  font-size: 1.22rem;
+  font-weight: 500;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.card-desc {
+  font-size: 0.92rem;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.card-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: auto;
+}
+
+// Semantic Chips & Status Badges (always glyph + word)
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.14rem 0.48rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  border-radius: var(--radius-hairline);
+  border: 1px solid var(--color-separator);
+  background: var(--color-raised);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.chip--accent {
+  background: var(--color-tint);
+  color: var(--color-accent);
+  border-color: var(--color-separator);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.16rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: var(--radius-hairline);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.status-badge--pass {
+  color: var(--color-success);
+  background: var(--color-success-tint);
+}
+
+.status-badge--warn {
+  color: var(--color-activity-text);
+  background: var(--color-activity-tint);
+}
+
+.status-badge--fail {
+  color: var(--color-danger);
+  background: var(--color-danger-tint);
+}
+
+// Specimen Plate Frame: ALWAYS #181A1E dark viewport regardless of Light/Dark theme
+.specimen-plate {
+  margin: 1.5rem 0;
+  background: var(--color-plate-bg);
+  color: var(--color-plate-text);
+  border: 1px solid var(--color-plate-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-offset);
+  overflow: hidden;
+}
+
+.specimen-plate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid var(--color-plate-border);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-plate-muted);
+}
+
+.specimen-plate-id {
+  color: var(--color-plate-text);
+  font-weight: 600;
+}
+
+.specimen-plate-media {
+  background: var(--color-plate-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+.specimen-plate-media img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.specimen-plate-caption {
+  padding: 0.7rem 0.9rem;
+  border-top: 1px solid var(--color-plate-border);
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--color-plate-muted);
+}
+
+.specimen-thumb {
+  background: var(--color-plate-bg);
+  border: 1px solid var(--color-plate-border);
+  border-radius: var(--radius-hairline);
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.specimen-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+// Solver Log Block
+.solver-log {
+  margin: 1.25rem 0;
+  max-width: 100%;
+  min-width: 0;
+  background: var(--color-plate-bg);
+  color: var(--color-plate-text);
+  border: 1px solid var(--color-plate-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.solver-log-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--color-plate-border);
+  background: #14161A;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  color: var(--color-plate-muted);
+}
+
+.solver-log-title {
+  color: var(--color-plate-text);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.solver-log-cmd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--color-plate-border);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #E288B8;
+  overflow-x: auto;
+}
+
+.solver-log-cmd code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.solver-log-pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0.85rem 0.95rem;
+  background: var(--color-plate-bg);
+  color: var(--color-plate-text);
+  font-size: 0.79rem;
+  line-height: 1.52;
+}
+
+// Callout Boxes
+.callout {
+  margin: 1.5rem 0;
+  padding: 1rem 1.15rem;
+  background: var(--color-card);
+  border: 1px solid var(--color-separator);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-card);
+}
+
+.callout--theorem {
+  border-left-color: var(--color-accent);
+  background: var(--color-tint);
+}
+
+.callout--limit {
+  border-left-color: var(--color-activity-text);
+  background: var(--color-activity-tint);
+}
+
+.callout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text);
+  margin-bottom: 0.5rem;
+}
+
+.callout-body > :last-child {
+  margin-bottom: 0;
+}
+
+// Filter Toolbar & Search
+.filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem 1.25rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1.5rem;
+  background: var(--color-card);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-card);
+}
+
+.filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.filter-pill {
+  padding: 0.34rem 0.68rem;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  background: var(--color-page);
+  border: 1px solid var(--color-control-edge);
+  border-radius: var(--radius-hairline);
+  cursor: pointer;
+}
+
+.filter-pill:hover {
+  background: var(--color-raised);
+  color: var(--color-text);
+}
+
+.filter-pill[aria-pressed="true"] {
+  background: var(--color-tint);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+  font-weight: 600;
+}
+
+.search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.42rem 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--color-text);
+  background: var(--color-page);
+  border: 1px solid var(--color-control-edge);
+  border-radius: var(--radius-hairline);
+}
+
+.search-input::placeholder {
+  color: var(--color-muted);
+}
+
+.filter-count {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+// Monograph Data Tables
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: var(--color-card);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-card);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.68rem 0.85rem;
+  border-bottom: 1px solid var(--color-separator);
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table thead th {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+  background: var(--color-raised);
+  white-space: nowrap;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-table tbody tr:hover {
+  background: var(--color-raised);
+}
+
+// Scorecard & V&V Banner
+.vv-banner {
+  padding: 1.25rem 1.35rem;
+  background: var(--color-card);
+  border: 1px solid var(--color-control-edge);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-offset);
+  margin-bottom: 2rem;
+}
+
+.scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 1060px) {
+  .scorecard-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .scorecard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.scorecard-tile {
+  background: var(--color-card);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-card);
+  padding: 1rem;
+}
+
+.scorecard-metric {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--color-text);
+  margin: 0.35rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorecard-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.scorecard-note {
+  font-size: 0.8rem;
+  line-height: 1.42;
+  color: var(--color-muted);
+}
+
+// Platform Tabs
+.platform-tabs {
+  background: var(--color-card);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  margin: 1.5rem 0;
+}
+
+.tablist {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-separator);
+  background: var(--color-raised);
+}
+
+.tab-btn {
+  padding: 0.68rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--color-separator);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab-btn[aria-selected="true"] {
+  background: var(--color-card);
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.tab-panel {
+  padding: 1.25rem;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+// Expandable detail blocks
+.detail-row[hidden] {
+  display: none;
+}
+
+.detail-panel {
+  margin-top: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--color-page);
+  border: 1px solid var(--color-separator);
+  border-radius: var(--radius-hairline);
+  font-size: 0.84rem;
+}
+
+.empty-state {
+  padding: 2rem 1.25rem;
+  text-align: center;
+  background: var(--color-card);
+  border: 1px dashed var(--color-control-edge);
+  border-radius: var(--radius-card);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}

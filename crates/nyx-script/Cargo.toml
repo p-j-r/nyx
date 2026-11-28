@@ -14,16 +14,16 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # Monty: a Python-syntax interpreter in pure Rust (MIT, from Pydantic), pinned exactly. The interpreter runs only in the worker program
 # (src/bin/nyx-script-worker.rs); this library talks to it through monty-pool, so a script that aborts the process (memory, stack) ends one
 # worker and not the engine.
-monty-pool = "=1.6.0"
-monty-types = "=1.6.0"
+monty-pool = "=1.7.0"
+monty-types = "=1.7.0"
 tokio = { version = "1", features = ["rt", "time"] }
 # the parser Monty uses, pinned the same: the static guard of trace.rs reads a script without running it
-ruff_python_ast = "=0.0.14"
-ruff_python_parser = "=0.0.14"
-ruff_text_size = "=0.0.14"
+ruff_python_ast = "=0.0.21"
+ruff_python_parser = "=0.0.21"
+ruff_text_size = "=0.0.21"
 # the worker program only
-monty-alloc = { version = "=1.6.0", features = ["exit-code"] }
-monty-proto = { version = "=1.6.0", features = ["worker"] }
+monty-alloc = { version = "=1.7.0", features = ["exit-code"] }
+monty-proto = { version = "=1.7.0", features = ["worker"] }
 
 [[bin]]
 name = "nyx-script-worker"

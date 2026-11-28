@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="nyx mark">
+  <!-- Offset Swiss monograph shadow -->
+  <rect x="6" y="6" width="56" height="56" rx="4" fill="#531F55"/>
+  <!-- Primary plum/burgundy field -->
+  <rect x="2" y="2" width="56" height="56" rx="4" fill="#820C4F"/>
+  <!-- Geometric Swiss [n] glyph in activity amber -->
+  <path d="M18 44V20h6v4.2c2.1-3 5.2-4.7 9-4.7 6.3 0 10.5 4.2 10.5 11.1V44h-6.2V31.7c0-3.8-2.1-6.2-5.6-6.2-3.7 0-6.2 2.6-6.2 6.6V44H18z" fill="#FFBD59"/>
+  <!-- Subtle Swiss structural bracket rule -->
+  <rect x="10" y="10" width="4" height="4" fill="#F1E4EC" opacity="0.85"/>
+</svg>
