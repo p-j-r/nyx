@@ -1,0 +1,91 @@
+name: Deploy Project Hub to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "website/**"
+      - "docs/ux/tokens.json"
+      - "docs/api/**"
+      - "materials/**"
+      - "examples/**"
+      - "benchmarks/validation/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "website/**"
+      - "docs/ux/tokens.json"
+      - "docs/api/**"
+      - "materials/**"
+      - "examples/**"
+      - "benchmarks/validation/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  ZOLA_VERSION: "0.23.6"
+
+jobs:
+  build:
+    name: Build static hub (site-prep + Zola)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain (1.99.1)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - name: Cache Cargo artifacts (website/site-prep)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "website/site-prep -> target"
+
+      - name: Install Zola ${{ env.ZOLA_VERSION }}
+        run: |
+          curl -fsSL "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin zola
+          zola --version
+
+      - name: Generate site data and run confidentiality gate
+        run: cargo run --manifest-path website/site-prep/Cargo.toml -- --repo . --out website --check
+
+      - name: Check Zola site links and templates
+        run: zola --root website check
+
+      - name: Build Zola static site
+        run: zola --root website build
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/public
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

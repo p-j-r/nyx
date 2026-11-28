@@ -38,3 +38,7 @@ Thumbs.db
 /docs/architecture/c4/export/
 /docs/architecture/c4/viewer/
 /docs/architecture/c4/reports/
+
+# static project website build outputs
+/website/public/
+/website/site-prep/target/

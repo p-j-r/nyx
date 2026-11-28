@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>{{ section.extra.kicker | default(value="SECTION") }}</span>
+    </div>
+    <h1>{{ section.title }}</h1>
+    {% if section.description %}
+      <p class="lead">{{ section.description }}</p>
+    {% endif %}
+  </header>
+
+  {% if section.content %}
+    <div class="prose">
+      {{ section.content | safe }}
+    </div>
+  {% endif %}
+
+  {% if section.pages | length > 0 %}
+    <div class="section-band">
+      <div class="grid-2">
+        {% for item in section.pages %}
+          <article class="card">
+            <div class="card-kicker">
+              <span>{% if item.date %}{{ item.date | date(format="%Y-%m-%d") }}{% else %}ENTRY{% endif %}</span>
+              <span>{{ item.reading_time }} min read</span>
+            </div>
+            <h2 class="card-title"><a href="{{ item.permalink }}">{{ item.title }}</a></h2>
+            {% if item.description %}
+              <p class="card-desc">{{ item.description }}</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock content %}

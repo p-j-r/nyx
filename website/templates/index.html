@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title | default(value=config.title) }} — Pure-Rust Multiphysics &amp; cQED Workbench{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <section class="hero-band">
+    <div class="hero-grid">
+      <div>
+        <div class="kicker">
+          <span class="kicker-rule" aria-hidden="true"></span>
+          <span>{{ section.extra.kicker | default(value="PURE-RUST FINITE-ELEMENT WORKBENCH") }}</span>
+        </div>
+        <h1 class="hero-title">{{ section.extra.hero_title | default(value=section.title) }}</h1>
+        <p class="hero-subtitle">{{ section.extra.hero_subtitle | default(value=config.description) }}</p>
+
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="{{ get_url(path='/install/') }}">Install &amp; Quickstart</a>
+          <a class="btn" href="{{ get_url(path='/specimens/') }}">Specimens</a>
+          <a class="btn" href="{{ get_url(path='/benchmarks/') }}">V&amp;V Scorecard</a>
+          <a class="btn" href="{{ get_url(path='/notes/') }}">Engineering Notes</a>
+        </div>
+
+        <div class="spec-ledger" aria-label="Engine specifications">
+          <div class="spec-ledger-cell">
+            <span class="spec-ledger-label">Workspace</span>
+            <span class="spec-ledger-value">{{ config.extra.crate_count | default(value=15) }} crates · Rust {{ config.extra.rust_version | default(value="1.99.1") }}</span>
+          </div>
+          <div class="spec-ledger-cell">
+            <span class="spec-ledger-label">Engine Catalogue</span>
+            <span class="spec-ledger-value">{{ config.extra.command_count | default(value=114) }} JSON-Schema commands</span>
+          </div>
+          <div class="spec-ledger-cell">
+            <span class="spec-ledger-label">Material Library</span>
+            <span class="spec-ledger-value">{{ config.extra.material_count | default(value=41) }} public TOML records (format = 2)</span>
+          </div>
+          <div class="spec-ledger-cell">
+            <span class="spec-ledger-label">Results Storage</span>
+            <span class="spec-ledger-value">Pure-Rust HDF5 + zlib-rs</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        {% set slides = section.extra.slides | default(value=[]) %}
+        {% if slides | length > 0 %}
+          {% set first = slides[0] %}
+          {% set total_slides = slides | length %}
+          <nyx-slideshow aria-label="Capability specimen plate slideshow">
+            <div class="plate-slideshow">
+              <div class="plate-stage"
+                   role="button"
+                   tabindex="0"
+                   data-slide-stage
+                   title="Click plate or use arrows for next capability"
+                   aria-label="Click plate or press Enter to advance to next capability">
+                <div class="plate-hud-top">
+                  <span class="plate-id-pill" data-hud-plate-id>{{ first.plate_id | default(value="PLATE 01.1") }}</span>
+                  <span class="plate-badge-pill" data-hud-badge>{{ first.badge | default(value="SPECIMEN") }}</span>
+                </div>
+
+                {% for slide in slides %}
+                  <div class="plate-slide" data-slide {% if not loop.first %}hidden{% endif %}>
+                    <img src="{{ get_url(path=slide.image) }}"
+                         alt="{{ slide.title | default(value='nyx capability plate') }}"
+                         {% if not loop.first %}loading="lazy"{% endif %}>
+                    <script type="application/json" data-slide-json>{{ slide | json_encode | safe }}</script>
+                  </div>
+                {% endfor %}
+
+                <span class="plate-stage-hint" aria-hidden="true">Click plate or use arrows for next capability</span>
+              </div>
+
+              <div class="plate-controls">
+                <button type="button" class="plate-ctrl-btn" data-slide-prev aria-label="Previous capability plate">◀</button>
+                <div class="plate-segments" role="group" aria-label="Select capability plate">
+                  {% for slide in slides %}
+                    <button type="button"
+                            class="plate-seg{% if loop.first %} is-active{% endif %}"
+                            data-slide-dot
+                            aria-label="Show {{ slide.plate_id | default(value='plate') }}: {{ slide.title | default(value='') }}"
+                            aria-current="{% if loop.first %}true{% else %}false{% endif %}">
+                      <span class="plate-seg-fill"></span>
+                    </button>
+                  {% endfor %}
+                </div>
+                <span class="plate-counter" data-slide-counter>01 / {% if total_slides < 10 %}0{% endif %}{{ total_slides }}</span>
+                <button type="button" class="plate-ctrl-btn" data-slide-next aria-label="Next capability plate">▶</button>
+                <button type="button" class="plate-ctrl-btn plate-auto-btn" data-slide-toggle aria-pressed="false" title="Pause or resume 6-second cycle">Auto · 6s</button>
+              </div>
+
+              <div class="plate-caption-bar">
+                <h2 class="plate-caption-title" data-caption-title>{{ first.title | default(value="") }}</h2>
+                <p class="plate-caption-text" data-caption-text>{{ first.caption | default(value="") }}</p>
+              </div>
+
+              <div class="solver-log plate-solver-log" data-slideshow-log-target aria-live="polite">
+                <div class="solver-log-head">
+                  <span class="solver-log-title">What the solver did · <span data-log-plate-id>{{ first.plate_id | default(value="PLATE 01.1") }}</span></span>
+                  <button type="button"
+                          class="btn-copy"
+                          data-copy-btn
+                          data-log-copy
+                          data-copy-text="{{ first.command | default(value='') }}">Copy cmd</button>
+                </div>
+                <div class="solver-log-cmd">
+                  <span>$ <code data-log-cmd>{{ first.command | default(value="") }}</code></span>
+                </div>
+                <div class="plate-solver-metrics" data-log-metrics {% if not first.metrics %}hidden{% endif %}>
+                  {{ first.metrics | default(value="") }}
+                </div>
+                <pre class="solver-log-pre"><code data-log-stdout>{% if first.solver_log %}{{ first.solver_log | join(sep="\n") }}{% endif %}</code></pre>
+              </div>
+            </div>
+          </nyx-slideshow>
+        {% else %}
+          <figure class="specimen-plate" style="margin: 0;">
+            <div class="specimen-plate-bar">
+              <span class="specimen-plate-id">PLATE 01</span>
+              <span>SPECIMEN STAGE READY</span>
+            </div>
+            <div class="specimen-plate-caption">
+              Populate <code>extra.slides</code> in <code>website/content/_index.md</code> to render the 5-plate interactive capability slideshow.
+            </div>
+          </figure>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="section-band">
+    <div class="section-head">
+      <div>
+        <div class="kicker"><span class="kicker-rule" aria-hidden="true"></span><span>01 · ARCHITECTURE</span></div>
+        <h2>Three front-ends driving one deterministic engine</h2>
+      </div>
+      <a class="btn btn-mono" href="{{ get_url(path='/api/') }}">Browse {{ config.extra.command_count | default(value=114) }} commands →</a>
+    </div>
+
+    <div class="grid-3">
+      <article class="card">
+        <div class="card-kicker"><span>CRATE · app</span><span>DESKTOP</span></div>
+        <h3 class="card-title">egui / wgpu Window</h3>
+        <p class="card-desc">Interactive 2D/3D viewport, Study/Physics/Materials tabs generated from physics descriptors, Ctrl+K command palette, and live convergence indicators.</p>
+        <div class="card-meta-row">
+          <span class="chip">nyx FILE.nyx.json</span>
+          <span class="chip">F5 Compute</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-kicker"><span>CRATE · nyx-script</span><span>SANDBOXED</span></div>
+        <h3 class="card-title">Monty-Run <code>*.nys</code> Scripts</h3>
+        <p class="card-desc">Python-syntax scripts executed in an isolated worker process with bounded memory allocation and directory confinement via <code>nyx check</code> and <code>nyx run</code>.</p>
+        <div class="card-meta-row">
+          <span class="chip">nyx check FILE.nys</span>
+          <span class="chip">nyx run FILE.nys</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-kicker"><span>CRATE · nyx-mcp</span><span>AI HOSTS</span></div>
+        <h3 class="card-title">Four-Tool Stdio MCP Server</h3>
+        <p class="card-desc">Exposes <code>script_run</code>, <code>script_wait</code>, <code>script_check</code>, and <code>api</code> over a persistent session. Wired by <code>nyx-connect</code> into Claude, Cursor, and VS Code.</p>
+        <div class="card-meta-row">
+          <span class="chip">nyx-connect connect all</span>
+          <span class="chip">JSON Schema</span>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section-band">
+    <div class="section-head">
+      <div>
+        <div class="kicker"><span class="kicker-rule" aria-hidden="true"></span><span>02 · PHYSICS KERNELS</span></div>
+        <h2>Strictly isolated PDE solvers on a shared FEM core</h2>
+      </div>
+      <a class="btn btn-mono" href="{{ get_url(path='/specimens/') }}">View Specimen Gallery →</a>
+    </div>
+
+    <div class="grid-3">
+      <article class="card">
+        <div class="card-kicker"><span>nyx-dfs</span><span>DIFFUSION &amp; ELECTROSTATICS</span></div>
+        <h3 class="card-title">Electrostatics, Magnetostatics &amp; Heat</h3>
+        <p class="card-desc">2D/3D electrostatics with Prager–Synge H(div) flux bounds, 3-layer planar BEM, spherical-harmonic far field, stationary and transient (exact/BDF2) heat transfer.</p>
+        <div class="card-meta-row">
+          <span class="chip chip--accent">0.000e0 thread drift</span>
+          <span class="chip">P1 / P2 + quarter-point</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-kicker"><span>nyx-sms</span><span>SOLID MECHANICS</span></div>
+        <h3 class="card-title">Elasticity, Piezoelectrics &amp; Anchor Loss</h3>
+        <p class="card-desc">Static, eigenfrequency, axisymmetric, driven, and 2.5D elastic waveguide modes with full anisotropic stiffness/photoelastic tensors, PML, LRB, and Floquet pairs.</p>
+        <div class="card-meta-row">
+          <span class="chip">Euler Z-X-Z</span>
+          <span class="chip">PML &amp; Floquet</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-kicker"><span>nyx-ems</span><span>ELECTROMAGNETICS &amp; cQED</span></div>
+        <h3 class="card-title">Waveguides, Cavities &amp; Driven ROM</h3>
+        <p class="card-desc">Full-vector Nédélec(2)+P2 waveguides with Stokes polarisation analysis, 3D cavities with BCS surface reactance, Craig–Bampton BBQ, EPR, and Loewner/PROM driven sweeps.</p>
+        <div class="card-meta-row">
+          <span class="chip">Nédélec deg 1 &amp; 2</span>
+          <span class="chip">Block shift-invert</span>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  {% if section.content %}
+  <section class="section-band">
+    <div class="prose">
+      {{ section.content | safe }}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock content %}

@@ -1,0 +1,1228 @@
+{
+  "suite_count": 6,
+  "target_count": 29,
+  "suites": [
+    {
+      "id": "cqed_palace_q3d_squadds",
+      "version": "1.0.0",
+      "citations": [
+        "AWS Center for Quantum Computing, Palace (PArallel LArge-scale Computational Electromagnetics), examples/coax & examples/cylinder (2024)",
+        "SQuADDS_DB (commit 0e25705f) & Ansys Q3D/HFSS benchmarks q3d_cap_0554 (Xmon) & q3d_cap_0470 (TransmonPocket), arXiv:2312.13483"
+      ],
+      "methodology": "Epistemic/aleatoric separation: Prager-Synge dual flux bounds [S_low, S_up] checked against cross-code/analytical D without folding delta_ep into Gaussian variance; eigenmode and S21 driven benchmarks checked via ASME V&V 20 AND rule.",
+      "target_count": 4,
+      "cases": {
+        "cavity_3d_eigen_and_driven": {
+          "description": "3D lossy rectangular microwave cavity (a=40mm, c=30mm, b=20mm, sigma=5.8e7 S/m copper IBC) TE101 eigenmode f_0, wall-loss Q_0, and 2-port driven S21 parity",
+          "driven_s21_clt_tolerances": {
+            "f_r_tol_rel": 0.005,
+            "q_l_tol_rel": 0.05
+          },
+          "geometry": {
+            "a_m": 0.04,
+            "b_m": 0.02,
+            "c_m": 0.03,
+            "sigma_cu_s_per_m": 58000000.0
+          },
+          "targets": [
+            {
+              "coverage_k": 2.0,
+              "description": "TE101 rectangular cavity fundamental frequency c0/2 * sqrt(1/a^2 + 1/c^2)",
+              "id": "cavity_te101_freq",
+              "quantity": "f_TE101",
+              "reference_value": 6245676208.333,
+              "tol_abs": 0.0,
+              "tol_rel": 0.01,
+              "u_d": 100000.0,
+              "u_input": 100000.0,
+              "unit": "Hz"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "TE101 rectangular copper cavity unloaded surface-loss quality factor Q_0 (Pozar Eq. 6.51)",
+              "id": "cavity_te101_q0",
+              "quantity": "Q0_TE101",
+              "reference_value": 10806.04,
+              "tol_abs": 0.0,
+              "tol_rel": 0.05,
+              "u_d": 80.0,
+              "u_input": 120.0,
+              "unit": "1"
+            }
+          ]
+        },
+        "coax_cylinder_electrostatic": {
+          "geometry": {
+            "a_m": 0.00001,
+            "b_m": 0.00003,
+            "eps_r": 11.7,
+            "length_m": 0.0001
+          },
+          "target": {
+            "coverage_k": 2.0,
+            "description": "Exact cylindrical coaxial capacitance 2*pi*eps0*eps_r*L / ln(b/a) with Prager-Synge dual flux bounds",
+            "id": "coax_c_exact",
+            "quantity": "C_coax",
+            "reference_value": 5.924749696966e-14,
+            "tol_abs": 0.0,
+            "tol_rel": 0.015,
+            "u_d": 5e-17,
+            "u_input": 5e-17,
+            "unit": "F"
+          }
+        },
+        "planar_gds_pocket_cross_code": {
+          "description": "3-terminal GDSII TransmonPocket + readout claw on 180 um Si (eps_r=11.45), cross-checking 3D volumetric FEM Prager-Synge bounds vs independent 2D layered Green-function planar_bem solver",
+          "geometry": {
+            "claw_x_m": 0.000055,
+            "claw_y_hi_m": 0.000098,
+            "claw_y_lo_m": 0.000086,
+            "eps_r_si": 11.45,
+            "gnd_outer_m": 0.00022,
+            "pad_half_x_m": 0.000065,
+            "pad_y_hi_m": 0.000068,
+            "pad_y_lo_m": 0.000012,
+            "pocket_x_m": 0.00011,
+            "pocket_y_m": 0.00013,
+            "t_sub_m": 0.00018
+          },
+          "tol_rel": 0.02,
+          "u_d_rel": 0.005,
+          "u_input_rel": 0.005
+        },
+        "squadds_q3d_reduction": {
+          "xmon_q3d_cap_0554": {
+            "e_j_hz": 15000000000.0,
+            "f_r_hz": 6500000000.0,
+            "maxwell_matrix_f": [
+              [
+                2.662751602122418e-13,
+                -6.706011354094588e-14,
+                -1.7231834463911894e-13
+              ],
+              [
+                -6.706011354094588e-14,
+                6.917479232898475e-14,
+                -1.983533590526942e-15
+              ],
+              [
+                -1.7231834463911894e-13,
+                -1.983533590526942e-15,
+                1.7560664203508705e-13
+              ]
+            ],
+            "target_ec_hz": {
+              "coverage_k": 2.0,
+              "description": "SQuADDS q3d_cap_0554 Xmon Eq. (17) charging energy E_C",
+              "id": "squadds_0554_ec",
+              "quantity": "E_C",
+              "reference_value": 110305299.505,
+              "tol_abs": 0.0,
+              "tol_rel": 0.005,
+              "u_d": 50000.0,
+              "u_input": 50000.0,
+              "unit": "Hz"
+            },
+            "terminals": [
+              "c0",
+              "c1",
+              "c2"
+            ],
+            "z0_ohm": 50.0
+          }
+        }
+      }
+    },
+    {
+      "id": "cqed_park2026",
+      "version": "1.0.0",
+      "citations": [
+        "S. Park et al., \"Experimental and electromagnetic modeling of kinetic-inductance disordered Nb superconducting resonators\", npj Quantum Information (2026) — Fig. 1d-e (100 nm Nb CPW on 500 um Si)"
+      ],
+      "methodology": "ASME V&V 20 explicit AND rule: |E| <= tol_rel*|D| + tol_abs AND |E| <= 2*u_val where u_val = sqrt(u_num^2 + u_input^2 + u_D^2).",
+      "target_count": 3,
+      "cases": {
+        "cpw_100nm_nb": {
+          "bcs_material": {
+            "f_ref_hz": 7064000000.0,
+            "film_model": "kerr",
+            "gap_0_j": 2.23503640443e-22,
+            "lambda_l_m": 3.33e-8,
+            "name": "nb_park2026",
+            "sigma_n_s_per_m": 55000000.0,
+            "tc_k": 9.2,
+            "xi_0_m": 3.9e-8
+          },
+          "geometry": {
+            "eps_r_si": 11.45,
+            "film_thickness_m": 1e-7,
+            "h_air_m": 0.0005,
+            "h_sub_m": 0.0005,
+            "l_res_m": 0.00808,
+            "s_gap_m": 0.00002895,
+            "w_box_m": 0.000297,
+            "w_trace_m": 0.0000493
+          },
+          "t_over_tc_sweep": [
+            0.01,
+            0.25,
+            0.5,
+            0.65,
+            0.75,
+            0.85
+          ],
+          "targets": [
+            {
+              "coverage_k": 2.0,
+              "description": "100 nm Nb CPW resonator lossless PEC reference frequency (Fig. 1d)",
+              "id": "park2026_cpw_f_pec",
+              "quantity": "f_PEC",
+              "reference_value": 7064000000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.015,
+              "u_d": 10000000.0,
+              "u_input": 28000000.0,
+              "unit": "Hz"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "100 nm Nb CPW resonator at T = 10 mK with BCS kinetic inductance (Fig. 1d)",
+              "id": "park2026_cpw_f_10mk",
+              "quantity": "f_0(10mK)",
+              "reference_value": 6910000000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.015,
+              "u_d": 10000000.0,
+              "u_input": 28000000.0,
+              "unit": "Hz"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "Kinetic inductance frequency pull f_0(10mK) - f_PEC (Fig. 1d)",
+              "id": "park2026_cpw_df_kin",
+              "quantity": "delta_f_kin",
+              "reference_value": -154000000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.1,
+              "u_d": 4000000.0,
+              "u_input": 6000000.0,
+              "unit": "Hz"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cqed_scqubits_tls",
+      "version": "1.0.0",
+      "citations": [
+        "J. Koch et al., Phys. Rev. A 76, 042319 (2007) — Charge-insensitive transmon Cooper-pair box spectrum",
+        "P. Groszkowski and J. Koch, Quantum 5, 583 (2021) — scqubits Python package harmonic-oscillator & charge-basis spectra",
+        "G. Calusine et al., Appl. Phys. Lett. 112, 062601 (2018); W. Woods et al., Phys. Rev. Applied 12, 014012 (2019); A. P. M. Place et al., Nature Commun. 12, 1779 (2021)"
+      ],
+      "methodology": "Frozen high-cutoff scqubits reference spectra compared against nyx-analysis Craig-Bampton 3D Fluxonium+resonator and Cooper-pair-box solvers; 3D matched-asymptotic TLS interface participation validated against resolved 2 nm oxide 2D reference and substrate trench monotonicity.",
+      "target_count": 8,
+      "cases": {
+        "frozen_scqubits_fluxonium": {
+          "ec_hz": 1000000000.0,
+          "ej_hz": 4000000000.0,
+          "el_hz": 1000000000.0,
+          "f_r_hz": 7000000000.0,
+          "flux_points": [
+            {
+              "phi_ext_over_phi0": 0.0,
+              "targets": [
+                {
+                  "coverage_k": 2.0,
+                  "description": "Bare Fluxonium (EC=EL=1 GHz, EJ=4 GHz) f01 at Phi_ext = 0",
+                  "id": "scq_flux0_f01",
+                  "quantity": "f_01",
+                  "reference_value": 5423392000.0,
+                  "tol_abs": 0.0,
+                  "tol_rel": 0.005,
+                  "u_d": 500000.0,
+                  "u_input": 2000000.0,
+                  "unit": "Hz"
+                },
+                {
+                  "coverage_k": 2.0,
+                  "description": "Bare Fluxonium f02 at Phi_ext = 0",
+                  "id": "scq_flux0_f02",
+                  "quantity": "f_02",
+                  "reference_value": 9721834000.0,
+                  "tol_abs": 0.0,
+                  "tol_rel": 0.005,
+                  "u_d": 1000000.0,
+                  "u_input": 4000000.0,
+                  "unit": "Hz"
+                }
+              ]
+            },
+            {
+              "phi_ext_over_phi0": 0.25,
+              "targets": [
+                {
+                  "coverage_k": 2.0,
+                  "description": "Bare Fluxonium f01 at Phi_ext = 0.25 Phi_0",
+                  "id": "scq_flux025_f01",
+                  "quantity": "f_01",
+                  "reference_value": 4922216000.0,
+                  "tol_abs": 0.0,
+                  "tol_rel": 0.005,
+                  "u_d": 500000.0,
+                  "u_input": 2000000.0,
+                  "unit": "Hz"
+                },
+                {
+                  "coverage_k": 2.0,
+                  "description": "Bare Fluxonium f02 at Phi_ext = 0.25 Phi_0",
+                  "id": "scq_flux025_f02",
+                  "quantity": "f_02",
+                  "reference_value": 7024157000.0,
+                  "tol_abs": 0.0,
+                  "tol_rel": 0.005,
+                  "u_d": 800000.0,
+                  "u_input": 3000000.0,
+                  "unit": "Hz"
+                }
+              ]
+            },
+            {
+              "phi_ext_over_phi0": 0.5,
+              "targets": [
+                {
+                  "coverage_k": 2.0,
+                  "description": "Bare Fluxonium f01 at half-flux sweet spot Phi_ext = 0.5 Phi_0",
+                  "id": "scq_flux05_f01",
+                  "quantity": "f_01",
+                  "reference_value": 581849000.0,
+                  "tol_abs": 0.0,
+                  "tol_rel": 0.005,
+                  "u_d": 100000.0,
+                  "u_input": 500000.0,
+                  "unit": "Hz"
+                },
+                {
+                  "coverage_k": 2.0,
+                  "description": "Bare Fluxonium f12 at half-flux sweet spot Phi_ext = 0.5 Phi_0",
+                  "id": "scq_flux05_f12",
+                  "quantity": "f_12",
+                  "reference_value": 3388587000.0,
+                  "tol_abs": 0.0,
+                  "tol_rel": 0.005,
+                  "u_d": 300000.0,
+                  "u_input": 1500000.0,
+                  "unit": "Hz"
+                }
+              ]
+            }
+          ]
+        },
+        "frozen_scqubits_transmon": {
+          "ec_hz": 300000000.0,
+          "ej_hz": 18000000000.0,
+          "targets": [
+            {
+              "coverage_k": 2.0,
+              "description": "Exact Cooper-pair-box Transmon f01 (EC=0.30 GHz, EJ=18.0 GHz)",
+              "id": "scq_transmon_f01",
+              "quantity": "f_01",
+              "reference_value": 6256996000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.0005,
+              "u_d": 500000.0,
+              "u_input": 1000000.0,
+              "unit": "Hz"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "Exact Cooper-pair-box Transmon anharmonicity alpha (EC=0.30 GHz, EJ=18.0 GHz)",
+              "id": "scq_transmon_alpha",
+              "quantity": "alpha",
+              "reference_value": -339523000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.0005,
+              "u_d": 50000.0,
+              "u_input": 100000.0,
+              "unit": "Hz"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "photonics_benchmarks",
+      "version": "1.0.0",
+      "citations": [
+        "S. G. Johnson and J. D. Joannopoulos, Opt. Express 8, 173 (2001) — MIT Photonic-Bands (MPB)",
+        "A. F. Oskooi et al., Comput. Phys. Commun. 181, 687 (2010) — MEEP",
+        "L. Chrostowski and M. Hochberg, Silicon Photonics Design: From Devices to Systems (Cambridge Univ. Press, 2015)"
+      ],
+      "methodology": "Cross-code validation of 2D/3D photonic eigenmodes, group index n_g, Floquet-Bloch Bragg band edges, 3D SWG dispersion, and radiative leaky grating decay alpha against archived MPB/Lumerical/analytical targets under ASME V&V 20.",
+      "target_count": 4,
+      "cases": {
+        "bragg_and_swg_bloch": {
+          "bragg_edge_tol_rel": 0.005,
+          "bragg_stack_d_m": [
+            0.0075,
+            0.0125
+          ],
+          "bragg_stack_n": [
+            3.4641016151377544,
+            1.4142135623730951
+          ],
+          "swg_3d": {
+            "alpha_tol_rel": 0.08,
+            "nb_tol_rel": 0.002,
+            "ng_tol_rel": 0.002,
+            "pitch_radiative_m": 6.2e-7,
+            "pitch_subwavelength_m": 2.4e-7,
+            "wavelength_m": 1.55e-6
+          }
+        },
+        "soi_wires_1550nm": {
+          "n_si": 3.4757,
+          "n_sio2": 1.444,
+          "strip_500x220_chrostowski": {
+            "height_m": 2.2e-7,
+            "n_si_chrostowski": 3.476,
+            "n_sio2_chrostowski": 1.444,
+            "targets": [
+              {
+                "coverage_k": 2.0,
+                "description": "500x220 nm Chrostowski & Hochberg (2015) SOI TE0 n_eff at 1550 nm (fixed-n Lumerical MODE)",
+                "id": "soi_500x220_te0_neff",
+                "quantity": "n_eff_TE0",
+                "reference_value": 2.444,
+                "tol_abs": 0.0,
+                "tol_rel": 0.002,
+                "u_d": 0.0015,
+                "u_input": 0.0015,
+                "unit": "1"
+              },
+              {
+                "coverage_k": 2.0,
+                "description": "500x220 nm Chrostowski & Hochberg (2015) SOI TE0 group index n_g (dispersionless n) cross-check",
+                "id": "soi_500x220_te0_ng",
+                "quantity": "n_g_TE0",
+                "reference_value": 4.19,
+                "tol_abs": 0.0,
+                "tol_rel": 0.005,
+                "u_d": 0.004,
+                "u_input": 0.004,
+                "unit": "1"
+              }
+            ],
+            "width_m": 5e-7
+          },
+          "strip_500x300": {
+            "height_m": 3e-7,
+            "targets": [
+              {
+                "coverage_k": 2.0,
+                "description": "500x300 nm SOI strip TE0 effective index at 1550 nm (Lumerical/MPB cross-code)",
+                "id": "soi_500x300_te0_neff",
+                "quantity": "n_eff_TE0",
+                "reference_value": 2.67179,
+                "tol_abs": 0.0,
+                "tol_rel": 0.001,
+                "u_d": 0.0008,
+                "u_input": 0.001,
+                "unit": "1"
+              },
+              {
+                "coverage_k": 2.0,
+                "description": "500x300 nm SOI strip TM0 effective index at 1550 nm (Lumerical/MPB cross-code)",
+                "id": "soi_500x300_tm0_neff",
+                "quantity": "n_eff_TM0",
+                "reference_value": 2.33374,
+                "tol_abs": 0.0,
+                "tol_rel": 0.001,
+                "u_d": 0.0008,
+                "u_input": 0.001,
+                "unit": "1"
+              }
+            ],
+            "width_m": 5e-7
+          },
+          "wavelength_m": 1.55e-6
+        }
+      }
+    },
+    {
+      "id": "solid_mems_piezo_benchmarks",
+      "version": "1.0.0",
+      "citations": [
+        "D. S. Bindel and S. Govindjee, Elastic PMLs for resonator anchor loss simulation, Int. J. Numer. Meth. Engng. 64, 789-818 (2005)",
+        "Z. Hao, A. Erbil, F. Ayazi, An analytical model for support loss in micromachined beam resonators, Sensors Actuators A 109, 156 (2003)",
+        "K. Tsubouchi and N. Mikoshiba, Zero-temperature-coefficient SAW delay line on AlN epitaxial films, IEEE Trans. Sonics Ultrason. SU-32, 634-644 (1985)",
+        "IEEE Std 176-1987, Standard on Piezoelectricity (Mason 1D BAW electromechanical coupling k_t^2)"
+      ],
+      "methodology": "Axisymmetric PML MEMS anchor loss Q, Kelvin-Voigt/Akhiezer viscoelastic Q_m, and coupled 3D/2D piezoelectric AlN BAW FBAR validation using ASME V&V 20 explicit AND rule with GCI/refinement u_num.",
+      "target_count": 4,
+      "cases": {
+        "akhiezer_viscoelastic": {
+          "aln_dielectric_tan_delta": 0.001,
+          "cantilever_tau_1us": {
+            "e_pa": 100000000000.0,
+            "h_m": 0.1,
+            "l_m": 1.0,
+            "nu": 0.0,
+            "qm_tol_rel": 0.05,
+            "rho_kg_m3": 2500.0,
+            "tau_s": 1e-6
+          },
+          "qm_tol_rel": 0.05
+        },
+        "aln_baw_piezoelectric": {
+          "geometry": {
+            "lx_m": 4e-7,
+            "ly_m": 4e-7,
+            "thickness_m": 2e-6
+          },
+          "material_tsubouchi_1985": {
+            "c11_pa": 410000000000.0,
+            "c12_pa": 149000000000.0,
+            "c13_pa": 99000000000.0,
+            "c33_pa": 389000000000.0,
+            "c44_pa": 125000000000.0,
+            "e15": -0.48,
+            "e31": -0.58,
+            "e33": 1.55,
+            "eps11_s": 9.21,
+            "eps33_s": 10.12,
+            "rho_kg_m3": 3260.0
+          },
+          "targets": [
+            {
+              "coverage_k": 2.0,
+              "description": "1D AlN BAW open-circuit anti-resonant (parallel) frequency f_p = sqrt(c33^D/rho)/(2d)",
+              "id": "aln_baw_fp",
+              "quantity": "f_p",
+              "reference_value": 2823449000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.01,
+              "u_d": 2000000.0,
+              "u_input": 5000000.0,
+              "unit": "Hz"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "1D AlN BAW short-circuit series resonant frequency f_s from Mason tan(phi)/phi = 1/kt^2",
+              "id": "aln_baw_fs",
+              "quantity": "f_s",
+              "reference_value": 2747672000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.01,
+              "u_d": 2000000.0,
+              "u_input": 5000000.0,
+              "unit": "Hz"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "1D AlN BAW electromechanical coupling factor k_t^2 = e33^2/(c33^D * eps33^S)",
+              "id": "aln_baw_kt2",
+              "quantity": "k_t2",
+              "reference_value": 0.06448175,
+              "tol_abs": 0.0,
+              "tol_rel": 0.03,
+              "u_d": 0.0004,
+              "u_input": 0.0008,
+              "unit": "1"
+            }
+          ]
+        },
+        "disk_anchor_loss": {
+          "anchor_q_pml_invariance_tol_rel": 0.1,
+          "geometry": {
+            "bessel_root_nu_022": 1.9976506,
+            "e_pa": 160000000000.0,
+            "h_disk_m": 1e-6,
+            "h_post_m": 5e-7,
+            "nu": 0.22,
+            "r_disk_m": 6e-6,
+            "r_post_m": 8e-7,
+            "rho_kg_m3": 2330.0
+          },
+          "targets": [
+            {
+              "coverage_k": 2.0,
+              "description": "Polysilicon radial-contour free-disk closed-form frequency (lambda*c/(2*pi*R), lambda=1.99765060)",
+              "id": "disk_contour_f0",
+              "quantity": "f_0",
+              "reference_value": 450155249.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.01,
+              "u_d": 500000.0,
+              "u_input": 2000000.0,
+              "unit": "Hz"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "thermal_nafems_benchmarks",
+      "version": "1.0.0",
+      "citations": [
+        "NAFEMS Publication TNSB Rev. 3, The Standard NAFEMS Benchmarks: Tests T1 (Membrane with Hot-Spot), T2 (1D Radiation), T3 (1D Transient Conduction), T4 (2D Steady Convection)",
+        "S. Timoshenko, Analysis of bi-metal thermostats, J. Opt. Soc. Am. 11, 233-255 (1925)"
+      ],
+      "methodology": "Point/transient/steady NAFEMS thermal targets and coupled thermomechanical bimetallic deflection/stress validated using ASME V&V 20 explicit AND rule with 3-grid GCI / 2-grid refinement u_num.",
+      "target_count": 6,
+      "cases": {
+        "coupled_bimorph_si_al": {
+          "al": {
+            "alpha": 0.000023,
+            "e_pa": 70000000000.0,
+            "k": 237.0,
+            "nu": 0.33
+          },
+          "h_al_m": 0.0005,
+          "h_si_m": 0.0005,
+          "length_m": 0.02,
+          "si": {
+            "alpha": 2.6e-6,
+            "e_pa": 160000000000.0,
+            "k": 148.0,
+            "nu": 0.22
+          },
+          "t_hot_k": 393.15,
+          "t_ref_k": 293.15,
+          "target": {
+            "coverage_k": 2.0,
+            "description": "Timoshenko (1925) coupled Si/Al bimorph tip deflection w(L) at deltaT=100 K (kappa=2.927667/m -> 0.585533 mm)",
+            "id": "bimorph_tip_deflection",
+            "quantity": "u_z(L)",
+            "reference_value": 0.0005855334,
+            "tol_abs": 0.0,
+            "tol_rel": 0.01,
+            "u_d": 5e-7,
+            "u_input": 2e-6,
+            "unit": "m"
+          }
+        },
+        "nafems_t1_hotspot": {
+          "alpha_per_k": 0.00001,
+          "delta_t_k": 100.0,
+          "e_pa": 100000000000.0,
+          "hotspot_radius_m": 0.001,
+          "nu": 0.3,
+          "plate_quarter_m": 0.01,
+          "probe_point_d_m": [
+            0.00105,
+            0.0
+          ],
+          "targets": [
+            {
+              "coverage_k": 2.0,
+              "description": "NAFEMS T1 hoop/direct stress sigma_zz at outer hot-spot boundary Point D (finite-plate b/a=10 Lame = 50.50 MPa; NAFEMS infinite target = 50.0 MPa)",
+              "id": "nafems_t1_sigma_yy_d",
+              "quantity": "sigma_zz_D",
+              "reference_value": 50500000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.025,
+              "u_d": 500000.0,
+              "u_input": 150000.0,
+              "unit": "Pa"
+            },
+            {
+              "coverage_k": 2.0,
+              "description": "NAFEMS T1 compressive biaxial stress inside hot spot r < a (-50.0 MPa infinite; -49.50 MPa finite b/a=10)",
+              "id": "nafems_t1_sigma_interior",
+              "quantity": "sigma_xx_in",
+              "reference_value": -49500000.0,
+              "tol_abs": 0.0,
+              "tol_rel": 0.025,
+              "u_d": 500000.0,
+              "u_input": 150000.0,
+              "unit": "Pa"
+            }
+          ]
+        },
+        "nafems_t2_radiation": {
+          "emissivity": 0.98,
+          "k_w_mk": 55.6,
+          "length_m": 0.1,
+          "sigma_sb": 5.67e-8,
+          "t_a_k": 1000.0,
+          "t_inf_k": 300.0,
+          "target": {
+            "coverage_k": 2.0,
+            "description": "NAFEMS T2 radiating tip temperature T_B solved via Newton linearized convection in dfs::heat",
+            "id": "nafems_t2_t_b",
+            "quantity": "T_B",
+            "reference_value": 927.007606,
+            "tol_abs": 0.0,
+            "tol_rel": 0.005,
+            "u_d": 0.5,
+            "u_input": 0.25,
+            "unit": "K"
+          },
+          "width_m": 0.01
+        },
+        "nafems_t3_transient": {
+          "amp_c": 100.0,
+          "cp_j_kgk": 440.5,
+          "k_w_mk": 35.0,
+          "length_m": 0.1,
+          "period_half_s": 40.0,
+          "probe_x_m": 0.08,
+          "rho_kg_m3": 7200.0,
+          "t_end_s": 32.0,
+          "target": {
+            "coverage_k": 2.0,
+            "description": "NAFEMS T3 Rev. 3 temperature at x=0.08 m, t=32 s (exact Duhamel series 36.6030 C)",
+            "id": "nafems_t3_x008_t32",
+            "quantity": "T(0.08, 32)",
+            "reference_value": 36.603045,
+            "tol_abs": 0.0,
+            "tol_rel": 0.005,
+            "u_d": 0.05,
+            "u_input": 0.05,
+            "unit": "degC"
+          },
+          "width_m": 0.01
+        },
+        "nafems_t4_convection": {
+          "h_w_m2k": 750.0,
+          "height_m": 1.0,
+          "k_w_mk": 52.0,
+          "probe_e_m": [
+            0.6,
+            0.2
+          ],
+          "t_base_c": 100.0,
+          "t_ext_c": 0.0,
+          "target": {
+            "coverage_k": 2.0,
+            "description": "NAFEMS T4 steady 2D convective plate temperature at E=(0.6, 0.2) m (Fourier series 18.2538 C; NAFEMS 18.3 C)",
+            "id": "nafems_t4_point_e",
+            "quantity": "T_E(0.6, 0.2)",
+            "reference_value": 18.253757,
+            "tol_abs": 0.0,
+            "tol_rel": 0.005,
+            "u_d": 0.05,
+            "u_input": 0.03,
+            "unit": "degC"
+          },
+          "width_m": 0.6
+        }
+      }
+    }
+  ],
+  "targets": [
+    {
+      "suite": "cqed_palace_q3d_squadds",
+      "case_group": "cavity_3d_eigen_and_driven",
+      "id": "cavity_te101_freq",
+      "description": "TE101 rectangular cavity fundamental frequency c0/2 * sqrt(1/a^2 + 1/c^2)",
+      "quantity": "f_TE101",
+      "unit": "Hz",
+      "reference_value": 6245676208.333,
+      "u_input": 100000.0,
+      "u_d": 100000.0,
+      "tol_rel": 0.01,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_palace_q3d_squadds",
+      "case_group": "cavity_3d_eigen_and_driven",
+      "id": "cavity_te101_q0",
+      "description": "TE101 rectangular copper cavity unloaded surface-loss quality factor Q_0 (Pozar Eq. 6.51)",
+      "quantity": "Q0_TE101",
+      "unit": "1",
+      "reference_value": 10806.04,
+      "u_input": 120.0,
+      "u_d": 80.0,
+      "tol_rel": 0.05,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_palace_q3d_squadds",
+      "case_group": "coax_cylinder_electrostatic",
+      "id": "coax_c_exact",
+      "description": "Exact cylindrical coaxial capacitance 2*pi*eps0*eps_r*L / ln(b/a) with Prager-Synge dual flux bounds",
+      "quantity": "C_coax",
+      "unit": "F",
+      "reference_value": 5.924749696966e-14,
+      "u_input": 5e-17,
+      "u_d": 5e-17,
+      "tol_rel": 0.015,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_palace_q3d_squadds",
+      "case_group": "squadds_q3d_reduction.xmon_q3d_cap_0554",
+      "id": "squadds_0554_ec",
+      "description": "SQuADDS q3d_cap_0554 Xmon Eq. (17) charging energy E_C",
+      "quantity": "E_C",
+      "unit": "Hz",
+      "reference_value": 110305299.505,
+      "u_input": 50000.0,
+      "u_d": 50000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_park2026",
+      "case_group": "cpw_100nm_nb",
+      "id": "park2026_cpw_f_pec",
+      "description": "100 nm Nb CPW resonator lossless PEC reference frequency (Fig. 1d)",
+      "quantity": "f_PEC",
+      "unit": "Hz",
+      "reference_value": 7064000000.0,
+      "u_input": 28000000.0,
+      "u_d": 10000000.0,
+      "tol_rel": 0.015,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_park2026",
+      "case_group": "cpw_100nm_nb",
+      "id": "park2026_cpw_f_10mk",
+      "description": "100 nm Nb CPW resonator at T = 10 mK with BCS kinetic inductance (Fig. 1d)",
+      "quantity": "f_0(10mK)",
+      "unit": "Hz",
+      "reference_value": 6910000000.0,
+      "u_input": 28000000.0,
+      "u_d": 10000000.0,
+      "tol_rel": 0.015,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_park2026",
+      "case_group": "cpw_100nm_nb",
+      "id": "park2026_cpw_df_kin",
+      "description": "Kinetic inductance frequency pull f_0(10mK) - f_PEC (Fig. 1d)",
+      "quantity": "delta_f_kin",
+      "unit": "Hz",
+      "reference_value": -154000000.0,
+      "u_input": 6000000.0,
+      "u_d": 4000000.0,
+      "tol_rel": 0.1,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_fluxonium.flux_points[0]",
+      "id": "scq_flux0_f01",
+      "description": "Bare Fluxonium (EC=EL=1 GHz, EJ=4 GHz) f01 at Phi_ext = 0",
+      "quantity": "f_01",
+      "unit": "Hz",
+      "reference_value": 5423392000.0,
+      "u_input": 2000000.0,
+      "u_d": 500000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_fluxonium.flux_points[0]",
+      "id": "scq_flux0_f02",
+      "description": "Bare Fluxonium f02 at Phi_ext = 0",
+      "quantity": "f_02",
+      "unit": "Hz",
+      "reference_value": 9721834000.0,
+      "u_input": 4000000.0,
+      "u_d": 1000000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_fluxonium.flux_points[1]",
+      "id": "scq_flux025_f01",
+      "description": "Bare Fluxonium f01 at Phi_ext = 0.25 Phi_0",
+      "quantity": "f_01",
+      "unit": "Hz",
+      "reference_value": 4922216000.0,
+      "u_input": 2000000.0,
+      "u_d": 500000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_fluxonium.flux_points[1]",
+      "id": "scq_flux025_f02",
+      "description": "Bare Fluxonium f02 at Phi_ext = 0.25 Phi_0",
+      "quantity": "f_02",
+      "unit": "Hz",
+      "reference_value": 7024157000.0,
+      "u_input": 3000000.0,
+      "u_d": 800000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_fluxonium.flux_points[2]",
+      "id": "scq_flux05_f01",
+      "description": "Bare Fluxonium f01 at half-flux sweet spot Phi_ext = 0.5 Phi_0",
+      "quantity": "f_01",
+      "unit": "Hz",
+      "reference_value": 581849000.0,
+      "u_input": 500000.0,
+      "u_d": 100000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_fluxonium.flux_points[2]",
+      "id": "scq_flux05_f12",
+      "description": "Bare Fluxonium f12 at half-flux sweet spot Phi_ext = 0.5 Phi_0",
+      "quantity": "f_12",
+      "unit": "Hz",
+      "reference_value": 3388587000.0,
+      "u_input": 1500000.0,
+      "u_d": 300000.0,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_transmon",
+      "id": "scq_transmon_f01",
+      "description": "Exact Cooper-pair-box Transmon f01 (EC=0.30 GHz, EJ=18.0 GHz)",
+      "quantity": "f_01",
+      "unit": "Hz",
+      "reference_value": 6256996000.0,
+      "u_input": 1000000.0,
+      "u_d": 500000.0,
+      "tol_rel": 0.0005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "cqed_scqubits_tls",
+      "case_group": "frozen_scqubits_transmon",
+      "id": "scq_transmon_alpha",
+      "description": "Exact Cooper-pair-box Transmon anharmonicity alpha (EC=0.30 GHz, EJ=18.0 GHz)",
+      "quantity": "alpha",
+      "unit": "Hz",
+      "reference_value": -339523000.0,
+      "u_input": 100000.0,
+      "u_d": 50000.0,
+      "tol_rel": 0.0005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "photonics_benchmarks",
+      "case_group": "soi_wires_1550nm.strip_500x220_chrostowski",
+      "id": "soi_500x220_te0_neff",
+      "description": "500x220 nm Chrostowski & Hochberg (2015) SOI TE0 n_eff at 1550 nm (fixed-n Lumerical MODE)",
+      "quantity": "n_eff_TE0",
+      "unit": "1",
+      "reference_value": 2.444,
+      "u_input": 0.0015,
+      "u_d": 0.0015,
+      "tol_rel": 0.002,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "photonics_benchmarks",
+      "case_group": "soi_wires_1550nm.strip_500x220_chrostowski",
+      "id": "soi_500x220_te0_ng",
+      "description": "500x220 nm Chrostowski & Hochberg (2015) SOI TE0 group index n_g (dispersionless n) cross-check",
+      "quantity": "n_g_TE0",
+      "unit": "1",
+      "reference_value": 4.19,
+      "u_input": 0.004,
+      "u_d": 0.004,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "photonics_benchmarks",
+      "case_group": "soi_wires_1550nm.strip_500x300",
+      "id": "soi_500x300_te0_neff",
+      "description": "500x300 nm SOI strip TE0 effective index at 1550 nm (Lumerical/MPB cross-code)",
+      "quantity": "n_eff_TE0",
+      "unit": "1",
+      "reference_value": 2.67179,
+      "u_input": 0.001,
+      "u_d": 0.0008,
+      "tol_rel": 0.001,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "photonics_benchmarks",
+      "case_group": "soi_wires_1550nm.strip_500x300",
+      "id": "soi_500x300_tm0_neff",
+      "description": "500x300 nm SOI strip TM0 effective index at 1550 nm (Lumerical/MPB cross-code)",
+      "quantity": "n_eff_TM0",
+      "unit": "1",
+      "reference_value": 2.33374,
+      "u_input": 0.001,
+      "u_d": 0.0008,
+      "tol_rel": 0.001,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "solid_mems_piezo_benchmarks",
+      "case_group": "aln_baw_piezoelectric",
+      "id": "aln_baw_fp",
+      "description": "1D AlN BAW open-circuit anti-resonant (parallel) frequency f_p = sqrt(c33^D/rho)/(2d)",
+      "quantity": "f_p",
+      "unit": "Hz",
+      "reference_value": 2823449000.0,
+      "u_input": 5000000.0,
+      "u_d": 2000000.0,
+      "tol_rel": 0.01,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "solid_mems_piezo_benchmarks",
+      "case_group": "aln_baw_piezoelectric",
+      "id": "aln_baw_fs",
+      "description": "1D AlN BAW short-circuit series resonant frequency f_s from Mason tan(phi)/phi = 1/kt^2",
+      "quantity": "f_s",
+      "unit": "Hz",
+      "reference_value": 2747672000.0,
+      "u_input": 5000000.0,
+      "u_d": 2000000.0,
+      "tol_rel": 0.01,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "solid_mems_piezo_benchmarks",
+      "case_group": "aln_baw_piezoelectric",
+      "id": "aln_baw_kt2",
+      "description": "1D AlN BAW electromechanical coupling factor k_t^2 = e33^2/(c33^D * eps33^S)",
+      "quantity": "k_t2",
+      "unit": "1",
+      "reference_value": 0.06448175,
+      "u_input": 0.0008,
+      "u_d": 0.0004,
+      "tol_rel": 0.03,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "solid_mems_piezo_benchmarks",
+      "case_group": "disk_anchor_loss",
+      "id": "disk_contour_f0",
+      "description": "Polysilicon radial-contour free-disk closed-form frequency (lambda*c/(2*pi*R), lambda=1.99765060)",
+      "quantity": "f_0",
+      "unit": "Hz",
+      "reference_value": 450155249.0,
+      "u_input": 2000000.0,
+      "u_d": 500000.0,
+      "tol_rel": 0.01,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "thermal_nafems_benchmarks",
+      "case_group": "coupled_bimorph_si_al",
+      "id": "bimorph_tip_deflection",
+      "description": "Timoshenko (1925) coupled Si/Al bimorph tip deflection w(L) at deltaT=100 K (kappa=2.927667/m -> 0.585533 mm)",
+      "quantity": "u_z(L)",
+      "unit": "m",
+      "reference_value": 0.0005855334,
+      "u_input": 2e-6,
+      "u_d": 5e-7,
+      "tol_rel": 0.01,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "thermal_nafems_benchmarks",
+      "case_group": "nafems_t1_hotspot",
+      "id": "nafems_t1_sigma_yy_d",
+      "description": "NAFEMS T1 hoop/direct stress sigma_zz at outer hot-spot boundary Point D (finite-plate b/a=10 Lame = 50.50 MPa; NAFEMS infinite target = 50.0 MPa)",
+      "quantity": "sigma_zz_D",
+      "unit": "Pa",
+      "reference_value": 50500000.0,
+      "u_input": 150000.0,
+      "u_d": 500000.0,
+      "tol_rel": 0.025,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "thermal_nafems_benchmarks",
+      "case_group": "nafems_t1_hotspot",
+      "id": "nafems_t1_sigma_interior",
+      "description": "NAFEMS T1 compressive biaxial stress inside hot spot r < a (-50.0 MPa infinite; -49.50 MPa finite b/a=10)",
+      "quantity": "sigma_xx_in",
+      "unit": "Pa",
+      "reference_value": -49500000.0,
+      "u_input": 150000.0,
+      "u_d": 500000.0,
+      "tol_rel": 0.025,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "thermal_nafems_benchmarks",
+      "case_group": "nafems_t2_radiation",
+      "id": "nafems_t2_t_b",
+      "description": "NAFEMS T2 radiating tip temperature T_B solved via Newton linearized convection in dfs::heat",
+      "quantity": "T_B",
+      "unit": "K",
+      "reference_value": 927.007606,
+      "u_input": 0.25,
+      "u_d": 0.5,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "thermal_nafems_benchmarks",
+      "case_group": "nafems_t3_transient",
+      "id": "nafems_t3_x008_t32",
+      "description": "NAFEMS T3 Rev. 3 temperature at x=0.08 m, t=32 s (exact Duhamel series 36.6030 C)",
+      "quantity": "T(0.08, 32)",
+      "unit": "degC",
+      "reference_value": 36.603045,
+      "u_input": 0.05,
+      "u_d": 0.05,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    },
+    {
+      "suite": "thermal_nafems_benchmarks",
+      "case_group": "nafems_t4_convection",
+      "id": "nafems_t4_point_e",
+      "description": "NAFEMS T4 steady 2D convective plate temperature at E=(0.6, 0.2) m (Fourier series 18.2538 C; NAFEMS 18.3 C)",
+      "quantity": "T_E(0.6, 0.2)",
+      "unit": "degC",
+      "reference_value": 18.253757,
+      "u_input": 0.03,
+      "u_d": 0.05,
+      "tol_rel": 0.005,
+      "tol_abs": 0.0,
+      "coverage_k": 2.0
+    }
+  ],
+  "squadds_summary": {
+    "evaluated_commit": "9480093a",
+    "headline_results": [
+      {
+        "detail": "MAE 1.369 fF, signed median bias -0.06%, p_obs = 2.00 Richardson convergence on NCap",
+        "id": "electrostatics_s1_1_s1_3",
+        "metric": "1.11% unweighted (1.04% HT [0.78%, 1.35%]) self-capacitance median error vs Ansys Q3D",
+        "sample_size": "60/60 ok",
+        "title": "Planar cQED Electrostatics (S1.1-S1.3)"
+      },
+      {
+        "detail": "100% bracketing across S1.2, S1.3, and S1.4",
+        "id": "prager_synge_bounds",
+        "metric": "98.6% strict bracketing of Ansys Q3D references across S1.1-S1.4",
+        "sample_size": "68/69 entries",
+        "title": "Certified Prager-Synge Dual Energy Brackets (AF-1 + AF-4)"
+      },
+      {
+        "detail": "Eliminates volumetric narrow-gap Steiner locking on S1.4",
+        "id": "planar_bem",
+        "metric": "76x faster (1.68 s median wall time); 4.04% self-capacitance median error on S1.4 in 1.03 s",
+        "sample_size": "S1.1-S1.4 ablation",
+        "title": "3-Layer Planar BEM (QFR-4, planar_bem)"
+      },
+      {
+        "detail": "2.3x closer to experiment than published SQuADDS Ansys HFSS reference (3.0% RMSRE)",
+        "id": "wm1_readout",
+        "metric": "1.32% RMSRE (0.97%-1.69%) against mK hardware measurements",
+        "sample_size": "6 qubits (Q1..Q6)",
+        "title": "Cryogenic Readout Resonator Frequencies (S4.1 WM1 W1 PEC)"
+      },
+      {
+        "detail": "Verified on identical 3D Nedelec meshes",
+        "id": "circuit_rom_vs_driven",
+        "metric": "Delta f_r = 0.0000%-1.67e-6%, Delta kappa = 0.0042%-0.257%",
+        "sample_size": "C0.3 & 12-slab S2.1",
+        "title": "Internal CircuitRom QEP vs ems::driven Taubin Circle Fit"
+      },
+      {
+        "detail": "Closed Craig-Bampton (M1), passive-port QEP (M2), and 3-port driven Schur BBQ (M3)",
+        "id": "qubit_cavity_equivalence",
+        "metric": "med |Delta f_01| = 1.38e-6% (M2) / 5.0e-6% (M3); Kubo TRK = 1.000000000000 +/- 2.7e-10",
+        "sample_size": "12/12 designs",
+        "title": "Unified QubitCavity 4-Way Equivalence & Kubo TRK Sum Rule"
+      },
+      {
+        "detail": "Full 3Q 1,085,076-tet (1.402M Nedelec DOF) ROM solved in 82.55 s (17.51 GiB)",
+        "id": "muninn_and_dissipator",
+        "metric": "Exact T_1 ranking Ancilla (12.82 ms) > Qubit (11.22 ms) > Env (8.19 ms); 100-pt SQUID sweep in 1.10 s",
+        "sample_size": "4 MUNINN + 2 Dissipator",
+        "title": "Cryogenic MUNINN Coherence Ranking & Dissipator SQUID Sweep"
+      },
+      {
+        "detail": "3.08x-3.67x multi-thread speedup",
+        "id": "dfs_thread_determinism",
+        "metric": "0.000e0 relative drift (bitwise exact) between NYX_THREADS=1 and 8",
+        "sample_size": "4/4 paired cases",
+        "title": "Electrostatic Parallel AMG Thread Determinism"
+      }
+    ],
+    "known_limits": [
+      {
+        "area": "S1.4 Volumetric sheet3d Narrow-Gap Locking (Core Bug 4)",
+        "id": "s1_4_steiner_locking",
+        "impact": "365.6% self-capacitance error on S1.4 narrow-gap interdigital fingers with volumetric sheet3d due to Ruppert max_steiner_multiplier exhaustion; mitigated by planar_bem (4.04% in 1.03 s)."
+      },
+      {
+        "area": "3D ems Parallel faer Factorisation Drift (Core Bug 5)",
+        "id": "ems_thread_drift",
+        "impact": "3.59e-10 to 1.15e-7 relative drift between NYX_THREADS=1 and NYX_THREADS=8 in sparse direct LDL^T/LU, exceeding the strict < 1e-13 ADR 11 gate."
+      },
+      {
+        "area": "WM1 W2 Lossless BCS ibc_tris Shift on Coarse P1 Edges",
+        "id": "wm1_w2_bcs_coarse_shift",
+        "impact": "Freeing tangential E_|| on coarse ~135 um P1 CPW edges shifts f_r by -9.6% (9.83% RMSRE vs 1.32% with W1 PEC); wide transmon pads shift by only -0.02%."
+      },
+      {
+        "area": "Mode G2 Dual-Box 1/R Extrapolation",
+        "id": "mode_g2_non_m_matrix",
+        "impact": "Independent meshes at P_1 and P_2 yield a 3.75e-3 positive off-diagonal Maxwell entry on 1/12 ablation designs (AF-3 single-solve far_field has 0/249 violations)."
+      },
+      {
+        "area": "FR-11 Finite-Thickness Metal on Finite Die (Core Bug 1)",
+        "id": "fr11_finite_die_bug1",
+        "impact": "Outer vertical Si|Vac die sidewalls falsely trigger resolved-step detection, blocking zero-thickness perimeter identification on finite dies inside vacuum."
+      },
+      {
+        "area": "Refined rank1 Lumped Port / JJ Sheets (Core Bug 2)",
+        "id": "refined_lumped_port_bug2",
+        "impact": "Refining rank1 port sheets stalls krylov_schur unless an unrefined port-exclusion box is maintained (capping narrow-gap P1 kappa/g/alpha accuracy)."
+      },
+      {
+        "area": "sheet3d z_coarsen Exterior Cap Collapse (Core Bug 3)",
+        "id": "z_coarsen_cap_bug3",
+        "impact": "Enabling z_coarsen: true on multi-layer finite-die electrostatic stacks collapses exterior cap boundary IDs."
+      }
+    ],
+    "peak_memory_gib": 19.71,
+    "phase1_hardware_completion": "30/30 (100.0%)",
+    "phase2_core_completion": "164/164 (100.0%)",
+    "smoke_completion": "32/32 (100.0%)",
+    "solver_ok_pct": 98.1,
+    "solver_ok_runs": 410,
+    "source_report": "docs/SQUADDS_BENCHMARK_REPORT.md",
+    "total_runs": 418
+  }
+}

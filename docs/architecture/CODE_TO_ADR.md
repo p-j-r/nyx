@@ -326,6 +326,8 @@ Every source, test, example, data and doc file of the repository maps to the ADR
 | `docs/architecture/contracts/install_manifest.v1.*` | 122, 19 | versioned installer receipt (`format = 1`) and JSON Schema |
 | `docs/architecture/contracts/install_report.v1.*` | 122, 19 | machine-readable `nyx-setup --json` report and JSON Schema |
 | `crates/nyx-install/*` | 122, 28, 88, 95, 100, 107, 131 | cross-platform pure-Rust installer (`nyx-setup`, `nyx-uninstall`), `nyx-pack` packager, OS desktop/PATH/file-assoc/ARP/Nyx.app drivers, 7-phase atomic journal, optional `glow` GUI wizard, and contract/hermetic/E2E tests |
+| `website/*` | 134, 13, 60, 88, 89, 108, 133 | static GitHub Pages project hub (Zola `0.23.6`), standalone `site-prep` extractor & confidentiality gate, generated tokens/data, and Swiss Lab Monograph templates |
+| `tools/gen_site_figures.*` | 134, 99, 111 | public website mode/3D cutaway plate figure generator |
 <!-- map:end -->
 
 ## Gaps this index shows

@@ -1,0 +1,260 @@
+// Hero PLATE 01 Interactive Slideshow (<nyx-slideshow>)
+
+nyx-slideshow {
+  display: block;
+}
+
+.plate-slideshow {
+  background: var(--color-plate-bg);
+  color: var(--color-plate-text);
+  border: 1px solid var(--color-plate-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-offset);
+  overflow: hidden;
+}
+
+.plate-stage {
+  position: relative;
+  background: var(--color-plate-bg);
+  cursor: pointer;
+  user-select: none;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-plate-border);
+}
+
+.plate-slide {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem;
+  animation: plateFadeIn 220ms ease-out;
+}
+
+.plate-slide[hidden] {
+  display: none;
+}
+
+.plate-slide img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+@keyframes plateFadeIn {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+.plate-hud-top {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.plate-id-pill,
+.plate-badge-pill {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.22rem 0.55rem;
+  border-radius: var(--radius-hairline);
+  background: rgba(20, 18, 24, 0.88);
+  border: 1px solid #3C3745;
+  color: var(--color-plate-text);
+}
+
+.plate-badge-pill {
+  color: #D96AA4;
+}
+
+.plate-stage-hint {
+  position: absolute;
+  bottom: 0.55rem;
+  right: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 0.18rem 0.48rem;
+  border-radius: var(--radius-hairline);
+  background: rgba(20, 18, 24, 0.84);
+  border: 1px solid #2E2A35;
+  color: var(--color-plate-muted);
+  opacity: 0.82;
+  transition: opacity 150ms ease, color 150ms ease;
+  pointer-events: none;
+}
+
+.plate-stage:hover .plate-stage-hint {
+  opacity: 1;
+  color: var(--color-plate-text);
+}
+
+// Control bar directly beneath the plate image
+.plate-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.75rem;
+  background: #14161A;
+  border-bottom: 1px solid var(--color-plate-border);
+}
+
+@media (max-width: 560px) {
+  .plate-controls {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  .plate-auto-btn {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+
+.plate-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 2rem;
+  height: 1.85rem;
+  padding: 0 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-plate-text);
+  background: #22252C;
+  border: 1px solid #3D3847;
+  border-radius: var(--radius-hairline);
+  cursor: pointer;
+}
+
+.plate-ctrl-btn:hover {
+  background: #2D313A;
+  border-color: #7D738C;
+}
+
+.plate-ctrl-btn[aria-pressed="true"] {
+  border-color: #D96AA4;
+  color: #D96AA4;
+}
+
+.plate-segments {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.plate-seg {
+  position: relative;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  background: #2E2A35;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.plate-seg:hover {
+  background: #464052;
+}
+
+.plate-seg-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: #D96AA4;
+}
+
+.plate-seg.is-done .plate-seg-fill {
+  width: 100%;
+  background: #8E7F99;
+}
+
+.plate-seg.is-active .plate-seg-fill {
+  width: 100%;
+  animation: slideProgress var(--slide-duration, 6000ms) linear forwards;
+}
+
+.plate-slideshow.is-paused .plate-seg.is-active .plate-seg-fill {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plate-slide {
+    animation: none;
+  }
+  .plate-seg.is-active .plate-seg-fill {
+    animation: none;
+    width: 100%;
+  }
+}
+
+@keyframes slideProgress {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.plate-counter {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-plate-muted);
+  white-space: nowrap;
+}
+
+.plate-caption-bar {
+  padding: 0.75rem 0.9rem;
+  background: var(--color-plate-bg);
+  border-bottom: 1px solid var(--color-plate-border);
+}
+
+.plate-caption-title {
+  font-family: var(--font-serif);
+  font-size: 1.08rem;
+  font-weight: 500;
+  color: var(--color-plate-text);
+  margin: 0 0 0.25rem;
+}
+
+.plate-caption-text {
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--color-plate-muted);
+  margin: 0;
+}
+
+// Synchronized "What the solver did" terminal panel
+.plate-solver-log {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.plate-solver-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  padding: 0.45rem 0.85rem;
+  background: #14161A;
+  border-bottom: 1px solid var(--color-plate-border);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #5FC08C;
+}

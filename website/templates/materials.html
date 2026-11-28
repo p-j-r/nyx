@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock title %}
+{% block description %}{{ section.description | default(value=config.description) }}{% endblock description %}
+
+{% block content %}
+<div class="container">
+  <header class="page-head">
+    <div class="kicker">
+      <span class="kicker-rule" aria-hidden="true"></span>
+      <span>{{ section.extra.kicker | default(value="FORMAT = 2 TOML LIBRARY · materials/*.toml") }}</span>
+    </div>
+    <h1>{{ section.title }}</h1>
+    {% if section.description %}
+      <p class="lead">{{ section.description }}</p>
+    {% endif %}
+  </header>
+
+  {% if section.content %}
+    <div class="prose" style="margin-bottom: 2rem;">
+      {{ section.content | safe }}
+    </div>
+  {% endif %}
+
+  {% set raw = load_data(path="data/materials.json", required=false) %}
+  {% set mats = [] %}
+  {% if raw %}
+    {% if raw.materials is defined %}
+      {% set mats = raw.materials %}
+    {% elif raw.items is defined %}
+      {% set mats = raw.items %}
+    {% else %}
+      {% set mats = raw %}
+    {% endif %}
+  {% endif %}
+
+  <div data-filter-root>
+    <div class="filter-toolbar">
+      <div class="filter-pills" role="group" aria-label="Filter materials by kind">
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="all" aria-pressed="true">All</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="semiconductor" aria-pressed="false">Semiconductor</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="crystalline" aria-pressed="false">Crystalline</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="amorphous" aria-pressed="false">Amorphous</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="polycrystalline" aria-pressed="false">Polycrystalline</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="superconductor" aria-pressed="false">Superconductor</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="metal" aria-pressed="false">Metal</button>
+        <button type="button" class="filter-pill" data-filter-btn data-filter-group="kind" data-filter-value="fluid" aria-pressed="false">Fluid</button>
+      </div>
+
+      <div class="search-wrap">
+        <label class="sr-only" for="material-search">Search materials</label>
+        <input id="material-search" class="search-input" type="search" data-filter-search placeholder="Search name, point group, citation..." autocomplete="off">
+        <span class="filter-count tabular" data-filter-count>{{ mats | length }} / {{ mats | length }}</span>
+      </div>
+    </div>
+
+    {% if mats | length > 0 %}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th>Kind</th>
+              <th>Point Group</th>
+              <th>T<sub>ref</sub> / ρ</th>
+              <th>Capabilities</th>
+              <th>Description &amp; Provenance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in mats %}
+              {% set name = m.name | default(value=m.id | default(value="material")) %}
+              {% set kind = m.kind | default(value="other") | lower %}
+              {% set caps = m.capabilities | default(value=[]) %}
+              {% set primary_cite = m.cite | default(value="") %}
+              {% if not primary_cite and m.sources is defined and m.sources | length > 0 %}
+                {% set primary_cite = m.sources[0].cite | default(value="") %}
+              {% endif %}
+              {% set search_blob = (name ~ " " ~ kind ~ " " ~ m.point_group | default(value="") ~ " " ~ m.description | default(value="") ~ " " ~ primary_cite) | lower %}
+              <tr data-filter-item data-kind="{{ kind }}" data-search="{{ search_blob }}">
+                <td>
+                  <strong><code>{{ name }}</code></strong>
+                  {% if m.doi %}
+                    <div style="margin-top: 0.25rem; font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-muted);">
+                      DOI: {{ m.doi }}
+                    </div>
+                  {% endif %}
+                </td>
+                <td><span class="chip chip--accent">{{ kind }}</span></td>
+                <td><code>{{ m.point_group | default(value="—") }}</code></td>
+                <td class="tabular">
+                  <div>{{ m.reference_temperature | default(value="—") }}</div>
+                  <div style="font-size: 0.78rem; color: var(--color-muted);">{{ m.density | default(value="") }}</div>
+                </td>
+                <td>
+                  <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
+                    {% if caps | length > 0 %}
+                      {% for c in caps %}<span class="chip">{{ c }}</span>{% endfor %}
+                    {% else %}
+                      {% if m.elastic %}<span class="chip">Elastic</span>{% endif %}
+                      {% if m.optical %}<span class="chip">Optical</span>{% endif %}
+                      {% if m.superconducting %}<span class="chip">BCS</span>{% endif %}
+                      {% if m.piezoelectric %}<span class="chip">Piezo</span>{% endif %}
+                      {% if m.thermal %}<span class="chip">Thermal</span>{% endif %}
+                      {% if m.electrical %}<span class="chip">Electrical</span>{% endif %}
+                    {% endif %}
+                  </div>
+                </td>
+                <td style="max-width: 44ch;">
+                  <div>{{ m.description | default(value="") }}</div>
+                  {% if primary_cite %}
+                    <div style="margin-top: 0.3rem; font-size: 0.78rem; color: var(--color-muted);">{{ primary_cite }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="empty-state" data-filter-empty hidden>No materials match the selected kind or search query.</div>
+    {% else %}
+      <div class="empty-state">
+        Material library catalogue <code>website/data/materials.json</code> has not been generated yet. Run the site-prep extractor to populate the material records.
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock content %}
