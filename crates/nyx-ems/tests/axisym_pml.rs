@@ -171,11 +171,12 @@ fn r32_curved_meshes_are_refused_by_unsupported_non_cavity_kernels() {
             yy: c(1.0, 0.0),
             zz: c(1.0, 0.0),
             xz: c(0.0, 0.0),
-            yz: c(0.0, 0.0)
+            yz: c(0.0, 0.0),
+            ..Default::default()
         };
         m2.n_cells()
     ];
-    let mu_c = vec![MuC { x: c(1.0, 0.0), y: c(1.0, 0.0), z: c(1.0, 0.0) }; m2.n_cells()];
+    let mu_c = vec![MuC { x: c(1.0, 0.0), y: c(1.0, 0.0), z: c(1.0, 0.0), ..Default::default() }; m2.n_cells()];
     let err = solve_modes_complex(&m2, 12e9, &eps_c, &mu_c, c(1.0, 0.0), 1, 2)
         .err()
         .expect("solve_modes_complex must reject curved simplex mesh");

@@ -13,9 +13,9 @@
         <ul class="footer-list">
           <li><a href="{{ get_url(path='/specimens/') }}">Specimens &amp; Examples</a></li>
           <li><a href="{{ get_url(path='/benchmarks/') }}">V&amp;V &amp; SQuADDS Benchmarks</a></li>
-          <li><a href="{{ get_url(path='/materials/') }}">Material Library (41 public TOML)</a></li>
+          <li><a href="{{ get_url(path='/materials/') }}">Material Library ({{ config.extra.material_count | default(value=42) }} public TOML)</a></li>
           <li><a href="{{ get_url(path='/notes/') }}">Engineering Notes</a></li>
-          <li><a href="{{ get_url(path='/api/') }}">Command Catalogue ({{ config.extra.command_count | default(value=114) }})</a></li>
+          <li><a href="{{ get_url(path='/api/') }}">Command Catalogue ({{ config.extra.command_count | default(value=118) }})</a></li>
         </ul>
       </div>
 
@@ -32,7 +32,7 @@
 
     <div class="footer-bottom">
       <span>Copyright &copy; 2026 p-j-r · SI units (metres) · Wafer frame (x, y propagation, z normal)</span>
-      <span>API Catalog: <code>{{ config.extra.catalog_hash | default(value="b3:60697136d596a5b047f70971b85b0f54") }}</code></span>
+      <span>API Catalog: <code>{{ config.extra.catalog_hash | default(value="b3:f4c059caae7ee3100bbf472db2c560bd") }}</code></span>
     </div>
   </div>
 </footer>

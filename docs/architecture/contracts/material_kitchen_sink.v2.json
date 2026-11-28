@@ -173,6 +173,67 @@
   },
   "kind": "crystalline",
   "name": "kitchen_sink_v2",
+  "nonlinear": {
+    "T_range": [
+      4.0,
+      400.0
+    ],
+    "chi2": {
+      "d": [
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -4.6e-12,
+          -2.1e-12
+        ],
+        [
+          -2.1e-12,
+          2.1e-12,
+          0.0,
+          -4.6e-12,
+          0.0,
+          0.0
+        ],
+        [
+          -4.6e-12,
+          -4.6e-12,
+          -2.5199999999999998e-11,
+          0.0,
+          0.0,
+          0.0
+        ]
+      ]
+    },
+    "chi3": {
+      "beta_tpa": 1e-13,
+      "k_fcd": -1e-27,
+      "n_2": 1.8e-19,
+      "sigma_fca": 1e-21,
+      "tau_c": 5e-10
+    },
+    "qpm": {
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "duty_cycle": 0.5,
+      "period": 4.8e-6,
+      "phase_offset": 0.0,
+      "sign": 1.0
+    },
+    "source": [
+      {
+        "cite": "Invented v2 nonlinear exemplar",
+        "doi": null,
+        "url": null,
+        "verified": "2026-11-21"
+      }
+    ],
+    "wavelength": 1.55e-6
+  },
   "notes": "Non-centrosymmetric trigonal 3m test case exercising every v2 section.",
   "optical": {
     "axes": {

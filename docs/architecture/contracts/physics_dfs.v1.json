@@ -2,7 +2,7 @@
   "bc_kinds": [
     {
       "applies": "boundary",
-      "doc": "Fixed potential (electrostatics).",
+      "doc": "Fixed potential (electrostatics, steady conduction).",
       "kind": "potential",
       "name": "Electric potential",
       "params": [
@@ -23,7 +23,28 @@
     },
     {
       "applies": "boundary",
-      "doc": "Zero potential (electrostatics, magnetostatics).",
+      "doc": "Fixed electric potential (steady conduction).",
+      "kind": "voltage",
+      "name": "Voltage",
+      "params": [
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Voltage",
+          "name": "value",
+          "required": false,
+          "unit": "V"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Zero potential (electrostatics, steady conduction, magnetostatics).",
       "kind": "ground",
       "name": "Ground",
       "params": []
@@ -46,6 +67,27 @@
           "name": "density",
           "required": false,
           "unit": "C/m^2"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Inward normal current density -n . J (steady conduction).",
+      "kind": "current_density",
+      "name": "Current density",
+      "params": [
+        {
+          "doc": "positive into the body",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Current density",
+          "name": "value",
+          "required": false,
+          "unit": "A/m^2"
         }
       ]
     },
@@ -437,6 +479,53 @@
     },
     {
       "applies": "boundary",
+      "doc": "Stefan-Boltzmann grey-body radiative heat transfer to an ambient sink: -n . q = emissivity * view_factor * sigma_SB * (T^4 - t_ambient^4) (heat transfer).",
+      "kind": "radiation",
+      "name": "Thermal radiation",
+      "params": [
+        {
+          "doc": "grey-body emissivity in [0, 1]",
+          "kind": {
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Surface emissivity",
+          "name": "emissivity",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "ambient radiation sink temperature (>= 0 K)",
+          "kind": {
+            "default": 293.15,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Ambient temperature",
+          "name": "t_ambient",
+          "required": false,
+          "unit": "K"
+        },
+        {
+          "doc": "geometric radiation view factor in [0, 1]",
+          "kind": {
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "View factor",
+          "name": "view_factor",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
       "doc": "Thin superconducting film with sheet kinetic inductance L_k,sq (magnetostatics).",
       "kind": "london_sheet",
       "name": "London superconducting sheet",
@@ -606,9 +695,47 @@
     {
       "field": "dfs.B",
       "role": "magnetic_field"
+    },
+    {
+      "field": "dfs.Q_joule",
+      "role": "heat_source"
     }
   ],
   "fields": {
+    "conduction": [
+      {
+        "components": [],
+        "doc": "electric potential",
+        "name": "V",
+        "unit": "V"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "electric field (2D: x and z)",
+        "name": "E",
+        "unit": "V/m"
+      },
+      {
+        "components": [
+          "x",
+          "y",
+          "z"
+        ],
+        "doc": "current density (2D: x and z)",
+        "name": "J",
+        "unit": "A/m^2"
+      },
+      {
+        "components": [],
+        "doc": "volumetric Joule heating power density",
+        "name": "Q_joule",
+        "unit": "W/m^3"
+      }
+    ],
     "electrostatic": [
       {
         "components": [],
@@ -683,7 +810,16 @@
     ]
   },
   "id": "dfs",
-  "imports": [],
+  "imports": [
+    {
+      "field": "dfs.heat_source",
+      "role": "heat_source"
+    },
+    {
+      "field": "dfs.temperature",
+      "role": "temperature"
+    }
+  ],
   "name": "Diffusion (electrostatics, heat transfer, magnetostatics)",
   "params": [
     {
@@ -754,7 +890,8 @@
       "label": "Electrical conductivity",
       "name": "sigma",
       "needed_by": [
-        "electrostatic"
+        "electrostatic",
+        "conduction"
       ],
       "unit": "S/m"
     },
@@ -830,7 +967,7 @@
           "oneOf": [
             {
               "additionalProperties": false,
-              "description": "Fixed potential (electrostatics).",
+              "description": "Fixed potential (electrostatics, steady conduction).",
               "properties": {
                 "kind": {
                   "const": "potential"
@@ -860,7 +997,37 @@
             },
             {
               "additionalProperties": false,
-              "description": "Zero potential (electrostatics, magnetostatics).",
+              "description": "Fixed electric potential (steady conduction).",
+              "properties": {
+                "kind": {
+                  "const": "voltage"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "default": 1.0,
+                      "description": "Voltage [V]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Zero potential (electrostatics, steady conduction, magnetostatics).",
               "properties": {
                 "kind": {
                   "const": "ground"
@@ -899,6 +1066,36 @@
                     "density": {
                       "default": 0.0,
                       "description": "Surface charge density [C/m^2]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Inward normal current density -n . J (steady conduction).",
+              "properties": {
+                "kind": {
+                  "const": "current_density"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "default": 0.0,
+                      "description": "Current density [A/m^2]. positive into the body",
                       "type": "number"
                     }
                   },
@@ -1277,6 +1474,51 @@
                     "t_ext": {
                       "default": 293.15,
                       "description": "Outside temperature [K]",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Stefan-Boltzmann grey-body radiative heat transfer to an ambient sink: -n . q = emissivity * view_factor * sigma_SB * (T^4 - t_ambient^4) (heat transfer).",
+              "properties": {
+                "kind": {
+                  "const": "radiation"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "emissivity": {
+                      "default": 1.0,
+                      "description": "Surface emissivity. grey-body emissivity in [0, 1]",
+                      "maximum": 1.0,
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "t_ambient": {
+                      "default": 293.15,
+                      "description": "Ambient temperature [K]. ambient radiation sink temperature (>= 0 K)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "view_factor": {
+                      "default": 1.0,
+                      "description": "View factor. geometric radiation view factor in [0, 1]",
+                      "maximum": 1.0,
+                      "minimum": 0.0,
                       "type": "number"
                     }
                   },
@@ -1795,6 +2037,25 @@
           },
           {
             "additionalProperties": false,
+            "description": "Steady Ohmic current flow and Joule heating: -div(sigma(T) grad V) = 0.",
+            "properties": {
+              "kind": {
+                "const": "conduction"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
             "description": "Temperature for fixed temperatures, fluxes, convection and sources: div(k grad T) + Q = 0.",
             "properties": {
               "kind": {
@@ -2056,6 +2317,13 @@
           "unit": "Hz"
         }
       ]
+    },
+    {
+      "dims": "both",
+      "doc": "Steady Ohmic current flow and Joule heating: -div(sigma(T) grad V) = 0.",
+      "kind": "conduction",
+      "name": "Steady electrical conduction",
+      "params": []
     },
     {
       "dims": "both",

@@ -21,10 +21,10 @@ Queues one solve per explicit point (`points` or `series`) or streams a determin
 | `points[].edits[].args` | object | no |  | its arguments |
 | `points[].edits[].cmd` | text | yes |  | a command that changes the project |
 | `points[].label` | text | no |  | a name for the point in the table; default `point N` |
-| `post_analyses` | list of object | no |  | read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { "analysis": "...", "physics"?: "...", "params"?: {...} } shorthand or { "cmd": "analyse" \| "integrate" \| "confinement" \| "extremum" \| "probe" \| "line_cut" \| "overlap", "args": {...} }). each item: one read-only post-solve analysis or field-reduction request |
-| `post_analyses[].analysis` | text | no |  | shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed) |
+| `post_analyses` | list of object | no |  | read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { "analysis": "...", "physics"?: "...", "params"?: {...} } shorthand or { "cmd": "analyse" \| "eme_sweep" \| "integrate" \| "confinement" \| "extremum" \| "probe" \| "line_cut" \| "overlap", "args": {...} }). each item: one read-only post-solve analysis or field-reduction request |
+| `post_analyses[].analysis` | text | no |  | shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics) |
 | `post_analyses[].args` | object | no |  | arguments object passed to `cmd` |
-| `post_analyses[].cmd` | text | no |  | explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op) |
+| `post_analyses[].cmd` | text | no |  | explicit read-only post-solve command name (analyse, eme_sweep, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op) |
 | `post_analyses[].label` | text | no |  | optional label attached to this post-analysis entry in the reply |
 | `post_analyses[].params` | object | no |  | optional parameters object for shorthand `analysis` |
 | `post_analyses[].physics` | text | no |  | three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis |

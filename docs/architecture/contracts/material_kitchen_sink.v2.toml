@@ -131,3 +131,28 @@ model = "rii_formula_4"
 coefficients = [4.5820, 0.099169, 0.0, 0.044432, 1.0, 0.0, 0.0, 1.0, 1.0, -0.021950, 2.0]
 dn_dT = "3.8e-5 1/K"
 dn_dT_einstein_theta = "350 K"
+
+[nonlinear]
+source = { cite = "Invented v2 nonlinear exemplar", verified = "2026-11-21" }
+wavelength = "1.55 um"
+T_range = [4.0, 400.0]
+
+[nonlinear.chi2]
+unit = "pm/V"
+d33 = -25.2
+d31 = -4.6
+d22 = 2.1
+d15 = -4.6
+
+[nonlinear.qpm]
+sign = 1.0
+Lambda_qpm = "4.8 um"
+axis = [0.0, 1.0, 0.0]
+duty_cycle = 0.5
+
+[nonlinear.chi3]
+n_2 = "1.8e-19 m^2/W"
+beta_tpa = "1.0e-13 m/W"
+sigma_fca = "1.0e-21 m^2"
+k_fcd = "-1.0e-27 m^3"
+tau_c = "0.5 ns"

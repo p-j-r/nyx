@@ -53,6 +53,7 @@ fn the_library_has_its_materials() {
             "gold_johnson",
             "granular_aluminium",
             "granular_aluminium_sc",
+            "graphene",
             "lithium_niobate",
             "lithium_niobate_4k",
             "lithium_niobate_mgo",

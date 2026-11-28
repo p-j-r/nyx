@@ -205,7 +205,27 @@ pub fn eigs_general(a: &Csr, b: &Csr, sigma: f64, nev: usize, opts: &EigOpts) ->
                 v.push(w);
             }
         }
-        let e = v.len();
+        let mut e = v.len();
+        if e == before && e < max_dim {
+            // Warm-start or invariant subspace exhausted before convergence: replenish with deterministic random directions
+            for _ in 0..p.max(2) {
+                if v.len() >= max_dim {
+                    break;
+                }
+                let mut w: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+                let w0 = dot(&w, &w).sqrt();
+                for _pass in 0..2 {
+                    let coef = par_dots(&v, &w);
+                    par_subtract(&mut w, &v, &coef);
+                }
+                let nrm = dot(&w, &w).sqrt();
+                if nrm > 1e-10 * w0 && nrm > 0.0 {
+                    w.iter_mut().for_each(|x| *x /= nrm);
+                    v.push(w);
+                }
+            }
+            e = v.len();
+        }
         if e == before {
             break;
         }

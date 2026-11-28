@@ -18,6 +18,7 @@ pub mod piezo_driven;
 pub mod piezo_mat;
 pub mod pml;
 pub mod problem;
+pub mod sensitivity;
 pub mod solid;
 pub mod waveguide;
 
@@ -433,6 +434,11 @@ impl Physics for Sms {
                 "Inactive regions",
                 "regions with no stiffness or mass (for example air); the dofs only they touch are held at zero",
             ),
+            ParamDesc::names(
+                "u_domains",
+                "Active mechanical domains",
+                "optional explicit subset of solid domains carrying displacement DOFs u in coupled piezoelectric solves; regions outside u_domains carry only electric potential phi",
+            ),
         ]
     }
 
@@ -492,7 +498,11 @@ impl Physics for Sms {
     }
 
     fn exports(&self) -> Vec<FieldLink> {
-        vec![FieldLink::new("sms.u", "displacement")]
+        vec![
+            FieldLink::new("sms.u", "displacement"),
+            FieldLink::new("sms.S", "strain"),
+            FieldLink::new("sms.E", "electric_field"),
+        ]
     }
 
     fn imports(&self) -> Vec<FieldLink> {
@@ -608,6 +618,16 @@ impl Physics for Sms {
         self.validate(spec, mesh)?;
         let problem = decode(spec, ctx)?;
         run(mesh, &problem, &ctx.progress)
+    }
+
+    fn sensitivity(
+        &self,
+        mesh: &Mesh,
+        spec: &ProblemSpec,
+        ctx: &mut Ctx,
+        req: &SensitivityRequest,
+    ) -> Result<SensitivityReport, Error> {
+        crate::sensitivity::compute_sensitivity(self, mesh, spec, ctx, req)
     }
 }
 

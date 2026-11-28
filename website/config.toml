@@ -23,8 +23,9 @@ include_content = true
 version = "v0.1.0"
 repo_url = "https://github.com/p-j-r/nyx"
 licence = "AGPL-3.0-only OR LicenseRef-nyx-Commercial"
-catalog_hash = "b3:60697136d596a5b047f70971b85b0f54"
-command_count = 114
+catalog_hash = "b3:f4c059caae7ee3100bbf472db2c560bd"
+command_count = 118
+material_count = 42
 crate_count = 15
 rust_version = "1.99.1"
 

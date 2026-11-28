@@ -393,6 +393,10 @@ source = { cite = "Verified unit test optical", verified = "2026-11-26" }
         json!({ "physics": "ems", "study": "modes", "study_params": { "freq": 1.934e14, "n_modes": 1 }, "order": 1 }),
     );
     call(&mut e_chain, "set_material", json!({ "physics": "ems", "region": "body", "material": "bounded_coupled" }));
+    // Without explicit opt-in `set_coupled_loop`, bidirectional `dfs <-> ems` (`temperature` + `heat_source`) is rejected as a cycle.
+    let err_cycle = e_chain.call("solve_run", &json!({ "physics": ["dfs", "ems"] })).unwrap_err().to_string();
+    assert!(err_cycle.contains("cycle"), "expected unconfigured cycle rejection, got: {err_cycle}");
+    call(&mut e_chain, "set_coupled_loop", json!({ "max_iters": 10, "rtol": 1e-6, "anderson_m": 5 }));
     call(&mut e_chain, "solve_run", json!({ "physics": ["dfs", "ems"] }));
 
     let ems_warns = warnings_of(&e_chain, "ems");

@@ -16,6 +16,8 @@ const CAPABILITY_KEYS: &[&str] = &[
     "electro_optic",
     "viscoelastic",
     "superconducting",
+    "sheet_2d",
+    "nonlinear",
     "interfaces",
 ];
 

@@ -17,12 +17,17 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 spade = "2.15.1"
 rayon = "1"
 toml = { version = "1", features = ["preserve_order"] }
+wgpu = { version = "30", optional = true }
+pollster = { version = "1", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
 
 [features]
 # solvers: use only the portable kernels. The default routes the restart multiply V <- V*Q of the block
 # Krylov-Schur eigensolver through faer GEMM, which is much faster but picks FMA/blocking by CPU, so its last bits
 # can differ between machines (never between thread counts).
 portable-kernels = []
+# Opt-in hardware acceleration: pure-Rust wgpu + WGSL compute kernels for f32 SpMV, reductions, and AMG V-cycles.
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 [dev-dependencies]
 proptest = "1"
 

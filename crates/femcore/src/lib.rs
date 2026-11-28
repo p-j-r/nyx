@@ -8,6 +8,8 @@
 //! * meshes: `mesh` (the meshes: `SimplexMesh` and its numbering of unknowns, the native per-cell-type mesh `native` and `cells`, `view`, `io` for `.fmsh`, `quality`, `fixtures`)
 //! * meshing: `meshing` (geom models to meshes: `MeshPlan`, `geomdrive`, `mesher` 2D shapes to triangles, `mesher3d` and `refine3d` 3D solids to tetrahedra, structured PML `pml`, `pml3`, `pml_box`, `physics_size`, `validate`)
 //! * adaptation: `adapt` (metric adaptation 2D and 3D, error estimators `estimate`, `estimate3`)
+//! * cross-mesh transfer: `transfer` (domain-filtered point location, sampling and conservative projection of fields between two meshes of
+//!   one geometry, boundary-facet transfer, active-domain sub-meshes; ADR 135)
 //! * finite-element basics: `fem` (quadrature, shape functions, scalar matrices, constraints), `fields` (gradients, node
 //!   averaging, plotting surface), `material` (anisotropic data, rotations), `expr` (user expressions)
 //! * linear algebra: `linalg` (the one library: `Csr<T>` matrices, direct and Krylov solvers, eigensolvers, multigrid;
@@ -49,6 +51,9 @@ pub mod warm;
 pub mod section;
 pub mod testkit;
 pub mod linalg;
+pub mod topology;
+pub mod transfer;
 pub mod validate;
 pub mod vvuq;
+pub use geom;
 

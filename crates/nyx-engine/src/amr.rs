@@ -534,7 +534,7 @@ pub(crate) fn solve_ems_cavity_with_amr(
             return Err(Error::Cancelled);
         }
         p.validate(spec, current_model.mesh())?;
-        let ctx = crate::solve::build_solve_ctx(registry, &current_model, p, spec, library, progress, done);
+        let ctx = crate::solve::build_solve_ctx(registry, &current_model, p, spec, library, progress, done)?;
         let pre_audit = crate::material_warnings::preflight(p, spec, &ctx, project.strict_material_range)?;
         let problem = nyx_ems::decode(spec, &ctx)?;
         let sm_cur = current_model.solver_mesh();

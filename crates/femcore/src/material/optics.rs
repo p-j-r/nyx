@@ -119,6 +119,117 @@ pub enum Axes {
     Biaxial([AxisModel; 3]),
 }
 
+fn is_zero_vec3(v: &[f64; 3]) -> bool {
+    v.iter().all(|&x| x == 0.0)
+}
+
+fn default_z_axis() -> [f64; 3] {
+    [0.0, 0.0, 1.0]
+}
+
+/// Dispersive or constant magneto-optic gyrotropy axial vector $\mathbf{g}(\lambda) = (g_x, g_y, g_z)$
+/// in the crystal frame, contributing $+i \mathbf{G}_\times$ where $\mathbf{G}_\times \mathbf{E} = \mathbf{g} \times \mathbf{E}$
+/// ($\varepsilon_{xy} = \varepsilon_{\text{sym},xy} - i g_z$, $\varepsilon_{yx} = \varepsilon_{\text{sym},yx} + i g_z$
+/// under the $e^{+j\omega t}$ convention).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Gyrotropy {
+    /// Constant complex gyrotropy vector $\mathbf{g} = \mathbf{g}_{\text{re}} + i \mathbf{g}_{\text{im}}$.
+    Constant {
+        g: [f64; 3],
+        #[serde(default, skip_serializing_if = "is_zero_vec3")]
+        g_im: [f64; 3],
+    },
+    /// Lorentz magneto-optic dispersion along crystal vector `axis`:
+    /// $\mathbf{g}(\omega) = \text{axis} \cdot \left(g_\infty + \sum_k \frac{f_k \omega_p^2}{\omega_{0k}^2 - \omega^2 + j \gamma_k \omega}\right)$
+    /// with frequencies in rad/s.
+    Lorentz {
+        #[serde(default = "default_z_axis")]
+        axis: [f64; 3],
+        #[serde(default)]
+        g_inf: f64,
+        plasma: f64,
+        lorentz: Vec<[f64; 3]>,
+        frequency_unit: String,
+    },
+    /// Wavelength-tabulated gyrotropy spectrum $\mathbf{g}(\lambda)$ in file wavelength units.
+    Tabulated {
+        lambda: Vec<f64>,
+        g_re: Vec<[f64; 3]>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        g_im: Vec<[f64; 3]>,
+        interpolation: Interp,
+        extrapolate: Extrapolate,
+    },
+}
+
+impl Gyrotropy {
+    pub fn is_non_zero(&self) -> bool {
+        match self {
+            Gyrotropy::Constant { g, g_im } => !is_zero_vec3(g) || !is_zero_vec3(g_im),
+            Gyrotropy::Lorentz { axis, g_inf, plasma, lorentz, .. } => {
+                !is_zero_vec3(axis) && (*g_inf != 0.0 || (*plasma != 0.0 && lorentz.iter().any(|o| o[0] != 0.0)))
+            }
+            Gyrotropy::Tabulated { g_re, g_im, .. } => {
+                g_re.iter().any(|v| !is_zero_vec3(v)) || g_im.iter().any(|v| !is_zero_vec3(v))
+            }
+        }
+    }
+
+    /// Evaluates complex $\mathbf{g}(\lambda) = [g_x, g_y, g_z]$ at file-unit wavelength `x`.
+    pub fn eval(&self, x: f64, unit_m: f64) -> Option<[Complex64; 3]> {
+        match self {
+            Gyrotropy::Constant { g, g_im } => Some([
+                Complex64::new(g[0], g_im[0]),
+                Complex64::new(g[1], g_im[1]),
+                Complex64::new(g[2], g_im[2]),
+            ]),
+            Gyrotropy::Lorentz { axis, g_inf, plasma, lorentz, .. } => {
+                let lam = x * unit_m;
+                if !(lam.is_finite() && lam > 0.0) {
+                    return None;
+                }
+                let w = 2.0 * std::f64::consts::PI * 299_792_458.0 / lam;
+                let j = Complex64::new(0.0, 1.0);
+                let wp2 = plasma * plasma;
+                let mut g_val = Complex64::new(*g_inf, 0.0);
+                for [f, w0, gam] in lorentz {
+                    let dd = Complex64::new(w0 * w0 - w * w, 0.0) + j * (gam * w);
+                    g_val += (f * wp2) / dd;
+                }
+                if !(g_val.re.is_finite() && g_val.im.is_finite()) {
+                    return None;
+                }
+                Some([g_val * axis[0], g_val * axis[1], g_val * axis[2]])
+            }
+            Gyrotropy::Tabulated { lambda, g_re, g_im, interpolation, extrapolate } => {
+                let ext = *extrapolate == Extrapolate::Linear;
+                let mut out = [Complex64::new(0.0, 0.0); 3];
+                for c_idx in 0..3 {
+                    let y_re: Vec<f64> = g_re.iter().map(|v| v[c_idx]).collect();
+                    let (re_v, _) = interpolate(lambda, &y_re, *interpolation, x, ext)?;
+                    let im_v = if g_im.is_empty() {
+                        0.0
+                    } else {
+                        let y_im: Vec<f64> = g_im.iter().map(|v| v[c_idx]).collect();
+                        interpolate(lambda, &y_im, *interpolation, x, ext)?.0
+                    };
+                    out[c_idx] = Complex64::new(re_v, im_v);
+                }
+                Some(out)
+            }
+        }
+    }
+
+    fn table_extent(&self) -> Option<(f64, f64)> {
+        match self {
+            Gyrotropy::Tabulated { lambda, extrapolate: Extrapolate::Error, .. } => {
+                Some((lambda[0], lambda[lambda.len() - 1]))
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Optical {
     /// where the optical data come from
@@ -133,6 +244,9 @@ pub struct Optical {
     /// temperature at which the models hold, K
     pub reference_temperature: f64,
     pub axes: Axes,
+    /// Optional magneto-optic gyrotropy axial vector $\mathbf{g}(\lambda)$ in the crystal frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy: Option<Gyrotropy>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -441,7 +555,61 @@ impl Axes {
 
 impl Optical {
     pub fn is_anisotropic(&self) -> bool {
-        !matches!(self.axes, Axes::Isotropic(_))
+        !matches!(self.axes, Axes::Isotropic(_)) || self.is_non_symmetric()
+    }
+
+    /// Returns `true` when this `[optical]` definition has a non-zero gyrotropy vector $\mathbf{g}(\lambda)$.
+    pub fn is_non_symmetric(&self) -> bool {
+        self.gyrotropy.as_ref().is_some_and(Gyrotropy::is_non_zero)
+    }
+
+    /// Evaluates the complex gyrotropy axial vector $\mathbf{g}(\lambda) = [g_x, g_y, g_z]$ in the crystal frame.
+    pub fn gyrotropy_crystal(&self, lambda_m: f64) -> Result<Option<[Complex64; 3]>, OpticsError> {
+        let Some(ref gyro) = self.gyrotropy else {
+            return Ok(None);
+        };
+        if !(lambda_m.is_finite() && lambda_m > 0.0) {
+            return Err(OpticsError::BadWavelength);
+        }
+        let x = lambda_m / self.unit_m;
+        let out_of = |lo: f64, hi: f64| OpticsError::OutOfRange {
+            lambda_m,
+            lo_m: lo * self.unit_m,
+            hi_m: hi * self.unit_m,
+            unit: self.wavelength_unit.clone(),
+            unit_m: self.unit_m,
+        };
+        let tol = 1e-12 * x.abs();
+        if let Some((lo, hi)) = self.range {
+            if x < lo - tol || x > hi + tol {
+                return Err(out_of(lo, hi));
+            }
+        }
+        if let Some((lo, hi)) = gyro.table_extent() {
+            if x < lo - tol || x > hi + tol {
+                return Err(out_of(lo, hi));
+            }
+        }
+        let g = gyro.eval(x, self.unit_m).ok_or(OpticsError::NotFinite { lambda_m })?;
+        Ok(Some(g))
+    }
+
+    /// Evaluates the complex gyrotropy axial vector $\mathbf{g}_{\text{global}}(\lambda) = (\det \mathbf{R}) \mathbf{R} \mathbf{g}_{\text{local}}(\lambda)$
+    /// in the global frame for Bunge Euler angles `euler_deg`.
+    pub fn gyrotropy_global(&self, lambda_m: f64, euler_deg: [f64; 3]) -> Result<Option<[Complex64; 3]>, OpticsError> {
+        let Some(g_loc) = self.gyrotropy_crystal(lambda_m)? else {
+            return Ok(None);
+        };
+        let r = super::rotation(euler_deg);
+        let g_re = [g_loc[0].re, g_loc[1].re, g_loc[2].re];
+        let g_im = [g_loc[0].im, g_loc[1].im, g_loc[2].im];
+        let rot_re = super::tensor::rotate_axial_vector(&g_re, &r);
+        let rot_im = super::tensor::rotate_axial_vector(&g_im, &r);
+        Ok(Some([
+            Complex64::new(rot_re[0], rot_im[0]),
+            Complex64::new(rot_re[1], rot_im[1]),
+            Complex64::new(rot_re[2], rot_im[2]),
+        ]))
     }
 
     /// The validity range in metres.
@@ -560,6 +728,10 @@ impl Optical {
     }
 
     /// Relative permittivity tensor in the global frame for a rotated crystal, returning any per-axis `dn_dT_range` clamping events.
+    ///
+    /// When `gyrotropy` is present, adds the non-reciprocal skew-symmetric part $+i \mathbf{G}_{\times,\text{global}}$
+    /// where $\mathbf{G}_{\times,\text{global}} \mathbf{E} = \mathbf{g}_{\text{global}} \times \mathbf{E}$
+    /// and $\mathbf{g}_{\text{global}} = (\det \mathbf{R}) \mathbf{R} \mathbf{g}_{\text{local}}$.
     pub fn permittivity_global_checked(
         &self,
         lambda_m: f64,
@@ -575,6 +747,16 @@ impl Optical {
                     out[i][j] += *dk * (r[i][k] * r[j][k]);
                 }
             }
+        }
+        if let Some(g) = self.gyrotropy_global(lambda_m, euler_deg)? {
+            let j = Complex64::new(0.0, 1.0);
+            let [gx, gy, gz] = g;
+            out[0][1] -= j * gz;
+            out[1][0] += j * gz;
+            out[0][2] += j * gy;
+            out[2][0] -= j * gy;
+            out[1][2] -= j * gx;
+            out[2][1] += j * gx;
         }
         Ok((out, clamps))
     }
@@ -654,7 +836,16 @@ impl Optical {
                 return Err(s.err("", "mixes ordinary/extraordinary with x/y/z tables; use one of the two forms"));
             }
         };
-        let opt = Optical { source, wavelength_unit: unit_text.unwrap_or_default(), unit_m, range, reference_temperature, axes };
+        let gyrotropy = read_gyrotropy(s, &ctx)?;
+        let opt = Optical {
+            source,
+            wavelength_unit: unit_text.unwrap_or_default(),
+            unit_m,
+            range,
+            reference_temperature,
+            axes,
+            gyrotropy,
+        };
         opt.validate().map_err(|(path, m)| s.err(&path, m))?;
         Ok(opt)
     }
@@ -762,7 +953,213 @@ impl Optical {
                 }
             }
         }
+        if let Some(ref gyro) = self.gyrotropy {
+            write_gyrotropy(&mut t, gyro);
+        }
         t
+    }
+}
+
+const GYROTROPY_KEYS: &[&str] = &[
+    "model",
+    "g",
+    "g_im",
+    "axis",
+    "g_inf",
+    "frequency_unit",
+    "plasma_frequency",
+    "oscillators",
+    "data",
+    "interpolation",
+    "extrapolate",
+];
+
+fn read_gyrotropy(s: &mut Section, ctx: &Ctx) -> Result<Option<Gyrotropy>, MaterialError> {
+    if !s.has("gyrotropy") {
+        return Ok(None);
+    }
+    if let Some(mut sub) = s.sub("gyrotropy")? {
+        let kind = sub.string("model")?.unwrap_or_else(|| "constant".to_string());
+        let gyro = match kind.to_ascii_lowercase().as_str() {
+            "constant" => {
+                let g = super::tensor::read_axial_vec3(&mut sub, "g")?
+                    .ok_or_else(|| sub.err("g", "constant gyrotropy needs g = [gx, gy, gz] or scalar gz"))?;
+                let g_im = super::tensor::read_axial_vec3(&mut sub, "g_im")?.unwrap_or([0.0; 3]);
+                Gyrotropy::Constant { g, g_im }
+            }
+            "lorentz" => {
+                if !ctx.unit_given {
+                    return Err(sub.err("wavelength_unit", "is required in [optical] for lorentz gyrotropy"));
+                }
+                let fu = sub.string("frequency_unit")?.ok_or_else(|| {
+                    sub.err("frequency_unit", "is required for lorentz gyrotropy (e.g. \"eV\", \"THz\", \"rad/s\")")
+                })?;
+                let scale = units::to_si(1.0, &fu, Dim::Frequency).map_err(|m| sub.err("frequency_unit", m))?;
+                let axis = super::tensor::read_axial_vec3(&mut sub, "axis")?.unwrap_or([0.0, 0.0, 1.0]);
+                let g_inf = sub.number("g_inf")?.unwrap_or(0.0);
+                let plasma = sub
+                    .quantity("plasma_frequency", Dim::Frequency, Some(&fu))?
+                    .ok_or_else(|| sub.err("plasma_frequency", "is missing for lorentz gyrotropy"))?;
+                if plasma <= 0.0 {
+                    return Err(sub.err("plasma_frequency", "must be positive"));
+                }
+                let rows = match sub.value("oscillators") {
+                    Some(toml::Value::Array(r)) if !r.is_empty() => r,
+                    _ => {
+                        return Err(sub.err(
+                            "oscillators",
+                            "needs oscillators = [[f, resonance, damping], ...] with one row per Lorentz term",
+                        ))
+                    }
+                };
+                let mut lorentz = Vec::with_capacity(rows.len());
+                for (i, row) in rows.iter().enumerate() {
+                    let toml::Value::Array(r) = row else {
+                        return Err(sub.err("oscillators", format!("row {} must be [f, resonance, damping]", i + 1)));
+                    };
+                    if r.len() != 3 {
+                        return Err(sub.err("oscillators", format!("row {} must have 3 entries [f, resonance, damping]", i + 1)));
+                    }
+                    let x: Vec<f64> = r.iter().map(|e| sub.number_of("oscillators", e)).collect::<Result<_, _>>()?;
+                    if x[1] <= 0.0 || x[2] < 0.0 {
+                        return Err(sub.err("oscillators", format!("row {}: resonance must be > 0 and damping >= 0", i + 1)));
+                    }
+                    lorentz.push([x[0], x[1] * scale, x[2] * scale]);
+                }
+                Gyrotropy::Lorentz { axis, g_inf, plasma, lorentz, frequency_unit: fu }
+            }
+            "tabulated" => {
+                if !ctx.unit_given {
+                    return Err(sub.err("wavelength_unit", "is required in [optical] for tabulated gyrotropy"));
+                }
+                let rows = match sub.value("data") {
+                    Some(toml::Value::Array(r)) => r,
+                    _ => {
+                        return Err(sub.err(
+                            "data",
+                            "tabulated gyrotropy needs data = [[wavelength, gz], ...], [[wavelength, gz_re, gz_im], ...], [[wavelength, gx, gy, gz], ...], or [[wavelength, gx_re, gx_im, gy_re, gy_im, gz_re, gz_im], ...]",
+                        ))
+                    }
+                };
+                let mut lambda = Vec::with_capacity(rows.len());
+                let mut g_re = Vec::with_capacity(rows.len());
+                let mut g_im = Vec::new();
+                let mut width = 0usize;
+                for (i, row) in rows.iter().enumerate() {
+                    let toml::Value::Array(r) = row else {
+                        return Err(sub.err("data", format!("row {} must be an array", i + 1)));
+                    };
+                    if !matches!(r.len(), 2 | 3 | 4 | 7) {
+                        return Err(sub.err(
+                            "data",
+                            format!("row {} has {} entries; expected 2, 3, 4, or 7 columns", i + 1, r.len()),
+                        ));
+                    }
+                    if width != 0 && width != r.len() {
+                        return Err(sub.err("data", "all tabulated gyrotropy rows must have the same number of columns"));
+                    }
+                    width = r.len();
+                    let v: Vec<f64> = r.iter().map(|e| sub.number_of("data", e)).collect::<Result<_, _>>()?;
+                    lambda.push(v[0]);
+                    match width {
+                        2 => g_re.push([0.0, 0.0, v[1]]),
+                        3 => {
+                            g_re.push([0.0, 0.0, v[1]]);
+                            g_im.push([0.0, 0.0, v[2]]);
+                        }
+                        4 => g_re.push([v[1], v[2], v[3]]),
+                        7 => {
+                            g_re.push([v[1], v[3], v[5]]);
+                            g_im.push([v[2], v[4], v[6]]);
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                if lambda.len() < 2 {
+                    return Err(sub.err("data", "tabulated gyrotropy needs at least two rows"));
+                }
+                if lambda[0] <= 0.0 {
+                    return Err(sub.err("data", "wavelengths must be positive"));
+                }
+                for i in 1..lambda.len() {
+                    if lambda[i] <= lambda[i - 1] {
+                        return Err(sub.err("data", "wavelengths must strictly increase"));
+                    }
+                }
+                let interpolation = match sub.string("interpolation")?.as_deref() {
+                    None | Some("pchip") => Interp::Pchip,
+                    Some("linear") => Interp::Linear,
+                    Some(o) => return Err(sub.err("interpolation", format!("unknown interpolation '{o}'"))),
+                };
+                let extrapolate = match sub.string("extrapolate")?.as_deref() {
+                    None | Some("error") => Extrapolate::Error,
+                    Some("linear") => Extrapolate::Linear,
+                    Some(o) => return Err(sub.err("extrapolate", format!("unknown extrapolate '{o}'"))),
+                };
+                Gyrotropy::Tabulated { lambda, g_re, g_im, interpolation, extrapolate }
+            }
+            other => {
+                return Err(sub.err("model", format!("unknown gyrotropy model '{other}'; use constant, lorentz, or tabulated")))
+            }
+        };
+        sub.finish(GYROTROPY_KEYS)?;
+        Ok(Some(gyro))
+    } else {
+        let g = super::tensor::read_axial_vec3(s, "gyrotropy")?
+            .ok_or_else(|| s.err("gyrotropy", "must be [gx, gy, gz], a scalar gz, or a [optical.gyrotropy] table"))?;
+        Ok(Some(Gyrotropy::Constant { g, g_im: [0.0; 3] }))
+    }
+}
+
+fn write_gyrotropy(t: &mut toml::Table, gyro: &Gyrotropy) {
+    match gyro {
+        Gyrotropy::Constant { g, g_im } if is_zero_vec3(g_im) => {
+            t.insert("gyrotropy".into(), fl(g));
+        }
+        Gyrotropy::Constant { g, g_im } => {
+            let mut sub = toml::Table::new();
+            sub.insert("model".into(), "constant".into());
+            sub.insert("g".into(), fl(g));
+            sub.insert("g_im".into(), fl(g_im));
+            t.insert("gyrotropy".into(), toml::Value::Table(sub));
+        }
+        Gyrotropy::Lorentz { axis, g_inf, plasma, lorentz, frequency_unit } => {
+            let s = freq_scale(frequency_unit);
+            let mut sub = toml::Table::new();
+            sub.insert("model".into(), "lorentz".into());
+            sub.insert("axis".into(), fl(axis));
+            if *g_inf != 0.0 {
+                sub.insert("g_inf".into(), toml::Value::Float(*g_inf));
+            }
+            sub.insert("frequency_unit".into(), frequency_unit.clone().into());
+            sub.insert("plasma_frequency".into(), toml::Value::Float(plasma / s));
+            let rows = lorentz.iter().map(|[f, w0, g]| fl(&[*f, w0 / s, g / s])).collect();
+            sub.insert("oscillators".into(), toml::Value::Array(rows));
+            t.insert("gyrotropy".into(), toml::Value::Table(sub));
+        }
+        Gyrotropy::Tabulated { lambda, g_re, g_im, interpolation, extrapolate } => {
+            let mut sub = toml::Table::new();
+            sub.insert("model".into(), "tabulated".into());
+            let rows = lambda
+                .iter()
+                .enumerate()
+                .map(|(i, &l)| {
+                    if g_im.is_empty() {
+                        fl(&[l, g_re[i][0], g_re[i][1], g_re[i][2]])
+                    } else {
+                        fl(&[l, g_re[i][0], g_im[i][0], g_re[i][1], g_im[i][1], g_re[i][2], g_im[i][2]])
+                    }
+                })
+                .collect();
+            sub.insert("data".into(), toml::Value::Array(rows));
+            if *interpolation == Interp::Linear {
+                sub.insert("interpolation".into(), "linear".into());
+            }
+            if *extrapolate == Extrapolate::Linear {
+                sub.insert("extrapolate".into(), "linear".into());
+            }
+            t.insert("gyrotropy".into(), toml::Value::Table(sub));
+        }
     }
 }
 
@@ -1200,6 +1597,7 @@ mod tests {
                 dn_dt_einstein_theta: None,
                 dn_dt_range: None,
             }),
+            gyrotropy: None,
         }
     }
 
@@ -1266,6 +1664,7 @@ mod tests {
                 dn_dt_einstein_theta: None,
                 dn_dt_range: None,
             }),
+            gyrotropy: None,
         };
         let f5 = Optical {
             axes: Axes::Isotropic(AxisModel {

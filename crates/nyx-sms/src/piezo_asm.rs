@@ -15,12 +15,12 @@ use crate::pml::{
 use crate::problem::{BcKind, ConductorRole, Plane, Problem, Study, ThermalSource};
 use crate::solid::{
     add_boundary_load_mixed, assemble_exponential_ie_robin, b_matrix, collect_exponential_ie_faces,
-    eval_raw_face_jacobian, mixed_cell_tensor, mixed_check_boundary_labels, mixed_untouched_dofs, raw_face_dofs,
-    thermal_strain, ResolvedIeDomains, Thermal,
+    eval_raw_face_jacobian, mixed_cell_tensor, mixed_check_boundary_labels, raw_face_dofs, thermal_strain,
+    ResolvedIeDomains, Thermal,
 };
 use femcore::fem::{
     add_boundary_load, assemble_mass, boundary_dofs, check_boundary_labels, geometry, quad_rule, shape,
-    shape_gradients, untouched_dofs, RefElement,
+    shape_gradients, RefElement,
 };
 use femcore::fem_mixed::{
     assemble_mass_mixed, eval_facet_jacobian, facet_lagrange_shape, facet_rule_mixed, lagrange_shape_into,
@@ -62,6 +62,14 @@ pub struct PiezoTerminal {
 pub struct PiezoConstraints {
     pub d: usize,
     pub n1: usize,
+    /// Number of scalar Lagrange nodes carrying mechanical displacement DOFs `u` (`n_u_nodes <= n1`).
+    /// Equal to `n1` on all-solid models; strictly smaller when non-solid dielectric/vacuum domains exist.
+    pub n_u_nodes: usize,
+    /// Sorted full-mesh scalar node indices (`0..n1`) active in the mechanical `u` submesh.
+    pub u_nodes: Vec<usize>,
+    /// Map from full-mesh scalar node `gd in 0..n1` to mechanical submesh node `0..n_u_nodes`,
+    /// or `usize::MAX` if node `gd` lies strictly in non-solid dielectric/vacuum domains.
+    pub node_to_u: Vec<usize>,
     pub n_mech: usize,
     pub n_tot: usize,
     pub red_all: Reduction,
@@ -75,6 +83,138 @@ pub struct PiezoConstraints {
     pub conductor_domains: Vec<i32>,
     pub terminals: Vec<PiezoTerminal>,
     pub terminal_lifts: Vec<Vec<C>>,
+}
+
+impl PiezoConstraints {
+    /// True when non-solid dielectric/vacuum domains exist and mechanical displacement DOFs `u`
+    /// are restricted to an active solid submesh (`n_u_nodes < n1`).
+    #[inline]
+    pub fn has_u_submesh(&self) -> bool {
+        self.n_u_nodes < self.n1
+    }
+
+    /// Expands a mechanical vector of length `d * n_u_nodes` (`n_mech`) to full-mesh nodal layout `d * n1`.
+    pub fn expand_u_full_nodes<T: Copy>(&self, u_sub: &[T], zero: T) -> Vec<T> {
+        if self.n_u_nodes == self.n1 {
+            return u_sub[..self.n_mech].to_vec();
+        }
+        let mut out = vec![zero; self.d * self.n1];
+        for comp in 0..self.d {
+            let src_base = comp * self.n_u_nodes;
+            let dst_base = comp * self.n1;
+            for (u_idx, &gd) in self.u_nodes.iter().enumerate() {
+                out[dst_base + gd] = u_sub[src_base + u_idx];
+            }
+        }
+        out
+    }
+
+    /// Restricts a full-mesh vector of length `d * n1` (or `(d + 1) * n1`) to the active `u` submesh (`n_mech` or `n_tot`).
+    pub fn restrict_full_vec(&self, v_full: &[f64]) -> Vec<f64> {
+        if self.n_u_nodes == self.n1 {
+            return v_full.to_vec();
+        }
+        let has_phi = v_full.len() == (self.d + 1) * self.n1;
+        let mut out = Vec::with_capacity(if has_phi { self.n_tot } else { self.n_mech });
+        for comp in 0..self.d {
+            let base = comp * self.n1;
+            for &gd in &self.u_nodes {
+                out.push(v_full[base + gd]);
+            }
+        }
+        if has_phi {
+            out.extend_from_slice(&v_full[self.d * self.n1..(self.d + 1) * self.n1]);
+        }
+        out
+    }
+
+    /// Restricts a full-mesh `n1 x n1` scalar CSR matrix to the `n_u_nodes x n_u_nodes` solid `u` submesh.
+    pub fn restrict_scalar_csr<T: femcore::linalg::scalar::Scalar>(
+        &self,
+        a: &femcore::linalg::csr::Csr<T>,
+    ) -> femcore::linalg::csr::Csr<T> {
+        if self.n_u_nodes == self.n1 {
+            return a.clone();
+        }
+        let mut indptr = Vec::with_capacity(self.n_u_nodes + 1);
+        indptr.push(0);
+        let mut indices = Vec::new();
+        let mut values = Vec::new();
+        for &gd_r in &self.u_nodes {
+            let (cols, vals) = a.row(gd_r);
+            for (&col_u32, &val) in cols.iter().zip(vals) {
+                let uc = self.node_to_u[col_u32 as usize];
+                if uc != usize::MAX {
+                    indices.push(uc);
+                    values.push(val);
+                }
+            }
+            indptr.push(indices.len());
+        }
+        femcore::linalg::csr::Csr::from_raw(self.n_u_nodes, self.n_u_nodes, indptr, indices, values)
+    }
+
+    /// Restricts a full-mesh `d * n1` mechanical CSR matrix to the `n_mech x n_mech` solid `u` submesh.
+    pub fn restrict_mech_csr<T: femcore::linalg::scalar::Scalar>(
+        &self,
+        a: &femcore::linalg::csr::Csr<T>,
+    ) -> femcore::linalg::csr::Csr<T> {
+        if self.n_u_nodes == self.n1 {
+            return a.clone();
+        }
+        let mut indptr = Vec::with_capacity(self.n_mech + 1);
+        indptr.push(0);
+        let mut indices = Vec::new();
+        let mut values = Vec::new();
+        for comp_r in 0..self.d {
+            let r_base = comp_r * self.n1;
+            for &gd_r in &self.u_nodes {
+                let r_full = r_base + gd_r;
+                let (cols, vals) = a.row(r_full);
+                for (&col_u32, &val) in cols.iter().zip(vals) {
+                    let c_full = col_u32 as usize;
+                    let comp_c = c_full / self.n1;
+                    let gd_c = c_full % self.n1;
+                    let uc = self.node_to_u[gd_c];
+                    if uc != usize::MAX {
+                        indices.push(comp_c * self.n_u_nodes + uc);
+                        values.push(val);
+                    }
+                }
+                indptr.push(indices.len());
+            }
+        }
+        femcore::linalg::csr::Csr::from_raw(self.n_mech, self.n_mech, indptr, indices, values)
+    }
+}
+
+fn build_u_submesh(
+    n1: usize,
+    mats: &[PiezoCellMat],
+    get_cell_dofs: &dyn Fn(usize, &mut Vec<usize>),
+) -> (usize, Vec<usize>, Vec<usize>) {
+    if mats.iter().all(|m| m.mech_active) {
+        return (n1, (0..n1).collect(), (0..n1).collect());
+    }
+    let mut active = vec![false; n1];
+    let mut scratch = Vec::new();
+    for (ci, mat) in mats.iter().enumerate() {
+        if mat.mech_active {
+            get_cell_dofs(ci, &mut scratch);
+            for &gd in &scratch {
+                active[gd] = true;
+            }
+        }
+    }
+    let mut u_nodes = Vec::new();
+    let mut node_to_u = vec![usize::MAX; n1];
+    for (gd, &is_act) in active.iter().enumerate() {
+        if is_act {
+            node_to_u[gd] = u_nodes.len();
+            u_nodes.push(gd);
+        }
+    }
+    (u_nodes.len(), u_nodes, node_to_u)
 }
 
 /// Assembled static coupled piezoelectric problem (real arithmetic).
@@ -174,16 +314,17 @@ fn build_piezo_constraints(
     n1: usize,
     spec: &Problem,
     cell_labels: &[i32],
+    mats: &[PiezoCellMat],
     get_cell_dofs: &dyn Fn(usize, &mut Vec<usize>),
     get_boundary_dofs: &dyn Fn(&[i32]) -> Vec<usize>,
     get_conductor_dofs: &dyn Fn(&[i32]) -> Vec<usize>,
-    mech_untouched: Vec<usize>,
     outer_clamped_nodes: Vec<usize>,
     ie_robin_nodes: Vec<usize>,
     periodic_rels: Vec<(usize, usize, C)>,
 ) -> Result<PiezoConstraints, String> {
-    let n_mech = dim * n1;
-    let n_tot = (dim + 1) * n1;
+    let (n_u_nodes, u_nodes, node_to_u) = build_u_submesh(n1, mats, get_cell_dofs);
+    let n_mech = dim * n_u_nodes;
+    let n_tot = n_mech + n1;
     let conductor_domains = spec.conductor_domains();
 
     let mut relations: Vec<(usize, usize, C)> = Vec::new();
@@ -191,15 +332,14 @@ fn build_piezo_constraints(
     let mut mech_rels: Vec<(usize, usize, C)> = Vec::new();
     let mut mech_fixed: Vec<(usize, C)> = Vec::new();
 
-    for dof in mech_untouched {
-        fixed_vals.push((dof, c(0.0, 0.0)));
-        mech_fixed.push((dof, c(0.0, 0.0)));
-    }
     for &node in &outer_clamped_nodes {
-        for comp in 0..dim {
-            let gd = comp * n1 + node;
-            fixed_vals.push((gd, c(0.0, 0.0)));
-            mech_fixed.push((gd, c(0.0, 0.0)));
+        let u_idx = node_to_u[node];
+        if u_idx != usize::MAX {
+            for comp in 0..dim {
+                let gd = comp * n_u_nodes + u_idx;
+                fixed_vals.push((gd, c(0.0, 0.0)));
+                mech_fixed.push((gd, c(0.0, 0.0)));
+            }
         }
         fixed_vals.push((n_mech + node, c(0.0, 0.0)));
     }
@@ -212,20 +352,36 @@ fn build_piezo_constraints(
                 if fixed[w] {
                     let val = c(values[w], 0.0);
                     for &dof in &bd {
-                        let gd = comp * n1 + dof;
-                        fixed_vals.push((gd, val));
-                        mech_fixed.push((gd, val));
+                        let u_idx = node_to_u[dof];
+                        if u_idx != usize::MAX {
+                            let gd = comp * n_u_nodes + u_idx;
+                            fixed_vals.push((gd, val));
+                            mech_fixed.push((gd, val));
+                        }
                     }
                 }
             }
         }
     }
 
-    // Separate Floquet periodic relations between mechanical and electrical blocks
-    for &(dest, src, fac) in &periodic_rels {
-        relations.push((dest, src, fac));
-        if dest < n_mech && src < n_mech {
-            mech_rels.push((dest, src, fac));
+    // Separate Floquet periodic relations between mechanical (`0..dim` on `u_nodes`) and electrical (`dim` on `0..n1`) blocks
+    for &(dest_raw, src_raw, fac) in &periodic_rels {
+        let comp = dest_raw / n1;
+        let dest_node = dest_raw % n1;
+        let src_node = src_raw % n1;
+        if comp < dim {
+            let ud = node_to_u[dest_node];
+            let us = node_to_u[src_node];
+            if ud != usize::MAX && us != usize::MAX {
+                let dest = comp * n_u_nodes + ud;
+                let src = comp * n_u_nodes + us;
+                relations.push((dest, src, fac));
+                mech_rels.push((dest, src, fac));
+            }
+        } else {
+            let dest = n_mech + dest_node;
+            let src = n_mech + src_node;
+            relations.push((dest, src, fac));
         }
     }
 
@@ -255,10 +411,10 @@ fn build_piezo_constraints(
     for &node in &ie_robin_nodes {
         elec_anchored[node] = true;
     }
-    for &(dest, src, fac) in &periodic_rels {
-        if dest >= n_mech && src >= n_mech {
-            let ud = dest - n_mech;
-            let us = src - n_mech;
+    for &(dest_raw, src_raw, fac) in &periodic_rels {
+        if dest_raw >= dim * n1 && src_raw >= dim * n1 {
+            let ud = dest_raw - dim * n1;
+            let us = src_raw - dim * n1;
             adj[ud].push(us);
             adj[us].push(ud);
             if (fac - c(1.0, 0.0)).norm() > 1e-9 {
@@ -592,6 +748,9 @@ fn build_piezo_constraints(
     Ok(PiezoConstraints {
         d: dim,
         n1,
+        n_u_nodes,
+        u_nodes,
+        node_to_u,
         n_mech,
         n_tot,
         red_all,
@@ -872,10 +1031,13 @@ fn accumulate_piezo_thermal_qp(
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn push_piezo_cell_blocks_real(
     coo: &mut Coo,
     d: usize,
-    n1: usize,
+    n_u_nodes: usize,
+    n_mech: usize,
+    node_to_u: &[usize],
     cell_nodes: &[usize],
     mat: &PiezoCellMat,
     ke_uu: &[f64],
@@ -887,14 +1049,16 @@ fn push_piezo_cell_blocks_real(
     let nloc = cell_nodes.len();
     let nd = d * nloc;
     u_dofs.clear();
-    u_dofs.reserve(nd);
-    for comp in 0..d {
-        for &gd in cell_nodes {
-            u_dofs.push(comp * n1 + gd);
+    if mat.mech_active {
+        u_dofs.reserve(nd);
+        for comp in 0..d {
+            for &gd in cell_nodes {
+                u_dofs.push(comp * n_u_nodes + node_to_u[gd]);
+            }
         }
     }
     p_dofs.clear();
-    p_dofs.extend(cell_nodes.iter().map(|&gd| d * n1 + gd));
+    p_dofs.extend(cell_nodes.iter().map(|&gd| n_mech + gd));
 
     if mat.mech_active {
         for i in 0..nd {
@@ -940,10 +1104,13 @@ fn push_piezo_cell_blocks_real(
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn push_piezo_cell_blocks_complex(
     coo: &mut CCoo,
     d: usize,
-    n1: usize,
+    n_u_nodes: usize,
+    n_mech: usize,
+    node_to_u: &[usize],
     cell_nodes: &[usize],
     mat: &PiezoCellMat,
     ke_uu: &[C],
@@ -955,14 +1122,16 @@ fn push_piezo_cell_blocks_complex(
     let nloc = cell_nodes.len();
     let nd = d * nloc;
     u_dofs.clear();
-    u_dofs.reserve(nd);
-    for comp in 0..d {
-        for &gd in cell_nodes {
-            u_dofs.push(comp * n1 + gd);
+    if mat.mech_active {
+        u_dofs.reserve(nd);
+        for comp in 0..d {
+            for &gd in cell_nodes {
+                u_dofs.push(comp * n_u_nodes + node_to_u[gd]);
+            }
         }
     }
     p_dofs.clear();
-    p_dofs.extend(cell_nodes.iter().map(|&gd| d * n1 + gd));
+    p_dofs.extend(cell_nodes.iter().map(|&gd| n_mech + gd));
 
     if mat.mech_active {
         for i in 0..nd {
@@ -1017,7 +1186,9 @@ pub fn assemble_piezo_real_simplex(
 ) -> RCsr {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);
-    let n = (d + 1) * n1;
+    let (n_u_nodes, _u_nodes, node_to_u) = build_u_submesh(n1, mats, &|ci, out| mesh.cell_dofs(ci, order, out));
+    let n_mech = d * n_u_nodes;
+    let n = n_mech + n1;
     let nc = mesh.n_cells();
     let thk = if d == 2 { thickness } else { 1.0 };
     let re = RefElement::new(d, order, if order > 1 { 2 * (order - 1) } else { 1 });
@@ -1071,7 +1242,9 @@ pub fn assemble_piezo_real_simplex(
             push_piezo_cell_blocks_real(
                 &mut coo,
                 d,
-                n1,
+                n_u_nodes,
+                n_mech,
+                &node_to_u,
                 &scratch[..nloc],
                 mat,
                 &ke_uu,
@@ -1107,7 +1280,12 @@ pub(crate) fn assemble_piezo_real_mixed(
     let space = dof_map.space;
     let order = space.order();
     let n1 = dof_map.n_dofs;
-    let n = (d + 1) * n1;
+    let (n_u_nodes, _u_nodes, node_to_u) = build_u_submesh(n1, mats, &|ci, out| {
+        out.clear();
+        out.extend_from_slice(dof_map.cell_dofs(ci));
+    });
+    let n_mech = d * n_u_nodes;
+    let n = n_mech + n1;
     let nc = mixed.n_cells();
     let thk = if d == 2 { thickness } else { 1.0 };
     let ns = if d == 2 { 3 } else { 6 };
@@ -1187,7 +1365,20 @@ pub(crate) fn assemble_piezo_real_mixed(
                 };
                 accumulate_piezo_qp_real(mat, d, plane, nloc, &grad, w_eff, &mut b, &mut ke_uu, &mut ke_up, &mut ke_pp);
             }
-            push_piezo_cell_blocks_real(&mut coo, d, n1, cdofs, mat, &ke_uu, &ke_up, &ke_pp, &mut u_dofs, &mut p_dofs);
+            push_piezo_cell_blocks_real(
+                &mut coo,
+                d,
+                n_u_nodes,
+                n_mech,
+                &node_to_u,
+                cdofs,
+                mat,
+                &ke_uu,
+                &ke_up,
+                &ke_pp,
+                &mut u_dofs,
+                &mut p_dofs,
+            );
         }
         coo
     });
@@ -1250,11 +1441,11 @@ pub(crate) fn assemble_piezo_real_mixed(
                 }
             }
             for a in 0..nloc {
-                let ra = d * n1 + fdofs[a];
+                let ra = n_mech + fdofs[a];
                 for b in a..nloc {
                     let v = blk[a * nloc + b];
                     if v != 0.0 {
-                        let cb = d * n1 + fdofs[b];
+                        let cb = n_mech + fdofs[b];
                         k_elec_coo.push(ra, cb, v);
                         if a != b {
                             k_elec_coo.push(cb, ra, v);
@@ -1265,12 +1456,23 @@ pub(crate) fn assemble_piezo_real_mixed(
         }
     }
 
-    // Pad mechanical Robin `(d*n1)` into `(d+1)*n1`
+    // Pad mechanical Robin `(d*n1)` into `n_tot` via `node_to_u`
     let mut k_mr_coo = Coo::new(n, n);
     for r in 0..k_mech_robin.nrows() {
+        let comp_r = r / n1;
+        let ur = node_to_u[r % n1];
+        if ur == usize::MAX {
+            continue;
+        }
+        let r_sub = comp_r * n_u_nodes + ur;
         let (cols, vals) = k_mech_robin.row(r);
         for (&col, &val) in cols.iter().zip(vals) {
-            k_mr_coo.push(r, col as usize, val);
+            let c_full = col as usize;
+            let comp_c = c_full / n1;
+            let uc = node_to_u[c_full % n1];
+            if uc != usize::MAX {
+                k_mr_coo.push(r_sub, comp_c * n_u_nodes + uc, val);
+            }
         }
     }
     let k_mr_padded = k_mr_coo.to_csr();
@@ -1295,7 +1497,9 @@ fn thermal_load_piezo_simplex(
     let nd = d * nloc;
     let ns = if d == 2 { 3 } else { 6 };
     let n1 = mesh.n_dofs(order);
-    let n = (d + 1) * n1;
+    let (n_u_nodes, _u_nodes, node_to_u) = build_u_submesh(n1, mats, &|ci, out| mesh.cell_dofs(ci, order, out));
+    let n_mech = d * n_u_nodes;
+    let n = n_mech + n1;
     let nc = mesh.n_cells();
     let thk = if d == 2 { thickness } else { 1.0 };
 
@@ -1339,12 +1543,12 @@ fn thermal_load_piezo_simplex(
             }
             for comp in 0..d {
                 for a in 0..nloc {
-                    f[comp * n1 + scratch[a]] += fe_u[comp * nloc + a];
+                    f[comp * n_u_nodes + node_to_u[scratch[a]]] += fe_u[comp * nloc + a];
                 }
             }
             if mat.elec_active {
                 for a in 0..nloc {
-                    f[d * n1 + scratch[a]] += fe_p[a];
+                    f[n_mech + scratch[a]] += fe_p[a];
                 }
             }
         }
@@ -1376,7 +1580,12 @@ fn thermal_load_piezo_mixed(
     let space = dof_map.space;
     let order = space.order();
     let n1 = dof_map.n_dofs;
-    let n = (d + 1) * n1;
+    let (n_u_nodes, _u_nodes, node_to_u) = build_u_submesh(n1, mats, &|ci, out| {
+        out.clear();
+        out.extend_from_slice(dof_map.cell_dofs(ci));
+    });
+    let n_mech = d * n_u_nodes;
+    let n = n_mech + n1;
     let nc = mixed.n_cells();
     let thk = if d == 2 { thickness } else { 1.0 };
     let ns = if d == 2 { 3 } else { 6 };
@@ -1464,12 +1673,12 @@ fn thermal_load_piezo_mixed(
             }
             for comp in 0..d {
                 for a in 0..nloc {
-                    f[comp * n1 + cdofs[a]] += fe_u[comp * nloc + a];
+                    f[comp * n_u_nodes + node_to_u[cdofs[a]]] += fe_u[comp * nloc + a];
                 }
             }
             if mat.elec_active {
                 for a in 0..nloc {
-                    f[d * n1 + cdofs[a]] += fe_p[a];
+                    f[n_mech + cdofs[a]] += fe_p[a];
                 }
             }
         }
@@ -1511,7 +1720,6 @@ pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resu
     let thk = if d == 2 { spec.thickness } else { 1.0 };
 
     let (by_dom, mats) = resolve_piezo_mats_simplex(mesh, spec, false)?;
-    let mech_untouched = untouched_dofs(mesh, order, d, &spec.inactive);
     let get_cell = |ci: usize, out: &mut Vec<usize>| {
         mesh.cell_dofs(ci, order, out);
     };
@@ -1522,10 +1730,10 @@ pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resu
         n1,
         spec,
         &mesh.cell_labels,
+        &mats,
         &get_cell,
         &get_bd,
         &get_cd,
-        mech_untouched,
         Vec::new(),
         Vec::new(),
         Vec::new(),
@@ -1534,7 +1742,7 @@ pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resu
     let k_full = assemble_piezo_real_simplex(mesh, &mats, order, spec.plane, spec.thickness);
     let k_red = congruence_real(&constraints.red_all, &k_full)?;
 
-    let mut f_mech_elec = vec![0.0; constraints.n_tot];
+    let mut f_full_nodes = vec![0.0; (d + 1) * n1];
     let axes = wafer_axes(d);
     for bc in &spec.bcs {
         match &bc.kind {
@@ -1542,17 +1750,18 @@ pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resu
                 for (comp, &w) in axes.iter().enumerate() {
                     if t[w] != 0.0 {
                         let tc = t[w] * thk;
-                        add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f_mech_elec, d + 1, comp);
+                        add_boundary_load(mesh, &bc.labels, &|_| tc, order, &mut f_full_nodes, d + 1, comp);
                     }
                 }
             }
             BcKind::SurfaceCharge(sigma_s) if *sigma_s != 0.0 => {
                 let qc = -sigma_s * thk;
-                add_boundary_load(mesh, &bc.labels, &|_| qc, order, &mut f_mech_elec, d + 1, d);
+                add_boundary_load(mesh, &bc.labels, &|_| qc, order, &mut f_full_nodes, d + 1, d);
             }
             _ => {}
         }
     }
+    let mut f_mech_elec = constraints.restrict_full_vec(&f_full_nodes);
     for el in &constraints.electrodes {
         if let (true, Some(q), Some(root)) = (el.is_floating, el.prescribed_charge, el.root_dof) {
             if q != 0.0 {
@@ -1564,9 +1773,10 @@ pub fn assemble_piezo_static_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resu
     let mut thermal = None;
     let mut f_th = vec![0.0; constraints.n_tot];
     if let Some(th) = &spec.thermal {
+        let inactive_mech: Vec<i32> = by_dom.iter().filter(|(_, m)| !m.mech_active).map(|(&dom, _)| dom).collect();
         let alpha: Vec<M3> = spec
             .materials
-            .cell_tensor_skipping(mesh, TensorKind::Expansion, Some(0.0), &spec.inactive)?
+            .cell_tensor_skipping(mesh, TensorKind::Expansion, Some(0.0), &inactive_mech)?
             .iter()
             .map(|a| plane_tensor(a, d))
             .collect();
@@ -1620,7 +1830,6 @@ pub fn assemble_piezo_static_mixed(
     check_static_mech_support(spec, ie_domains.has_exponential_robin())?;
 
     let (by_dom, mats) = resolve_piezo_mats_mixed(mixed, spec, false)?;
-    let mech_untouched = mixed_untouched_dofs(mixed, dof_map, d, &spec.inactive);
     let ie_clamped = ie_domains.outer_clamped_dofs(mixed, dof_map, spec);
     let conductor_domains = spec.conductor_domains();
     let ie_robin_nodes: Vec<usize> = if ie_domains.has_exponential_robin() {
@@ -1646,15 +1855,16 @@ pub fn assemble_piezo_static_mixed(
         n1,
         spec,
         &mixed.cell_labels,
+        &mats,
         &get_cell,
         &get_bd,
         &get_cd,
-        mech_untouched,
         ie_clamped,
         ie_robin_nodes,
         Vec::new(),
     )?;
 
+    let inactive_mech: Vec<i32> = by_dom.iter().filter(|(_, m)| !m.mech_active).map(|(&dom, _)| dom).collect();
     let k_full = assemble_piezo_real_mixed(
         mixed,
         dof_map,
@@ -1662,12 +1872,12 @@ pub fn assemble_piezo_static_mixed(
         spec.plane,
         spec.thickness,
         &ie_domains,
-        &spec.inactive,
+        &inactive_mech,
         &constraints.conductor_domains,
     );
     let k_red = congruence_real(&constraints.red_all, &k_full)?;
 
-    let mut f_mech_elec = vec![0.0; constraints.n_tot];
+    let mut f_full_nodes = vec![0.0; (d + 1) * n1];
     let axes = wafer_axes(d);
     for bc in &spec.bcs {
         match &bc.kind {
@@ -1675,24 +1885,18 @@ pub fn assemble_piezo_static_mixed(
                 for (comp, &w) in axes.iter().enumerate() {
                     if t[w] != 0.0 {
                         let tc = t[w] * thk;
-                        add_boundary_load_mixed(mixed, dof_map, &bc.labels, tc, &mut f_mech_elec, comp);
+                        add_boundary_load_mixed(mixed, dof_map, &bc.labels, tc, &mut f_full_nodes, comp);
                     }
                 }
             }
             BcKind::SurfaceCharge(sigma_s) if *sigma_s != 0.0 => {
                 let qc = -sigma_s * thk;
-                add_boundary_load_mixed(
-                    mixed,
-                    dof_map,
-                    &bc.labels,
-                    qc,
-                    &mut f_mech_elec[constraints.n_mech..constraints.n_tot],
-                    0,
-                );
+                add_boundary_load_mixed(mixed, dof_map, &bc.labels, qc, &mut f_full_nodes[d * n1..(d + 1) * n1], 0);
             }
             _ => {}
         }
     }
+    let mut f_mech_elec = constraints.restrict_full_vec(&f_full_nodes);
     for el in &constraints.electrodes {
         if let (true, Some(q), Some(root)) = (el.is_floating, el.prescribed_charge, el.root_dof) {
             if q != 0.0 {
@@ -1706,13 +1910,7 @@ pub fn assemble_piezo_static_mixed(
     if let Some(th) = &spec.thermal {
         let all_alpha = mixed_cell_tensor(&spec.materials, mixed, TensorKind::Expansion, Some(0.0))?;
         let alpha: Vec<M3> = (0..mixed.n_cells())
-            .map(|ci| {
-                if spec.inactive.contains(&mixed.cell_labels[ci]) {
-                    [[0.0; 3]; 3]
-                } else {
-                    plane_tensor(&all_alpha[ci], d)
-                }
-            })
+            .map(|ci| if !mats[ci].mech_active { [[0.0; 3]; 3] } else { plane_tensor(&all_alpha[ci], d) })
             .collect();
         let t = match &th.source {
             ThermalSource::Uniform(tv) => vec![*tv; n1],
@@ -1766,7 +1964,9 @@ fn assemble_piezo_complex_simplex(
 ) -> CCsr {
     let d = mesh.dim;
     let n1 = mesh.n_dofs(order);
-    let n = (d + 1) * n1;
+    let (n_u_nodes, _u_nodes, node_to_u) = build_u_submesh(n1, mats, &|ci, out| mesh.cell_dofs(ci, order, out));
+    let n_mech = d * n_u_nodes;
+    let n = n_mech + n1;
     let nc = mesh.n_cells();
     let thk = if d == 2 { thickness } else { 1.0 };
     let re = RefElement::new(d, order, if order > 1 { 2 * (order - 1) } else { 1 });
@@ -1847,7 +2047,9 @@ fn assemble_piezo_complex_simplex(
             push_piezo_cell_blocks_complex(
                 &mut coo,
                 d,
-                n1,
+                n_u_nodes,
+                n_mech,
+                &node_to_u,
                 &scratch[..nloc],
                 mat,
                 &ke_uu,
@@ -1879,7 +2081,12 @@ fn assemble_piezo_complex_mixed(
     let space = dof_map.space;
     let order = space.order();
     let n1 = dof_map.n_dofs;
-    let n = (d + 1) * n1;
+    let (n_u_nodes, _u_nodes, node_to_u) = build_u_submesh(n1, mats, &|ci, out| {
+        out.clear();
+        out.extend_from_slice(dof_map.cell_dofs(ci));
+    });
+    let n_mech = d * n_u_nodes;
+    let n = n_mech + n1;
     let nc = mixed.n_cells();
     let thk = if d == 2 { thickness } else { 1.0 };
     let ns = if d == 2 { 3 } else { 6 };
@@ -1937,7 +2144,7 @@ fn assemble_piezo_complex_mixed(
                         for i in 0..d {
                             let mut acc = c(0.0, 0.0);
                             for k in 0..d {
-                                acc += jac.j_inv[k][i] * gp[k];
+                                acc += jac.j_inv[k][i] * grad_k(gp, k);
                             }
                             gc[a * d + i] = acc;
                         }
@@ -1961,7 +2168,9 @@ fn assemble_piezo_complex_mixed(
             push_piezo_cell_blocks_complex(
                 &mut coo,
                 d,
-                n1,
+                n_u_nodes,
+                n_mech,
+                &node_to_u,
                 cdofs,
                 mat,
                 &ke_uu,
@@ -1979,6 +2188,11 @@ fn assemble_piezo_complex_mixed(
         all.extend(&blk);
     }
     all.to_csr()
+}
+
+#[inline]
+fn grad_k(gp: [f64; 3], k: usize) -> f64 {
+    gp[k]
 }
 
 fn assemble_pml_mass_simplex(
@@ -2189,7 +2403,6 @@ pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resul
     let is_hermitian = !any_pml && !has_dielectric_loss && !has_damping;
     let is_complex = any_pml || has_dielectric_loss || has_damping || has_periodic;
 
-    let mech_untouched = untouched_dofs(mesh, order, d, &spec.inactive);
     let outer_clamped =
         if any_pml { outer_clamped_dofs_simplex(mesh, order, spec, &resolved_pml, false, 0.0) } else { Vec::new() };
 
@@ -2209,10 +2422,10 @@ pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resul
         n1,
         spec,
         &mesh.cell_labels,
+        &mats,
         &get_cell,
         &get_bd,
         &get_cd,
-        mech_untouched,
         outer_clamped,
         Vec::new(),
         periodic_rels,
@@ -2242,7 +2455,7 @@ pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resul
         let kf = assemble_piezo_real_simplex(mesh, &mats, order, spec.plane, spec.thickness);
         let kr = congruence_real(&constraints.red_all, &kf)?;
         let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
-        let m1 = assemble_mass(mesh, order, &rho_t);
+        let m1 = constraints.restrict_scalar_csr(&assemble_mass(mesh, order, &rho_t));
         let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
         let m_uu = RCsr::block_diag(&blocks);
         let mr = congruence_real(&constraints.red_u, &m_uu)?;
@@ -2253,10 +2466,10 @@ pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resul
         let kf_c = assemble_piezo_complex_simplex(mesh, &mats, order, spec.plane, spec.thickness, &resolved_pml);
         let kr_c = congruence_fast(&constraints.red_all, &kf_c);
         let m_uu_c = if any_pml {
-            assemble_pml_mass_simplex(mesh, &rho, order, spec.thickness, &resolved_pml)
+            constraints.restrict_mech_csr(&assemble_pml_mass_simplex(mesh, &rho, order, spec.thickness, &resolved_pml))
         } else {
             let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
-            let m1 = assemble_mass(mesh, order, &rho_t);
+            let m1 = constraints.restrict_scalar_csr(&assemble_mass(mesh, order, &rho_t));
             let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
             RCsr::block_diag(&blocks).to_complex()
         };
@@ -2266,12 +2479,18 @@ pub fn assemble_piezo_eigen_simplex(mesh: &SimplexMesh, spec: &Problem) -> Resul
             let mut c_uu_r = RCsr::zeros(constraints.n_mech, constraints.n_mech);
             if has_visc {
                 let eta_wafer: Vec<_> = mats.iter().map(|m| m.eta).collect();
-                let cv = crate::solid::assemble_solid(mesh, &eta_wafer, order, spec.plane, spec.thickness);
+                let cv = constraints.restrict_mech_csr(&crate::solid::assemble_solid(
+                    mesh,
+                    &eta_wafer,
+                    order,
+                    spec.plane,
+                    spec.thickness,
+                ));
                 c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cv);
             }
             if !lrb_labels.is_empty() {
                 let c6_arr: Vec<_> = mats.iter().map(|m| m.c6).collect();
-                let cl = damping_matrix(mesh, &c6_arr, &rho, &lrb_labels, order, d);
+                let cl = constraints.restrict_mech_csr(&damping_matrix(mesh, &c6_arr, &rho, &lrb_labels, order, d));
                 let cl_sc = if d == 2 { thk } else { 1.0 };
                 c_uu_r = RCsr::axpby(1.0, &c_uu_r, cl_sc, &cl);
             }
@@ -2357,7 +2576,6 @@ pub fn assemble_piezo_eigen_mixed(
     let is_hermitian = !any_pml && !has_dielectric_loss && !has_damping;
     let is_complex = any_pml || has_dielectric_loss || has_damping || has_periodic;
 
-    let mech_untouched = mixed_untouched_dofs(mixed, dof_map, d, &spec.inactive);
     let outer_clamped =
         if any_pml { outer_clamped_dofs_mixed(mixed, dof_map, spec, &resolved_pml, false, 0.0) } else { Vec::new() };
 
@@ -2377,10 +2595,10 @@ pub fn assemble_piezo_eigen_mixed(
         n1,
         spec,
         &mixed.cell_labels,
+        &mats,
         &get_cell,
         &get_bd,
         &get_cd,
-        mech_untouched,
         outer_clamped,
         Vec::new(),
         periodic_rels,
@@ -2393,6 +2611,7 @@ pub fn assemble_piezo_eigen_mixed(
     let diagnostics = resolved_pml.diagnostics.clone();
     let n_u_red = constraints.n_u_red;
     let n_tot_red = constraints.red_all.n_reduced();
+    let inactive_mech: Vec<i32> = by_dom.iter().filter(|(_, m)| !m.mech_active).map(|(&dom, _)| dom).collect();
 
     let (
         k_full_real,
@@ -2414,12 +2633,12 @@ pub fn assemble_piezo_eigen_mixed(
             spec.plane,
             spec.thickness,
             &ResolvedIeDomains::default(),
-            &spec.inactive,
+            &inactive_mech,
             &constraints.conductor_domains,
         );
         let kr = congruence_real(&constraints.red_all, &kf)?;
         let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
-        let m1 = assemble_mass_mixed(mixed, dof_map, &rho_t);
+        let m1 = constraints.restrict_scalar_csr(&assemble_mass_mixed(mixed, dof_map, &rho_t));
         let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
         let m_uu = RCsr::block_diag(&blocks);
         let mr = congruence_real(&constraints.red_u, &m_uu)?;
@@ -2430,10 +2649,10 @@ pub fn assemble_piezo_eigen_mixed(
         let kf_c = assemble_piezo_complex_mixed(mixed, dof_map, &mats, spec.plane, spec.thickness, &resolved_pml);
         let kr_c = congruence_fast(&constraints.red_all, &kf_c);
         let m_uu_c = if any_pml {
-            assemble_pml_mass_mixed(mixed, dof_map, &rho, spec.thickness, &resolved_pml)
+            constraints.restrict_mech_csr(&assemble_pml_mass_mixed(mixed, dof_map, &rho, spec.thickness, &resolved_pml))
         } else {
             let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
-            let m1 = assemble_mass_mixed(mixed, dof_map, &rho_t);
+            let m1 = constraints.restrict_scalar_csr(&assemble_mass_mixed(mixed, dof_map, &rho_t));
             let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
             RCsr::block_diag(&blocks).to_complex()
         };
@@ -2443,12 +2662,26 @@ pub fn assemble_piezo_eigen_mixed(
             let mut c_uu_r = RCsr::zeros(constraints.n_mech, constraints.n_mech);
             if has_visc {
                 let eta_wafer: Vec<_> = mats.iter().map(|m| m.eta).collect();
-                let cv = crate::solid::assemble_solid_mixed(mixed, dof_map, &eta_wafer, spec.plane, spec.thickness);
+                let cv = constraints.restrict_mech_csr(&crate::solid::assemble_solid_mixed(
+                    mixed,
+                    dof_map,
+                    &eta_wafer,
+                    spec.plane,
+                    spec.thickness,
+                ));
                 c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cv);
             }
             if !lrb_labels.is_empty() {
                 let c6_arr: Vec<_> = mats.iter().map(|m| m.c6).collect();
-                let cl = damping_matrix_mixed(mixed, dof_map, &c6_arr, &rho, &lrb_labels, d, thk);
+                let cl = constraints.restrict_mech_csr(&damping_matrix_mixed(
+                    mixed,
+                    dof_map,
+                    &c6_arr,
+                    &rho,
+                    &lrb_labels,
+                    d,
+                    thk,
+                ));
                 c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cl);
             }
             Some(congruence_fast(&constraints.red_u, &c_uu_r.to_complex()))
@@ -2552,7 +2785,6 @@ pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) 
     let has_periodic = !spec.periodic.is_empty();
     let is_complex = any_pml || has_dielectric_loss || has_damping || has_periodic;
 
-    let mech_untouched = untouched_dofs(mesh, order, d, &spec.inactive);
     let outer_clamped =
         if any_pml { outer_clamped_dofs_simplex(mesh, order, spec, &resolved_pml, false, 0.0) } else { Vec::new() };
 
@@ -2572,10 +2804,10 @@ pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) 
         n1,
         spec,
         &mesh.cell_labels,
+        &mats,
         &get_cell,
         &get_bd,
         &get_cd,
-        mech_untouched,
         outer_clamped,
         Vec::new(),
         periodic_rels,
@@ -2592,10 +2824,10 @@ pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) 
     };
 
     let m_uu_full = if any_pml {
-        assemble_pml_mass_simplex(mesh, &rho, order, spec.thickness, &resolved_pml)
+        constraints.restrict_mech_csr(&assemble_pml_mass_simplex(mesh, &rho, order, spec.thickness, &resolved_pml))
     } else {
         let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
-        let m1 = assemble_mass(mesh, order, &rho_t);
+        let m1 = constraints.restrict_scalar_csr(&assemble_mass(mesh, order, &rho_t));
         let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
         RCsr::block_diag(&blocks).to_complex()
     };
@@ -2604,12 +2836,18 @@ pub(crate) fn assemble_piezo_driven_simplex(mesh: &SimplexMesh, spec: &Problem) 
         let mut c_uu_r = RCsr::zeros(constraints.n_mech, constraints.n_mech);
         if has_visc {
             let eta_wafer: Vec<_> = mats.iter().map(|m| m.eta).collect();
-            let cv = crate::solid::assemble_solid(mesh, &eta_wafer, order, spec.plane, spec.thickness);
+            let cv = constraints.restrict_mech_csr(&crate::solid::assemble_solid(
+                mesh,
+                &eta_wafer,
+                order,
+                spec.plane,
+                spec.thickness,
+            ));
             c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cv);
         }
         if !lrb_labels.is_empty() {
             let c6_arr: Vec<_> = mats.iter().map(|m| m.c6).collect();
-            let cl = damping_matrix(mesh, &c6_arr, &rho, &lrb_labels, order, d);
+            let cl = constraints.restrict_mech_csr(&damping_matrix(mesh, &c6_arr, &rho, &lrb_labels, order, d));
             let cl_sc = if d == 2 { thk } else { 1.0 };
             c_uu_r = RCsr::axpby(1.0, &c_uu_r, cl_sc, &cl);
         }
@@ -2658,7 +2896,7 @@ pub(crate) fn assemble_piezo_driven_mixed(
     let n1 = dof_map.n_dofs;
     let thk = if d == 2 { spec.thickness } else { 1.0 };
 
-    let (_by_dom, mats) = resolve_piezo_mats_mixed(mixed, spec, true)?;
+    let (by_dom, mats) = resolve_piezo_mats_mixed(mixed, spec, true)?;
     let rho: Vec<f64> = mats.iter().map(|m| m.rho).collect();
     let resolved_pml = ResolvedPmlDomains::from_mixed(mixed, spec, false, f_ref)?;
     let any_pml = !resolved_pml.domains.is_empty();
@@ -2674,7 +2912,6 @@ pub(crate) fn assemble_piezo_driven_mixed(
     let has_periodic = !spec.periodic.is_empty();
     let is_complex = any_pml || has_dielectric_loss || has_damping || has_periodic;
 
-    let mech_untouched = mixed_untouched_dofs(mixed, dof_map, d, &spec.inactive);
     let outer_clamped =
         if any_pml { outer_clamped_dofs_mixed(mixed, dof_map, spec, &resolved_pml, false, 0.0) } else { Vec::new() };
 
@@ -2694,10 +2931,10 @@ pub(crate) fn assemble_piezo_driven_mixed(
         n1,
         spec,
         &mixed.cell_labels,
+        &mats,
         &get_cell,
         &get_bd,
         &get_cd,
-        mech_untouched,
         outer_clamped,
         Vec::new(),
         periodic_rels,
@@ -2707,6 +2944,7 @@ pub(crate) fn assemble_piezo_driven_mixed(
         return Err("driven study has no free degrees of freedom after constraints".into());
     }
 
+    let inactive_mech: Vec<i32> = by_dom.iter().filter(|(_, m)| !m.mech_active).map(|(&dom, _)| dom).collect();
     let k_full = if any_pml || has_dielectric_loss {
         assemble_piezo_complex_mixed(mixed, dof_map, &mats, spec.plane, spec.thickness, &resolved_pml)
     } else {
@@ -2717,17 +2955,17 @@ pub(crate) fn assemble_piezo_driven_mixed(
             spec.plane,
             spec.thickness,
             &ResolvedIeDomains::default(),
-            &spec.inactive,
+            &inactive_mech,
             &constraints.conductor_domains,
         )
         .to_complex()
     };
 
     let m_uu_full = if any_pml {
-        assemble_pml_mass_mixed(mixed, dof_map, &rho, spec.thickness, &resolved_pml)
+        constraints.restrict_mech_csr(&assemble_pml_mass_mixed(mixed, dof_map, &rho, spec.thickness, &resolved_pml))
     } else {
         let rho_t: Vec<f64> = rho.iter().map(|&r| r * thk).collect();
-        let m1 = assemble_mass_mixed(mixed, dof_map, &rho_t);
+        let m1 = constraints.restrict_scalar_csr(&assemble_mass_mixed(mixed, dof_map, &rho_t));
         let blocks: Vec<&RCsr> = (0..d).map(|_| &m1).collect();
         RCsr::block_diag(&blocks).to_complex()
     };
@@ -2736,12 +2974,26 @@ pub(crate) fn assemble_piezo_driven_mixed(
         let mut c_uu_r = RCsr::zeros(constraints.n_mech, constraints.n_mech);
         if has_visc {
             let eta_wafer: Vec<_> = mats.iter().map(|m| m.eta).collect();
-            let cv = crate::solid::assemble_solid_mixed(mixed, dof_map, &eta_wafer, spec.plane, spec.thickness);
+            let cv = constraints.restrict_mech_csr(&crate::solid::assemble_solid_mixed(
+                mixed,
+                dof_map,
+                &eta_wafer,
+                spec.plane,
+                spec.thickness,
+            ));
             c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cv);
         }
         if !lrb_labels.is_empty() {
             let c6_arr: Vec<_> = mats.iter().map(|m| m.c6).collect();
-            let cl = damping_matrix_mixed(mixed, dof_map, &c6_arr, &rho, &lrb_labels, d, thk);
+            let cl = constraints.restrict_mech_csr(&damping_matrix_mixed(
+                mixed,
+                dof_map,
+                &c6_arr,
+                &rho,
+                &lrb_labels,
+                d,
+                thk,
+            ));
             c_uu_r = RCsr::axpby(1.0, &c_uu_r, 1.0, &cl);
         }
         Some(c_uu_r.to_complex())

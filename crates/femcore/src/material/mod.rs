@@ -15,9 +15,11 @@ pub mod bcs;
 pub mod coupled;
 pub mod elastic;
 pub mod import;
+pub mod nonlinear;
 pub mod optics;
 pub mod reader;
 pub mod schema;
+pub mod sheet2d;
 pub mod source;
 pub mod spec;
 pub mod state_t;
@@ -32,12 +34,24 @@ pub use coupled::{
     Dielectric, ElectroOptic, InterfaceLayer, Interfaces, Photoelastic, PiezoForm, Piezoelectric, Viscoelastic, EPSILON_0,
 };
 pub use elastic::{Class, Elastic, Unique};
-pub use optics::{AxisModel, Dispersion, Optical, OpticsError};
+pub use nonlinear::{
+    chi2_d_global, d_rank3_to_voigt, d_voigt_to_rank3, drude_carrier_step, eval_chi2_polarization_time,
+    eval_chi2_tangent_time, eval_chi3_envelope_time, eval_chi3_kerr_time, validate_chi2_point_group, Chi2, Chi3,
+    Nonlinear, QpmSpec, C0_NL, CHI2_KEYS, CHI3_KEYS, NONLINEAR_KEYS, QPM_KEYS,
+};
+pub use optics::{AxisModel, Dispersion, Gyrotropy, Optical, OpticsError};
 pub use reader::MaterialError;
+pub use sheet2d::{
+    chemical_potential_from_gate_potential, gate_oxide_capacitance, kubo_graphene_interband,
+    kubo_graphene_isotropic, kubo_graphene_tensor, sheet2d_fresnel_normal_tra,
+    tm_plasmon_wavenumber_nonretarded, tm_plasmon_wavenumber_retarded_symmetric, Sheet2d,
+    Sheet2dModel, Sheet2dPole, DEFAULT_GRAPHENE_VF, E_CHARGE, EPS0 as SHEET2D_EPS0,
+    ETA0 as SHEET2D_ETA0, GRAPHENE_SIGMA0, SHEET_2D_KEYS,
+};
 pub use source::Source;
 pub use spec::{merge_over, Library, MaterialSpec};
 pub use state_t::{AxisClamp, CheckedTempEval, ComponentClamp, CrystalSetting, MaterialKind, PointGroup, TempClampInfo, TempCurve, TempTensor, TEMP_CURVE_KEYS};
-pub use tensor::TensorProp;
+pub use tensor::{axial_from_skew, det3, rotate_axial_vector, skew_from_axial, TensorProp};
 
 pub type M3 = [[f64; 3]; 3];
 pub type M6 = [[f64; 6]; 6];
@@ -206,6 +220,77 @@ pub struct Anisotropy {
     /// Photoelastic Pockels tensor p_IJ (dimensionless, textbook Voigt in crystal frame).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub photoelastic: Option<M6>,
+    /// Linear electro-optic Pockels tensor r^S_Ik (m/V, textbook Voigt 6x3 in crystal frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub electro_optic: Option<[[f64; 3]; 6]>,
+    /// Optional anisotropic real symmetric relative permeability $\boldsymbol{\mu}'$.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permeability: Option<Tensor>,
+    /// Optional anisotropic imaginary symmetric relative permeability $\boldsymbol{\mu}''$ ($\boldsymbol{\mu}_{\text{sym}} = \boldsymbol{\mu}' - i\boldsymbol{\mu}''$).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permeability_im: Option<Tensor>,
+    /// Real part $\mathbf{g}_{\text{re}} = (g_x, g_y, g_z)$ of the electric gyrotropy / Voigt axial vector
+    /// in the crystal frame, contributing $+i \mathbf{G}_\times$ ($\mathbf{G}_\times \mathbf{E} = \mathbf{g} \times \mathbf{E}$).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy: Option<[f64; 3]>,
+    /// Imaginary part $\mathbf{g}_{\text{im}}$ of the electric gyrotropy axial vector (magneto-optic circular dichroism).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy_im: Option<[f64; 3]>,
+    /// Real part $\mathbf{g}_{\mu,\text{re}}$ of the magnetic gyrotropy / Polder axial vector in the crystal frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_gyrotropy: Option<[f64; 3]>,
+    /// Imaginary part $\mathbf{g}_{\mu,\text{im}}$ of the magnetic gyrotropy axial vector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_gyrotropy_im: Option<[f64; 3]>,
+    /// Second- and third-order optical nonlinearities (`[nonlinear]`: `chi2`, `chi3`, `qpm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonlinear: Option<Nonlinear>,
+}
+
+impl Anisotropy {
+    /// Returns `true` when this domain has a non-zero skew-symmetric electric or magnetic gyrotropic vector.
+    pub fn is_non_symmetric(&self) -> bool {
+        let nz = |v: Option<[f64; 3]>| v.is_some_and(|g| g.iter().any(|&x| x != 0.0));
+        nz(self.gyrotropy) || nz(self.gyrotropy_im) || nz(self.mu_gyrotropy) || nz(self.mu_gyrotropy_im)
+    }
+
+    /// Evaluates the electric gyrotropy axial vector $(\mathbf{g}_{\text{re}}, \mathbf{g}_{\text{im}})$
+    /// rotated into the global frame via $\mathbf{g}_{\text{global}} = (\det \mathbf{R}) \mathbf{R} \mathbf{g}_{\text{local}}$.
+    pub fn gyrotropy_global(&self) -> Option<([f64; 3], [f64; 3])> {
+        if self.gyrotropy.is_none() && self.gyrotropy_im.is_none() {
+            return None;
+        }
+        let r = rotation(self.euler_deg);
+        let g_re = rotate_axial_vector(&self.gyrotropy.unwrap_or([0.0; 3]), &r);
+        let g_im = rotate_axial_vector(&self.gyrotropy_im.unwrap_or([0.0; 3]), &r);
+        if g_re.iter().all(|&x| x == 0.0) && g_im.iter().all(|&x| x == 0.0) {
+            None
+        } else {
+            Some((g_re, g_im))
+        }
+    }
+
+    /// Evaluates the magnetic gyrotropy axial vector $(\mathbf{g}_{\mu,\text{re}}, \mathbf{g}_{\mu,\text{im}})$
+    /// rotated into the global frame via $\mathbf{g}_{\mu,\text{global}} = (\det \mathbf{R}) \mathbf{R} \mathbf{g}_{\mu,\text{local}}$.
+    pub fn mu_gyrotropy_global(&self) -> Option<([f64; 3], [f64; 3])> {
+        if self.mu_gyrotropy.is_none() && self.mu_gyrotropy_im.is_none() {
+            return None;
+        }
+        let r = rotation(self.euler_deg);
+        let g_re = rotate_axial_vector(&self.mu_gyrotropy.unwrap_or([0.0; 3]), &r);
+        let g_im = rotate_axial_vector(&self.mu_gyrotropy_im.unwrap_or([0.0; 3]), &r);
+        if g_re.iter().all(|&x| x == 0.0) && g_im.iter().all(|&x| x == 0.0) {
+            None
+        } else {
+            Some((g_re, g_im))
+        }
+    }
+}
+
+/// Rotate a crystal-frame axial vector `g` to the global frame by Bunge Euler angles
+/// `euler_deg = [phi1, Phi, phi2]` in degrees: $\mathbf{g}_{\text{global}} = (\det \mathbf{R}) \mathbf{R} \mathbf{g}_{\text{local}}$.
+pub fn axial_global(g: &[f64; 3], euler_deg: [f64; 3]) -> [f64; 3] {
+    rotate_axial_vector(g, &rotation(euler_deg))
 }
 
 pub fn rotation(euler_deg: [f64; 3]) -> M3 {

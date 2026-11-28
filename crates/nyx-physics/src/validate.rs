@@ -56,12 +56,69 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
         check_params(&bc.params, &d.params, &format!("condition '{}'", bc.kind))?;
     }
     let props = p.properties();
+    let has_eps_r = props.iter().any(|d| d.name == "eps_r");
+    let is_gyro_key = |name: &str| {
+        matches!(
+            name,
+            "gyrotropy"
+                | "gyrotropy_im"
+                | "gyro_e"
+                | "gyro_e_im"
+                | "mu_gyrotropy"
+                | "mu_gyrotropy_im"
+                | "gyro_m"
+                | "gyro_m_im"
+        )
+    };
+    let is_eo_pe_key = |name: &str| {
+        p.id() == "ems"
+            && matches!(
+                name,
+                "r11"
+                    | "r_11"
+                    | "r13"
+                    | "r_13"
+                    | "r22"
+                    | "r_22"
+                    | "r33"
+                    | "r_33"
+                    | "r41"
+                    | "r_41"
+                    | "r42"
+                    | "r_42"
+                    | "r51"
+                    | "r_51"
+                    | "p11"
+                    | "p_11"
+                    | "p12"
+                    | "p_12"
+                    | "p13"
+                    | "p_13"
+                    | "p31"
+                    | "p_31"
+                    | "p33"
+                    | "p_33"
+                    | "p14"
+                    | "p_14"
+                    | "p41"
+                    | "p_41"
+                    | "p44"
+                    | "p_44"
+            )
+    };
+    let is_aux_em_tensor = |name: &str| {
+        has_eps_r
+            && (matches!(name, "loss_tangent" | "tan_delta" | "sigma" | "eps_r_im" | "mu_r_im")
+                || is_gyro_key(name)
+                || is_eo_pe_key(name)
+                || (p.id() == "ems" && name == "mu_r"))
+    };
     for (region, m) in &spec.materials {
         match m {
             MaterialAssign::Props(map) => {
                 for (name, v) in map {
                     let desc = props.iter().find(|d| &d.name == name);
-                    let allowed = desc.is_some() || (name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r"));
+                    let allowed = desc.is_some() || is_aux_em_tensor(name);
                     if !allowed {
                         return Err(Error::invalid(format!(
                             "region '{region}': {} does not read a property '{name}' (it reads: {})",
@@ -88,14 +145,10 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
             }
             MaterialAssign::PropsTensor(map) => {
                 for (name, v) in map {
-                    let desc_kind = if let Some(desc) = props.iter().find(|d| &d.name == name) {
-                        if name == "loss_tangent" {
-                            PropKind::Tensor
-                        } else {
-                            desc.kind
-                        }
-                    } else if name == "loss_tangent" && props.iter().any(|d| d.name == "eps_r") {
+                    let desc_kind = if is_aux_em_tensor(name) {
                         PropKind::Tensor
+                    } else if let Some(desc) = props.iter().find(|d| &d.name == name) {
+                        desc.kind
                     } else {
                         return Err(Error::invalid(format!(
                             "region '{region}': {} does not read a property '{name}' (it reads: {})",
@@ -103,6 +156,9 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                             props.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")
                         )));
                     };
+                    let allow_non_symmetric = (p.id() == "ems"
+                        && matches!(name.as_str(), "eps_r" | "eps_r_im" | "mu_r" | "mu_r_im"))
+                        || is_gyro_key(name);
                     match v {
                         PropValue::Scalar(x) => {
                             if desc_kind == PropKind::Matrix3x6 {
@@ -170,9 +226,10 @@ pub fn validate_spec(p: &dyn Physics, spec: &ProblemSpec) -> Result<(), Error> {
                             }
                             let max_abs = mat.iter().flatten().fold(0.0_f64, |acc, x| acc.max(x.abs()));
                             let tol = 1e-12 * max_abs.max(1.0);
-                            if (mat[0][1] - mat[1][0]).abs() > tol
-                                || (mat[0][2] - mat[2][0]).abs() > tol
-                                || (mat[1][2] - mat[2][1]).abs() > tol
+                            if !allow_non_symmetric
+                                && ((mat[0][1] - mat[1][0]).abs() > tol
+                                    || (mat[0][2] - mat[2][0]).abs() > tol
+                                    || (mat[1][2] - mat[2][1]).abs() > tol)
                             {
                                 return Err(Error::invalid(format!(
                                     "region '{region}': tensor property '{name}' must be symmetric"

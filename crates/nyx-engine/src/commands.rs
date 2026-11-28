@@ -59,18 +59,137 @@ fn expr_schema(doc: &str) -> Value {
 fn object(doc: &str) -> Value {
     json!({ "type": "object", "description": doc })
 }
+fn sensitivity_objective_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "scalar objective differentiated by discrete adjoint or modal sensitivity (`eigenfrequency`, `effective_index`, `quality_factor`, `transmission`, `splitter_balance`, `capacitance`, `compliance`, `target_temperature`, or `field_power`)",
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "eigenfrequency",
+                    "effective_index",
+                    "quality_factor",
+                    "transmission",
+                    "splitter_balance",
+                    "capacitance",
+                    "compliance",
+                    "target_temperature",
+                    "field_power"
+                ],
+                "description": "objective family"
+            },
+            "mode": int("0-based eigenmode index (default 0)"),
+            "target_hz": number("optional target resonant frequency in Hz (switches objective to normalized squared mismatch)"),
+            "scale_hz": number("optional normalization scale in Hz (> 0) for target_hz mismatch"),
+            "target_neff": number("optional target effective or Bloch index (switches objective to 0.5 * (neff - target_neff)^2)"),
+            "inverse": boolean("for quality_factor: differentiate loss tangent 1/Q instead of Q, default false"),
+            "out_port": int("0-based output port index for transmission (default 1)"),
+            "in_port": int("0-based excited input port index for transmission, splitter_balance, or field_power (default 0)"),
+            "out_ports": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "description": "0-based output port indices for splitter_balance" },
+            "targets": { "type": "array", "items": { "type": "number" }, "description": "target power fractions per output port in splitter_balance" },
+            "freq_index": int("optional 0-based driven frequency index (omit to average across all sweep frequencies)"),
+            "target": number("optional target transmission or compliance value (switches to squared mismatch)"),
+            "term_i": int("0-based row terminal index for capacitance C_{ij} (default 0)"),
+            "term_j": int("0-based column terminal index for capacitance C_{ij} (default 0)"),
+            "target_f": number("optional target capacitance in farads (switches to squared mismatch)"),
+            "domain": text("region name or pattern for target_temperature or field_power"),
+            "target_k": number("optional target temperature in kelvin for squared tracking error"),
+            "p_norm": number("optional smooth L_p peak norm exponent (>= 1) for target_temperature")
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+    })
+}
+
+fn design_params_schema() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "description": "design parameters differentiated or optimized (`param_var`, `material_scalar`, `eme_segment_length`, or `topology_density`)",
+        "items": {
+            "type": "object",
+            "description": "one scalar CAD, scalar material, EME segment-length, or cellwise topology-density design parameter",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["param_var", "material_scalar", "eme_segment_length", "topology_density"],
+                    "description": "design parameter category"
+                },
+                "name": text("geometry parameter name in FeatureList::params (for param_var)"),
+                "region": text("material region name (for material_scalar)"),
+                "property": text("scalar material property name such as eps_r, k, E, nu, rho, Q (for material_scalar or topology_density)"),
+                "segment": int("0-based EME segment index for eme_segment_length (default 0)"),
+                "min": number("optional lower box bound"),
+                "max": number("optional upper box bound"),
+                "domain": text("design region name or pattern (for topology_density)"),
+                "filter_radius": number("unstructured Helmholtz PDE filter radius l_f in metres (>= 0, default 0)"),
+                "simp_penalty": number("SIMP power-law exponent p (>= 1, default 3.0)"),
+                "ramp_q": number("optional RAMP concavity parameter q (>= 0); overrides simp_penalty when given"),
+                "beta": number("Heaviside tanh projection sharpness beta (>= 0, default 1.0)"),
+                "eta": number("Heaviside projection threshold eta in [0, 1] (default 0.5)"),
+                "val_min": number("void endpoint scalar/real property value at rho_bar = 0 (default 1e-3)"),
+                "val_max": number("solid endpoint scalar/real property value at rho_bar = 1 (default 1.0)"),
+                "val_min_im": number("void imaginary permittivity endpoint at rho_bar = 0 (default 0.0)"),
+                "val_max_im": number("solid imaginary permittivity endpoint at rho_bar = 1 (default 0.0)"),
+                "plasmon_damping": number("intermediate extinction floor for plasmon-safe metallic optical interpolation (default 0.0)"),
+                "initial_density": number("uniform initial raw density in [0, 1] when densities is omitted"),
+                "densities": { "type": "array", "items": { "type": "number" }, "description": "optional explicit per-cell raw densities in [0, 1]" }
+            },
+            "required": ["kind"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn optimize_constraints_schema() -> Value {
+    json!({
+        "type": "array",
+        "description": "inequality constraints c_i(x) <= 0 enforced by mma",
+        "items": {
+            "type": "object",
+            "description": "one optimization constraint",
+            "properties": {
+                "kind": { "type": "string", "enum": ["volume_fraction"], "description": "constraint kind" },
+                "param_index": int("0-based index of the topology_density entry in params (default 0)"),
+                "max_fraction": number("upper bound on physical volume fraction in (0, 1]"),
+                "min_fraction": number("optional lower bound on physical volume fraction in [0, max_fraction]")
+            },
+            "required": ["kind", "max_fraction"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn continuation_schedule_schema() -> Value {
+    json!({
+        "type": "array",
+        "description": "optional multi-stage Heaviside beta continuation schedule [{ beta, max_iters }]",
+        "items": {
+            "type": "object",
+            "description": "one Heaviside projection sharpness stage",
+            "properties": {
+                "beta": number("Heaviside sharpness beta (>= 0) for this stage"),
+                "max_iters": int("maximum optimizer iterations in this stage (>= 1)")
+            },
+            "required": ["beta", "max_iters"],
+            "additionalProperties": false
+        }
+    })
+}
+
 fn post_analyses_schema() -> Value {
     json!({
         "type": "array",
-        "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
+        "description": "read-only post-solve analyses or field reductions run on full in-memory fields before fields are dropped (either { \"analysis\": \"...\", \"physics\"?: \"...\", \"params\"?: {...} } shorthand or { \"cmd\": \"analyse\" | \"eme_sweep\" | \"integrate\" | \"confinement\" | \"extremum\" | \"probe\" | \"line_cut\" | \"overlap\", \"args\": {...} })",
         "items": {
             "type": "object",
             "description": "one read-only post-solve analysis or field-reduction request",
             "properties": {
-                "analysis": text("shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed)"),
+                "analysis": text("shorthand analysis id to run via `analyse` (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics)"),
                 "physics": text("three-letter physics code for shorthand `analysis`; defaults to the solved physics that supports the analysis"),
                 "params": object("optional parameters object for shorthand `analysis`"),
-                "cmd": text("explicit read-only post-solve command name (analyse, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)"),
+                "cmd": text("explicit read-only post-solve command name (analyse, eme_sweep, integrate, confinement, extremum, probe, line_cut, overlap, result_info, result_field, list_analyses, field, field_op)"),
                 "args": object("arguments object passed to `cmd`"),
                 "label": text("optional label attached to this post-analysis entry in the reply")
             },
@@ -175,6 +294,23 @@ impl Engine {
             cmd("set_physics_params", "Set the options of a physics", "", Edit, schema(vec![("physics", phys()), ("params", object("physics options"))], &["physics", "params"])),
             cmd("remove_physics", "Remove a physics from the project", "", Edit, schema(vec![("physics", phys())], &["physics"])),
             cmd("set_active", "Set the active physics", "The one solved by default.", Edit, schema(vec![("physics", phys())], &["physics"])),
+            cmd(
+                "set_coupled_loop",
+                "Configure two-way Anderson coupled loop",
+                "Configures or disables an explicit opt-in two-way Anderson-accelerated self-consistent coupled loop (`femcore::linalg::snes::anderson`, default history depth `m = 5`) for photothermal (`ems` <-> `dfs` `heat_stationary`) or electrothermal (`dfs` `conduction` `auxiliary` <-> `dfs` `heat_stationary`) convergence (`||T^{k+1} - T^k||_inf / max(1, ||T^k||_inf) <= rtol`). Pass `enabled: false` to clear.",
+                Edit,
+                schema(
+                    vec![
+                        ("enabled", boolean("when false, clears coupled_loop so solve_run enforces acyclic one-way chains; default true")),
+                        ("max_iters", int("maximum outer Anderson iterations (>= 1), default 25")),
+                        ("rtol", number("relative L_inf temperature convergence tolerance (> 0), default 1e-6")),
+                        ("anderson_m", int("Anderson type-II history depth m (0..=64; 0 is Picard), default 5")),
+                        ("source_scale", number("non-negative multiplier applied to exported heat_source before thermal assembly (e.g. input optical power in W), default 1.0")),
+                        ("auxiliary", json!({ "type": ["object", "null"], "description": "optional auxiliary source ProblemSpec (e.g. dfs conduction problem for intra-physics electrothermal V <-> T coupling); null clears auxiliary" })),
+                    ],
+                    &[],
+                ),
+            ),
             cmd("check_project", "Check the project", "Checks the geometry, the element size and every problem against the descriptors of its physics, without meshing.", Read, schema(vec![], &[])),
             cmd("import_gds", "Import GDSII conductive sheets", "Reads a binary GDSII (.gds) stream in a 3D project, flattens SREF/AREF hierarchy and PATH/BOUNDARY/BOX geometry into SI metres, unions each requested [layer, datatype] pair, optionally splits disconnected conductive islands and renames islands from TEXT labels on `pin_layer`, fits circular arcs within `arc_tol`, and adds `Polygons` + `Sheet` features at height `z`. Returns `{ sheets, layers, bbox, unpadded_bbox, padded_bbox, lateral_pad, pins }`.", Edit,
                 schema(vec![
@@ -210,7 +346,7 @@ impl Engine {
                     ("vac_top_region", text("region name of the top vacuum in Overlay, default \"VacTop\"")),
                     ("overlay", boolean("create or update the project's Overlay feature with the stack regions, default true")),
                 ], &[])),
-            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap.", Edit,
+            cmd("set_mesh", "Set the mesh settings", "Give only what changes. `adapt_scale`, `adapt_grade`, `adapt_max_cells`, `gap_cells`, `max_cells`, `dz_min`, `max_z_slabs`, `z_growth_ratio`, `max_steiner_multiplier`, `singular_edges`, `quarter_point_xi`, `pml_mode`, `structured_pml`, or `sweep` set to null return to their defaults. `sweep` extrudes a 2D cross-section or a 3D geometry model along y through layered intervals with optional `fill` or per-layer `regions` remap. With `physics` the settings that physics is meshed with on its own are edited instead (per-physics meshing, ADR 135), and `active_domains` keeps only some regions of a mesh.", Edit,
                 schema(vec![("h", number("global element size in metres")), ("adapt_scale", json!({ "type": ["number", "null"], "description": "adaptive meshing: the factor on the sizes the model asks for (smaller is finer); null is the simple mesher" })), ("adapt_grade", json!({ "type": ["number", "null"], "description": "adaptive / AMR metric gradation slope (> 0); null uses 0.4" })), ("adapt_max_cells", json!({ "type": ["integer", "null"], "minimum": 1, "description": "adaptive / AMR maximum cell count (>= 1); null uses 2000000" })), ("physics_sizing", boolean("size the elements from the waves of the physics (points per wavelength)")), ("points_per_wavelength", json!({ "type": ["number", "null"], "description": "points per shortest wavelength when physics_sizing is on; null: 12 for order 1, 6 for order 2" })), ("pml_mode", json!({ "type": ["string", "null"], "enum": ["auto", "structured", "inline", null], "description": "how absorbing layers are meshed: \"auto\" (default, structured native Quad/Prism/Hex layers when PML regions exist), \"structured\", or \"inline\" (legacy unstructured simplices)" })), ("structured_pml", json!({ "type": ["boolean", "null"], "description": "legacy boolean alias for pml_mode (true -> \"structured\", false -> \"inline\")" })), ("max_dev", json!({ "type": ["number", "null"], "description": "largest chord deviation from a curved edge or face, metres; null: h / 50 for the adaptive mesher and no limit for the simple 3D mesher" })), ("curved", boolean("3D: curved (quadratic) isoparametric geometry for cells on curved surfaces and fitted sheet arc rims (ems, dfs, and sheet3d), default false")),
                     ("gap_cells", json!({ "type": ["number", "null"], "description": "3D sheet stack: target minimum number of 2D triangles across narrow coplanar gaps between conductor sheets (positive number, e.g. 2.5); null disables automatic gap clamping" })),
                     ("z_coarsen", boolean("3D sheet stack: progressively coarsen the 2D sheet triangulation away from the conductor plane along z via conforming pure-tetrahedral transition slabs, default false")),
@@ -228,6 +364,9 @@ impl Engine {
                     ("adapt_rel_tol", json!({ "type": ["number", "null"], "exclusiveMinimum": 0, "description": "relative quantity-of-interest tolerance between consecutive ems::cavity / sms AMR passes; null uses 1e-3" })),
                     ("adapt_growth", json!({ "type": ["number", "null"], "exclusiveMinimum": 1.0, "description": "target mesh cell growth multiplier per ems::cavity / sms AMR pass (> 1.0); null uses 1.5" })),
                     ("retain_amr_data", boolean("retain transient cellwise ElectroAmrData indicators on SolveResult instead of stripping them after solve, default false")),
+                    ("active_domains", json!({ "type": ["array", "null"], "items": { "type": "string" }, "description": "mesh only these regions (names or name* patterns); the other cells are dropped and the region names are kept, so fields still pair by region name across meshes; null meshes every region" })),
+                    ("physics", text("edit the settings this physics is meshed with on its own (per-physics meshing; it starts from the project mesh settings); fields of physics on different meshes are transferred by region name")),
+                    ("own", boolean("with physics: false drops the physics' own mesh settings so it uses the project mesh again")),
                     ("sweep", json!({ "type": ["array", "null"], "items": { "type": "object", "properties": { "thickness": { "type": "number", "description": "thickness of the layer along y, metres" }, "n": { "type": "integer", "description": "cells across the thickness" }, "domain_offset": { "type": "integer", "description": "added to the domain numbers of the layer's cells" }, "fill": { "type": "string", "description": "region name: every cell of the layer belongs to it" }, "regions": { "type": "object", "description": "optional per-layer region remap { source_region: target_region } in this layer" } }, "required": ["thickness", "n"] }, "description": "layers to sweep a 2D cross-section or 3D geometry model along y" }))], &[])),
             cmd("mesh_build", "Mesh the geometry", "Meshes the geometry with the current settings. With wait false it starts a job and returns its id.", Expensive, schema(vec![("wait", boolean("wait for the mesh, default true"))], &[])),
             cmd("solve_run", "Solve", "Solves the active physics (or the named ones, in coupling order), meshing first when needed. With wait false it starts a job. When the project is bound to a workflow the run is recorded.", Expensive,
@@ -285,6 +424,34 @@ impl Engine {
             cmd("sweep_table", "The table of a sweep", "Applies the points that have finished and returns one row per point: its label and edits, its state (`queued`, `running`, `done`, `skipped_invalid_geometry`, `cancelled`, `failed`), the numbers of each physics solved (eigenvalues, values, numeric scalars), the unknowns and cells, the seconds and the run it was recorded as, plus `skipped_invalid_geometry` counts and optional HDF5 `checkpoint_path` when running QMC/checkpointed sweeps. With `wait_s` it waits up to that many seconds for the points to finish (`complete` says whether they all have). Without `sweep` it lists the sweeps of this session.", Read,
                 schema(vec![("sweep", int("the sweep's number")), ("wait_s", number("longest wait in seconds, default 0"))], &[])),
             cmd("sweep_cancel", "Cancel the points of a sweep that have not finished", "Queued points never run; a running one stops at its next check.", Expensive, schema(vec![("sweep", int("the sweep's number"))], &["sweep"])),
+            cmd("sensitivity_run", "Compute discrete adjoint sensitivities", "Evaluates the scalar objective `J(p)` and its exact discrete adjoint, modal, or analytical Redheffer EME sensitivity gradient `dJ/dp` across named CAD parameters (`param_var`, via harmonic mesh-velocity extension), scalar material properties (`material_scalar`), EME segment lengths (`eme_segment_length`, via `dP_c/dL_c = -j beta_c P_c`), and Helmholtz-filtered SIMP/RAMP/optical cellwise densities (`topology_density`) without finite-difference solve loops (ADR 140, ADR 142).", Expensive,
+                schema(vec![
+                    ("physics", phys()),
+                    ("objective", sensitivity_objective_schema()),
+                    ("params", design_params_schema()),
+                    ("shape_step_rel", number("optional relative CAD step size for harmonic boundary velocity extraction, default 1e-6")),
+                    ("include_densities", boolean("include projected physical densities in the reply when topology parameters are present, default true")),
+                ], &["objective", "params"])),
+            cmd("optimize_run", "Run gradient-based shape, material, or topology optimization", "Optimizes CAD geometry parameters, scalar material properties, EME propagation segment lengths (`eme_segment_length`), or unstructured Helmholtz-filtered cellwise topology densities using `lbfgs`, `ncg` (Polak-Ribiere+), or constrained `mma` (method of moving asymptotes) driven by exact discrete adjoint / analytical Redheffer gradients, optional Heaviside `beta` continuation stages, and modal eigenvector tracking (ADR 140, ADR 142). Stores the final solved result (attaching `topology_density` when present) and optionally writes a JSON checkpoint to `checkpoint_path`.", Expensive,
+                schema(vec![
+                    ("physics", phys()),
+                    ("objective", sensitivity_objective_schema()),
+                    ("params", design_params_schema()),
+                    ("algorithm", json!({ "type": "string", "enum": ["lbfgs", "ncg", "mma"], "description": "gradient optimizer: lbfgs (default), ncg (Polak-Ribiere+ nonlinear conjugate gradients), or mma (method of moving asymptotes)" })),
+                    ("sense", json!({ "type": "string", "enum": ["minimize", "maximize"], "description": "optimization direction: minimize (default) or maximize" })),
+                    ("max_iters", int("maximum optimizer iterations per stage (>= 1), default 50")),
+                    ("gtol", number("relative gradient norm convergence threshold (> 0) for lbfgs and ncg, default 1e-6")),
+                    ("ftol", number("relative objective change threshold (> 0) for lbfgs and ncg, default 1e-12")),
+                    ("xtol", number("maximum design variable step threshold (> 0) for mma, default 1e-6")),
+                    ("move_limit", number("fractional per-iteration box move limit (> 0) for mma, default 0.2")),
+                    ("constraints", optimize_constraints_schema()),
+                    ("continuation_schedule", continuation_schedule_schema()),
+                    ("optimize", object("optional OptimizeSpec object overriding default optimizer tolerances, constraints, or continuation stages")),
+                    ("remesh", boolean("rebuild the CAD mesh at every shape evaluation instead of smooth harmonic mesh morphing, default false")),
+                    ("apply", boolean("apply optimized parameters and store the final solved result on the active project, default true")),
+                    ("shape_step_rel", number("optional relative CAD step size for harmonic boundary velocity extraction, default 1e-6")),
+                    ("checkpoint_path", text("optional JSON file path for writing optimization history and final design checkpoint")),
+                ], &["objective", "params"])),
             cmd("poll_jobs", "Apply finished jobs", "Applies every job that has finished since the last call and returns what each came to.", Read, schema(vec![], &[])),
             cmd("result_info", "Describe the results", "For each physics solved: the study, size, time, solutions with their values, fields (node-averaged, real) and `cell_fields` (the per-cell fields the reductions read: name, unit, complex or not), scalars, unconditional solver `diagnostics` and numerical `error_budget`, `stale` (whether what this result was made from has changed since: its own problem, the materials, the mesh or a physics it takes fields from) and `age_s` (seconds since it was stored), and `validated`: `{state, tier, reason, check?}` where `state` is `exploratory` (no mesh-convergence check with a tolerance has passed on this problem), `checked` (one did or flux bounds certified it) or `check_not_affordable` (not checked, and a check is expected not to fit this machine). A stale result is never checked; every answer that carries `stale` carries `validated`.", Read, schema(vec![("physics", phys())], &[])),
             cmd("result_field", "Read a field", "The values of one field of one solution (sampled evenly when there are more than `max_values`), with `stale` and `age_s` of the result it was read from.", Read,
@@ -446,9 +613,19 @@ impl Engine {
             ),
             cmd("results_file_info", "Describe an HDF5 results file", "The project title, the mesh size and for each physics the study, size, time, number of solutions, scalars, solver diagnostics and numerical error budget of a results file.", Read, schema(vec![("path", text("file path"))], &["path"])),
             cmd("open_results", "Open an HDF5 results file", "Makes the project of a results file the project, builds its mesh again (meshing is deterministic) and checks it is the stored mesh, then takes the stored results as the latest results, so every analysis, plot and export works on them as after a solve. Replaces the present project. Needs a build with HDF5 support. With `wait` false it starts a job (reading and meshing happen on it; the project is replaced when job_wait or poll_jobs applies it).", Edit, schema(vec![("path", text("file path, .h5")), ("wait", boolean("wait for it, default true"))], &["path"])),
-            cmd("list_analyses", "List the analyses", "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
-            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, or uq_cqed. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]`, `params` accept `trench_depth_m` (substrate over-etch depth in metres), and passing `electrostatic_physics` (e.g. `\"dfs\"`, with optional `port_terminals`, `modal_voltages`, `modal_freqs_hz`) evaluates hybrid quasi-electrostatic modal TLS participation and `T1_TLS_s` on the fine electrostatic mesh. For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. For `piezo_resonator`, extracts series/parallel resonance frequencies (`f_s_Hz`, `f_p_Hz`), IEEE coupling factors (`k_t2`, `k_eff2`), unwrapped phase-slope quality factors (`Q_s`, `Q_p`), and bounded 6-parameter mBVD equivalent circuit (`C_0`, `R_0`, `R_s`, `C_m`, `L_m`, `R_m`) from `DrivenPortData`. For `uq_cqed`, propagates fabrication and constitutive 1-sigma `uncertainties` (plus `seed`, `n_samples`, `electrostatic_physics` companion bounds) through zero-solve EPR/Hamiltonian/Capacitance/TLS post-processing while keeping ASME V&V 20 epistemic brackets strictly separated from aleatoric variances. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.", Read,
-                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys()), ("params", object("optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, electrostatic_physics, port_terminals, modal_voltages, modal_freqs_hz; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; piezo_resonator: port, terminations, f_window_hz, z_ref_ohm, fix_r_s_ohm; uq_cqed: seed, n_samples, basis, uncertainties, electrostatic_physics, qubits, resonators, metal_thickness_m; epr options)"))], &["analysis", "physics"])),
+            cmd("list_analyses", "List the analyses", "The analyses of results (polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, optomechanics), which solved physics each applies to and, per physics, whether its result is `stale`.", Read, schema(vec![], &[])),
+            cmd("eme_sweep", "Run an analytical EME sweep", "Evaluates an analytical post-solve Eigenmode Expansion sweep (`length`, `periodicity`, or `modes`) on the cached `EmeData` of a solved `eme` study without re-solving 2D cross-section eigenmodes. `length` sweeps the propagation length of segment `segment`, `periodicity` sweeps `PeriodicSubgrid` `subgrid` repetitions in O(log N) Redheffer star products, and `modes` sweeps modal truncation counts across cached interface overlaps. The reply carries `stale`, `age_s`, and `validated` of the result it was run on.", Read,
+                schema(vec![
+                    ("physics", phys()),
+                    ("mode", json!({ "type": "string", "enum": ["length", "periodicity", "modes"], "description": "post-solve EME sweep kind: 'length', 'periodicity', or 'modes'" })),
+                    ("segment", int("0-based EME segment index for mode = 'length', default 0")),
+                    ("lengths", json!({ "type": "array", "items": { "type": "number", "minimum": 0.0 }, "minItems": 1, "description": "segment lengths in metres (>= 0) for mode = 'length'" })),
+                    ("subgrid", int("0-based PeriodicSubgrid index for mode = 'periodicity', default 0")),
+                    ("reps", json!({ "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "description": "unit-cell repetition counts (>= 1) for mode = 'periodicity'" })),
+                    ("mode_counts", json!({ "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "description": "modal truncation counts (>= 1) per slice for mode = 'modes'" })),
+                ], &["mode"])),
+            cmd("analyse", "Analyse a result", "Runs an analysis on the latest result of a physics: polarization, capacitance_matrix, inductance_matrix, epr, hamiltonian, tls_participation, network, piezo_resonator, uq_cqed, far_field, beam_overlap, or optomechanics. For `capacitance_matrix`, optional `params` perform ground projection or floating Schur elimination (`ground`, `eliminate: \"drop\" | \"floating_schur\"`), grounded/differential lumped qubit reduction (`qubits: [{ name, pads, E_J_Hz? }]`), resonator ZPF / dispersive coupling extraction (`resonators: [{ name, terminal, f_r_Hz, Z0_ohm?, resonator_type?, C_r_F? }]`), and matched-asymptotic finite-metal-thickness correction (`metal_thickness_m`, `edge_cutoff_m`). For `hamiltonian`, outputs include `f_cav_Hz`, `g_matrix_Hz`, `kappa_cav_Hz`, and `t1_purcell_s`, and `params` accept `sweep_port` (0-based index or port name), `squid_asymmetry`, `squid_flux_sweep`, and `ej_hz_sweep`. For `tls_participation`, interface thicknesses/permittivities/loss tangents auto-load from the material TOML `[interfaces.{ma,ms,sa}]`, `params` accept `trench_depth_m` (substrate over-etch depth in metres), and passing `electrostatic_physics` (e.g. `\"dfs\"`, with optional `port_terminals`, `modal_voltages`, `modal_freqs_hz`) evaluates hybrid quasi-electrostatic modal TLS participation and `T1_TLS_s` on the fine electrostatic mesh. For `network`, extracts damped companion-QEP modes, ROM-synthesized Z/Y/S matrices, Schur-complement Black-Box Quantization (`bbq_modes`), Taubin algebraic circle-fit resonator parameters (`s21_fit`), and Touchstone v1.1 (`.sNp`) text from either `CircuitRom` or `DrivenPortData`. For `piezo_resonator`, extracts series/parallel resonance frequencies (`f_s_Hz`, `f_p_Hz`), IEEE coupling factors (`k_t2`, `k_eff2`), unwrapped phase-slope quality factors (`Q_s`, `Q_p`), and bounded 6-parameter mBVD equivalent circuit (`C_0`, `R_0`, `R_s`, `C_m`, `L_m`, `R_m`) from `DrivenPortData`. For `uq_cqed`, propagates fabrication and constitutive 1-sigma `uncertainties` (plus `seed`, `n_samples`, `electrostatic_physics` companion bounds) through zero-solve EPR/Hamiltonian/Capacitance/TLS post-processing while keeping ASME V&V 20 epistemic brackets strictly separated from aleatoric variances. For `optomechanics`, evaluates photoelastic (`g_pe_hz`), moving-boundary (`g_mb_hz`), total vacuum optomechanical coupling (`g_0_hz`, `m_eff_kg`, `x_zpf_m`), and stimulated Brillouin scattering gain (`sbs_gain_w_inv_m_inv`) across shared or independent optical (`optical_physics`) and mechanical (`mechanical_physics`) meshes (ADR 141). The reply carries `stale`, `age_s`, and `validated` of the result it was run on.", Read,
+                schema(vec![("analysis", text("analysis id (list_analyses)")), ("physics", phys()), ("params", object("optional analysis parameters (capacitance_matrix: ground, eliminate, qubits, resonators, metal_thickness_m, edge_cutoff_m; hamiltonian: basis, fock_trunc, sweep_port, flux_sweep, squid_asymmetry, squid_flux_sweep, ej_hz_sweep; tls_participation: trench_depth_m, t_ma/t_ms/t_sa, electrostatic_physics, port_terminals, modal_voltages, modal_freqs_hz; network: freqs_hz, terminations_ohm, active_ports, s21_ports, resonator_branch, touchstone_format; piezo_resonator: port, terminations, f_window_hz, z_ref_ohm, fix_r_s_ohm; uq_cqed: seed, n_samples, basis, uncertainties, electrostatic_physics, qubits, resonators, metal_thickness_m; optomechanics: optical_physics, mechanical_physics, optical_mode, mechanical_mode, core_domains, interface_boundaries, acoustic_q; far_field/beam_overlap/epr options)"))], &["analysis", "physics"])),
             cmd("figure", "Draw the modes or 3D fields of a result", "Writes a 2D or 3D figure of the latest result of a physics as SVG or PNG (the extension of `path` decides). 2D kinds (`gallery`, `components`) align each mode's phase and draw on the mesh section with region outlines and in-plane arrows. 3D kinds (`slice3d`, `cutaway3d`, `isosurface3d`, `mesh3d`) evaluate `expr` (e.g. `re(Ex)`, `abs2(E)`) directly on un-averaged 8-subtet P2 `CellFields` so normal-field discontinuities across material interfaces stay sharp, render with Z-buffered/translucent orthographic projection (`camera`, `show_edges`), and support zero-copy Bloch unit-cell tiling (`repeat_periodic` with `exp(-i m periodic_phase)` applied before `expr`).", Read,
                 schema(vec![("physics", phys()), ("path", text("file to write, .svg or .png")),
                     ("kind", json!({ "type": "string", "enum": ["gallery", "components", "slice3d", "cutaway3d", "isosurface3d", "mesh3d"], "description": "figure layout: gallery (default), components, slice3d (3D planar slice), cutaway3d (3D clipped cutaway), isosurface3d (3D translucent marching-tets isosurfaces) or mesh3d (3D region/element surface view)" })),
@@ -671,6 +848,7 @@ impl Engine {
                 self.project.active = Some(id);
                 ok()
             }
+            "set_coupled_loop" => self.set_coupled_loop(args),
             "check_project" => {
                 self.project.check(&self.registry)?;
                 ok()
@@ -732,6 +910,8 @@ impl Engine {
             "queue_submit" | "queue_list" | "queue_get" | "queue_cancel" | "queue_hold" | "queue_release" | "queue_set_priority" | "queue_pause"
             | "queue_resume" | "queue_wait" => self.queue_command(name, args),
             "sweep_run" | "sweep_table" | "sweep_cancel" => self.sweep_command(name, args),
+            "sensitivity_run" => self.sensitivity_run(args),
+            "optimize_run" => self.optimize_run(args),
             "poll_jobs" => Ok(json!(self
                 .poll()
                 .into_iter()
@@ -888,6 +1068,7 @@ impl Engine {
             }
             "figure" => self.figure(args),
             "list_analyses" => Ok(self.list_analyses()),
+            "eme_sweep" => self.eme_sweep(args),
             "analyse" => self.analyse_with(
                 get_str(args, "analysis")?,
                 get_str(args, "physics")?,
@@ -991,9 +1172,46 @@ impl Engine {
 
     fn set_mesh(&mut self, args: &Value) -> R {
         let a = args_obj(args)?;
-        let mut s: MeshSettings = self.project.mesh.clone();
+        // `physics` edits the settings that physics is meshed with on its own (ADR 135); `own: false` drops them
+        let target = match a.get("physics").filter(|v| !v.is_null()) {
+            Some(v) => {
+                let p = v.as_str().ok_or_else(|| Error::invalid("`physics` is a physics code"))?;
+                self.project.need_spec(p)?;
+                Some(p.to_string())
+            }
+            None => None,
+        };
+        if let Some(own) = a.get("own").filter(|v| !v.is_null()) {
+            let own = own.as_bool().ok_or_else(|| Error::invalid("`own` is true or false"))?;
+            let Some(p) = &target else {
+                return Err(Error::invalid(
+                    "`own` needs `physics`: the physics whose own mesh settings it keeps or drops",
+                ));
+            };
+            if !own {
+                self.project.mesh_by_physics.remove(p);
+                return ok();
+            }
+        }
+        let mut s: MeshSettings = match &target {
+            Some(p) => self.project.mesh_for(p).clone(),
+            None => self.project.mesh.clone(),
+        };
         for (k, v) in a {
             match k.as_str() {
+                "physics" | "own" => {}
+                "active_domains" => {
+                    s.active_domains = if v.is_null() {
+                        None
+                    } else {
+                        let names: Option<Vec<String>> =
+                            v.as_array().and_then(|xs| xs.iter().map(|x| x.as_str().map(str::to_string)).collect());
+                        match names {
+                            Some(n) if !n.is_empty() && n.iter().all(|x| !x.trim().is_empty()) => Some(n),
+                            _ => return Err(Error::invalid("`active_domains` is a non-empty list of region names, or null")),
+                        }
+                    }
+                }
                 "h" => s.h = v.as_f64().ok_or_else(|| Error::invalid("`h` is a number in metres"))?,
                 "adapt_scale" => {
                     s.adapt_scale = if v.is_null() {
@@ -1229,7 +1447,7 @@ impl Engine {
                 }
                 other => {
                     return Err(Error::invalid(format!(
-                        "set_mesh has no field '{other}' (h, adapt_scale, adapt_grade, adapt_max_cells, physics_sizing, points_per_wavelength, pml_mode, structured_pml, max_dev, curved, gap_cells, z_coarsen, max_cells, dz_min, max_z_slabs, z_growth_ratio, max_steiner_multiplier, strict_mesh, singular_edges, quarter_point_xi, corner_grading, target_tol, adapt_passes, adapt_rel_tol, adapt_growth, retain_amr_data, sweep)"
+                        "set_mesh has no field '{other}' (h, adapt_scale, adapt_grade, adapt_max_cells, physics_sizing, points_per_wavelength, pml_mode, structured_pml, max_dev, curved, gap_cells, z_coarsen, max_cells, dz_min, max_z_slabs, z_growth_ratio, max_steiner_multiplier, strict_mesh, singular_edges, quarter_point_xi, corner_grading, target_tol, adapt_passes, adapt_rel_tol, adapt_growth, retain_amr_data, sweep, active_domains, physics, own)"
                     )))
                 }
             }
@@ -1237,7 +1455,76 @@ impl Engine {
         if !(s.h > 0.0 && s.h.is_finite()) {
             return Err(Error::invalid("the element size must be a positive finite number"));
         }
-        self.project.mesh = s;
+        match target {
+            Some(p) => {
+                self.project.mesh_by_physics.insert(p, s);
+            }
+            None => self.project.mesh = s,
+        }
+        ok()
+    }
+
+    fn set_coupled_loop(&mut self, args: &Value) -> R {
+        let a = args_obj(args)?;
+        if a.get("enabled").and_then(Value::as_bool) == Some(false) {
+            self.project.coupled_loop = None;
+            return ok();
+        }
+        let mut cfg = self.project.coupled_loop.clone().unwrap_or_default();
+        for (k, v) in a {
+            match k.as_str() {
+                "enabled" => {
+                    v.as_bool().ok_or_else(|| Error::invalid("`enabled` must be true or false"))?;
+                }
+                "max_iters" => {
+                    let n = v
+                        .as_u64()
+                        .and_then(|x| usize::try_from(x).ok())
+                        .filter(|&x| x >= 1)
+                        .ok_or_else(|| Error::invalid("`max_iters` must be an integer >= 1"))?;
+                    cfg.max_iters = n;
+                }
+                "rtol" => {
+                    let t = v
+                        .as_f64()
+                        .filter(|&x| x > 0.0 && x.is_finite())
+                        .ok_or_else(|| Error::invalid("`rtol` must be a positive finite number"))?;
+                    cfg.rtol = t;
+                }
+                "anderson_m" => {
+                    let m = v
+                        .as_u64()
+                        .and_then(|x| usize::try_from(x).ok())
+                        .filter(|&x| x <= 64)
+                        .ok_or_else(|| Error::invalid("`anderson_m` must be an integer in 0..=64"))?;
+                    cfg.anderson_m = m;
+                }
+                "source_scale" => {
+                    let s = v
+                        .as_f64()
+                        .filter(|&x| x >= 0.0 && x.is_finite())
+                        .ok_or_else(|| Error::invalid("`source_scale` must be a non-negative finite number"))?;
+                    cfg.source_scale = s;
+                }
+                "auxiliary" => {
+                    if v.is_null() {
+                        cfg.auxiliary = None;
+                    } else {
+                        let spec: ProblemSpec = serde_json::from_value(v.clone())
+                            .map_err(|e| Error::invalid(format!("`auxiliary` is not a valid ProblemSpec: {e}")))?;
+                        let p = crate::physics_for(&self.registry, &spec.physics)?;
+                        nyx_physics::validate_spec(p, &spec)?;
+                        cfg.auxiliary = Some(spec);
+                    }
+                }
+                other => {
+                    return Err(Error::invalid(format!(
+                        "set_coupled_loop has no field '{other}' (enabled, max_iters, rtol, anderson_m, source_scale, auxiliary)"
+                    )));
+                }
+            }
+        }
+        self.project.coupled_loop = Some(cfg);
         ok()
     }
 

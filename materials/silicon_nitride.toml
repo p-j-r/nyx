@@ -45,3 +45,12 @@ model = "sellmeier"
 B = [3.0249, 40314.0]
 lambda0 = [0.1353406, 1239.842]
 source = { cite = "K. Luke, Y. Okawachi, M. R. E. Lamont, A. L. Gaeta, M. Lipson, Broadband mid-infrared frequency comb generation in a Si3N4 microresonator, Opt. Lett. 40, 4823-4826 (2015): Sellmeier fit of a 340 nm film on 3.1 um thermal SiO2, as in the refractiveindex.info database (Si3N4, Luke, CC0). Film index depends on deposition (stoichiometry): use your own ellipsometry for quantitative work", url = "https://refractiveindex.info/?shelf=main&book=Si3N4&page=Luke", doi = "10.1364/OL.40.004823", verified = "2026-11-04" }
+
+[nonlinear]
+T_range = [4.0, 600.0]
+
+[nonlinear.chi3]
+wavelength = "1.55 um"
+n_2 = "2.4e-19 m^2/W"
+beta_tpa = "0.0 m/W"
+source = { cite = "APPROXIMATE stoichiometric LPCVD Si3N4 Kerr refractive index n_2 = 2.4e-19 m^2/W at 1550 nm with negligible two-photon absorption below the ~5 eV bandgap (K. Ikeda, R. E. Saperstein, N. Alic, Y. Fainman, Opt. Express 16, 12987-12994 (2008); D. J. Moss, R. Morandotti, A. L. Gaeta, M. Lipson, Nat. Photonics 7, 597-607 (2013))", doi = "10.1364/OE.16.012987" }

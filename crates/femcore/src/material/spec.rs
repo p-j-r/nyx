@@ -11,8 +11,10 @@ use super::coupled::{
     resolve_piezo_legendre_duals, Dielectric, ElectroOptic, Interfaces, Photoelastic, Piezoelectric, Viscoelastic,
 };
 use super::elastic::Elastic;
+use super::nonlinear::{Nonlinear, CHI2_KEYS, CHI3_KEYS, NONLINEAR_KEYS, QPM_KEYS};
 use super::optics::{self, Optical, OpticsError};
 use super::reader::{MaterialError, Section};
+use super::sheet2d::{Sheet2d, SHEET_2D_KEYS};
 use super::source::{read_sources, write_sources, Source};
 use super::state_t::{CrystalSetting, MaterialKind, PointGroup, TempCurve, TempTensor};
 use super::tensor::{Requirement, TensorProp};
@@ -64,11 +66,29 @@ pub struct Electrical {
     pub permittivity: Option<TensorProp>,
     /// relative
     pub permeability: Option<f64>,
-    /// S/m
+    /// S/m at reference temperature (or evaluated from `conductivity_t`)
     pub conductivity: Option<TensorProp>,
+    /// Temperature-dependent electrical conductivity `sigma(T)` (S/m)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conductivity_t: Option<TempTensor>,
     /// dimensionless dielectric loss tangent `tan(delta)`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loss_tangent: Option<TensorProp>,
+    /// Optional anisotropic relative permeability tensor $\boldsymbol{\mu}_r$.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permeability_tensor: Option<TensorProp>,
+    /// Optional electric gyrotropy / Voigt axial vector $\mathbf{g}_{\text{re}}$ in the crystal frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy: Option<[f64; 3]>,
+    /// Optional imaginary part $\mathbf{g}_{\text{im}}$ of the electric gyrotropy axial vector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gyrotropy_im: Option<[f64; 3]>,
+    /// Optional magnetic gyrotropy / Polder axial vector $\mathbf{g}_{\mu,\text{re}}$ in the crystal frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_gyrotropy: Option<[f64; 3]>,
+    /// Optional imaginary part $\mathbf{g}_{\mu,\text{im}}$ of the magnetic gyrotropy axial vector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mu_gyrotropy_im: Option<[f64; 3]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -110,6 +130,10 @@ pub struct MaterialSpec {
     pub viscoelastic: Option<Viscoelastic>,
     #[serde(default, skip_serializing_if = "Interfaces::is_empty")]
     pub interfaces: Interfaces,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_2d: Option<Sheet2d>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonlinear: Option<Nonlinear>,
 }
 
 impl Default for MaterialSpec {
@@ -137,6 +161,8 @@ impl Default for MaterialSpec {
             electro_optic: None,
             viscoelastic: None,
             interfaces: Interfaces::default(),
+            sheet_2d: None,
+            nonlinear: None,
         }
     }
 }
@@ -167,6 +193,8 @@ pub const TOP_KEYS: &[&str] = &[
     "electro_optic",
     "viscoelastic",
     "interfaces",
+    "sheet_2d",
+    "nonlinear",
     "optical",
 ];
 
@@ -391,24 +419,70 @@ impl MaterialSpec {
             electrical.permittivity = TensorProp::read(&mut t, "permittivity", Dim::Dimensionless, Requirement::PositiveDefinite, "relative permittivity")?;
             let mu = t.number("permeability")?;
             electrical.permeability = positive(&t, "permeability", mu, "the relative permeability")?;
-            electrical.conductivity = TensorProp::read(&mut t, "conductivity", Dim::ElectricalConductivity, Requirement::NonNegative, "electrical conductivity")?;
+            if t.value("conductivity").is_some_and(is_temp_curve_value) {
+                let curve = TempTensor::read(&mut t, "conductivity", Dim::ElectricalConductivity, None)?.unwrap();
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::NonNegative, "electrical conductivity").map_err(|m| t.err("conductivity", m))?;
+                electrical.conductivity = Some(val);
+                electrical.conductivity_t = Some(curve);
+            } else {
+                electrical.conductivity = TensorProp::read(&mut t, "conductivity", Dim::ElectricalConductivity, Requirement::NonNegative, "electrical conductivity")?;
+            }
             if electrical.conductivity.is_none() {
-                electrical.conductivity = TensorProp::read(&mut t, "sigma", Dim::ElectricalConductivity, Requirement::NonNegative, "electrical conductivity")?;
+                if t.value("sigma").is_some_and(is_temp_curve_value) {
+                    let curve = TempTensor::read(&mut t, "sigma", Dim::ElectricalConductivity, None)?.unwrap();
+                    let val = curve.eval_tensor(t_ref);
+                    val.check(Requirement::NonNegative, "electrical conductivity").map_err(|m| t.err("sigma", m))?;
+                    electrical.conductivity = Some(val);
+                    electrical.conductivity_t = Some(curve);
+                } else {
+                    electrical.conductivity = TensorProp::read(&mut t, "sigma", Dim::ElectricalConductivity, Requirement::NonNegative, "electrical conductivity")?;
+                }
+            }
+            if let Some(curve) = TempTensor::read(&mut t, "conductivity_T", Dim::ElectricalConductivity, None)? {
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::NonNegative, "electrical.conductivity_T").map_err(|m| t.err("conductivity_T", m))?;
+                if electrical.conductivity.is_none() {
+                    electrical.conductivity = Some(val);
+                }
+                electrical.conductivity_t = Some(curve);
+            }
+            if let Some(curve) = TempTensor::read(&mut t, "sigma_T", Dim::ElectricalConductivity, None)? {
+                let val = curve.eval_tensor(t_ref);
+                val.check(Requirement::NonNegative, "electrical.sigma_T").map_err(|m| t.err("sigma_T", m))?;
+                if electrical.conductivity.is_none() {
+                    electrical.conductivity = Some(val);
+                }
+                electrical.conductivity_t = Some(curve);
             }
             electrical.loss_tangent = TensorProp::read(&mut t, "loss_tangent", Dim::Dimensionless, Requirement::NonNegative, "dielectric loss tangent")?;
             if electrical.loss_tangent.is_none() {
                 electrical.loss_tangent = TensorProp::read(&mut t, "tan_delta", Dim::Dimensionless, Requirement::NonNegative, "dielectric loss tangent")?;
             }
+            electrical.permeability_tensor = TensorProp::read(&mut t, "mu_r", Dim::Dimensionless, Requirement::PositiveDefinite, "relative permeability tensor")?;
+            electrical.gyrotropy = super::tensor::read_axial_vec3(&mut t, "gyrotropy")?;
+            electrical.gyrotropy_im = super::tensor::read_axial_vec3(&mut t, "gyrotropy_im")?;
+            electrical.mu_gyrotropy = super::tensor::read_axial_vec3(&mut t, "mu_gyrotropy")?;
+            electrical.mu_gyrotropy_im = super::tensor::read_axial_vec3(&mut t, "mu_gyrotropy_im")?;
             const ELECTRICAL_PARSE_KEYS: &[&str] = &[
                 "source",
                 "permittivity",
                 "permeability",
                 "conductivity",
                 "conductivity_unit",
+                "conductivity_T",
+                "conductivity_T_unit",
                 "sigma",
                 "sigma_unit",
+                "sigma_T",
+                "sigma_T_unit",
                 "loss_tangent",
                 "tan_delta",
+                "mu_r",
+                "gyrotropy",
+                "gyrotropy_im",
+                "mu_gyrotropy",
+                "mu_gyrotropy_im",
             ];
             t.finish(ELECTRICAL_PARSE_KEYS)?;
         }
@@ -420,6 +494,8 @@ impl MaterialSpec {
         let electro_optic = s.sub("electro_optic")?.map(|mut eo| ElectroOptic::read(&mut eo, point_group)).transpose()?;
         let viscoelastic = s.sub("viscoelastic")?.map(|mut ve| Viscoelastic::read(&mut ve, point_group)).transpose()?;
         let interfaces = s.sub("interfaces")?.map(|mut iface| Interfaces::read(&mut iface)).transpose()?.unwrap_or_default();
+        let sheet_2d = s.sub("sheet_2d")?.map(|mut sh| Sheet2d::read(&mut sh)).transpose()?;
+        let nonlinear = s.sub("nonlinear")?.map(|mut nl| Nonlinear::read(&mut nl, point_group)).transpose()?;
 
         if let Some(pg) = point_group.filter(|pg| pg.forbids_piezo_and_pockels()) {
             if piezoelectric.is_some() {
@@ -468,6 +544,7 @@ impl MaterialSpec {
                 let opt = Optical::read(&mut o)?;
                 let mut known: Vec<&str> = optics::OPTICAL_KEYS.to_vec();
                 known.extend(optics::MODEL_KEYS);
+                known.push("gyrotropy");
                 o.finish(&known)?;
                 Some(opt)
             }
@@ -504,6 +581,8 @@ impl MaterialSpec {
             electro_optic,
             viscoelastic,
             interfaces,
+            sheet_2d,
+            nonlinear,
         })
     }
 
@@ -589,6 +668,9 @@ impl MaterialSpec {
             el.insert("permeability".into(), toml::Value::Float(m));
         }
         put_tensor(&mut el, "conductivity", self.electrical.conductivity.as_ref(), Some("S/m"));
+        if let Some(st) = &self.electrical.conductivity_t {
+            el.insert("conductivity_T".into(), st.to_toml(Some("S/m")));
+        }
         put_tensor(&mut el, "loss_tangent", self.electrical.loss_tangent.as_ref(), None);
         if !el.is_empty() {
             t.insert("electrical".into(), toml::Value::Table(el));
@@ -629,6 +711,18 @@ impl MaterialSpec {
             let mut tbl = toml::Table::new();
             self.interfaces.write(&mut tbl);
             t.insert("interfaces".into(), toml::Value::Table(tbl));
+        }
+        if let Some(sh) = &self.sheet_2d {
+            let mut tbl = toml::Table::new();
+            sh.write(&mut tbl);
+            t.insert("sheet_2d".into(), toml::Value::Table(tbl));
+        }
+        if let Some(nl) = &self.nonlinear {
+            let mut tbl = toml::Table::new();
+            nl.write(&mut tbl);
+            if !tbl.is_empty() {
+                t.insert("nonlinear".into(), toml::Value::Table(tbl));
+            }
         }
         if let Some(o) = &self.optical {
             t.insert("optical".into(), toml::Value::Table(o.write()));
@@ -809,6 +903,22 @@ impl MaterialSpec {
         self.thermal_expansion_at_checked(temp_k).map(|(v, _)| v)
     }
 
+    /// Evaluates electrical conductivity `sigma(T)` (S/m) at `temp_k` with clamping metadata.
+    pub fn electrical_conductivity_at_checked(
+        &self,
+        temp_k: Option<f64>,
+    ) -> Option<(TensorProp, Vec<super::state_t::ComponentClamp>)> {
+        match (temp_k, &self.electrical.conductivity_t) {
+            (Some(t), Some(curve)) => Some(curve.eval_tensor_checked(t)),
+            _ => self.electrical.conductivity.clone().map(|v| (v, Vec::new())),
+        }
+    }
+
+    /// Evaluates electrical conductivity `sigma(T)` (S/m) at `temp_k`, defaulting to reference temperature.
+    pub fn electrical_conductivity_at(&self, temp_k: Option<f64>) -> Option<TensorProp> {
+        self.electrical_conductivity_at_checked(temp_k).map(|(v, _)| v)
+    }
+
     /// Convenience BCS surface impedance evaluator using `[superconducting]` defaults when omitted.
     pub fn surface_impedance_at(
         &self,
@@ -827,6 +937,28 @@ impl MaterialSpec {
         bcs_surface_impedance(sc, freq_hz, temp_k, d, fm).map_err(|message| MaterialError {
             material: self.name.clone(),
             path: "superconducting".into(),
+            message,
+        })
+    }
+
+    /// Evaluates the $2 \times 2$ tangential surface conductivity tensor $\boldsymbol{\sigma}_{2\text{D}}(\omega, T, \mu_c, B_0)$
+    /// in Siemens (`S`) from `[sheet_2d]` at frequency `freq_hz` ($\text{Hz}$).
+    pub fn sheet2d_conductivity_at(
+        &self,
+        freq_hz: f64,
+        temp_k: Option<f64>,
+        mu_c_j: Option<f64>,
+        b_0_t: Option<f64>,
+    ) -> Result<[[Complex64; 2]; 2], MaterialError> {
+        let sh = self.sheet_2d.as_ref().ok_or_else(|| MaterialError {
+            material: self.name.clone(),
+            path: "sheet_2d".into(),
+            message: "this material has no [sheet_2d] section".into(),
+        })?;
+        let omega = 2.0 * std::f64::consts::PI * freq_hz;
+        sh.eval_tensor(omega, temp_k, mu_c_j, b_0_t).map_err(|message| MaterialError {
+            material: self.name.clone(),
+            path: "sheet_2d".into(),
             message,
         })
     }
@@ -862,6 +994,14 @@ impl MaterialSpec {
             .piezoelectric
             .as_ref()
             .and_then(|pz| pz.stress_charge(ce_voigt.as_ref()).ok());
+        let piezo_d = self
+            .piezoelectric
+            .as_ref()
+            .and_then(|pz| pz.strain_charge(ce_voigt.as_ref()).ok());
+        let electro_optic = self
+            .electro_optic
+            .as_ref()
+            .and_then(|eo| eo.resolved_clamped(self.photoelastic.as_ref(), piezo_d.as_ref()));
         Anisotropy {
             stiffness: self.elastic.as_ref().map(|e| Stiffness::General(e.c)),
             conductivity: self
@@ -877,7 +1017,50 @@ impl MaterialSpec {
             viscosity: self.viscoelastic.as_ref().map(|v| v.matrix),
             piezo_e,
             photoelastic: self.photoelastic.as_ref().map(|pe| pe.matrix),
+            electro_optic,
+            permeability: self
+                .dielectric
+                .as_ref()
+                .and_then(|d| d.mu_r.as_ref())
+                .or(self.electrical.permeability_tensor.as_ref())
+                .map(TensorProp::to_legacy),
+            permeability_im: None,
+            gyrotropy: self
+                .dielectric
+                .as_ref()
+                .and_then(|d| d.gyrotropy)
+                .or(self.electrical.gyrotropy),
+            gyrotropy_im: self
+                .dielectric
+                .as_ref()
+                .and_then(|d| d.gyrotropy_im)
+                .or(self.electrical.gyrotropy_im),
+            mu_gyrotropy: self
+                .dielectric
+                .as_ref()
+                .and_then(|d| d.mu_gyrotropy)
+                .or(self.electrical.mu_gyrotropy),
+            mu_gyrotropy_im: self
+                .dielectric
+                .as_ref()
+                .and_then(|d| d.mu_gyrotropy_im)
+                .or(self.electrical.mu_gyrotropy_im),
+            nonlinear: self.nonlinear.clone(),
         }
+    }
+
+    /// Returns `true` if any electromagnetic section (`[optical]`, `[dielectric]`, `[electrical]`)
+    /// carries a non-zero gyrotropic / skew-symmetric tensor contribution.
+    pub fn is_non_symmetric(&self) -> bool {
+        let nz = |v: Option<[f64; 3]>| v.is_some_and(|g| g.iter().any(|&x| x != 0.0));
+        self.optical.as_ref().is_some_and(Optical::is_non_symmetric)
+            || self.dielectric.as_ref().is_some_and(|d| {
+                nz(d.gyrotropy) || nz(d.gyrotropy_im) || nz(d.mu_gyrotropy) || nz(d.mu_gyrotropy_im)
+            })
+            || nz(self.electrical.gyrotropy)
+            || nz(self.electrical.gyrotropy_im)
+            || nz(self.electrical.mu_gyrotropy)
+            || nz(self.electrical.mu_gyrotropy_im)
     }
 
     /// Scalar properties under the older names (`rho`, `Cp`, `mu_r`, and `eps_r`, `k`, `alpha`, `E`, `nu` where the data are isotropic).
@@ -1218,6 +1401,55 @@ fn merge_subtable(section: &str, base: &toml::Table, over: &toml::Table) -> toml
         }
     }
 
+    if section == "sheet_2d" {
+        let model_changed = over.get("model").is_some_and(|m| r.get("model") != Some(m));
+        if model_changed {
+            for k in [
+                "mu_c",
+                "tau",
+                "gamma",
+                "scattering_rate",
+                "temperature",
+                "v_f",
+                "b_0",
+                "n_layers",
+                "sigma_uu_re",
+                "sigma_uu_im",
+                "sigma_vv_re",
+                "sigma_vv_im",
+                "sigma_unit",
+                "frequency_unit",
+                "poles_u",
+                "poles_v",
+                "omega",
+                "data",
+                "data_uu",
+                "data_vv",
+            ] {
+                r.remove(k);
+            }
+        }
+    }
+
+    if section == "nonlinear.chi2" {
+        let rep_changed = over.contains_key("matrix")
+            || over.keys().any(|k| k.len() == 3 && k.starts_with('d') && k.as_bytes()[1].is_ascii_digit());
+        if rep_changed {
+            r.remove("matrix");
+            r.retain(|k, _| !(k.len() == 3 && k.starts_with('d') && k.as_bytes()[1].is_ascii_digit()));
+        }
+    }
+
+    if matches!(section, "nonlinear.qpm" | "nonlinear.chi2.qpm") {
+        if over.contains_key("Lambda_qpm") {
+            r.remove("period");
+            r.remove("period_unit");
+        } else if over.contains_key("period") {
+            r.remove("Lambda_qpm");
+            r.remove("Lambda_qpm_unit");
+        }
+    }
+
     for (k, v) in over {
         let sub_path = format!("{section}.{k}");
         if let (Some(toml::Value::Table(bt)), toml::Value::Table(ot)) = (r.get(k), v) {
@@ -1295,6 +1527,11 @@ pub struct Keys {
     pub viscoelastic: &'static [&'static str],
     pub interfaces: &'static [&'static str],
     pub interface_layer: &'static [&'static str],
+    pub sheet_2d: &'static [&'static str],
+    pub nonlinear: &'static [&'static str],
+    pub chi2: &'static [&'static str],
+    pub chi3: &'static [&'static str],
+    pub qpm: &'static [&'static str],
     pub temp_curve: &'static [&'static str],
     pub optical: &'static [&'static str],
     pub model: &'static [&'static str],
@@ -1315,6 +1552,11 @@ pub fn keys() -> Keys {
         viscoelastic: super::coupled::VISCOELASTIC_KEYS,
         interfaces: super::coupled::INTERFACES_KEYS,
         interface_layer: super::coupled::IFACE_KEYS,
+        sheet_2d: SHEET_2D_KEYS,
+        nonlinear: NONLINEAR_KEYS,
+        chi2: CHI2_KEYS,
+        chi3: CHI3_KEYS,
+        qpm: QPM_KEYS,
         temp_curve: super::state_t::TEMP_CURVE_KEYS,
         optical: optics::OPTICAL_KEYS,
         model: optics::MODEL_KEYS,

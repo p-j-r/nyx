@@ -38,6 +38,7 @@ pub mod xdmf;
 pub mod apiref;
 pub mod commandlist;
 pub mod meshing;
+pub mod optimize;
 pub mod path_guard;
 pub mod pml;
 pub mod preview;
@@ -63,7 +64,7 @@ pub use engine::Engine;
 pub use estimate::{Estimate, History};
 pub use jobs::{JobId, JobInfo, JobOutput, JobRunner, JobState, Lane, Submit, WorkerRun};
 pub use meshing::{FemcoreMesher, MeshedModel, Mesher};
-pub use project::{MeshSettings, PmlModeRequest, Project, SweepLayer};
+pub use project::{CoupledLoopConfig, MeshSettings, PmlModeRequest, Project, SweepLayer};
 pub use queue::QueueOpts;
 
 use nyx_physics::{Error, Registry};

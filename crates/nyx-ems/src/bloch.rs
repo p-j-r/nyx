@@ -67,6 +67,7 @@ pub struct BlochAssembly {
     pub eps_phys_re: Vec<[[f64; 3]; 3]>,
     pub d_omega_eps: Vec<[[f64; 3]; 3]>,
     pub mur_phys: Vec<f64>,
+    pub is_non_symmetric: bool,
 }
 
 /// Stage 2 output: converged complex Bloch indices `(n_B, vec_index)` sorted by distance to `sigma`.
@@ -244,6 +245,8 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
     let d_omega_eps = problem.cell_d_omega_eps(mesh)?;
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let (eps, mu_inv) = simplex_cell_materials_3d(mesh, problem)?;
+    let mut is_non_symmetric =
+        problem.materials.is_non_symmetric() || crate::mixed_ops::is_c3_slice_non_symmetric(&eps, &mu_inv);
     let pml_table = EmPmlTable::from_simplex(mesh, &problem.materials, freq, true, false);
     let pml_cells = pml_table.pml_cells_mask();
 
@@ -257,9 +260,22 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
         assemble_bloch_matrices(mesh, &ned, k0, &eps, &mu_inv, pml_table.has_any().then_some(&pml_table));
     lap(&mut tl, "bloch3d: numbering and assembly");
 
-    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty();
+    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty() || !problem.sheet_2d.is_empty();
     let ibc_jj = if has_sheets {
-        Some(assemble_ibc_and_jj_3d(mesh, &ned, &problem.pec, &problem.surface_impedance, &[], freq)?)
+        let mut ij = assemble_ibc_and_jj_3d(mesh, &ned, &problem.pec, &problem.surface_impedance, &[], freq)?;
+        if !problem.sheet_2d.is_empty() {
+            let has_non_sym_sheets = crate::ibc::assemble_sheet2d_3d(
+                mesh,
+                &ned,
+                &problem.pec,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                freq,
+                &mut ij,
+            )?;
+            is_non_symmetric |= has_non_sym_sheets;
+        }
+        Some(ij)
     } else {
         None
     };
@@ -272,7 +288,12 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
     let exterior = mesh.exterior_facets();
     let periodic_labels: Vec<i32> =
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
-    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let ibc_labels: Vec<i32> = problem
+        .surface_impedance
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(problem.sheet_2d.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
     let (sym_pec_facets, sym_pmc_facets) = symmetry_facet_flags(mesh, problem.symmetry)?;
 
     let mut fixed_set = std::collections::BTreeSet::new();
@@ -342,6 +363,7 @@ pub fn assemble_bloch(mesh: &Discretisation, problem: &Problem) -> Result<BlochA
         eps_phys_re,
         d_omega_eps,
         mur_phys: mur,
+        is_non_symmetric,
     })
 }
 
@@ -482,7 +504,12 @@ pub fn bloch_fields_cells(
             for a in 0..nloc {
                 let idx = ci * nloc + a;
                 let ck = curl_k_phys[idx];
-                h_phys[idx] = [ck[0] * mui * h_prefactor, ck[1] * mui * h_prefactor, ck[2] * mui * h_prefactor];
+                h_phys[idx] = if asm.is_non_symmetric {
+                    let mck = crate::mixed_ops::c3_mul_vec(&asm.mu_inv[ci], ck);
+                    [mck[0] * h_prefactor, mck[1] * h_prefactor, mck[2] * h_prefactor]
+                } else {
+                    [ck[0] * mui * h_prefactor, ck[1] * mui * h_prefactor, ck[2] * mui * h_prefactor]
+                };
             }
         }
         for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
@@ -683,9 +710,23 @@ pub fn assemble_bloch_mixed(
     );
     lap(&mut tl, "bloch3d(mixed): numbering and assembly");
 
-    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty();
+    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty() || !problem.sheet_2d.is_empty();
+    let mut has_non_sym_sheets = false;
     let ibc_jj = if has_sheets {
-        Some(assemble_ibc_and_jj_3d_mixed(mesh, &ned, &problem.pec, &problem.surface_impedance, &[], freq)?)
+        let mut ij_tuple =
+            assemble_ibc_and_jj_3d_mixed(mesh, &ned, &problem.pec, &problem.surface_impedance, &[], freq)?;
+        if !problem.sheet_2d.is_empty() {
+            has_non_sym_sheets = crate::mixed_ops::assemble_sheet2d_3d_mixed(
+                mesh,
+                &ned,
+                &problem.pec,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                freq,
+                &mut ij_tuple.0,
+            )?;
+        }
+        Some(ij_tuple)
     } else {
         None
     };
@@ -697,7 +738,12 @@ pub fn assemble_bloch_mixed(
 
     let periodic_labels: Vec<i32> =
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
-    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let ibc_labels: Vec<i32> = problem
+        .surface_impedance
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(problem.sheet_2d.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
     let (sym_pec_facets, sym_pmc_facets) = symmetry_facet_flags_mixed(mesh, problem.symmetry)?;
 
     let mut fixed_set = std::collections::BTreeSet::new();
@@ -767,6 +813,7 @@ pub fn assemble_bloch_mixed(
             eps_phys_re: mats.eps_phys_re,
             d_omega_eps: mats.d_omega_eps,
             mur_phys: mats.mur_phys,
+            is_non_symmetric: mats.is_non_symmetric || has_non_sym_sheets,
         },
         ned,
     ))
@@ -859,7 +906,12 @@ pub fn bloch_fields_cells_mixed(
             for a in 0..nloc {
                 let idx = sc * nloc + a;
                 let ck = curl_k_phys[idx];
-                h_phys[idx] = [ck[0] * mui * h_prefactor, ck[1] * mui * h_prefactor, ck[2] * mui * h_prefactor];
+                h_phys[idx] = if asm.is_non_symmetric {
+                    let mck = crate::mixed_ops::c3_mul_vec(&asm.mu_inv[mc], ck);
+                    [mck[0] * h_prefactor, mck[1] * h_prefactor, mck[2] * h_prefactor]
+                } else {
+                    [ck[0] * mui * h_prefactor, ck[1] * mui * h_prefactor, ck[2] * mui * h_prefactor]
+                };
             }
         }
         for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {

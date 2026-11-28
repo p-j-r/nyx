@@ -482,6 +482,7 @@ pub enum SparseDrivenSolver {
     Direct {
         solver: Option<Box<DirectSolver<C>>>,
         requested: String,
+        force_general_lu: bool,
     },
     Blr {
         solver: Option<Box<ShiftedBlrLu<C>>>,
@@ -492,19 +493,33 @@ pub enum SparseDrivenSolver {
 
 impl SparseDrivenSolver {
     pub fn new(requested: &str, blr_tol: f64) -> Self {
+        Self::new_with_symmetry(requested, blr_tol, false)
+    }
+
+    /// Creates a driven sparse solver, routing to general `LU` when `is_non_symmetric` is `true` (`FR-34`).
+    pub fn new_with_symmetry(requested: &str, blr_tol: f64, is_non_symmetric: bool) -> Self {
         if requested == "blr" {
             Self::Blr { solver: None, a_cur: CCsr::zeros(0, 0), tol: blr_tol }
         } else {
-            Self::Direct { solver: None, requested: requested.to_string() }
+            Self::Direct {
+                solver: None,
+                requested: requested.to_string(),
+                force_general_lu: is_non_symmetric,
+            }
         }
     }
 
     pub fn update_matrix(&mut self, a_mat: &CCsr) -> Result<(), String> {
         match self {
-            Self::Direct { solver, .. } => match solver.as_mut() {
+            Self::Direct { solver, force_general_lu, .. } => match solver.as_mut() {
                 Some(s) => s.update_matrix(a_mat),
                 None => {
-                    *solver = Some(Box::new(DirectSolver::new(a_mat, false)?));
+                    let ds = if *force_general_lu {
+                        DirectSolver::new_general_lu(a_mat)?
+                    } else {
+                        DirectSolver::new(a_mat, false)?
+                    };
+                    *solver = Some(Box::new(ds));
                     Ok(())
                 }
             },
@@ -590,7 +605,7 @@ impl SparseDrivenSolver {
 
     pub fn backend_name(&self) -> String {
         match self {
-            Self::Direct { solver, requested } => {
+            Self::Direct { solver, requested, .. } => {
                 let Some(s) = solver.as_ref() else {
                     return "None".to_string();
                 };

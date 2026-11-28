@@ -19,6 +19,8 @@
 //! full-space residual certification across all sweep frequencies.
 
 use crate::cavity::{assemble_maxwell_with_pml, basis3_keyed, gradient_full, safe_curved_jacobian, Ned3};
+use crate::excitation::{assemble_scattered_rhs, excitation_volume_powers, ExcitationSpec, PreparedExcitation};
+use crate::floquet_port::{assemble_floquet_ports_3d, AssembledFloquetPort};
 use crate::ibc::{assemble_ibc_and_jj_3d, reduce_real_csr, reduce_real_vec, AssembledJjPort, SheetCellKind, MU0};
 use crate::mixed_ops::{
     assemble_ibc_and_jj_3d_mixed, assemble_lumped_ports_3d_mixed, assemble_maxwell_mixed, assemble_waveports_3d_mixed,
@@ -123,8 +125,17 @@ fn ned_relations(
 /// Kind of driven port in the unified port list `0..P`.
 #[derive(Clone, Debug)]
 pub enum DrivenPortKind {
-    Lumped { z0: f64 },
-    Wave { wave_index: usize },
+    Lumped {
+        z0: f64,
+    },
+    Wave {
+        wave_index: usize,
+    },
+    /// Propagating Rayleigh-Floquet channel `harmonic` of diffraction port `port` (FR-36).
+    Floquet {
+        port: usize,
+        harmonic: usize,
+    },
 }
 
 /// Unified metadata for one driven port $p \in \{0..P-1\}$.
@@ -132,20 +143,52 @@ pub enum DrivenPortKind {
 pub struct DrivenPortEntry {
     pub name: String,
     pub kind: DrivenPortKind,
-    /// Equilibrated reduced port functional $\hat{\mathbf{b}}_p = \mathbf{D} \mathbf{b}_{p,\text{red}}$ (`nred`).
+    /// Equilibrated reduced port functional $\hat{\mathbf{b}}_p = \mathbf{D} \mathbf{b}_{p,\text{red}}$ (`nred`; empty for Floquet channels).
     pub b_hat: Vec<f64>,
+    /// Complex drive / receive functionals `(D P^H c_h, D P^T conj(c_h))` of a Floquet channel.
+    pub c_hat: Option<(Vec<C>, Vec<C>)>,
 }
 
 impl DrivenPortEntry {
+    /// Equilibrated drive functional (complex).
+    pub fn drive_hat(&self) -> Vec<C> {
+        match &self.c_hat {
+            Some((d, _)) => d.clone(),
+            None => self.b_hat.iter().map(|&b| c(b, 0.0)).collect(),
+        }
+    }
+
+    /// Port response $\hat{\mathbf{t}}_p^T \hat{\mathbf{y}}$ of an equilibrated solution `y_hat`.
+    pub fn recv_dot(&self, y_hat: &[C]) -> C {
+        match &self.c_hat {
+            Some((_, r)) => r.iter().zip(y_hat).fold(c(0.0, 0.0), |acc, (&ri, &yi)| acc + ri * yi),
+            None => self.b_hat.iter().zip(y_hat).fold(c(0.0, 0.0), |acc, (&bi, &yi)| acc + yi * bi),
+        }
+    }
+
+    /// Whether the port carries power at `omega` (Floquet channels below their cutoff do not).
+    pub fn is_active(&self, omega: f64, floquet: &[AssembledFloquetPort]) -> bool {
+        match self.kind {
+            DrivenPortKind::Floquet { port, harmonic } => floquet[port].propagating(harmonic, omega),
+            _ => true,
+        }
+    }
+
     /// Returns `(z0_p(omega), gamma_p(omega), d(gamma_p)/d(omega), d^2(gamma_p)/d(omega)^2)` at angular frequency `omega` (rad/s),
     /// where $\text{RHS}_p(\omega) = \gamma_p(\omega) \hat{\mathbf{b}}_p$ and $\gamma_p(\omega) = 2 i \omega \mu_0 Z_{0,p}(\omega)^{-1/2}$.
     #[inline]
-    pub fn excitation_coeffs(&self, omega: f64, waveports: &[AssembledWavePort]) -> (f64, C, C, C) {
+    pub fn excitation_coeffs(
+        &self,
+        omega: f64,
+        waveports: &[AssembledWavePort],
+        floquet: &[AssembledFloquetPort],
+    ) -> (f64, C, C, C) {
         match self.kind {
             DrivenPortKind::Lumped { z0 } => {
                 let c_scale = 2.0 * MU0 * z0.max(1e-30).sqrt().recip();
                 (z0, c(0.0, omega * c_scale), c(0.0, c_scale), c(0.0, 0.0))
             }
+            DrivenPortKind::Floquet { port, harmonic } => floquet[port].excitation(harmonic, omega),
             DrivenPortKind::Wave { wave_index } => {
                 let (beta, dbeta, d2beta, z0) = waveports[wave_index].beta_and_derivs(omega);
                 // omega * mu_0 * Z_{0,p}^(-1/2) = sqrt(omega * mu_0 * beta)
@@ -167,6 +210,14 @@ impl DrivenPortEntry {
         match self.kind {
             DrivenPortKind::Lumped { z0 } => z0,
             DrivenPortKind::Wave { wave_index } => waveports[wave_index].bc.z0_ohm.unwrap_or(z_wave),
+            // the S formula uses z = 2 / Re(Y); the reported wave impedance is 1 / Re(Y)
+            DrivenPortKind::Floquet { .. } => {
+                if z_wave.is_finite() {
+                    0.5 * z_wave
+                } else {
+                    1e30
+                }
+            }
         }
     }
 }
@@ -217,6 +268,7 @@ fn equilibrate_driven_system(
             name: lp.bc.name.clone(),
             kind: DrivenPortKind::Lumped { z0: lp.bc.z0 },
             b_hat: scale_vec(&lp.b_red, &d_ruiz),
+            c_hat: None,
         });
     }
     for (wave_index, wp) in waveports.iter().enumerate() {
@@ -224,9 +276,55 @@ fn equilibrate_driven_system(
             name: wp.bc.name.clone(),
             kind: DrivenPortKind::Wave { wave_index },
             b_hat: scale_vec(&wp.b_red, &d_ruiz),
+            c_hat: None,
         });
     }
     (d_ruiz, terms_hat, ports)
+}
+
+/// Appends the Floquet DtN terms `c_hat t_hat^T` (one per harmonic, in `floquet_terms` order) and the propagating channels of every
+/// diffraction port to `terms_hat` / `ports` (FR-36). Reduced functionals: drive `D P^H c`, receive `D P^T conj(c) = conj(drive)`.
+fn append_floquet_terms(
+    red: &femcore::periodic::Reduction,
+    n_full: usize,
+    d_ruiz: &[f64],
+    floquet: &[AssembledFloquetPort],
+    f_max: f64,
+    terms_hat: &mut Vec<CCsr>,
+    ports: &mut Vec<DrivenPortEntry>,
+) -> Vec<(usize, usize)> {
+    let nred = d_ruiz.len();
+    let mut floquet_terms = Vec::new();
+    let omega_max = 2.0 * PI * f_max;
+    for (pi, fp) in floquet.iter().enumerate() {
+        for (hi, hm) in fp.harmonics.iter().enumerate() {
+            let mut dense = vec![c(0.0, 0.0); n_full];
+            for &(d, v) in &hm.c_full {
+                dense[d] = v;
+            }
+            let c_red = red.restrict_rhs(&dense);
+            let drive: Vec<C> = c_red.iter().zip(d_ruiz).map(|(&v, &d)| v * d).collect();
+            let recv: Vec<C> = drive.iter().map(|v| v.conj()).collect();
+            let nz: Vec<usize> = (0..nred).filter(|&i| drive[i].norm() > 0.0).collect();
+            let mut coo = femcore::linalg::csr::CCoo::new(nred, nred);
+            for &i in &nz {
+                for &j in &nz {
+                    coo.push(i, j, drive[i] * recv[j]);
+                }
+            }
+            terms_hat.push(coo.to_csr());
+            floquet_terms.push((pi, hi));
+            if fp.propagating(hi, omega_max) {
+                ports.push(DrivenPortEntry {
+                    name: fp.channel_name(hi),
+                    kind: DrivenPortKind::Floquet { port: pi, harmonic: hi },
+                    b_hat: Vec::new(),
+                    c_hat: Some((drive, recv)),
+                });
+            }
+        }
+    }
+    floquet_terms
 }
 
 /// Stage 1 of the 3D driven frequency-domain solver: Nedelec numbering, PEC/periodic reduction,
@@ -261,12 +359,31 @@ pub struct DrivenAssembly {
     pub cell_sheet: Vec<Option<SheetCellKind>>,
     pub mu_inv: Vec<C3>,
     pub mur_phys: Vec<f64>,
+    pub eps_phys_im: Vec<[[f64; 3]; 3]>,
+    pub pml_cells: Vec<bool>,
+    pub pec_labels: Vec<i32>,
+    pub surface_impedance: Vec<crate::problem::SurfaceImpedanceBc>,
+    pub sheet_2d: Vec<crate::problem::Sheet2dBc>,
+    pub imported_potential: Option<Vec<f64>>,
+    pub temperature_field: Option<Vec<f64>>,
+    pub has_loss: bool,
     pub has_sheets: bool,
+    pub has_non_symmetric_sheets: bool,
     pub has_pml: bool,
+    pub is_non_symmetric: bool,
     pub k_pml_red: CCsr,
     pub m_pml_red: CCsr,
     pub m_phys_red: RCsr,
     pub m_pml_phys_red: RCsr,
+    /// Unstretched complex permittivity tensor per cell (scattered-field contrast, FR-36).
+    pub eps_cells: Vec<C3>,
+    /// Scattered-field analytical excitations (FR-36).
+    pub excitations: Vec<ExcitationSpec>,
+    /// Floquet diffraction ports and the `(port, harmonic)` of every DtN term after the waveport terms (FR-36).
+    pub floquet_ports: Vec<AssembledFloquetPort>,
+    pub floquet_terms: Vec<(usize, usize)>,
+    /// Power multiplier of the midplane symmetry (2 per mirror plane) for whole-structure powers and cross-sections.
+    pub symmetry_factor: f64,
 }
 
 impl DrivenAssembly {
@@ -274,7 +391,7 @@ impl DrivenAssembly {
     pub fn term_coeffs(&self, omega: f64) -> Vec<(C, C, C)> {
         let k0 = omega / C0;
         let dk0 = 1.0 / C0;
-        let mut out = Vec::with_capacity(3 + self.waveports.len());
+        let mut out = Vec::with_capacity(3 + self.waveports.len() + self.floquet_terms.len());
         // Term 0: K_tot * 1
         out.push((c(1.0, 0.0), c(0.0, 0.0), c(0.0, 0.0)));
         // Term 1: C_tot * (i k_0)
@@ -285,6 +402,10 @@ impl DrivenAssembly {
         for wp in &self.waveports {
             let (beta, dbeta, d2beta, _) = wp.beta_and_derivs(omega);
             out.push((c(0.0, beta), c(0.0, dbeta), c(0.0, d2beta)));
+        }
+        // Floquet DtN terms: c_h t_h^T * gamma_h(omega)
+        for &(p, h) in &self.floquet_terms {
+            out.push(self.floquet_ports[p].gamma(h, omega));
         }
         out
     }
@@ -343,12 +464,27 @@ impl PromOperator for DrivenAssembly {
     }
 
     fn port_b_hat(&self, port: usize) -> Vec<C> {
-        self.ports[port].b_hat.iter().map(|&b| c(b, 0.0)).collect()
+        self.ports[port].drive_hat()
+    }
+
+    fn port_b_recv_hat(&self, port: usize) -> Option<Vec<C>> {
+        if self.floquet_ports.is_empty() {
+            None
+        } else {
+            Some(match &self.ports[port].c_hat {
+                Some((_, r)) => r.clone(),
+                None => self.ports[port].b_hat.iter().map(|&b| c(b, 0.0)).collect(),
+            })
+        }
     }
 
     fn port_gamma(&self, port: usize, omega: f64) -> (C, C, C) {
-        let (_, g0, g1, g2) = self.ports[port].excitation_coeffs(omega, &self.waveports);
+        let (_, g0, g1, g2) = self.ports[port].excitation_coeffs(omega, &self.waveports, &self.floquet_ports);
         (g0, g1, g2)
+    }
+
+    fn is_symmetric(&self) -> bool {
+        !self.is_non_symmetric && !self.has_non_symmetric_sheets && self.floquet_ports.is_empty()
     }
 }
 
@@ -377,15 +513,29 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     } else {
         (study_f_min, study_f_max, study_n_points)
     };
-    if problem.lumped_ports.is_empty() && problem.waveports.is_empty() {
-        return Err("driven study requires at least one 'lumped_port' or 'waveport' boundary condition".into());
+    if problem.lumped_ports.is_empty()
+        && problem.waveports.is_empty()
+        && problem.diffraction_ports.is_empty()
+        && problem.excitations.is_empty()
+    {
+        return Err("driven study requires at least one 'lumped_port', 'waveport' or 'diffraction_port' boundary condition, or a scattered-field excitation".into());
     }
     validate_port_contacts_3d(mesh, problem)?;
     let order = if problem.order == 1 { 1 } else { 2 };
-    let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
+    let tens = problem.cell_complex_permittivity(mesh)?;
     let eps_phys_re: Vec<[[f64; 3]; 3]> = tens.iter().map(|(re, _)| *re).collect();
+    let eps_phys_im: Vec<[[f64; 3]; 3]> = tens.iter().map(|(_, im)| *im).collect();
+    let has_loss = problem.has_loss() || tens.iter().any(|(re, im)| crate::problem::is_lossy_eps_pair(re, im));
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let (eps, mu_inv) = simplex_cell_materials_3d(mesh, problem)?;
+    let mut is_non_symmetric =
+        problem.materials.is_non_symmetric() || crate::mixed_ops::is_c3_slice_non_symmetric(&eps, &mu_inv);
+    if is_non_symmetric && solver == "lblt" {
+        return Err(
+            "driven solver 'lblt' cannot be used with non-symmetric or gyrotropic material tensors (A != A^T); use 'auto', 'direct', 'blr', or 'ams_fgmres'"
+                .into(),
+        );
+    }
     let f0 = 0.5 * (f_min + f_max);
     let pml_table = EmPmlTable::from_simplex(mesh, &problem.materials, f0, false, solver == "ams_fgmres");
     let pml_cells = pml_table.pml_cells_mask();
@@ -400,12 +550,36 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     let n = ned.n_dofs();
     let (k, m) = assemble_maxwell_with_pml(mesh, &ned, &eps, &mu_inv, has_pml.then_some(&pml_table));
 
-    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty();
+    let has_sheets = !problem.pec.is_empty()
+        || !problem.surface_impedance.is_empty()
+        || !problem.lumped_jj.is_empty()
+        || !problem.sheet_2d.is_empty();
+    let mut has_non_symmetric_sheets = false;
     let mut ibc_jj = if has_sheets {
-        Some(assemble_ibc_and_jj_3d(mesh, &ned, &problem.pec, &problem.surface_impedance, &problem.lumped_jj, f0)?)
+        let mut ij =
+            assemble_ibc_and_jj_3d(mesh, &ned, &problem.pec, &problem.surface_impedance, &problem.lumped_jj, f0)?;
+        if !problem.sheet_2d.is_empty() {
+            has_non_symmetric_sheets = crate::ibc::assemble_sheet2d_3d(
+                mesh,
+                &ned,
+                &problem.pec,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                f0,
+                &mut ij,
+            )?;
+        }
+        Some(ij)
     } else {
         None
     };
+    is_non_symmetric = is_non_symmetric || has_non_symmetric_sheets;
+    if (is_non_symmetric || !problem.diffraction_ports.is_empty()) && solver == "lblt" {
+        return Err(
+            "driven solver 'lblt' cannot be used with non-symmetric or gyrotropic material tensors, Hall sheets, or Floquet diffraction ports (A != A^T); use 'auto', 'direct', 'blr', or 'ams_fgmres'"
+                .into(),
+        );
+    }
 
     let mut lumped_ports = assemble_lumped_ports_3d(mesh, &ned, &problem.pec, &problem.lumped_ports)?;
     let mut waveports = assemble_waveports_3d(
@@ -420,15 +594,44 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         f_min,
         f_max,
     )?;
+    let periodic_shifts: Vec<([f64; 3], f64)> = matches
+        .iter()
+        .zip(&problem.periodic)
+        .map(|(m, p)| {
+            let s = |k: usize| m.shift.get(k).copied().unwrap_or(0.0);
+            ([s(0), s(1), s(2)], p.phase)
+        })
+        .collect();
+    let floquet_ports = assemble_floquet_ports_3d(
+        mesh,
+        &ned,
+        &problem.diffraction_ports,
+        &problem.pec,
+        &periodic_shifts,
+        &eps_phys_re,
+        &eps_phys_im,
+        &mur,
+        f_max,
+    )?;
 
-    // Exterior PEC walls exclude periodic, pmc, surface_impedance, lumped_jj, lumped_port, and waveport boundaries
+    // Exterior PEC walls exclude periodic, pmc, surface_impedance, sheet_2d, lumped_jj, lumped_port, waveport, and diffraction_port boundaries
     let exterior = mesh.exterior_facets();
     let periodic_labels: Vec<i32> =
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
-    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let ibc_labels: Vec<i32> = problem
+        .surface_impedance
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(problem.sheet_2d.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
     let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
-    let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let wp_labels: Vec<i32> = problem
+        .waveports
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(problem.diffraction_ports.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
 
     let (sym_pec, sym_pmc) = symmetry_facet_flags(mesh, problem.symmetry)?;
     let mut fixed_set = BTreeSet::new();
@@ -529,8 +732,11 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
     };
 
     // Compute iterative symmetric Ruiz diagonal equilibration at midband omega_mid
-    let (d_ruiz, terms_hat, ports) =
+    let (d_ruiz, mut terms_hat, mut ports) =
         equilibrate_driven_system(nred, f0, &k_tot_red, &c_tot_red, &m_tot_red, &lumped_ports, &waveports);
+    let floquet_terms = append_floquet_terms(&red, n, &d_ruiz, &floquet_ports, f_max, &mut terms_hat, &mut ports);
+    let symmetry_factor =
+        2f64.powi(problem.symmetry.x_is_pec().is_some() as i32 + problem.symmetry.z_is_pec().is_some() as i32);
 
     let ams_data = if solver == "ams_fgmres" && problem.periodic.is_empty() {
         let nv = mesh.n_points();
@@ -739,12 +945,27 @@ pub fn assemble_emw_driven(mesh: &Discretisation, problem: &Problem) -> Result<D
         cell_sheet,
         mu_inv,
         mur_phys: mur,
+        eps_phys_im,
+        pml_cells,
+        pec_labels: problem.pec.clone(),
+        surface_impedance: problem.surface_impedance.clone(),
+        sheet_2d: problem.sheet_2d.clone(),
+        imported_potential: problem.imported_potential.clone(),
+        temperature_field: problem.temperature_field.clone(),
+        has_loss,
         has_sheets,
+        has_non_symmetric_sheets,
         has_pml,
+        is_non_symmetric,
         k_pml_red,
         m_pml_red,
         m_phys_red,
         m_pml_phys_red,
+        eps_cells: eps,
+        excitations: problem.excitations.clone(),
+        floquet_ports,
+        floquet_terms,
+        symmetry_factor,
     })
 }
 
@@ -848,8 +1069,15 @@ impl DrivenLinearSolver {
             _ => match slot.as_mut() {
                 Some(Self::Sparse(sp)) => sp.update_matrix(a_mat),
                 _ => {
+                    let non_sym = !PromOperator::is_symmetric(asm);
+                    if non_sym && asm.solver == "lblt" {
+                        return Err(
+                            "driven solver 'lblt' cannot be used with non-symmetric or gyrotropic material tensors, Hall sheets, or Floquet diffraction ports (A != A^T); use 'auto', 'direct', 'blr', or 'ams_fgmres'"
+                                .into(),
+                        );
+                    }
                     *slot = None;
-                    let mut sp = SparseDrivenSolver::new(&asm.solver, asm.blr_tol);
+                    let mut sp = SparseDrivenSolver::new_with_symmetry(&asm.solver, asm.blr_tol, non_sym);
                     sp.update_matrix(a_mat)?;
                     *slot = Some(Self::Sparse(Box::new(sp)));
                     Ok(())
@@ -1049,7 +1277,12 @@ fn build_driven_solution(
         for a in 0..nloc {
             let idx = ci * nloc + a;
             let ce = curl_e[idx];
-            h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
+            h_field[idx] = if asm.is_non_symmetric {
+                let mce = crate::mixed_ops::c3_mul_vec(&asm.mu_inv[ci], ce);
+                [mce[0] * h_prefactor, mce[1] * h_prefactor, mce[2] * h_prefactor]
+            } else {
+                [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor]
+            };
         }
     }
     for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
@@ -1128,9 +1361,128 @@ struct DrivenSweepCoreOut {
     f_res_hz: f64,
     rep_x_red: Vec<C>,
     diag: crate::diag::EmsDiag,
+    /// `exc_records[freq][excitation]` (FR-36).
+    exc_records: Vec<Vec<ExcitationRecord>>,
+}
+
+/// Outcome of one scattered-field excitation at one frequency (whole-structure powers, symmetry factor applied).
+#[derive(Clone, Debug)]
+struct ExcitationRecord {
+    p_abs: f64,
+    p_ext: f64,
+    p_sca_pml: f64,
+    intensity: Option<f64>,
+    p_dipole_bg: Option<f64>,
+    /// Unscaled reduced scattered field, kept for the frequencies that emit fields.
+    x_red: Option<Vec<C>>,
+}
+
+/// Prepared excitations and their equilibrated reduced scattered-field right-hand sides `D P^H b_scat(omega)`.
+fn excitation_rhs_hat(
+    mesh: &Discretisation,
+    asm: &DrivenAssembly,
+    omega: f64,
+) -> Result<(Vec<PreparedExcitation>, Vec<Vec<C>>), String> {
+    let mut preps = Vec::with_capacity(asm.excitations.len());
+    let mut cols = Vec::with_capacity(asm.excitations.len());
+    for exc in &asm.excitations {
+        let prep = exc
+            .excitation
+            .prepare(omega, exc.eps_bg, exc.mu_bg)
+            .map_err(|e| format!("excitation '{}': {e}", exc.name))?;
+        let b = assemble_scattered_rhs(mesh, &asm.ned, exc, &prep, &asm.eps_cells, &asm.mu_inv, &asm.pml_cells)?;
+        let b_red = asm.red.restrict_rhs(&b);
+        cols.push(b_red.iter().zip(&asm.d_ruiz).map(|(&v, &d)| v * d).collect());
+        preps.push(prep);
+    }
+    Ok((preps, cols))
+}
+
+/// Power absorbed by the PML from an (unscaled, reduced) field: `Im(x^H (K_pml - k0^2 M_pml) x) / (2 omega mu0)`.
+fn pml_absorbed_power(asm: &DrivenAssembly, omega: f64, x_red: &[C]) -> f64 {
+    if !asm.has_pml || x_red.is_empty() {
+        return 0.0;
+    }
+    let k0_2 = (omega / C0).powi(2);
+    let kx = asm.k_pml_red.matvec(x_red);
+    let mx = asm.m_pml_red.matvec(x_red);
+    let mut q = 0.0_f64;
+    for i in 0..x_red.len() {
+        q += (x_red[i].conj() * (kx[i] - mx[i] * k0_2)).im;
+    }
+    q / (2.0 * omega * MU0)
+}
+
+/// Post-processes the equilibrated scattered-field solutions `y_hat_cols` of every excitation at `omega`.
+fn excitation_records(
+    mesh: &Discretisation,
+    asm: &DrivenAssembly,
+    omega: f64,
+    preps: &[PreparedExcitation],
+    y_hat_cols: &[Vec<C>],
+    keep_fields: bool,
+) -> Vec<ExcitationRecord> {
+    let sf = asm.symmetry_factor;
+    asm.excitations
+        .iter()
+        .zip(preps)
+        .zip(y_hat_cols)
+        .map(|((exc, prep), y_hat)| {
+            let x_red: Vec<C> = y_hat.iter().zip(&asm.d_ruiz).map(|(&y, &d)| y * d).collect();
+            let x_full = asm.red.expand(&x_red);
+            let (p_abs, p_ext) = excitation_volume_powers(
+                mesh,
+                &asm.ned,
+                exc,
+                prep,
+                &asm.eps_cells,
+                &asm.mu_inv,
+                &asm.pml_cells,
+                &x_full,
+            );
+            let p_sca_pml = pml_absorbed_power(asm, omega, &x_red);
+            ExcitationRecord {
+                p_abs: sf * p_abs,
+                p_ext: sf * p_ext,
+                p_sca_pml: sf * p_sca_pml,
+                intensity: prep.plane_wave_intensity(),
+                p_dipole_bg: prep.dipole_power(),
+                x_red: keep_fields.then_some(x_red),
+            }
+        })
+        .collect()
+}
+
+/// Frequency indices whose excitation fields are emitted: all when `n_freq * n_exc <= 8`, else the one nearest midband.
+fn excitation_field_freqs(freqs_hz: &[f64], n_exc: usize) -> BTreeSet<usize> {
+    if n_exc == 0 || freqs_hz.is_empty() {
+        return BTreeSet::new();
+    }
+    if freqs_hz.len() * n_exc <= 8 {
+        return (0..freqs_hz.len()).collect();
+    }
+    let mid = 0.5 * (freqs_hz[0] + freqs_hz[freqs_hz.len() - 1]);
+    let best = (0..freqs_hz.len()).min_by(|&a, &b| (freqs_hz[a] - mid).abs().total_cmp(&(freqs_hz[b] - mid).abs()));
+    best.into_iter().collect()
+}
+
+/// Zeroes the rows and columns of Floquet channels that are evanescent at `omega` (they carry no power there).
+fn zero_inactive_channels(asm: &DrivenAssembly, omega: f64, s_k: &mut [Vec<C>]) {
+    if asm.floquet_ports.is_empty() {
+        return;
+    }
+    let active: Vec<bool> = asm.ports.iter().map(|p| p.is_active(omega, &asm.floquet_ports)).collect();
+    for p in 0..s_k.len() {
+        for q in 0..s_k[p].len() {
+            if !active[p] || !active[q] {
+                s_k[p][q] = c(0.0, 0.0);
+            }
+        }
+    }
 }
 
 fn eval_driven_sweep_pass(
+    mesh: Option<&Discretisation>,
     asm: &DrivenAssembly,
     freqs_hz: &[f64],
     seed_override: Option<&[f64]>,
@@ -1181,7 +1533,16 @@ fn eval_driven_sweep_pass(
     let mut max_passivity = 0.0_f64;
     let mut max_reciprocity = 0.0_f64;
 
-    if let Some(tol) = asm.prom_tol {
+    let n_exc = asm.excitations.len();
+    let field_freqs = excitation_field_freqs(freqs_hz, n_exc);
+    let mut exc_records: Vec<Vec<ExcitationRecord>> = Vec::with_capacity(if n_exc > 0 { n_points } else { 0 });
+    let exc_mesh = match (n_exc > 0, mesh) {
+        (true, Some(m)) => Some(m),
+        (true, None) => return Err("scattered-field excitations need the simplex discretisation".into()),
+        _ => None,
+    };
+
+    if let Some(tol) = asm.prom_tol.filter(|_| p_ports > 0) {
         let mut solver = EmsPromSolver { asm, slot: None };
         let mut min_s_metric = f64::INFINITY;
         const SWEEP_CHUNK: usize = 32;
@@ -1209,24 +1570,26 @@ fn eval_driven_sweep_pass(
                             let mut z_circ_k = Vec::with_capacity(p_ports);
                             let mut z0_pairs_k = Vec::with_capacity(p_ports);
                             for port in &asm.ports {
-                                let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm.waveports);
+                                let (z_wave_p, _, _, _) = port.excitation_coeffs(w, &asm.waveports, &asm.floquet_ports);
                                 let z_circ_p = port.circuit_z0(z_wave_p, &asm.waveports);
                                 z_wave_k.push(z_wave_p);
                                 z_circ_k.push(z_circ_p);
                                 z0_pairs_k.push([z_circ_p, 0.0]);
                             }
+                            let b_recv = prom.b_r_recv();
                             let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
                             for p in 0..p_ports {
                                 let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
                                 for q in 0..p_ports {
                                     let mut v_pq = c(0.0, 0.0);
                                     for i in 0..b_dim {
-                                        v_pq += xr_k[q][i] * prom.b_r_drive[i][p];
+                                        v_pq += xr_k[q][i] * b_recv[i][p];
                                     }
                                     let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
                                     s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
                                 }
                             }
+                            zero_inactive_channels(asm, w, &mut s_k);
                             let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
                             let (pass_k, recip_k) = s_matrix_passivity_and_reciprocity(&s_k);
                             let (s_out, z_out, y_out, rep) = s_to_z_and_y_checked(&s_k, &z_circ_k);
@@ -1274,6 +1637,22 @@ fn eval_driven_sweep_pass(
         diag.per_mode_residuals = summary.prom_residuals;
         diag.max_algebraic_residual = diag.max_algebraic_residual.max(max_residual).max(max_conv_res);
         diag.set_model_truncation_rel(max_residual);
+        // Non-separable scattered-field right-hand sides are solved at full order on one factorization per frequency (FR-36).
+        if let Some(m) = exc_mesh {
+            let mut slot: Option<DrivenLinearSolver> = None;
+            for (k, &w) in omegas.iter().enumerate() {
+                femcore::progress::check()?;
+                let a_mat = asm.assemble_matrix_at(w);
+                DrivenLinearSolver::build_or_update(&mut slot, asm, w, &a_mat)?;
+                let (preps, cols) = excitation_rhs_hat(m, asm, w)?;
+                let s_ref =
+                    slot.as_ref().ok_or_else(|| "driven linear solver missing after build_or_update".to_string())?;
+                let (y_cols, chk, _) = s_ref.solve_many_checked(&a_mat, &cols)?;
+                diag.max_algebraic_residual = diag.max_algebraic_residual.max(chk.algebraic_residual);
+                exc_records.push(excitation_records(m, asm, w, &preps, &y_cols, field_freqs.contains(&k)));
+            }
+            hdm_solves += n_points;
+        }
     } else {
         // Direct point-by-point HDM solve (prom_tol = None), reusing symbolic factorization across all frequencies
         let mut solver: Option<DrivenLinearSolver> = None;
@@ -1292,40 +1671,52 @@ fn eval_driven_sweep_pass(
             let mut z_wave_k = Vec::with_capacity(p_ports);
             let mut z_circ_k = Vec::with_capacity(p_ports);
             let mut z0_pairs_k = Vec::with_capacity(p_ports);
-            let mut rhs_cols = Vec::with_capacity(p_ports);
+            let mut rhs_cols = Vec::with_capacity(p_ports + n_exc);
             for port in &asm.ports {
-                let (z_wave_p, g0, _, _) = port.excitation_coeffs(w, &asm.waveports);
+                let (z_wave_p, g0, _, _) = port.excitation_coeffs(w, &asm.waveports, &asm.floquet_ports);
                 let z_circ_p = port.circuit_z0(z_wave_p, &asm.waveports);
                 z_wave_k.push(z_wave_p);
                 z_circ_k.push(z_circ_p);
                 z0_pairs_k.push([z_circ_p, 0.0]);
-                rhs_cols.push(port.b_hat.iter().map(|&b| g0 * b).collect::<Vec<C>>());
+                rhs_cols.push(port.drive_hat().into_iter().map(|b| g0 * b).collect::<Vec<C>>());
             }
             z0_ohm.push(z0_pairs_k);
+            let preps = if let Some(m) = exc_mesh {
+                let (preps, cols) = excitation_rhs_hat(m, asm, w)?;
+                rhs_cols.extend(cols);
+                preps
+            } else {
+                Vec::new()
+            };
 
-            let (y_cols, chk, it_opt) = s_ref.solve_many_checked(&a_mat, &rhs_cols)?;
+            let (mut y_cols, chk, it_opt) = s_ref.solve_many_checked(&a_mat, &rhs_cols)?;
             diag.absorb_direct(&chk);
             if let Some(its) = it_opt {
                 diag.iterations = Some(diag.iterations.map_or(its, |prev| prev + its));
             }
             per_freq_res.push(chk.algebraic_residual);
             worst_bw = worst_bw.max(chk.algebraic_residual);
+            if let Some(m) = exc_mesh {
+                let exc_cols = y_cols.split_off(p_ports);
+                exc_records.push(excitation_records(m, asm, w, &preps, &exc_cols, field_freqs.contains(&k)));
+            }
 
             let mut s_k = vec![vec![c(0.0, 0.0); p_ports]; p_ports];
             for p in 0..p_ports {
                 let inv_sqrt_z_wave_p = 1.0 / z_wave_k[p].max(1e-30).sqrt();
-                let b_hat_p = &asm.ports[p].b_hat;
                 for q in 0..p_ports {
-                    let mut v_pq = c(0.0, 0.0);
-                    for (&bp, &yq) in b_hat_p.iter().zip(&y_cols[q]) {
-                        v_pq += yq * bp;
-                    }
+                    let v_pq = asm.ports[p].recv_dot(&y_cols[q]);
                     let delta = if p == q { c(1.0, 0.0) } else { c(0.0, 0.0) };
                     s_k[p][q] = v_pq * inv_sqrt_z_wave_p - delta;
                 }
             }
-            let metric = if p_ports >= 2 { s_k[1][0].norm() } else { s_k[0][0].norm() };
-            if metric < min_s_metric {
+            zero_inactive_channels(asm, w, &mut s_k);
+            let metric = match p_ports {
+                0 => 0.0,
+                1 => s_k[0][0].norm(),
+                _ => s_k[1][0].norm(),
+            };
+            if p_ports > 0 && metric < min_s_metric {
                 min_s_metric = metric;
                 rep_freq_idx = k;
                 rep_x_red = y_cols[0].iter().zip(&asm.d_ruiz).map(|(&yi, &di)| yi * di).collect();
@@ -1394,12 +1785,16 @@ fn eval_driven_sweep_pass(
     }
 
     let f_res_hz = freqs_hz[rep_freq_idx];
-    let s_dip_mag = if p_ports >= 2 {
-        let s21 = s_matrix[rep_freq_idx][1][0];
-        s21[0].hypot(s21[1])
-    } else {
-        let s11 = s_matrix[rep_freq_idx][0][0];
-        s11[0].hypot(s11[1])
+    let s_dip_mag = match p_ports {
+        0 => 1.0,
+        1 => {
+            let s11 = s_matrix[rep_freq_idx][0][0];
+            s11[0].hypot(s11[1])
+        }
+        _ => {
+            let s21 = s_matrix[rep_freq_idx][1][0];
+            s21[0].hypot(s21[1])
+        }
     };
     let s21_min_db = 20.0 * s_dip_mag.max(1e-30).log10();
 
@@ -1426,10 +1821,15 @@ fn eval_driven_sweep_pass(
         f_res_hz,
         rep_x_red,
         diag,
+        exc_records,
     })
 }
 
-fn run_driven_sweep_core(asm: &DrivenAssembly, opts: &DrivenOptions) -> Result<DrivenSweepCoreOut, String> {
+fn run_driven_sweep_core(
+    mesh: Option<&Discretisation>,
+    asm: &DrivenAssembly,
+    opts: &DrivenOptions,
+) -> Result<DrivenSweepCoreOut, String> {
     let mut freqs_hz: Vec<f64> = if let Some(fs) = asm.freqs_hz.as_ref().filter(|v| !v.is_empty()) {
         fs.to_vec()
     } else {
@@ -1440,8 +1840,8 @@ fn run_driven_sweep_core(asm: &DrivenAssembly, opts: &DrivenOptions) -> Result<D
             (0..n_pts).map(|k| asm.f_min + (asm.f_max - asm.f_min) * (k as f64) / ((n_pts - 1) as f64)).collect()
         }
     };
-    let mut out = eval_driven_sweep_pass(asm, &freqs_hz, None)?;
-    if opts.resonance_bisection && freqs_hz.len() >= 2 {
+    let mut out = eval_driven_sweep_pass(mesh, asm, &freqs_hz, None)?;
+    if opts.resonance_bisection && freqs_hz.len() >= 2 && !asm.ports.is_empty() {
         let p_ports = asm.ports.len();
         let tracked = |s_mat: &[Vec<[f64; 2]>]| -> C {
             let pair = if p_ports >= 2 { s_mat[1][0] } else { s_mat[0][0] };
@@ -1486,7 +1886,7 @@ fn run_driven_sweep_core(asm: &DrivenAssembly, opts: &DrivenOptions) -> Result<D
             freqs_hz.extend(insert_mids);
             freqs_hz.sort_by(|a, b| a.total_cmp(b));
             freqs_hz.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * b.abs().max(1.0));
-            out = eval_driven_sweep_pass(asm, &freqs_hz, Some(&seeds))?;
+            out = eval_driven_sweep_pass(mesh, asm, &freqs_hz, Some(&seeds))?;
         }
     }
     Ok(out)
@@ -1506,16 +1906,93 @@ pub fn solve_driven_with_options(
 ) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let asm = assemble_emw_driven(mesh, problem)?;
-    let out = run_driven_sweep_core(&asm, opts)?;
+    let out = run_driven_sweep_core(Some(mesh), &asm, opts)?;
     let (p_pml_w, layer_fraction) = compute_driven_pml_metrics(&asm, out.f_res_hz, &out.rep_x_red);
 
-    let rep_sol = build_driven_solution(
-        mesh,
-        &asm,
-        out.f_res_hz,
-        &out.rep_x_red,
-        format!("driven ({}): {:.6} GHz", asm.ports[0].name, out.f_res_hz / 1e9),
-    );
+    let f_ibc_def = 0.5 * (asm.f_min + asm.f_max);
+    let mut solutions = Vec::new();
+    let mut p_loss_opt = None;
+    if !asm.ports.is_empty() {
+        let mut rep_sol = build_driven_solution(
+            mesh,
+            &asm,
+            out.f_res_hz,
+            &out.rep_x_red,
+            format!("driven ({}): {:.6} GHz", asm.ports[0].name, out.f_res_hz / 1e9),
+        );
+        if asm.has_loss {
+            let x_full = asm.red.expand(&out.rep_x_red);
+            let (q_opt, p_loss_w) = crate::heat_source::compute_3d_heat_source_simplex_ext(
+                mesh,
+                &asm.ned,
+                &x_full,
+                out.f_res_hz,
+                &asm.pml_cells,
+                &asm.eps_phys_im,
+                &asm.mur_phys,
+                &asm.pec_labels,
+                &asm.surface_impedance,
+                f_ibc_def,
+                &[],
+                0.0,
+                &asm.sheet_2d,
+                asm.imported_potential.as_deref(),
+                asm.temperature_field.as_deref(),
+                None,
+                asm.order,
+            )?;
+            rep_sol.fields.push(Field::scalar("Q_opt", "W/m^3", q_opt));
+            p_loss_opt = Some(p_loss_w);
+        }
+        solutions.push(rep_sol);
+    }
+    let freqs_out = out.driven_data.freqs_hz.clone();
+    for (k, recs) in out.exc_records.iter().enumerate() {
+        for (e, rec) in recs.iter().enumerate() {
+            if let Some(x_red) = &rec.x_red {
+                let exc = &asm.excitations[e];
+                let omega = 2.0 * PI * freqs_out[k];
+                let prep = exc.excitation.prepare(omega, exc.eps_bg, exc.mu_bg)?;
+                let mut exc_sol = build_excitation_solution(
+                    mesh,
+                    &asm,
+                    exc,
+                    &prep,
+                    freqs_out[k],
+                    x_red,
+                    format!("excitation ({}): {:.6} GHz", exc.name, freqs_out[k] / 1e9),
+                );
+                if asm.has_loss {
+                    let x_full = asm.red.expand(x_red);
+                    let inc_fn = |xq: [f64; 3]| prep.field(xq).0;
+                    let (q_opt, p_loss_w) = crate::heat_source::compute_3d_heat_source_simplex_ext(
+                        mesh,
+                        &asm.ned,
+                        &x_full,
+                        freqs_out[k],
+                        &asm.pml_cells,
+                        &asm.eps_phys_im,
+                        &asm.mur_phys,
+                        &asm.pec_labels,
+                        &asm.surface_impedance,
+                        f_ibc_def,
+                        &[],
+                        0.0,
+                        &asm.sheet_2d,
+                        asm.imported_potential.as_deref(),
+                        asm.temperature_field.as_deref(),
+                        Some(&inc_fn),
+                        asm.order,
+                    )?;
+                    exc_sol.fields.push(Field::scalar("Q_opt", "W/m^3", q_opt));
+                    if p_loss_opt.is_none() {
+                        p_loss_opt = Some(p_loss_w);
+                    }
+                }
+                solutions.push(exc_sol);
+            }
+        }
+    }
 
     let n_points = out.driven_data.freqs_hz.len();
     let p_ports = asm.ports.len();
@@ -1544,16 +2021,24 @@ pub fn solve_driven_with_options(
         }
         .scalar(),
     ];
+    if let Some(p_loss_w) = p_loss_opt {
+        scalars.push(("P_loss (W)".into(), Scalar::Num(p_loss_w)));
+    }
     if asm.has_sheets {
         scalars.push(build_tls_meta(mesh, problem).scalar());
     }
+    scalars.extend(scattering_scalars(&asm, &freqs_out, &out.exc_records));
+    if !asm.floquet_ports.is_empty() {
+        scalars.push(diffraction_channels_scalar(&asm));
+    }
 
     let log = vec![format!(
-        "driven sweep [{:.4}..{:.4} GHz, {} points, {} port(s), solver={}, backend={}]: {} HDM solve(s), ROM dim {}, max residual {:.2e}, ROM sweep {:.4} s",
+        "driven sweep [{:.4}..{:.4} GHz, {} points, {} port(s), {} excitation(s), solver={}, backend={}]: {} HDM solve(s), ROM dim {}, max residual {:.2e}, ROM sweep {:.4} s",
         asm.f_min / 1e9,
         asm.f_max / 1e9,
         n_points,
         p_ports,
+        asm.excitations.len(),
         asm.solver,
         out.backend_name,
         hdm_solves,
@@ -1568,7 +2053,7 @@ pub fn solve_driven_with_options(
         study: "driven".into(),
         order: asm.order as u8,
         dim: 3,
-        solutions: vec![rep_sol],
+        solutions,
         scalars,
         log,
         dofs: asm.n,
@@ -1576,6 +2061,193 @@ pub fn solve_driven_with_options(
         diagnostics: Some(diagnostics),
         error_budget: Some(error_budget),
     })
+}
+
+/// JSON scalar `scattering` with per-excitation, per-frequency powers (W) and, for plane waves, cross-sections (m^2), plus
+/// single-frequency numeric scalars `<name>: sigma_ext (m^2)` etc. (FR-36).
+fn scattering_scalars(asm: &DrivenAssembly, freqs_hz: &[f64], recs: &[Vec<ExcitationRecord>]) -> Vec<(String, Scalar)> {
+    if asm.excitations.is_empty() || recs.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut items = Vec::with_capacity(asm.excitations.len());
+    for (e, exc) in asm.excitations.iter().enumerate() {
+        let col = |f: &dyn Fn(&ExcitationRecord) -> f64| -> Vec<f64> { recs.iter().map(|r| f(&r[e])).collect() };
+        let p_abs = col(&|r| r.p_abs);
+        let p_ext = col(&|r| r.p_ext);
+        let p_sca = col(&|r| r.p_ext - r.p_abs);
+        let p_pml = col(&|r| r.p_sca_pml);
+        let intensity: Vec<Option<f64>> = recs.iter().map(|r| r[e].intensity).collect();
+        let sig = |p: &[f64]| -> Option<Vec<f64>> {
+            intensity.iter().zip(p).map(|(i, &pv)| i.filter(|&v| v > 0.0).map(|v| pv / v)).collect()
+        };
+        let mut item = serde_json::json!({
+            "name": exc.name,
+            "freqs_hz": freqs_hz,
+            "P_abs_W": p_abs,
+            "P_ext_W": p_ext,
+            "P_sca_W": p_sca,
+            "P_sca_pml_W": p_pml,
+            "symmetry_factor": asm.symmetry_factor,
+        });
+        if let (Some(sa), Some(se), Some(ss), Some(sp)) = (sig(&p_abs), sig(&p_ext), sig(&p_sca), sig(&p_pml)) {
+            item["sigma_abs_m2"] = serde_json::json!(sa);
+            item["sigma_ext_m2"] = serde_json::json!(se);
+            item["sigma_sca_m2"] = serde_json::json!(ss);
+            item["sigma_sca_pml_m2"] = serde_json::json!(sp);
+            if freqs_hz.len() == 1 {
+                out.push((format!("{}: sigma_abs (m^2)", exc.name), Scalar::Num(sa[0])));
+                out.push((format!("{}: sigma_ext (m^2)", exc.name), Scalar::Num(se[0])));
+                out.push((format!("{}: sigma_sca (m^2)", exc.name), Scalar::Num(ss[0])));
+                out.push((format!("{}: sigma_sca_pml (m^2)", exc.name), Scalar::Num(sp[0])));
+            }
+        }
+        let p_dip: Vec<Option<f64>> = recs.iter().map(|r| r[e].p_dipole_bg).collect();
+        if p_dip.iter().all(|p| p.is_some()) {
+            item["P_dipole_background_W"] = serde_json::json!(p_dip);
+        }
+        if freqs_hz.len() == 1 {
+            out.push((format!("{}: P_abs (W)", exc.name), Scalar::Num(p_abs[0])));
+            out.push((format!("{}: P_ext (W)", exc.name), Scalar::Num(p_ext[0])));
+            out.push((format!("{}: P_sca_pml (W)", exc.name), Scalar::Num(p_pml[0])));
+        }
+        items.push(item);
+    }
+    out.insert(0, ("scattering".into(), Scalar::Text(serde_json::json!({ "excitations": items }).to_string())));
+    out
+}
+
+/// JSON scalar `diffraction_channels`: the Rayleigh-Floquet channel of every Floquet S-matrix port (FR-36).
+fn diffraction_channels_scalar(asm: &DrivenAssembly) -> (String, Scalar) {
+    let mut chans = Vec::new();
+    for (idx, p) in asm.ports.iter().enumerate() {
+        if let DrivenPortKind::Floquet { port, harmonic } = p.kind {
+            let fp = &asm.floquet_ports[port];
+            let h = &fp.harmonics[harmonic];
+            chans.push(serde_json::json!({
+                "index": idx, "name": p.name, "port": fp.bc.name, "m": h.m, "n": h.n,
+                "pol": if h.te { "TE" } else { "TM" }, "kt": h.kt, "n_out": fp.n_out, "eps_r": fp.eps_r,
+            }));
+        }
+    }
+    let ports: Vec<serde_json::Value> = asm
+        .floquet_ports
+        .iter()
+        .map(|fp| {
+            serde_json::json!({
+                "name": fp.bc.name, "lattice": fp.lattice, "kt0": fp.kt0, "n_harmonics": fp.harmonics.len(),
+                "axis_n": fp.axis_n, "axes_t": fp.axes_t
+            })
+        })
+        .collect();
+    ("diffraction_channels".into(), Scalar::Text(serde_json::json!({ "ports": ports, "channels": chans }).to_string()))
+}
+
+/// Builds the field solution of one scattered-field excitation: total `Ex..Hz` cell fields (V/m, A/m), and, when
+/// `keep_scattered`, the scattered `Esx..Hsz`; nodal `|E|`, `Re E*` of the total field (FR-36).
+fn build_excitation_solution(
+    mesh: &Discretisation,
+    asm: &DrivenAssembly,
+    exc: &ExcitationSpec,
+    prep: &PreparedExcitation,
+    freq_hz: f64,
+    x_red: &[C],
+    label: String,
+) -> Solution {
+    let x = asm.red.expand(x_red);
+    let geo = geometry(mesh);
+    let lamn = local_bary(3, 2);
+    let nloc = lamn.len();
+    let nc = mesh.n_cells();
+    let nb = asm.ned.nb();
+    let omega = (2.0 * PI * freq_hz).max(1e-300);
+    let mut es = vec![[c(0.0, 0.0); 3]; nc * nloc];
+    let mut et = vec![[c(0.0, 0.0); 3]; nc * nloc];
+    let mut hs = vec![[c(0.0, 0.0); 3]; nc * nloc];
+    let mut ht = vec![[c(0.0, 0.0); 3]; nc * nloc];
+    let (mut w, mut cu) = (Vec::new(), Vec::new());
+    let mut gs = [[0.0; 3]; 4];
+    for ci in 0..nc {
+        let gid = asm.ned.key_pairs(mesh, ci);
+        for b in 0..4 {
+            for kk in 0..3 {
+                gs[b][kk] = geo.g[ci * 12 + b * 3 + kk];
+            }
+        }
+        let curved = mesh.cell_is_curved(ci).then(|| CurvedTet::new(mesh.cell_geometry_nodes(ci)));
+        let vs = mesh.cell(ci);
+        let mui = 1.0 / asm.mur_phys[ci];
+        for (a, l) in lamn.iter().enumerate() {
+            let lam = [l[0], l[1], l[2], l[3]];
+            let xq = match &curved {
+                Some(ct) => {
+                    let gq = safe_curved_jacobian(ct, &lam, &gs);
+                    basis3_keyed(asm.order, &lam, &gq, &gid, &mut w, &mut cu);
+                    ct.position(&lam)
+                }
+                None => {
+                    basis3_keyed(asm.order, &lam, &gs, &gid, &mut w, &mut cu);
+                    let mut p = [0.0; 3];
+                    for b in 0..4 {
+                        let q = mesh.point(vs[b] as usize);
+                        for kk in 0..3 {
+                            p[kk] += lam[b] * q[kk];
+                        }
+                    }
+                    p
+                }
+            };
+            let mut val = [c(0.0, 0.0); 3];
+            let mut cval = [c(0.0, 0.0); 3];
+            for s in 0..nb {
+                let coef = x[asm.ned.cell_dofs[ci][s]];
+                for kk in 0..3 {
+                    val[kk] += coef * w[s][kk];
+                    cval[kk] += coef * cu[s][kk];
+                }
+            }
+            let (e_inc, curl_inc) = prep.field(xq);
+            let h_inc = prep.h_field(curl_inc);
+            let idx = ci * nloc + a;
+            let pref = c(0.0, mui / (omega * MU0));
+            for kk in 0..3 {
+                et[idx][kk] = val[kk] + e_inc[kk];
+                ht[idx][kk] = (cval[kk] + curl_inc[kk]) * pref;
+                es[idx][kk] = val[kk];
+                hs[idx][kk] = ht[idx][kk] - h_inc[kk];
+            }
+        }
+    }
+    let big =
+        et.iter().flat_map(|v| v.iter()).cloned().fold(c(0.0, 0.0), |m, z| if z.norm() > m.norm() { z } else { m });
+    let rot = if big.norm() > 0.0 { big.conj() / big.norm() } else { c(1.0, 0.0) };
+    let mag: Vec<f64> = et.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
+    let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
+    let avg = |vals: Vec<f64>| node_average(mesh, &vals.iter().map(|v| v * s).collect::<Vec<f64>>(), 1, 2);
+    let fields = vec![
+        Field::scalar("|E|", "a.u.", avg(mag)),
+        Field::scalar("Re Ex", "a.u.", avg(et.iter().map(|v| (v[0] * rot).re).collect())),
+        Field::scalar("Re Ey", "a.u.", avg(et.iter().map(|v| (v[1] * rot).re).collect())),
+        Field::scalar("Re Ez", "a.u.", avg(et.iter().map(|v| (v[2] * rot).re).collect())),
+    ];
+    let mut cells = CellFields::new(mesh, 2);
+    let mut push = |prefix: &str, unit: &str, data: &[[C; 3]]| {
+        for (k, comp) in ["x", "y", "z"].iter().enumerate() {
+            cells.push_complex(
+                format!("{prefix}{comp}"),
+                unit,
+                data.iter().map(|v| v[k].re).collect(),
+                data.iter().map(|v| v[k].im).collect(),
+            );
+        }
+    };
+    push("E", "V/m", &et);
+    push("H", "A/m", &ht);
+    if exc.keep_scattered {
+        push("Es", "V/m", &es);
+        push("Hs", "A/m", &hs);
+    }
+    Solution { label, fields, cell_fields: cell_fields_of(&cells), value: Some(freq_hz), eigenvalue: None }
 }
 
 // ------------------------------------------------------------------ Native 3D MixedDiscretisation (`Tet + Prism + Hex`) driven solver
@@ -1594,11 +2266,11 @@ pub fn solve_driven_mixed_with_options(
 ) -> Result<SolveResult, String> {
     let t0 = Instant::now();
     let (asm, ned_mixed) = assemble_emw_driven_mixed(mixed, problem)?;
-    let out = run_driven_sweep_core(&asm, opts)?;
+    let out = run_driven_sweep_core(None, &asm, opts)?;
     let (p_pml_w, layer_fraction) = compute_driven_pml_metrics(&asm, out.f_res_hz, &out.rep_x_red);
 
     let (simplex, proj) = MixedToSimplexProjector::from_mesh(mesh, mixed).map_err(|e| e.to_string())?;
-    let rep_sol = build_driven_solution_mixed(
+    let mut rep_sol = build_driven_solution_mixed(
         mixed,
         &ned_mixed,
         &simplex,
@@ -1608,6 +2280,33 @@ pub fn solve_driven_mixed_with_options(
         &out.rep_x_red,
         format!("driven ({}): {:.6} GHz", asm.ports[0].name, out.f_res_hz / 1e9),
     );
+    let p_loss_opt = if asm.has_loss {
+        let x_full = asm.red.expand(&out.rep_x_red);
+        let f_ibc_def = 0.5 * (asm.f_min + asm.f_max);
+        let (q_opt, p_loss_w) = crate::heat_source::compute_3d_heat_source_mixed_ext(
+            mixed,
+            &ned_mixed,
+            &simplex,
+            &proj,
+            &x_full,
+            out.f_res_hz,
+            &asm.pml_cells,
+            &asm.eps_phys_im,
+            &asm.pec_labels,
+            &asm.surface_impedance,
+            f_ibc_def,
+            0.0,
+            &[],
+            &asm.sheet_2d,
+            asm.imported_potential.as_deref(),
+            asm.temperature_field.as_deref(),
+            asm.order,
+        )?;
+        rep_sol.fields.push(Field::scalar("Q_opt", "W/m^3", q_opt));
+        Some(p_loss_w)
+    } else {
+        None
+    };
 
     let n_points = out.driven_data.freqs_hz.len();
     let p_ports = asm.ports.len();
@@ -1636,6 +2335,9 @@ pub fn solve_driven_mixed_with_options(
         }
         .scalar(),
     ];
+    if let Some(p_loss_w) = p_loss_opt {
+        scalars.push(("P_loss (W)".into(), Scalar::Num(p_loss_w)));
+    }
     if asm.has_sheets {
         scalars.push(build_tls_meta(&simplex, problem).scalar());
     }
@@ -1697,6 +2399,12 @@ pub fn assemble_emw_driven_mixed(
     } else {
         (study_f_min, study_f_max, study_n_points)
     };
+    if !problem.diffraction_ports.is_empty() || !problem.excitations.is_empty() {
+        return Err(
+            "diffraction_port and scattered-field excitations need a pure tetrahedral (straight or curved) mesh; prism/hex cells are not supported yet"
+                .into(),
+        );
+    }
     if problem.lumped_ports.is_empty() && problem.waveports.is_empty() {
         return Err("driven study requires at least one 'lumped_port' or 'waveport' boundary condition".into());
     }
@@ -1717,26 +2425,48 @@ pub fn assemble_emw_driven_mixed(
     let n = ned.n_dofs;
     let (k, m) = assemble_maxwell_mixed(mesh, &ned, &mats.eps_0, &mats.mu_inv_0, has_pml.then_some(&pml_table));
 
-    let has_sheets = !problem.pec.is_empty() || !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty();
+    let has_sheets = !problem.pec.is_empty()
+        || !problem.surface_impedance.is_empty()
+        || !problem.lumped_jj.is_empty()
+        || !problem.sheet_2d.is_empty();
+    let mut has_non_symmetric_sheets = false;
     let mut ibc_jj = if has_sheets {
-        Some(assemble_ibc_and_jj_3d_mixed(
-            mesh,
-            &ned,
-            &problem.pec,
-            &problem.surface_impedance,
-            &problem.lumped_jj,
-            f0,
-        )?)
+        let mut ij_tuple =
+            assemble_ibc_and_jj_3d_mixed(mesh, &ned, &problem.pec, &problem.surface_impedance, &problem.lumped_jj, f0)?;
+        if !problem.sheet_2d.is_empty() {
+            has_non_symmetric_sheets = crate::mixed_ops::assemble_sheet2d_3d_mixed(
+                mesh,
+                &ned,
+                &problem.pec,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                f0,
+                &mut ij_tuple.0,
+            )?;
+        }
+        Some(ij_tuple)
     } else {
         None
     };
+    let is_non_symmetric_mixed = mats.is_non_symmetric || has_non_symmetric_sheets;
+    if is_non_symmetric_mixed && solver == "lblt" {
+        return Err(
+            "driven solver 'lblt' cannot be used with non-symmetric or gyrotropic material tensors, Hall sheets, or Floquet diffraction ports (A != A^T); use 'auto', 'direct', 'blr', or 'ams_fgmres'"
+                .into(),
+        );
+    }
 
     let (mut lumped_ports, _) = assemble_lumped_ports_3d_mixed(mesh, &ned, &problem.pec, &problem.lumped_ports)?;
     let (mut waveports, _) = assemble_waveports_3d_mixed(mesh, &ned, problem, f_min, f_max)?;
 
     let periodic_labels: Vec<i32> =
         problem.periodic.iter().flat_map(|p| p.source.iter().chain(p.dest.iter()).copied()).collect();
-    let ibc_labels: Vec<i32> = problem.surface_impedance.iter().flat_map(|b| b.labels.iter().copied()).collect();
+    let ibc_labels: Vec<i32> = problem
+        .surface_impedance
+        .iter()
+        .flat_map(|b| b.labels.iter().copied())
+        .chain(problem.sheet_2d.iter().flat_map(|b| b.labels.iter().copied()))
+        .collect();
     let jj_labels: Vec<i32> = problem.lumped_jj.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let lp_labels: Vec<i32> = problem.lumped_ports.iter().flat_map(|b| b.labels.iter().copied()).collect();
     let wp_labels: Vec<i32> = problem.waveports.iter().flat_map(|b| b.labels.iter().copied()).collect();
@@ -1950,12 +2680,32 @@ pub fn assemble_emw_driven_mixed(
             cell_sheet,
             mu_inv: mats.mu_inv_0,
             mur_phys: mats.mur_phys,
+            eps_phys_im: mats.eps_phys_im.clone(),
+            pml_cells,
+            pec_labels: problem.pec.clone(),
+            surface_impedance: problem.surface_impedance.clone(),
+            sheet_2d: problem.sheet_2d.clone(),
+            imported_potential: problem.imported_potential.clone(),
+            temperature_field: problem.temperature_field.clone(),
+            has_loss: problem.has_loss()
+                || mats
+                    .eps_phys_re
+                    .iter()
+                    .zip(&mats.eps_phys_im)
+                    .any(|(re, im)| crate::problem::is_lossy_eps_pair(re, im)),
             has_sheets,
+            has_non_symmetric_sheets,
             has_pml,
+            is_non_symmetric: is_non_symmetric_mixed,
             k_pml_red,
             m_pml_red,
             m_phys_red,
             m_pml_phys_red,
+            eps_cells: Vec::new(),
+            excitations: Vec::new(),
+            floquet_ports: Vec::new(),
+            floquet_terms: Vec::new(),
+            symmetry_factor: 1.0,
         },
         ned,
     ))
@@ -2026,7 +2776,12 @@ fn build_driven_solution_mixed(
         for a in 0..nloc {
             let idx = sc * nloc + a;
             let ce = curl_e[idx];
-            h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
+            h_field[idx] = if asm.is_non_symmetric {
+                let mce = crate::mixed_ops::c3_mul_vec(&asm.mu_inv[mc], ce);
+                [mce[0] * h_prefactor, mce[1] * h_prefactor, mce[2] * h_prefactor]
+            } else {
+                [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor]
+            };
         }
     }
     for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {

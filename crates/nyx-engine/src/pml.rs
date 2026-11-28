@@ -169,8 +169,17 @@ impl Engine {
         let dim2 = self.project.geometry.dim == 2;
         let want_auto = auto_scale.unwrap_or_else(|| strength.is_none_or(|s| s <= 0.0));
         let r0 = target_reflection.unwrap_or(1e-6).clamp(1e-15, 0.5);
-        let is_eigen =
-            !matches!(study_kind, "driven" | "static" | "electrostatic" | "heat_stationary" | "magnetostatic");
+        let is_eigen = !matches!(
+            study_kind,
+            "driven"
+                | "nonlinear_driven"
+                | "dgtd"
+                | "fdtd"
+                | "static"
+                | "electrostatic"
+                | "heat_stationary"
+                | "magnetostatic"
+        );
         let resolved_profile = match profile.map(str::trim).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"))
         {
             Some(pr) => pr.to_ascii_lowercase(),

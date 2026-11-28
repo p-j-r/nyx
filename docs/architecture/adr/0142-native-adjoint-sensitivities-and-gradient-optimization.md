@@ -1,0 +1,41 @@
+# 142. Native adjoint sensitivities and gradient-based optimization
+
+Date: 2026-11-27
+
+## Status
+
+Accepted (FR-40). Extends ADR 8, ADR 9, ADR 19, ADR 25, ADR 33, ADR 41, ADR 42, ADR 45, ADR 82, ADR 106, ADR 110, ADR 129, ADR 131, ADR 133, ADR 136, and ADR 137.
+
+## Context
+
+Inverse design, resonance tuning, impedance matching, and structural/photonic/thermal topology optimization require exact derivatives $\nabla_{\mathbf{p}} J(\mathbf{p})$ across potentially tens of thousands of cellwise material densities alongside parametric CAD dimensions and scalar constitutive properties, without running $O(N_{\mathrm{params}})$ finite-difference forward solves:
+
+1. **Solver-core optimization and sensitivity primitives were not wired to physics or engine commands:** `femcore::linalg::opt` (`lbfgs`, Polak–Ribière$^+$ `nonlinear_cg`, constrained Svanberg `mma`, and `adjoint_gradient`) and `femcore::linalg::sens` (`eigenvalue_derivative`, `nonlinear_eigenvalue_derivative`, `left_eigenvector`, and Hungarian modal `match_modes` / `Tracker`) existed as tested linear-algebra routines in `femcore`, while `nyx-physics`, the three physics crates (`nyx-dfs`, `nyx-sms`, `nyx-ems`), and `nyx-engine` lacked a layered sensitivity contract, PDE density filtering, CAD shape-velocity extraction, and optimization commands.
+2. **Unstructured mesh regularization and plasmon-safe optical interpolation:** Raw cellwise topology densities produce mesh-dependent checkerboards unless regularized by an unstructured PDE filter, and naive linear permittivity interpolation between dielectrics ($\operatorname{Re}\varepsilon_r > 0$) and metals ($\operatorname{Re}\varepsilon_r < 0$) crosses $\operatorname{Re}\varepsilon_r = 0$ at intermediate grey densities, creating non-physical localized surface-plasmon singularities.
+3. **Smooth CAD boundary-to-interior shape velocities on straight and curved meshes:** Differentiating fixed-topology finite-element operators with respect to named `geom` parameters (`FeatureList::params`) requires extracting exact boundary velocities from the CAD evaluation oracle (`Evaluated`) — including curved quadratic mid-edge nodes (`CellMesh::edge_nodes`, ADR 82) and sliding planar endcaps — and extending them smoothly into the interior mesh without element inversion.
+4. **Non-symmetric modal pencils and PROM-accelerated driven sweeps:** Magneto-optic gyrotropy (ADR 136) and Hall-biased 2D sheets (ADR 137) break matrix reciprocity ($\mathbf{A}^T \neq \mathbf{A}$), requiring true biorthogonal left eigenvectors rather than complex-conjugate right modes; meanwhile, multi-port driven electromagnetic sweeps (`nyx-ems::driven`) require discrete adjoints that reuse either cached full-order sparse factorizations or the $r \times r$ Hermite Tangential Galerkin reduced-order subspace (`femcore::linalg::prom`).
+
+## Decision
+
+* **Unstructured Helmholtz PDE density filter, Heaviside projection, SIMP/RAMP, and harmonic CAD shape velocity (`femcore::topology`):**
+  * Add `HelmholtzFilter` solving $(-l_f^2 \nabla\cdot\nabla + 1)\tilde{\rho} = \rho$ on 2D and 3D `SimplexMesh` active design domains via `DirectSolver`, projecting vertex fields to design cells by volume average and providing exact discrete chain-rule pullback $\partial J / \partial \boldsymbol{\rho} = \mathbf{F}^T (\partial J / \partial \tilde{\boldsymbol{\rho}})$ reproducing $\langle \mathbf{g}, \mathbf{F}\delta\boldsymbol{\rho}\rangle = \langle \mathbf{F}^T \mathbf{g}, \delta\boldsymbol{\rho}\rangle$ to machine precision.
+  * Add smooth thresholded Heaviside projection `heaviside_project(rho_tilde, beta, eta)` with analytic derivatives, geometric `continuation_schedule`, `simp_interpolate`, `ramp_interpolate`, and `optical_eps_interpolate` (`OpticalInterpMode::Auto` / `RefractiveIndex` interpolating complex refractive index $(n, \kappa)$ with intermediate extinction floor so metallic endpoints never cross $|\varepsilon_r| \to 0$).
+  * Add `compute_shape_velocity`, `ShapeVelocityField`, `displace_mesh`, `displace_simplex_mesh`, `simplex_geometry_shape_deriv`, `assemble_laplace_shape_deriv`, and `assemble_mass_shape_deriv`: perturbs a named `FeatureList` parameter while checking CAD topological invariance, extracts surface/crease velocities on vertices and curved `edge_nodes`, constrains normal motion on orthogonal planar caps, and solves an inverse-volume-stiffened $P_1$ harmonic Laplacian extension across interior vertices.
+* **Layered sensitivity and optimization envelope (`nyx-physics::sensitivity`, `Physics::sensitivity`):**
+  * Add pure-data types `SensitivityObjective` (`Eigenfrequency`, `EffectiveIndex`, `QualityFactor`, `Transmission`, `SplitterBalance`, `Capacitance`, `Compliance`, `TargetTemperature`, `FieldPower`), `DesignParam` (`ParamVar`, `MaterialScalar`, `TopologyDensity`), `SensitivityRequest`, `SensitivityReport`, `ConstraintSpec` (`VolumeFraction`), `ContinuationStage`, `OptimizeSense`, `OptimizeSpec`, `EvaluatedTopologyParam`, and `TrackedModeBasis`, guarded against `NaN`/`Inf` inputs and outputs (ADR 131).
+  * Add a defaulted object-safe `Physics::sensitivity` method on `Physics` returning `Error::Unsupported` unless implemented by the physics crate, preserving strict crate layering (`nyx-dfs`, `nyx-sms`, and `nyx-ems` remain mutually independent).
+* **Physics discrete adjoint and modal sensitivity kernels (`nyx-{dfs,sms,ems}::sensitivity`):**
+  * **`nyx-ems`:** Implement modal sensitivities in 2D `modes`/`modes_complex`, 3D `cavity` (straight and curved Nédélec elements), and 3D `bloch` (quadratic pencil via `NonlinearEigenProblem::polynomial` and `nonlinear_eigenvalue_derivative`), using `left_eigenvector` whenever PML, tilted-crystal, gyrotropic, or Hall `sheet_2d` terms break Hermitian symmetry, and continuous mode pairing via `sens::match_modes`. Implement 3D `driven` discrete adjoints for `Transmission`, `SplitterBalance`, and `FieldPower` reusing cached sparse factorizations in full-order HDM sweeps and solving the $r \times r$ transposed reduced system inside Hermite `prom` sweeps, with Ruiz-scaling invariance and single-pass element bilinear contractions for cellwise `TopologyDensity`.
+  * **`nyx-dfs`:** Implement discrete adjoints for `electrostatic` (`Capacitance` $C_{ij}$ on multi-terminal studies, two-conductor $2 W_e / (\Delta V)^2$, and `Compliance`) and `heat_stationary` (`Compliance` via `opt::adjoint_gradient` and `TargetTemperature` mean, tracking, and smooth $L_p$ peak) across `ParamVar`, `MaterialScalar`, and SIMP/RAMP `TopologyDensity`.
+  * **`nyx-sms`:** Implement `static` compliance sensitivity (`opt::adjoint_gradient` including boundary-traction area shape derivatives $\partial \mathbf{f}/\partial p$) and `eigenfrequency` / 2D `modes` / `axisymmetric_eigenfrequency` modal sensitivities (`eigenvalue_derivative`, `left_eigenvector`, `match_modes`) across shape, elastic moduli, and SIMP/RAMP stiffness densities.
+* **Engine optimization driver and commands (`nyx-engine::optimize`, `commands`, `commandlist`):**
+  * Add `sensitivity_run` and `optimize_run` to `Engine::catalog()`, wiring `lbfgs`, `nonlinear_cg`, and `mma` with box bounds, `VolumeFraction` inequality constraints, cached `HelmholtzFilter` reuse across iterations, multi-stage Heaviside `beta` continuation schedules, modal eigenvector tracking, `"topology_density"` `CellField` attachment on stored `SolveResult`s, `nyx-store` run recording, and `path_guard`-confined `checkpoint_path` JSON output.
+
+## Consequences
+
+* Crate layering (`crates/nyx-engine/tests/layering.rs`) and deterministic parallel execution (`NYX_THREADS=1` vs `8`) are preserved bit-for-bit.
+* `physics_api` advances additively to `1.8` and `engine_commands` advances additively to `1.37`; existing forward solves, project files, and golden outputs remain unchanged.
+
+## Code
+
+`crates/femcore/src/{topology,lib}.rs`, `crates/femcore/tests/topology_filter.rs`, `crates/nyx-physics/src/{sensitivity,physics,lib}.rs`, `crates/nyx-dfs/src/{sensitivity,lib}.rs`, `crates/nyx-dfs/tests/fr40_sensitivity.rs`, `crates/nyx-sms/src/{sensitivity,lib}.rs`, `crates/nyx-sms/tests/fr40_sensitivity.rs`, `crates/nyx-ems/src/{sensitivity,modes_complex,lib}.rs`, `crates/nyx-ems/tests/fr40_sensitivity.rs`, `crates/nyx-engine/src/{optimize,commands,commandlist,lib}.rs`, `crates/nyx-engine/tests/fr40_optimize.rs`.

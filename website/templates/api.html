@@ -15,8 +15,8 @@
       <p class="lead">{{ section.description }}</p>
     {% endif %}
     <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem;">
-      <span class="chip chip--accent">{{ config.extra.command_count | default(value=114) }} commands</span>
-      <span class="chip">Catalog hash: <code>{{ config.extra.catalog_hash | default(value="b3:60697136d596a5b047f70971b85b0f54") }}</code></span>
+      <span class="chip chip--accent">{{ config.extra.command_count | default(value=118) }} commands</span>
+      <span class="chip">Catalog hash: <code>{{ config.extra.catalog_hash | default(value="b3:f4c059caae7ee3100bbf472db2c560bd") }}</code></span>
       <span class="chip">CLI parity: <code>nyx api list</code> / <code>nyx api show &lt;cmd&gt;</code></span>
     </div>
   </header>
@@ -54,7 +54,7 @@
 
         <div class="search-wrap">
           <label class="sr-only" for="api-search">Search commands</label>
-          <input id="api-search" class="search-input" type="search" data-filter-search placeholder="Search 114 commands (press /)..." autocomplete="off">
+          <input id="api-search" class="search-input" type="search" data-filter-search placeholder="Search {{ config.extra.command_count | default(value=118) }} commands (press /)..." autocomplete="off">
           <span class="filter-count tabular" data-filter-count>{{ cmds | length }} / {{ cmds | length }}</span>
         </div>
       </div>
@@ -154,7 +154,7 @@
       <div class="empty-state" data-filter-empty hidden>No commands match your category, access level, or search query.</div>
     {% else %}
       <div class="empty-state">
-        Command catalogue <code>website/data/api.json</code> has not been generated yet. Run the site-prep extractor to populate all {{ config.extra.command_count | default(value=114) }} commands.
+        Command catalogue <code>website/data/api.json</code> has not been generated yet. Run the site-prep extractor to populate all {{ config.extra.command_count | default(value=118) }} commands.
       </div>
     {% endif %}
   </div>

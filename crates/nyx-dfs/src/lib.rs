@@ -11,13 +11,19 @@
 
 pub mod ac_loss;
 mod common;
+pub mod conduction;
 mod diag;
 pub mod electro;
 pub mod heat;
 pub mod magneto;
 pub mod planar_bem;
 pub mod problem;
+pub mod sensitivity;
 
+pub use conduction::{
+    assemble_conduction, conduction_fields, solve_conduction, solve_conduction_mixed, solve_conduction_potential,
+    ConductionAssembly,
+};
 pub use electro::{
     assemble_electrostatics, electrostatics_fields, solve_electrostatics, solve_electrostatics_mixed, solve_potential,
     ElectroAssembly, EPS0,
@@ -25,7 +31,7 @@ pub use electro::{
 pub use heat::{assemble_heat, heat_fields, solve_heat, solve_heat_mixed, solve_heat_states, HeatStates, HeatSystem};
 pub use magneto::{solve_magnetostatics, solve_magnetostatics_mixed, MU0};
 pub use planar_bem::{layered_greens_function, solve_planar_bem, LayeredStack};
-pub use problem::{decode, Bc, BcKind, IeCoordKind, IeProfile, InfiniteElementSpec, Problem, Study};
+pub use problem::{decode, Bc, BcKind, IeCoordKind, IeProfile, InfiniteElementSpec, Problem, Study, SIGMA_SB};
 
 use femcore::progress::{self, Progress};
 use nyx_physics::*;
@@ -134,6 +140,13 @@ impl Physics for Dfs {
                 ],
             },
             StudyDesc {
+                kind: "conduction".into(),
+                name: "Steady electrical conduction".into(),
+                doc: "Steady Ohmic current flow and Joule heating: -div(sigma(T) grad V) = 0.".into(),
+                dims: Dims::Both,
+                params: vec![],
+            },
+            StudyDesc {
                 kind: "heat_stationary".into(),
                 name: "Heat transfer, stationary".into(),
                 doc: "Temperature for fixed temperatures, fluxes, convection and sources: div(k grad T) + Q = 0."
@@ -188,15 +201,27 @@ impl Physics for Dfs {
             b(
                 "potential",
                 "Electric potential",
-                "Fixed potential (electrostatics).",
+                "Fixed potential (electrostatics, steady conduction).",
                 vec![ParamDesc::number("value", "Potential", "V", 1.0, "")],
             ),
-            b("ground", "Ground", "Zero potential (electrostatics, magnetostatics).", vec![]),
+            b(
+                "voltage",
+                "Voltage",
+                "Fixed electric potential (steady conduction).",
+                vec![ParamDesc::number("value", "Voltage", "V", 1.0, "")],
+            ),
+            b("ground", "Ground", "Zero potential (electrostatics, steady conduction, magnetostatics).", vec![]),
             b(
                 "surface_charge",
                 "Surface charge",
                 "Surface charge density (electrostatics).",
                 vec![ParamDesc::number("density", "Surface charge density", "C/m^2", 0.0, "")],
+            ),
+            b(
+                "current_density",
+                "Current density",
+                "Inward normal current density -n . J (steady conduction).",
+                vec![ParamDesc::number("value", "Current density", "A/m^2", 0.0, "positive into the body")],
             ),
             b(
                 "terminal",
@@ -379,6 +404,19 @@ impl Physics for Dfs {
                 ],
             ),
             b(
+                "radiation",
+                "Thermal radiation",
+                "Stefan-Boltzmann grey-body radiative heat transfer to an ambient sink: -n . q = emissivity * view_factor * sigma_SB * (T^4 - t_ambient^4) (heat transfer).",
+                vec![
+                    ParamDesc::number("emissivity", "Surface emissivity", "", 1.0, "grey-body emissivity in [0, 1]")
+                        .range(Some(0.0), Some(1.0)),
+                    ParamDesc::number("t_ambient", "Ambient temperature", "K", 293.15, "ambient radiation sink temperature (>= 0 K)")
+                        .range(Some(0.0), None),
+                    ParamDesc::number("view_factor", "View factor", "", 1.0, "geometric radiation view factor in [0, 1]")
+                        .range(Some(0.0), Some(1.0)),
+                ],
+            ),
+            b(
                 "london_sheet",
                 "London superconducting sheet",
                 "Thin superconducting film with sheet kinetic inductance L_k,sq (magnetostatics).",
@@ -432,7 +470,14 @@ impl Physics for Dfs {
         vec![
             PropDesc::new("eps_r", "Relative permittivity", "", Tensor, &["electrostatic"], None),
             PropDesc::new("tan_delta", "Dielectric loss tangent", "", Tensor, &["electrostatic"], Some(0.0)),
-            PropDesc::new("sigma", "Electrical conductivity", "S/m", Tensor, &["electrostatic"], Some(0.0)),
+            PropDesc::new(
+                "sigma",
+                "Electrical conductivity",
+                "S/m",
+                Tensor,
+                &["electrostatic", "conduction"],
+                Some(0.0),
+            ),
             PropDesc::new("rho_v", "Charge density", "C/m^3", Scalar, &["electrostatic"], Some(0.0)),
             PropDesc::new("k", "Thermal conductivity", "W/(m K)", Tensor, &["heat_stationary", "heat_transient"], None),
             PropDesc::new("rho", "Density", "kg/m^3", Scalar, &["heat_transient"], None),
@@ -474,6 +519,12 @@ impl Physics for Dfs {
                 FieldDesc::new("V", "V", &[], "electric potential"),
                 FieldDesc::new("E", "V/m", &WAFER, "electric field (2D: x and z)"),
             ],
+            "conduction" => vec![
+                FieldDesc::new("V", "V", &[], "electric potential"),
+                FieldDesc::new("E", "V/m", &WAFER, "electric field (2D: x and z)"),
+                FieldDesc::new("J", "A/m^2", &WAFER, "current density (2D: x and z)"),
+                FieldDesc::new("Q_joule", "W/m^3", &[], "volumetric Joule heating power density"),
+            ],
             "heat_stationary" | "heat_transient" => vec![
                 FieldDesc::new("T", "K", &[], "temperature"),
                 FieldDesc::new("q", "W/m^2", &WAFER, "heat flux (2D: x and z)"),
@@ -492,11 +543,36 @@ impl Physics for Dfs {
             FieldLink::new("dfs.V", "potential"),
             FieldLink::new("dfs.E", "electric_field"),
             FieldLink::new("dfs.B", "magnetic_field"),
+            FieldLink::new("dfs.Q_joule", "heat_source"),
         ]
     }
 
     fn imports(&self) -> Vec<FieldLink> {
-        vec![]
+        vec![FieldLink::new("dfs.heat_source", "heat_source"), FieldLink::new("dfs.temperature", "temperature")]
+    }
+
+    fn study_exports(&self, study: &str) -> Vec<FieldLink> {
+        match study {
+            "electrostatic" => {
+                vec![FieldLink::new("dfs.V", "potential"), FieldLink::new("dfs.E", "electric_field")]
+            }
+            "conduction" => vec![
+                FieldLink::new("dfs.V", "potential"),
+                FieldLink::new("dfs.E", "electric_field"),
+                FieldLink::new("dfs.Q_joule", "heat_source"),
+            ],
+            "heat_stationary" | "heat_transient" => vec![FieldLink::new("dfs.T", "temperature")],
+            "magnetostatic" => vec![FieldLink::new("dfs.B", "magnetic_field")],
+            _ => self.exports(),
+        }
+    }
+
+    fn study_imports(&self, study: &str) -> Vec<FieldLink> {
+        match study {
+            "heat_stationary" | "heat_transient" => vec![FieldLink::new("dfs.heat_source", "heat_source")],
+            "conduction" => vec![FieldLink::new("dfs.temperature", "temperature")],
+            _ => vec![],
+        }
     }
 
     fn validate(&self, spec: &ProblemSpec, mesh: &Mesh) -> Result<(), Error> {
@@ -519,9 +595,99 @@ impl Physics for Dfs {
             ctx.frequency =
                 spec.study.params.get("freq").and_then(|v| v.as_f64()).filter(|&f| f > 0.0 && f.is_finite());
         }
-        let problem = decode(spec, ctx)?;
+        let mut problem = decode(spec, ctx)?;
+        apply_transferred_inputs_dfs(mesh, &mut problem, ctx)?;
         run(mesh, &problem, &ctx.progress)
     }
+
+    fn sensitivity(
+        &self,
+        mesh: &Mesh,
+        spec: &ProblemSpec,
+        ctx: &mut Ctx,
+        req: &SensitivityRequest,
+    ) -> Result<SensitivityReport, Error> {
+        crate::sensitivity::compute_sensitivity(self, mesh, spec, ctx, req)
+    }
+}
+
+fn apply_transferred_inputs_dfs(mesh: &Mesh, problem: &mut Problem, ctx: &Ctx) -> Result<(), Error> {
+    if ctx.transferred_inputs.is_empty() {
+        return Ok(());
+    }
+    if matches!(problem.study, Study::HeatStationary | Study::HeatTransient { .. }) {
+        if let Some(tf) = ctx.transferred_inputs.get("heat_source") {
+            if !tf.is_same_mesh(mesh) {
+                let src_disc_owned;
+                let src_disc: &Discretisation = match &tf.discretisation {
+                    Some(d) => d.as_ref(),
+                    None => {
+                        src_disc_owned = discretise(&tf.mesh)?;
+                        &src_disc_owned
+                    }
+                };
+                let src_idx = femcore::transfer::TransferIndex::new(
+                    femcore::transfer::SourceMesh::Simplex(src_disc),
+                    &tf.domain_names,
+                    femcore::transfer::TransferOptions::default(),
+                )
+                .map_err(|e| Error::from_kernel(e.to_string()))?;
+                let src_field = femcore::transfer::SourceField::Nodal {
+                    values: &tf.values,
+                    ncomp: tf.components.max(1),
+                    order: tf.order,
+                };
+                let tgt_disc: Discretisation = if mesh.is_pure_simplex() {
+                    discretise(mesh)?
+                } else {
+                    let mixed = discretise_mixed(mesh)?;
+                    let (simplex, _) = MixedToSimplexProjector::from_mesh(mesh, &mixed)?;
+                    simplex
+                };
+                let tgt_idx = femcore::transfer::TransferIndex::new(
+                    femcore::transfer::SourceMesh::Simplex(&tgt_disc),
+                    &problem.domain_names,
+                    femcore::transfer::TransferOptions::default(),
+                )
+                .map_err(|e| Error::from_kernel(e.to_string()))?;
+                let proj = femcore::transfer::project_scalar_conservative(
+                    &src_idx,
+                    &src_field,
+                    &tgt_idx,
+                    problem.order,
+                    femcore::transfer::MassKind::Consistent,
+                )
+                .map_err(|e| Error::from_kernel(e.to_string()))?;
+                if proj.cell_values.iter().any(|v| !v.is_finite()) {
+                    return Err(Error::NonFinite(
+                        "conservatively projected 'heat_source' field contains NaN or infinity".into(),
+                    ));
+                }
+                problem.heat_source_cell_nodes = Some(proj.cell_values);
+            }
+        }
+    } else if matches!(problem.study, Study::Conduction) {
+        if let Some(tf) = ctx.transferred_inputs.get("temperature") {
+            if !tf.is_same_mesh(mesh) && mesh.is_pure_simplex() {
+                let tgt_disc = discretise(mesh)?;
+                let sampled = tf.sample_cell_nodes(&tgt_disc, &problem.domain_names, 2)?;
+                let fallback = ctx.temperature.unwrap_or(293.15);
+                let mut tcn = sampled.values;
+                for (val, &ok) in tcn.iter_mut().zip(&sampled.found) {
+                    if !ok {
+                        *val = fallback;
+                    }
+                }
+                if tcn.iter().any(|v| !v.is_finite()) {
+                    return Err(Error::NonFinite(
+                        "transferred 'temperature' field for conduction contains NaN or infinity".into(),
+                    ));
+                }
+                problem.temperature_cell_nodes = Some(tcn);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn mesh_has_curved_edges(mesh: &Mesh) -> bool {
@@ -547,9 +713,9 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
     let d = discretise(mesh)?;
     if mesh_has_curved_edges(mesh) || d.has_curved() {
         match &problem.study {
-            Study::HeatStationary | Study::HeatTransient { .. } if mesh.is_pure_simplex() => {
+            Study::Conduction | Study::HeatStationary | Study::HeatTransient { .. } if mesh.is_pure_simplex() => {
                 return Err(Error::Unsupported(
-                    "heat transfer does not support curved simplex edge nodes (R32)".into(),
+                    "heat transfer and steady conduction do not support curved simplex edge nodes (R32)".into(),
                 ));
             }
             Study::Magnetostatic { .. } => {
@@ -627,6 +793,13 @@ pub fn run(mesh: &Mesh, problem: &Problem, progress: &Arc<Progress>) -> Result<S
                     solve_electrostatics_mixed(mesh, problem)
                 } else {
                     solve_electrostatics(&d, problem)
+                }
+            }
+            Study::Conduction => {
+                if use_mixed {
+                    solve_conduction_mixed(mesh, problem)
+                } else {
+                    solve_conduction(&d, problem)
                 }
             }
             Study::Magnetostatic { .. } => {

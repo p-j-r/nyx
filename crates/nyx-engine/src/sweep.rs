@@ -756,7 +756,16 @@ impl Engine {
         let mut pt_fields_saved = true;
         let mut pt_post_analyses: Vec<Value> = Vec::new();
         let (state, error, run, numbers, dofs, cells) = match outcome {
-            Ok(JobOutput::Solved { model, results, failed, worker, reuse: reuse_of, fields_saved, post_analyses }) => {
+            Ok(JobOutput::Solved {
+                model,
+                results,
+                failed,
+                worker,
+                reuse: reuse_of,
+                fields_saved,
+                post_analyses,
+                ..
+            }) => {
                 reuse = reuse_of;
                 pt_fields_saved = fields_saved;
                 pt_post_analyses = post_analyses;
@@ -1076,9 +1085,12 @@ fn run_streaming_qmc_job(
                 .into_values()
                 .map(|st| Arc::try_unwrap(st.result).unwrap_or_else(|a| (*a).clone()))
                 .collect();
-            let order: Vec<String> = registry
-                .solve_order(&chain.iter().map(String::as_str).collect::<Vec<_>>())
-                .unwrap_or_else(|_| chain.clone());
+            let order: Vec<String> = crate::solve::project_solve_order(
+                &registry,
+                &sample_eng.project,
+                &chain.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|_| chain.clone());
             restored.sort_by_key(|res| order.iter().position(|o| o == &res.physics).unwrap_or(usize::MAX));
             results = restored;
         }

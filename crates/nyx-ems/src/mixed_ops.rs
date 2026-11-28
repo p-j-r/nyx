@@ -7,13 +7,13 @@
 
 use crate::cavity::{assemble_complex, CURVED_QUAD_DEGREE};
 use crate::ibc::{
-    ibc_parallel_params, jj_inv_l_tot, sorted3, AssembledJjPort, IbcJjAssembly3D, PerturbativeIbcTri, SheetCellKind,
-    ETA0, MU0,
+    ibc_parallel_params, jj_inv_l_tot, sheet2d_tangent_frame_3d, sorted3, AssembledJjPort, IbcJjAssembly3D,
+    PerturbativeIbcTri, SheetCellKind, ETA0, MU0,
 };
 use crate::modes::{assemble_modes_with_bcs, solve_mode_pairs, EpsCell, C0};
 use crate::ports::{AssembledLumpedPort, AssembledWavePort};
 pub use crate::problem::symmetry_facet_flags_mixed;
-use crate::problem::{LumpedJjBc, LumpedPortBc, Problem, SurfaceImpedanceBc};
+use crate::problem::{LumpedJjBc, LumpedPortBc, Problem, Sheet2dBc, SurfaceImpedanceBc};
 use femcore::edge::{cell_data, edge_basis, tri_g};
 use femcore::edge_mixed::{
     build_ams_p1_from_masks, build_ams_p2_from_masks, eval_cell_basis_3d, gradient_p1_full, gradient_p2_full,
@@ -403,6 +403,29 @@ fn estimate_wavelength_range(domains: &[i32], materials: &Materials, f_ref: f64)
 
 // ------------------------------------------------------------------ MixedDiscretisation material lookup
 
+/// Returns `true` if a `3x3` complex tensor `m` violates transpose symmetry (`m[a][b] != m[b][a]`).
+#[inline]
+pub fn is_c3_non_symmetric(m: &C3) -> bool {
+    let max_v = m.iter().flatten().fold(0.0_f64, |acc, z| acc.max(z.norm()));
+    let tol = 1e-14 * max_v.max(1e-30);
+    (m[0][1] - m[1][0]).norm() > tol || (m[0][2] - m[2][0]).norm() > tol || (m[1][2] - m[2][1]).norm() > tol
+}
+
+/// Returns `true` if any cell in `eps` or `mu_inv` is non-symmetric.
+pub fn is_c3_slice_non_symmetric(eps: &[C3], mu_inv: &[C3]) -> bool {
+    eps.iter().any(is_c3_non_symmetric) || mu_inv.iter().any(is_c3_non_symmetric)
+}
+
+/// Multiplies a `3x3` complex tensor `m` by a 3-vector `v`.
+#[inline]
+pub fn c3_mul_vec(m: &C3, v: [C; 3]) -> [C; 3] {
+    [
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+    ]
+}
+
 /// Unstretched per-cell electromagnetic tensors on a `MixedDiscretisation`.
 pub struct MixedCellMaterials {
     pub eps_0: Vec<C3>,
@@ -411,6 +434,7 @@ pub struct MixedCellMaterials {
     pub eps_phys_im: Vec<M3>,
     pub d_omega_eps: Vec<M3>,
     pub mur_phys: Vec<f64>,
+    pub is_non_symmetric: bool,
 }
 
 impl MixedCellMaterials {
@@ -419,6 +443,11 @@ impl MixedCellMaterials {
         let mut re_by_dom = BTreeMap::new();
         let mut im_by_dom = BTreeMap::new();
         let mut mu_by_dom = BTreeMap::new();
+        let mut eps_c_by_dom = BTreeMap::new();
+        let mut mui_c_by_dom = BTreeMap::new();
+        let has_tensor_mu = problem.materials.has_tensor(femcore::props::TensorKind::Permeability)
+            || problem.materials.has_tensor(femcore::props::TensorKind::PermeabilityIm)
+            || problem.materials.aniso.values().any(|a| a.mu_gyrotropy.is_some() || a.mu_gyrotropy_im.is_some());
 
         for &d in &doms {
             let re = match problem.materials.aniso.get(&d).and_then(|a| a.permittivity.as_ref()) {
@@ -436,9 +465,18 @@ impl MixedCellMaterials {
                 }
             };
             let mur = problem.materials.get(d, "mu_r").unwrap_or(1.0);
+            let eps_c = problem.materials.domain_full_complex_permittivity(d, Some(1.0))?;
+            let mui_c = if has_tensor_mu {
+                let mu_c = problem.materials.domain_full_complex_permeability(d, Some(1.0))?;
+                femcore::props::inv3_c(&mu_c).map_err(|e| format!("domain {d}: {e}"))?
+            } else {
+                iso_mu_inv_c3(mur)
+            };
             re_by_dom.insert(d, re);
             im_by_dom.insert(d, im);
             mu_by_dom.insert(d, mur);
+            eps_c_by_dom.insert(d, eps_c);
+            mui_c_by_dom.insert(d, mui_c);
         }
 
         let nc = mesh.n_cells();
@@ -449,33 +487,116 @@ impl MixedCellMaterials {
         let mut d_omega_eps = Vec::with_capacity(nc);
         let mut mur_phys = Vec::with_capacity(nc);
 
+        let nv = mesh.n_points();
+        let ct_opt = problem.cell_temperatures.as_deref();
+        let tf_opt = problem.temperature_field.as_deref();
+        let eo_pe = if problem.has_eo_or_pe_perturbation() { Some(problem.domain_eo_pe_global()) } else { None };
+        let cell_e = if eo_pe.is_some() {
+            problem.eval_cell_electric_field_with(nc, nv, mesh.dim, |ci| mesh.cell(ci))
+        } else {
+            None
+        };
+        let cell_s = if eo_pe.is_some() { problem.eval_cell_strain_with(nc, nv, |ci| mesh.cell(ci)) } else { None };
         for ci in 0..nc {
             let dom = mesh.cell_labels[ci];
-            let re = re_by_dom[&dom];
-            let im = im_by_dom[&dom];
+            let (mut re, mut im) = (re_by_dom[&dom], im_by_dom[&dom]);
+            let mut eps_c = eps_c_by_dom[&dom];
+            if let Some(td) = problem.thermo_optic_domains.get(&dom) {
+                let tc_opt = if let Some(ct) = ct_opt.filter(|v| v.len() == nc) {
+                    Some(ct[ci])
+                } else if let Some(tf) = tf_opt {
+                    if tf.len() == nc {
+                        Some(tf[ci])
+                    } else if tf.len() >= nv {
+                        let cv = mesh.cell(ci);
+                        Some(cv.iter().map(|&v| tf[v as usize]).sum::<f64>() / (cv.len() as f64))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(tc) = tc_opt.filter(|&t| t > 0.0 && t.is_finite()) {
+                    if let Some(pair) = td.eval_at(tc)? {
+                        re = pair.0;
+                        im = pair.1;
+                        eps_c = apply_thermo_optic_to_c3(eps_c, &re, &im);
+                    }
+                }
+            }
+            if let Some(ref map) = eo_pe {
+                if let Some((r_g, p_g)) = map.get(&dom) {
+                    let e_dc = cell_e.as_ref().map(|v| &v[ci]);
+                    let s_dc = cell_s.as_ref().map(|v| &v[ci]);
+                    let d_eps =
+                        femcore::material::coupled::delta_eps_eo_pe(&re, r_g.as_ref(), p_g.as_ref(), e_dc, s_dc);
+                    for a in 0..3 {
+                        for b in 0..3 {
+                            re[a][b] += d_eps[a][b];
+                        }
+                    }
+                    eps_c = apply_thermo_optic_to_c3(eps_c, &re, &im);
+                }
+            }
             let mur = mu_by_dom[&dom];
-            eps_0.push(complex_eps_c3(&re, &im));
-            mu_inv_0.push(iso_mu_inv_c3(mur));
+            eps_0.push(eps_c);
+            mu_inv_0.push(mui_c_by_dom[&dom]);
             eps_phys_re.push(re);
             eps_phys_im.push(im);
             d_omega_eps.push(problem.d_omega_eps.get(&dom).copied().unwrap_or(re));
             mur_phys.push(mur);
         }
+        let is_non_symmetric = problem.materials.is_non_symmetric() || is_c3_slice_non_symmetric(&eps_0, &mu_inv_0);
 
-        Ok(Self { eps_0, mu_inv_0, eps_phys_re, eps_phys_im, d_omega_eps, mur_phys })
+        Ok(Self { eps_0, mu_inv_0, eps_phys_re, eps_phys_im, d_omega_eps, mur_phys, is_non_symmetric })
     }
+}
+
+/// Replaces the symmetric part of `base_eps` with `complex_eps_c3(re, im)` while preserving any
+/// skew-symmetric gyrotropic off-diagonal entries `0.5 * (base_eps[a][b] - base_eps[b][a])`.
+#[inline]
+pub(crate) fn apply_thermo_optic_to_c3(base_eps: C3, re: &femcore::material::M3, im: &femcore::material::M3) -> C3 {
+    let mut out = complex_eps_c3(re, im);
+    let mut out_has_skew = false;
+    for a in 0..3 {
+        for b in (a + 1)..3 {
+            if (out[a][b] - out[b][a]).norm() > 1e-15 {
+                out_has_skew = true;
+            }
+        }
+    }
+    if !out_has_skew {
+        for a in 0..3 {
+            for b in 0..3 {
+                out[a][b] += c(0.5, 0.0) * (base_eps[a][b] - base_eps[b][a]);
+            }
+        }
+    }
+    out
 }
 
 /// Evaluates unstretched `(eps_0, mu_inv_0)` on a `SimplexMesh` (`Discretisation`) in 3D wafer axes.
 pub fn simplex_cell_materials_3d(mesh: &Discretisation, problem: &Problem) -> Result<(Vec<C3>, Vec<C3>), String> {
-    let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
-    let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
-    let mut eps_0 = Vec::with_capacity(mesh.n_cells());
-    let mut mu_inv_0 = Vec::with_capacity(mesh.n_cells());
-    for ci in 0..mesh.n_cells() {
-        eps_0.push(complex_eps_c3(&tens[ci].0, &tens[ci].1));
-        mu_inv_0.push(iso_mu_inv_c3(mur[ci]));
+    let mut eps_0 = problem.materials.cell_full_complex_permittivity(mesh, Some(1.0))?;
+    if problem.has_cell_material_perturbation() {
+        let tens = problem.cell_complex_permittivity(mesh)?;
+        let eo_pe = problem.domain_eo_pe_global();
+        for ci in 0..mesh.n_cells() {
+            let dom = mesh.cell_labels[ci];
+            if problem.thermo_optic_domains.contains_key(&dom) || eo_pe.contains_key(&dom) {
+                eps_0[ci] = apply_thermo_optic_to_c3(eps_0[ci], &tens[ci].0, &tens[ci].1);
+            }
+        }
     }
+    let has_tensor_mu = problem.materials.has_tensor(femcore::props::TensorKind::Permeability)
+        || problem.materials.has_tensor(femcore::props::TensorKind::PermeabilityIm)
+        || problem.materials.aniso.values().any(|a| a.mu_gyrotropy.is_some() || a.mu_gyrotropy_im.is_some());
+    let mu_inv_0 = if has_tensor_mu {
+        problem.materials.cell_full_complex_permeability_inv(mesh, Some(1.0))?
+    } else {
+        let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
+        mur.into_iter().map(iso_mu_inv_c3).collect()
+    };
     Ok((eps_0, mu_inv_0))
 }
 
@@ -1381,6 +1502,130 @@ fn assemble_ibc_and_jj_3d_mixed_with_mode(
         ibc_facets,
         jj_facets_by_port,
     ))
+}
+
+/// Appends penetrable 2D tensor surface conductivity (`sheet_2d`) jump integrals to an [`IbcJjAssembly3D`]
+/// on a 3D [`MixedDiscretisation`] (`Tet + Prism + Hex`). Returns `Ok(true)` if any sheet has $\sigma_{uv} \neq \sigma_{vu}$.
+pub fn assemble_sheet2d_3d_mixed(
+    mesh: &MixedDiscretisation,
+    ned: &NedMixed,
+    pec_labels: &[i32],
+    sheet_bcs: &[Sheet2dBc],
+    imported_potential: Option<&[f64]>,
+    f_ref: f64,
+    ij: &mut IbcJjAssembly3D,
+) -> Result<bool, String> {
+    if sheet_bcs.is_empty() {
+        return Ok(false);
+    }
+    let n = ned.n_dofs;
+    let face_to_cell = build_face_to_cell_3d_mixed(mesh);
+    let omega_ref = (2.0 * PI * f_ref).max(1e-30);
+    let k0_ref = omega_ref / C0;
+
+    let mut seen = BTreeSet::new();
+    for f in 0..mesh.n_facets() {
+        if pec_labels.contains(&mesh.facet_labels[f]) {
+            seen.insert(MixedFaceKey::from_slice(mesh.facet(f)));
+        }
+    }
+
+    let mut k_2d_coo = Coo::new(n, n);
+    let mut c_2d_coo = Coo::new(n, n);
+    let mut has_non_symmetric = false;
+
+    for bc in sheet_bcs {
+        if bc.is_non_symmetric() {
+            has_non_symmetric = true;
+        }
+        let f_eval = if bc.f_ref > 0.0 { bc.f_ref } else { f_ref };
+        ij.direct_ibc_labels.extend(bc.labels.iter().copied());
+
+        for f in 0..mesh.n_facets() {
+            if !bc.labels.contains(&mesh.facet_labels[f]) {
+                continue;
+            }
+            let fv = mesh.facet(f);
+            let ft = mesh.facet_type(f);
+            let key = MixedFaceKey::from_slice(fv);
+            if !seen.insert(key) {
+                continue;
+            }
+            let (ci, _, n_out, bnd_dofs, _, weights, psi_q) =
+                eval_facet_tangential_basis_3d_mixed(mesh, ned, &face_to_cell, f)?;
+            let (u_hat, v_hat, _) = sheet2d_tangent_frame_3d(n_out);
+            let iso = IsoparametricCell::from_mesh(mesh, ci);
+            let deg = if iso.curved { CURVED_QUAD_DEGREE } else { 4 };
+            let frule = facet_rule_mixed(ft, deg);
+
+            let nb_f = bnd_dofs.len();
+            let mut k_loc = vec![0.0; nb_f * nb_f];
+            let mut c_loc = vec![0.0; nb_f * nb_f];
+            let mut sig_rep = [[c(0.0, 0.0); 2]; 2];
+
+            for (q, (&wq, xi_f)) in weights.iter().zip(&frule.pts).enumerate() {
+                let local_v = imported_potential.and_then(|pot| {
+                    if pot.len() >= mesh.n_points() {
+                        let (fn1, _) = facet_lagrange_shape(ft, LagrangeSpace::Order1, xi_f);
+                        Some(fn1.iter().zip(fv).map(|(&sh, &vid)| sh * pot[vid as usize]).sum::<f64>())
+                    } else {
+                        None
+                    }
+                });
+                let sig = bc.eval_tensor_at(f_eval, None, local_v)?;
+                if q == 0 {
+                    sig_rep = sig;
+                }
+                if (sig[0][1] - sig[1][0]).norm() > 1e-18 * (sig[0][0].norm() + sig[1][1].norm()).max(1e-30) {
+                    has_non_symmetric = true;
+                }
+                let k_tensor = [
+                    [-omega_ref * MU0 * sig[0][0].im, -omega_ref * MU0 * sig[0][1].im],
+                    [-omega_ref * MU0 * sig[1][0].im, -omega_ref * MU0 * sig[1][1].im],
+                ];
+                let c_tensor = [
+                    [MU0 * C0 * sig[0][0].re, MU0 * C0 * sig[0][1].re],
+                    [MU0 * C0 * sig[1][0].re, MU0 * C0 * sig[1][1].re],
+                ];
+                for a in 0..nb_f {
+                    let wa = psi_q[q][a];
+                    let wa_u = dot3(wa, u_hat);
+                    let wa_v = dot3(wa, v_hat);
+                    for b in 0..nb_f {
+                        let wb = psi_q[q][b];
+                        let wb_u = dot3(wb, u_hat);
+                        let wb_v = dot3(wb, v_hat);
+                        let k_ab = wa_u * (k_tensor[0][0] * wb_u + k_tensor[0][1] * wb_v)
+                            + wa_v * (k_tensor[1][0] * wb_u + k_tensor[1][1] * wb_v);
+                        let c_ab = wa_u * (c_tensor[0][0] * wb_u + c_tensor[0][1] * wb_v)
+                            + wa_v * (c_tensor[1][0] * wb_u + c_tensor[1][1] * wb_v);
+                        k_loc[a * nb_f + b] += wq * k_ab;
+                        c_loc[a * nb_f + b] += wq * c_ab;
+                    }
+                }
+            }
+
+            if k_loc.iter().any(|&v| v != 0.0) {
+                k_2d_coo.push_block(&bnd_dofs, &bnd_dofs, &k_loc);
+            }
+            if c_loc.iter().any(|&v| v != 0.0) {
+                c_2d_coo.push_block(&bnd_dofs, &bnd_dofs, &c_loc);
+            }
+            ij.cell_sheet[ci] = Some(SheetCellKind::Sheet2D { sigma_2d: sig_rep, u_hat, v_hat, n_hat: n_out });
+        }
+    }
+
+    let k_2d = k_2d_coo.to_csr();
+    let c_2d = c_2d_coo.to_csr();
+    if k_2d.nnz() > 0 {
+        ij.k_ibc_full = ij.k_ibc_full.add_scaled(&k_2d, 1.0);
+        ij.kc_ibc_full = ij.kc_ibc_full.add_scaled(&k_2d.to_complex(), c(1.0, 0.0));
+    }
+    if c_2d.nnz() > 0 {
+        ij.c_ibc_full = ij.c_ibc_full.add_scaled(&c_2d, 1.0);
+        ij.kc_ibc_full = ij.kc_ibc_full.add_scaled(&c_2d.to_complex(), c(0.0, k0_ref));
+    }
+    Ok(has_non_symmetric)
 }
 
 /// Assembles `lumped_port` conditions on a 3D `MixedDiscretisation`.

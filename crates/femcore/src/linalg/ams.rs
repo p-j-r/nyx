@@ -23,27 +23,34 @@
 //!
 //! Written from the Hiptmair–Xu paper (2007) and Kolev–Vassilevski (2009), not from hypre's code.
 
-use crate::linalg::amg::{Amg, AmgOptions, gauss_seidel};
+use crate::linalg::amg::{
+    Amg, AmgF32, AmgOptions, CsrF32, SmootherKind, chebyshev_smooth, chebyshev_smooth_f32,
+    estimate_dinv_a_spectral_radius, f32_safe_scale, gauss_seidel, gauss_seidel_f32,
+};
 use crate::linalg::csr::Csr;
+use crate::linalg::device::CpuVec;
 use crate::linalg::direct::SolverError;
 use crate::linalg::faer_glue::FaerScalar;
 use crate::linalg::ksp::{Gmres, GmresOptions, Orthogonalization, PcSide, Tolerances};
 use crate::linalg::linop::Preconditioner;
+use crate::linalg::par;
 use crate::linalg::scalar::{C64, Scalar};
-use crate::linalg::vecops;
+use crate::linalg::vecops::{self, CHUNK};
 use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub struct AmsOptions {
     /// Options of the AMG hierarchies on the auxiliary nodal operators.
     pub amg: AmgOptions,
-    /// Gauss–Seidel sweeps of the edge smoother (each direction).
+    /// Gauss–Seidel sweeps of the edge smoother (each direction, when `smoother == GaussSeidel`).
     pub smoother_sweeps: usize,
+    /// Fine-edge smoother selection (default [`SmootherKind::GaussSeidel`]).
+    pub smoother: SmootherKind,
 }
 
 impl Default for AmsOptions {
     fn default() -> Self {
-        Self { amg: AmgOptions::default(), smoother_sweeps: 1 }
+        Self { amg: AmgOptions::default(), smoother_sweeps: 1, smoother: SmootherKind::GaussSeidel }
     }
 }
 
@@ -58,6 +65,8 @@ struct Scratch<T> {
 pub struct Ams<T: FaerScalar> {
     a: Csr<T>,
     inv_diag: Vec<T>,
+    lmax: f64,
+    smoother: SmootherKind,
     g: Csr<T>,
     gt: Csr<T>,
     amg_g: Amg<T>,
@@ -106,6 +115,11 @@ impl<T: FaerScalar> Ams<T> {
         }
         let inv_diag: Vec<T> =
             a.diagonal().into_iter().map(|d| if d == T::ZERO { T::ONE } else { T::ONE / d }).collect();
+        let lmax = if matches!(opts.smoother, SmootherKind::Chebyshev { .. }) {
+            estimate_dinv_a_spectral_radius(a, &inv_diag)
+        } else {
+            1.0
+        };
         let z = |n: usize| vec![T::ZERO; n];
         let to3 = |mut v: Vec<Csr<T>>| -> [Csr<T>; 3] {
             let c = v.pop().unwrap();
@@ -122,6 +136,8 @@ impl<T: FaerScalar> Ams<T> {
         Ok(Self {
             a: a.clone(),
             inv_diag,
+            lmax,
+            smoother: opts.smoother,
             g: gm,
             gt: gtm,
             amg_g,
@@ -166,18 +182,254 @@ impl<T: FaerScalar> Preconditioner<T> for Ams<T> {
         let mut guard = self.scratch.borrow_mut();
         let sc = &mut *guard;
         sc.x.fill(T::ZERO);
-        for _ in 0..self.sweeps {
-            gauss_seidel(&self.a, &self.inv_diag, b, &mut sc.x, true);
+        match self.smoother {
+            SmootherKind::GaussSeidel => {
+                for _ in 0..self.sweeps {
+                    gauss_seidel(&self.a, &self.inv_diag, b, &mut sc.x, true);
+                }
+            }
+            SmootherKind::Chebyshev { degree } => {
+                chebyshev_smooth(
+                    &self.a,
+                    &self.inv_diag,
+                    self.lmax,
+                    degree.max(1),
+                    b,
+                    &mut sc.x,
+                    &mut sc.res,
+                    &mut sc.tmp_edge,
+                    true,
+                );
+            }
         }
         let grad = [(&self.g, &self.gt, &self.amg_g)];
         let pis = [0, 1, 2].map(|c| (&self.pi[c], &self.pit[c], &self.amg_pi[c]));
         self.correct(&grad, b, sc);
         self.correct(&pis, b, sc);
         self.correct(&grad, b, sc);
-        for _ in 0..self.sweeps {
-            gauss_seidel(&self.a, &self.inv_diag, b, &mut sc.x, false);
+        match self.smoother {
+            SmootherKind::GaussSeidel => {
+                for _ in 0..self.sweeps {
+                    gauss_seidel(&self.a, &self.inv_diag, b, &mut sc.x, false);
+                }
+            }
+            SmootherKind::Chebyshev { degree } => {
+                chebyshev_smooth(
+                    &self.a,
+                    &self.inv_diag,
+                    self.lmax,
+                    degree.max(1),
+                    b,
+                    &mut sc.x,
+                    &mut sc.res,
+                    &mut sc.tmp_edge,
+                    false,
+                );
+            }
         }
         z.copy_from_slice(&sc.x);
+    }
+}
+
+impl<T: FaerScalar> crate::linalg::device::DevicePreconditioner<CpuVec<T>> for Ams<T> {
+    #[inline]
+    fn apply(&self, r: &CpuVec<T>, z: &mut CpuVec<T>) {
+        Preconditioner::apply(self, &r.0, &mut z.0);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------ Mixed-Precision AmsF32
+
+struct ScratchAmsF32 {
+    rhs: Vec<f32>,
+    x: Vec<f32>,
+    res: Vec<f32>,
+    tmp_edge: Vec<f32>,
+    tmp_node: Vec<f32>,
+    corr_node: Vec<f32>,
+}
+
+/// Mixed-precision single-precision (`f32`) Hiptmair–Xu AMS preconditioner driving outer `f64`
+/// PCG / FGMRES solves (`FR-43a`).
+///
+/// Both the fine-edge smoother (symmetric Gauss–Seidel or parallel Chebyshev) and all four
+/// auxiliary nodal AMG hierarchies (`AmgF32`) execute in `f32`.
+pub struct AmsF32 {
+    a: CsrF32,
+    inv_diag: Vec<f32>,
+    lmax: f32,
+    smoother: SmootherKind,
+    sweeps: usize,
+    g: CsrF32,
+    gt: CsrF32,
+    amg_g: AmgF32,
+    pi: [CsrF32; 3],
+    pit: [CsrF32; 3],
+    amg_pi: [AmgF32; 3],
+    scratch: RefCell<ScratchAmsF32>,
+}
+
+impl AmsF32 {
+    pub fn new(a: &Csr<f64>, g: &Csr<f64>, edge_vectors: &[[f64; 3]], opts: &AmsOptions) -> Result<Self, SolverError> {
+        let ne = a.nrows();
+        if a.ncols() != ne {
+            return Err(SolverError::InvalidArgument("AmsF32 matrix must be square"));
+        }
+        if g.nrows() != ne || edge_vectors.len() != ne {
+            return Err(SolverError::InvalidArgument("AmsF32 gradient and edge_vectors must match matrix dimension"));
+        }
+        if a.values().iter().any(|v| !v.is_finite()) || g.values().iter().any(|v| !v.is_finite()) {
+            return Err(SolverError::InvalidArgument("AmsF32 input contains non-finite entries"));
+        }
+        let nn = g.ncols();
+        let gt_f64 = g.transpose();
+        let a_g = gt_f64.matmul(&a.matmul(g));
+        let amg_g = AmgF32::new(&a_g, opts.amg.clone())?;
+
+        let mut pis = Vec::with_capacity(3);
+        let mut pits = Vec::with_capacity(3);
+        let mut amgs = Vec::with_capacity(3);
+        for c in 0..3 {
+            let mut trip = Vec::with_capacity(g.nnz());
+            for (e, t) in edge_vectors.iter().enumerate() {
+                for &j in g.row(e).0 {
+                    trip.push((e, j as usize, 0.5 * t[c]));
+                }
+            }
+            let pic = Csr::from_triplets(ne, nn, &trip)
+                .map_err(|_| SolverError::InvalidArgument("failed to assemble AmsF32 Pi operator"))?;
+            let pict = pic.transpose();
+            let a_pi = pict.matmul(&a.matmul(&pic));
+            amgs.push(AmgF32::new(&a_pi, opts.amg.clone())?);
+            pis.push(CsrF32::from_csr_f64(&pic));
+            pits.push(CsrF32::from_csr_f64(&pict));
+        }
+        let inv_diag_f64: Vec<f64> =
+            a.diagonal().into_iter().map(|d| if d == 0.0 { 1.0 } else { 1.0 / d }).collect();
+        let lmax = estimate_dinv_a_spectral_radius(a, &inv_diag_f64) as f32;
+        let inv_diag: Vec<f32> = inv_diag_f64.into_iter().map(|d| d as f32).collect();
+
+        let [pi0, pi1, pi2]: [CsrF32; 3] = pis
+            .try_into()
+            .map_err(|_| SolverError::InvalidArgument("internal Pi count mismatch"))?;
+        let [pit0, pit1, pit2]: [CsrF32; 3] = pits
+            .try_into()
+            .map_err(|_| SolverError::InvalidArgument("internal Pit count mismatch"))?;
+        let [amg0, amg1, amg2]: [AmgF32; 3] = amgs
+            .try_into()
+            .map_err(|_| SolverError::InvalidArgument("internal AmgF32 count mismatch"))?;
+
+        Ok(Self {
+            a: CsrF32::from_csr_f64(a),
+            inv_diag,
+            lmax,
+            smoother: opts.smoother,
+            sweeps: opts.smoother_sweeps,
+            g: CsrF32::from_csr_f64(g),
+            gt: CsrF32::from_csr_f64(&gt_f64),
+            amg_g,
+            pi: [pi0, pi1, pi2],
+            pit: [pit0, pit1, pit2],
+            amg_pi: [amg0, amg1, amg2],
+            scratch: RefCell::new(ScratchAmsF32 {
+                rhs: vec![0.0; ne],
+                x: vec![0.0; ne],
+                res: vec![0.0; ne],
+                tmp_edge: vec![0.0; ne],
+                tmp_node: vec![0.0; nn],
+                corr_node: vec![0.0; nn],
+            }),
+        })
+    }
+
+    fn correct_f32(&self, parts: &[(&CsrF32, &CsrF32, &AmgF32)], sc: &mut ScratchAmsF32) {
+        let ne = self.a.nrows;
+        let par = par::worth_parallel(ne);
+        self.a.spmv(&sc.x, &mut sc.res);
+        par::for_chunks_mut(&mut sc.res, CHUNK, par, |c, rc| {
+            let s = c * CHUNK;
+            for (i, ri) in rc.iter_mut().enumerate() {
+                *ri = sc.rhs[s + i] - *ri;
+            }
+        });
+        for &(q, qt, amg) in parts {
+            qt.spmv(&sc.res, &mut sc.tmp_node);
+            amg.apply_f32(&sc.tmp_node, &mut sc.corr_node);
+            q.spmv(&sc.corr_node, &mut sc.tmp_edge);
+            par::for_chunks_mut(&mut sc.x, CHUNK, par, |c, xc| {
+                let s = c * CHUNK;
+                for (i, xi) in xc.iter_mut().enumerate() {
+                    *xi += sc.tmp_edge[s + i];
+                }
+            });
+        }
+    }
+}
+
+impl Preconditioner<f64> for AmsF32 {
+    fn apply(&self, b: &[f64], z: &mut [f64]) {
+        let (to_s, from_s) = f32_safe_scale(b);
+        let mut guard = self.scratch.borrow_mut();
+        let sc = &mut *guard;
+        for (dst, &src) in sc.rhs.iter_mut().zip(b) {
+            *dst = (src * to_s) as f32;
+        }
+        sc.x.fill(0.0);
+        match self.smoother {
+            SmootherKind::GaussSeidel => {
+                for _ in 0..self.sweeps {
+                    gauss_seidel_f32(&self.a, &self.inv_diag, &sc.rhs, &mut sc.x, true);
+                }
+            }
+            SmootherKind::Chebyshev { degree } => {
+                chebyshev_smooth_f32(
+                    &self.a,
+                    &self.inv_diag,
+                    self.lmax,
+                    degree.max(1),
+                    &sc.rhs,
+                    &mut sc.x,
+                    &mut sc.res,
+                    &mut sc.tmp_edge,
+                    true,
+                );
+            }
+        }
+        let grad = [(&self.g, &self.gt, &self.amg_g)];
+        let pis = [0, 1, 2].map(|c| (&self.pi[c], &self.pit[c], &self.amg_pi[c]));
+        self.correct_f32(&grad, sc);
+        self.correct_f32(&pis, sc);
+        self.correct_f32(&grad, sc);
+        match self.smoother {
+            SmootherKind::GaussSeidel => {
+                for _ in 0..self.sweeps {
+                    gauss_seidel_f32(&self.a, &self.inv_diag, &sc.rhs, &mut sc.x, false);
+                }
+            }
+            SmootherKind::Chebyshev { degree } => {
+                chebyshev_smooth_f32(
+                    &self.a,
+                    &self.inv_diag,
+                    self.lmax,
+                    degree.max(1),
+                    &sc.rhs,
+                    &mut sc.x,
+                    &mut sc.res,
+                    &mut sc.tmp_edge,
+                    false,
+                );
+            }
+        }
+        for (dst, &src) in z.iter_mut().zip(&sc.x) {
+            *dst = (src as f64) * from_s;
+        }
+    }
+}
+
+impl crate::linalg::device::DevicePreconditioner<CpuVec<f64>> for AmsF32 {
+    #[inline]
+    fn apply(&self, r: &CpuVec<f64>, z: &mut CpuVec<f64>) {
+        Preconditioner::apply(self, &r.0, &mut z.0);
     }
 }
 
@@ -556,6 +808,13 @@ impl<T: FaerScalar> Preconditioner<T> for AmsP2<T> {
             self.smooth(b, &mut sc.x, false);
         }
         z.copy_from_slice(&sc.x);
+    }
+}
+
+impl<T: FaerScalar> crate::linalg::device::DevicePreconditioner<CpuVec<T>> for AmsP2<T> {
+    #[inline]
+    fn apply(&self, r: &CpuVec<T>, z: &mut CpuVec<T>) {
+        Preconditioner::apply(self, &r.0, &mut z.0);
     }
 }
 

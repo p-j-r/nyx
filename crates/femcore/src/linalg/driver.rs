@@ -139,6 +139,28 @@ impl<T: FaerScalar> DirectSolver<T> {
         Ok(DirectSolver { fac, n })
     }
 
+    /// Factorises a non-symmetric sparse matrix directly with general COLAMD `LU` (`FR-34`),
+    /// bypassing symmetric/Hermitian `LBL^T` probes.
+    pub fn new_general_lu(a: &Csr<T>) -> Result<Self, String> {
+        let n = a.nrows();
+        if n == 0 || a.ncols() != n {
+            return Err("the matrix to factorise must be square and not empty".into());
+        }
+        progress::check()?;
+        let kind = if T::IS_COMPLEX { "complex " } else { "" };
+        let _stage = progress::stage(format!(
+            "factorising a sparse {kind}non-symmetric matrix ({n} unknowns, {} non-zeros) with general LU; this cannot be interrupted",
+            a.nnz()
+        ));
+        let mut fac = ShiftedFactorization::new(a, None, Definiteness::General)
+            .map_err(|e| format!("sparse factorisation failed: {e}"))?;
+        fac.ordering = fill_ordering(n);
+        fac.force_general_lu = true;
+        crate::par::on_factor_pool(|| fac.set_shift(T::ZERO))
+            .map_err(|e| format!("sparse factorisation failed (singular matrix?): {e}"))?;
+        Ok(DirectSolver { fac, n })
+    }
+
     pub fn n(&self) -> usize {
         self.n
     }

@@ -281,6 +281,113 @@ fn superconducting_schema() -> Value {
     json!({ "type": "object", "additionalProperties": false, "required": ["tc"], "properties": p })
 }
 
+fn sheet2d_schema() -> Value {
+    let mut p = serde_json::Map::new();
+    p.insert("source".into(), source_ref());
+    p.insert("model".into(), json!({ "enum": ["kubo_graphene", "kubo", "anisotropic", "drude_lorentz_2d", "constant", "tabulated"], "default": "kubo_graphene" }));
+    p.insert("mu_c".into(), quantity("chemical potential (Fermi level) mu_c, eV or J"));
+    p.insert("mu_c_unit".into(), json!({ "type": "string" }));
+    p.insert("tau".into(), quantity("carrier momentum relaxation time tau, ps, fs or s"));
+    p.insert("tau_unit".into(), json!({ "type": "string" }));
+    p.insert("gamma".into(), quantity("phenomenological scattering rate Gamma = hbar/(2*tau) (eV/meV) or gamma = 1/tau (THz/rad/s)"));
+    p.insert("gamma_unit".into(), json!({ "type": "string" }));
+    p.insert("scattering_rate".into(), quantity("alias for gamma"));
+    p.insert("scattering_rate_unit".into(), json!({ "type": "string" }));
+    p.insert("temperature".into(), quantity("reference temperature T, K"));
+    p.insert("temperature_unit".into(), json!({ "type": "string" }));
+    p.insert("T_range".into(), json!({ "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" }, "description": "valid temperature range [T_min, T_max] in K" }));
+    p.insert("v_f".into(), quantity("Dirac Fermi velocity v_F, m/s (default 1.0e6 m/s)"));
+    p.insert("v_f_unit".into(), json!({ "type": "string" }));
+    p.insert("b_0".into(), quantity("out-of-plane static magnetic bias B_0, T"));
+    p.insert("b_0_unit".into(), json!({ "type": "string" }));
+    p.insert("n_layers".into(), json!({ "type": "number", "exclusiveMinimum": 0, "default": 1.0 }));
+    p.insert("theta_deg".into(), json!({ "type": "number", "description": "in-plane rotation angle of principal axes (u, v) in degrees" }));
+    p.insert("theta_rad".into(), json!({ "type": "number", "description": "in-plane rotation angle of principal axes (u, v) in radians" }));
+    p.insert("sigma_uu_re".into(), json!({ "description": "principal-axis u sheet conductivity real part, S or array for tabulated" }));
+    p.insert("sigma_uu_im".into(), json!({ "description": "principal-axis u sheet conductivity imaginary part, S or array for tabulated" }));
+    p.insert("sigma_vv_re".into(), json!({ "description": "principal-axis v sheet conductivity real part, S or array for tabulated" }));
+    p.insert("sigma_vv_im".into(), json!({ "description": "principal-axis v sheet conductivity imaginary part, S or array for tabulated" }));
+    p.insert("sigma_unit".into(), json!({ "type": "string", "default": "S" }));
+    p.insert("frequency_unit".into(), json!({ "type": "string" }));
+    p.insert("poles_u".into(), json!({ "type": "array", "items": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } }, "description": "rows [omega_0, gamma, weight] along principal axis u" }));
+    p.insert("poles_v".into(), json!({ "type": "array", "items": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } }, "description": "rows [omega_0, gamma, weight] along principal axis v" }));
+    p.insert("omega".into(), json!({ "type": "array", "items": { "type": "number" } }));
+    p.insert("data".into(), json!({ "type": "array", "items": { "type": "array", "items": { "type": "number" } } }));
+    p.insert("data_uu".into(), json!({ "type": "array", "items": { "type": "array", "items": { "type": "number" } } }));
+    p.insert("data_vv".into(), json!({ "type": "array", "items": { "type": "array", "items": { "type": "number" } } }));
+    json!({ "type": "object", "additionalProperties": false, "properties": p })
+}
+
+fn qpm_schema() -> Value {
+    let mut p = serde_json::Map::new();
+    p.insert("sign".into(), json!({ "type": "number", "enum": [-1.0, 1.0], "default": 1.0, "description": "ferroelectric domain poling sign (+1 or -1)" }));
+    p.insert("Lambda_qpm".into(), quantity("spatial periodic poling period Lambda_qpm, um or m"));
+    p.insert("Lambda_qpm_unit".into(), json!({ "type": "string" }));
+    p.insert("period".into(), quantity("alias for Lambda_qpm"));
+    p.insert("period_unit".into(), json!({ "type": "string" }));
+    p.insert("axis".into(), json!({ "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" }, "default": [0.0, 1.0, 0.0], "description": "QPM grating wavevector direction in global wafer coordinates" }));
+    p.insert("duty_cycle".into(), json!({ "type": "number", "exclusiveMinimum": 0.0, "exclusiveMaximum": 1.0, "default": 0.5, "description": "positive-domain duty cycle D in (0, 1)" }));
+    p.insert("phase_offset".into(), quantity("coordinate offset along axis where the +sign half-period starts"));
+    p.insert("phase_offset_unit".into(), json!({ "type": "string" }));
+    json!({ "type": "object", "additionalProperties": false, "properties": p })
+}
+
+fn chi2_schema() -> Value {
+    let mut p = serde_json::Map::new();
+    p.insert("source".into(), source_ref());
+    p.insert("wavelength".into(), quantity("reference optical wavelength of d_iJ measurement"));
+    p.insert("wavelength_unit".into(), json!({ "type": "string" }));
+    p.insert("unit".into(), json!({ "type": "string", "description": "unit of bare d_iJ numbers, for example \"pm/V\" or \"m/V\"" }));
+    p.insert("kleinman".into(), json!({ "type": "boolean", "default": false, "description": "apply Kleinman permutation symmetry when expanding named d_iJ entries" }));
+    p.insert("broken_centrosymmetry".into(), json!({ "type": "boolean", "default": false, "description": "explicitly permit non-zero d_iJ on centrosymmetric point groups (e.g. DC-field or strain-induced chi^(2))" }));
+    p.insert("matrix".into(), json!({ "type": "array", "description": "contracted 3x6 second-order d_iJ = 0.5 * chi^(2)_iJ matrix in textbook Voigt order (1=xx..6=xy)" }));
+    p.insert("qpm".into(), qpm_schema());
+    for i in 1..=3 {
+        for j in 1..=6 {
+            p.insert(format!("d{i}{j}"), quantity("second-order nonlinear optical tensor entry d_iJ, pm/V or m/V"));
+        }
+    }
+    json!({ "type": "object", "additionalProperties": false, "properties": p })
+}
+
+fn chi3_schema() -> Value {
+    let mut p = serde_json::Map::new();
+    p.insert("source".into(), source_ref());
+    p.insert("wavelength".into(), quantity("reference optical wavelength of chi^(3) / TPA parameters"));
+    p.insert("wavelength_unit".into(), json!({ "type": "string" }));
+    p.insert("n_2".into(), quantity("nonlinear Kerr refractive index n_2, m^2/W or cm^2/W"));
+    p.insert("n_2_unit".into(), json!({ "type": "string" }));
+    p.insert("unit".into(), json!({ "type": "string", "description": "unit of bare chi3_ijkl numbers, for example \"m^2/V^2\" or \"pm^2/V^2\"" }));
+    p.insert("chi3_xxxx".into(), quantity("diagonal third-order susceptibility chi^(3)_xxxx, m^2/V^2"));
+    p.insert("chi3_xxyy".into(), quantity("cross-polarized susceptibility chi^(3)_xxyy, m^2/V^2"));
+    p.insert("chi3_xyxy".into(), quantity("cross-polarized susceptibility chi^(3)_xyxy, m^2/V^2"));
+    p.insert("chi3_xyyx".into(), quantity("conjugate cross-polarized susceptibility chi^(3)_xyyx, m^2/V^2"));
+    p.insert("b_over_a".into(), json!({ "type": "number", "description": "Maker-Terhune cross-polarization ratio B/A (default 1.0 for electronic Kleinman symmetry)" }));
+    p.insert("beta_tpa".into(), quantity("two-photon absorption coefficient beta_TPA >= 0, m/W or cm/GW"));
+    p.insert("beta_tpa_unit".into(), json!({ "type": "string" }));
+    p.insert("sigma_fca".into(), quantity("free-carrier absorption cross-section sigma_FCA >= 0, m^2 or cm^2"));
+    p.insert("sigma_fca_unit".into(), json!({ "type": "string" }));
+    p.insert("k_fcd".into(), quantity("signed free-carrier dispersion coefficient k_FCD (Delta n = k_FCD * N_c), m^3 or cm^3"));
+    p.insert("k_fcd_unit".into(), json!({ "type": "string" }));
+    p.insert("tau_c".into(), quantity("effective free-carrier recombination lifetime tau_c >= 0, ns, ps or s"));
+    p.insert("tau_c_unit".into(), json!({ "type": "string" }));
+    json!({ "type": "object", "additionalProperties": false, "properties": p })
+}
+
+fn nonlinear_schema() -> Value {
+    let mut p = serde_json::Map::new();
+    p.insert("source".into(), source_ref());
+    p.insert("wavelength".into(), quantity("default reference optical wavelength for [nonlinear]"));
+    p.insert("wavelength_unit".into(), json!({ "type": "string" }));
+    p.insert("T_range".into(), json!({ "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" }, "description": "valid temperature range [T_min, T_max]" }));
+    p.insert("T_unit".into(), json!({ "type": "string", "default": "K" }));
+    p.insert("broken_centrosymmetry".into(), json!({ "type": "boolean", "default": false, "description": "allow non-zero chi2 on centrosymmetric point groups when inversion symmetry is broken" }));
+    p.insert("chi2".into(), chi2_schema());
+    p.insert("chi3".into(), chi3_schema());
+    p.insert("qpm".into(), qpm_schema());
+    json!({ "type": "object", "additionalProperties": false, "properties": p })
+}
+
 fn defs_v2_schema() -> Value {
     let mut iface_p = serde_json::Map::new();
     iface_p.insert("source".into(), source_ref());
@@ -448,6 +555,8 @@ pub fn material_schema() -> Value {
             }
         }),
     );
+    top.insert("sheet_2d".into(), sheet2d_schema());
+    top.insert("nonlinear".into(), nonlinear_schema());
     top.insert(
         "optical".into(),
         json!({

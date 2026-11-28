@@ -11,8 +11,18 @@ description = "The ems physics of nyx: descriptors now, kernels moved in from fe
 [dependencies]
 nyx-physics = { path = "../nyx-physics" }
 femcore = { path = "../femcore" }
+blake3 = "1"
+serde = { workspace = true }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 rayon = "1"
+wgpu = { version = "30", optional = true }
+pollster = { version = "1.0", optional = true }
+bytemuck = { version = "1.25", features = ["derive"], optional = true }
+
+[features]
+# Opt-in wgpu GPU compute kernels for time-domain FDTD and DGTD studies (ADR 146).
+# Default CPU builds compile zero GPU dependencies and remain 0-ULP bit-exact.
+gpu = ["femcore/gpu", "dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dev-dependencies]
 geom = { path = "../geom" }

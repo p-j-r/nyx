@@ -723,7 +723,7 @@
     },
     {
       "applies": "boundary",
-      "doc": "2D boundary-mode waveguide port on an exterior face in a 3D driven frequency sweep.",
+      "doc": "2D boundary-mode waveguide port on an exterior face in a 3D driven or EME study.",
       "kind": "waveport",
       "name": "Waveguide boundary port",
       "params": [
@@ -778,12 +778,1245 @@
           "unit": "Ohm"
         }
       ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Penetrable zero-thickness 2D material sheet (e.g. monolayer Kubo graphene or anisotropic 2D crystal) with 2x2 tangential surface conductivity tensor sigma_2D(omega, T, mu_c, B_0) in Siemens.",
+      "kind": "sheet_2d",
+      "name": "Zero-thickness 2D material sheet",
+      "params": [
+        {
+          "doc": "optional material from the library with a [sheet_2d] block",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "2D sheet material",
+          "name": "material",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "surface conductivity model when material is omitted",
+          "kind": {
+            "default": "kubo_graphene",
+            "options": [
+              "kubo_graphene",
+              "anisotropic",
+              "constant"
+            ],
+            "type": "choice"
+          },
+          "label": "Sheet dispersion model",
+          "name": "model",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Dirac Fermi level / chemical potential mu_c in eV",
+          "kind": {
+            "default": 0.3,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Chemical potential",
+          "name": "mu_c_eV",
+          "required": false,
+          "unit": "eV"
+        },
+        {
+          "doc": "carrier momentum relaxation time tau in seconds",
+          "kind": {
+            "default": 5e-13,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Relaxation time",
+          "name": "tau_s",
+          "required": false,
+          "unit": "s"
+        },
+        {
+          "doc": "sheet temperature T in Kelvin",
+          "kind": {
+            "default": 300.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Temperature",
+          "name": "temperature",
+          "required": false,
+          "unit": "K"
+        },
+        {
+          "doc": "Dirac Fermi velocity v_F in m/s",
+          "kind": {
+            "default": 1000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Fermi velocity",
+          "name": "v_f",
+          "required": false,
+          "unit": "m/s"
+        },
+        {
+          "doc": "static out-of-plane magnetic flux density B_0 in Tesla (Hall effect)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Out-of-plane magnetic bias",
+          "name": "b_0",
+          "required": false,
+          "unit": "T"
+        },
+        {
+          "doc": "effective number of decoupled 2D layers",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Number of layers",
+          "name": "n_layers",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "in-plane rotation angle of principal axes (u, v) in degrees",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "In-plane rotation",
+          "name": "theta_deg",
+          "required": false,
+          "unit": "deg"
+        },
+        {
+          "doc": "inline real sheet conductivity along principal axis u",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Principal-u real conductivity",
+          "name": "sigma_uu_re",
+          "required": false,
+          "unit": "S"
+        },
+        {
+          "doc": "inline imaginary sheet conductivity along principal axis u",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Principal-u imag conductivity",
+          "name": "sigma_uu_im",
+          "required": false,
+          "unit": "S"
+        },
+        {
+          "doc": "inline real sheet conductivity along principal axis v",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Principal-v real conductivity",
+          "name": "sigma_vv_re",
+          "required": false,
+          "unit": "S"
+        },
+        {
+          "doc": "inline imaginary sheet conductivity along principal axis v",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Principal-v imag conductivity",
+          "name": "sigma_vv_im",
+          "required": false,
+          "unit": "S"
+        },
+        {
+          "doc": "gate oxide capacitance per unit area C_ox for electrostatic chemical-potential gating",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Gate oxide capacitance",
+          "name": "c_ox",
+          "required": false,
+          "unit": "F/m^2"
+        },
+        {
+          "doc": "gate oxide relative permittivity eps_ox (used with d_ox when c_ox is 0)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Gate oxide relative permittivity",
+          "name": "eps_ox",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "gate oxide thickness d_ox in metres (used with eps_ox when c_ox is 0)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Gate oxide thickness",
+          "name": "d_ox",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "gate voltage offset V_CNP at the Dirac charge-neutrality point",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Charge-neutrality voltage",
+          "name": "v_cnp",
+          "required": false,
+          "unit": "V"
+        },
+        {
+          "doc": "uniform gate potential bias V_gate when no spatially varying potential field is imported",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Uniform gate voltage",
+          "name": "v_gate",
+          "required": false,
+          "unit": "V"
+        },
+        {
+          "doc": "reference frequency for conductivity evaluation (0 uses the study frequency)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Reference frequency",
+          "name": "f_ref",
+          "required": false,
+          "unit": "Hz"
+        }
+      ]
+    },
+    {
+      "applies": "boundary",
+      "doc": "Planar unit-cell face of a transversely Floquet-periodic driven study expanded in orthonormal TE/TM Rayleigh-Floquet harmonics; every propagating order is an S-matrix channel ('name:(m,n)TE|TM', |S|^2 = diffraction efficiency), evanescent orders enter the exact DtN operator.",
+      "kind": "diffraction_port",
+      "name": "Floquet diffraction port",
+      "params": [
+        {
+          "doc": "unique port identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Port name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "largest |m| of the Rayleigh harmonics along the first transverse axis (-1: automatic, all propagating orders at f_max plus one evanescent ring)",
+          "kind": {
+            "default": -1,
+            "max": null,
+            "min": -1,
+            "type": "integer"
+          },
+          "label": "Max order along axis 1",
+          "name": "m_max",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "largest |n| along the second transverse axis (-1: automatic)",
+          "kind": {
+            "default": -1,
+            "max": null,
+            "min": -1,
+            "type": "integer"
+          },
+          "label": "Max order along axis 2",
+          "name": "n_max",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Scattered-field plane wave E = A exp(i phase) p exp(-i k k_hat.(r - origin)) in the background (eps_bg, mu_bg); 'on' selects the scatterer (contrast) domains.",
+      "kind": "plane_wave",
+      "name": "Plane-wave excitation",
+      "params": [
+        {
+          "doc": "unique excitation identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Excitation name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "unit propagation vector k_hat in wafer axes",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Propagation direction",
+          "name": "direction",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "electric polarization; its component along k_hat is removed",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (real part)",
+          "name": "polarization",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part for elliptical polarization",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (imaginary part)",
+          "name": "polarization_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "field amplitude (plane wave) or focal amplitude (beams)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Amplitude",
+          "name": "amplitude",
+          "required": false,
+          "unit": "V/m"
+        },
+        {
+          "doc": "phase at the origin / focus",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Phase",
+          "name": "phase",
+          "required": false,
+          "unit": "rad"
+        },
+        {
+          "doc": "point where the incident phase equals 'phase'",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Phase origin",
+          "name": "origin",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "real part of the homogeneous background eps_r",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permittivity",
+          "name": "eps_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part (<= 0 for loss with exp(+i w t))",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Background permittivity (imaginary)",
+          "name": "eps_bg_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permeability",
+          "name": "mu_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Keep scattered fields",
+          "name": "keep_scattered",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Scattered-field Gaussian beam of waist w0 focused at 'focus' (exact complex-source/sink beam by default, or the paraxial model); 'on' selects the contrast domains.",
+      "kind": "gaussian_beam",
+      "name": "Gaussian-beam excitation",
+      "params": [
+        {
+          "doc": "unique excitation identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Excitation name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "unit propagation vector k_hat in wafer axes",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Propagation direction",
+          "name": "direction",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "electric polarization; its component along k_hat is removed",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (real part)",
+          "name": "polarization",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part for elliptical polarization",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (imaginary part)",
+          "name": "polarization_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "field amplitude (plane wave) or focal amplitude (beams)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Amplitude",
+          "name": "amplitude",
+          "required": false,
+          "unit": "V/m"
+        },
+        {
+          "doc": "phase at the origin / focus",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Phase",
+          "name": "phase",
+          "required": false,
+          "unit": "rad"
+        },
+        {
+          "doc": "beam focus",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Focus",
+          "name": "focus",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "1/e field radius at the focus",
+          "kind": {
+            "default": 1e-6,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Waist radius w0",
+          "name": "waist",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "exact complex-source/sink beam or first-order paraxial Gaussian",
+          "kind": {
+            "default": "complex_source",
+            "options": [
+              "complex_source",
+              "paraxial"
+            ],
+            "type": "choice"
+          },
+          "label": "Beam model",
+          "name": "model",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "real part of the homogeneous background eps_r",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permittivity",
+          "name": "eps_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part (<= 0 for loss with exp(+i w t))",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Background permittivity (imaginary)",
+          "name": "eps_bg_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permeability",
+          "name": "mu_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Keep scattered fields",
+          "name": "keep_scattered",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Scattered-field elliptical paraxial Gaussian beam with waists (waist_x, waist_y) at axial foci (focus_x, focus_y) relative to 'focus'.",
+      "kind": "astigmatic_gaussian_beam",
+      "name": "Astigmatic Gaussian-beam excitation",
+      "params": [
+        {
+          "doc": "unique excitation identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Excitation name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "unit propagation vector k_hat in wafer axes",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Propagation direction",
+          "name": "direction",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "electric polarization; its component along k_hat is removed",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (real part)",
+          "name": "polarization",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part for elliptical polarization",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (imaginary part)",
+          "name": "polarization_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "field amplitude (plane wave) or focal amplitude (beams)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Amplitude",
+          "name": "amplitude",
+          "required": false,
+          "unit": "V/m"
+        },
+        {
+          "doc": "phase at the origin / focus",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Phase",
+          "name": "phase",
+          "required": false,
+          "unit": "rad"
+        },
+        {
+          "doc": "beam reference point on the axis",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Reference point",
+          "name": "focus",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1e-6,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Waist along x_axis",
+          "name": "waist_x",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1e-6,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Waist along y",
+          "name": "waist_y",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "axial offset of the x waist from 'focus'",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Axial focus of x",
+          "name": "focus_x",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "axial offset of the y waist from 'focus'",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Axial focus of y",
+          "name": "focus_y",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "projected onto the plane normal to the direction",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Transverse x axis",
+          "name": "x_axis",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "real part of the homogeneous background eps_r",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permittivity",
+          "name": "eps_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part (<= 0 for loss with exp(+i w t))",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Background permittivity (imaginary)",
+          "name": "eps_bg_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permeability",
+          "name": "mu_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Keep scattered fields",
+          "name": "keep_scattered",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Scattered-field vectorial angular-spectrum focus of an aplanatic lens of numerical aperture NA (Gauss-Legendre x trapezoid superposition of exact plane waves).",
+      "kind": "thin_lens_beam",
+      "name": "Focused thin-lens excitation",
+      "params": [
+        {
+          "doc": "unique excitation identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Excitation name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "unit propagation vector k_hat in wafer axes",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Propagation direction",
+          "name": "direction",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "electric polarization; its component along k_hat is removed",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (real part)",
+          "name": "polarization",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part for elliptical polarization",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Polarization (imaginary part)",
+          "name": "polarization_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "field amplitude (plane wave) or focal amplitude (beams)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Amplitude",
+          "name": "amplitude",
+          "required": false,
+          "unit": "V/m"
+        },
+        {
+          "doc": "phase at the origin / focus",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Phase",
+          "name": "phase",
+          "required": false,
+          "unit": "rad"
+        },
+        {
+          "doc": "geometric focus",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Focus",
+          "name": "focus",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "n_bg sin(theta_max)",
+          "kind": {
+            "default": 0.5,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Numerical aperture",
+          "name": "NA",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "pupil x axis",
+          "kind": {
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Transverse x axis",
+          "name": "x_axis",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "Gaussian pupil apodization exp(-(sin theta / sin theta_max)^2 / filling^2); 0 = uniform",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Pupil filling factor",
+          "name": "filling",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 32,
+            "max": null,
+            "min": 2,
+            "type": "integer"
+          },
+          "label": "Polar quadrature points",
+          "name": "n_theta",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 48,
+            "max": null,
+            "min": 4,
+            "type": "integer"
+          },
+          "label": "Azimuthal quadrature points",
+          "name": "n_phi",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "real part of the homogeneous background eps_r",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permittivity",
+          "name": "eps_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part (<= 0 for loss with exp(+i w t))",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Background permittivity (imaginary)",
+          "name": "eps_bg_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permeability",
+          "name": "mu_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Keep scattered fields",
+          "name": "keep_scattered",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "applies": "domain",
+      "doc": "Hertzian electric (C m) or magnetic (A m^2) point dipole radiating into the background; it must lie outside the contrast domains selected by 'on'.",
+      "kind": "dipole",
+      "name": "Point-dipole excitation",
+      "params": [
+        {
+          "doc": "unique excitation identifier",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Excitation name",
+          "name": "name",
+          "required": true,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Position",
+          "name": "position",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "dipole moment, C m (electric) or A m^2 (magnetic)",
+          "kind": {
+            "default": [
+              1e-20,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Moment (real part)",
+          "name": "moment",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "len": 3,
+            "type": "vector"
+          },
+          "label": "Moment (imaginary part)",
+          "name": "moment_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "magnetic instead of electric dipole",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Magnetic dipole",
+          "name": "magnetic",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "real part of the homogeneous background eps_r",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permittivity",
+          "name": "eps_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "imaginary part (<= 0 for loss with exp(+i w t))",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Background permittivity (imaginary)",
+          "name": "eps_bg_im",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Background permeability",
+          "name": "mu_bg",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Keep scattered fields",
+          "name": "keep_scattered",
+          "required": false,
+          "unit": ""
+        }
+      ]
     }
   ],
   "exports": [
     {
       "field": "ems.E",
       "role": "optical_field"
+    },
+    {
+      "field": "ems.Q_opt",
+      "role": "heat_source"
     }
   ],
   "fields": {
@@ -877,7 +2110,85 @@
         "unit": "a.u."
       }
     ],
+    "dgtd": [
+      {
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (2D axisymmetric: azimuthal)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
+        "unit": "a.u."
+      }
+    ],
     "driven": [
+      {
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (2D axisymmetric: azimuthal)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
+        "unit": "a.u."
+      }
+    ],
+    "eme": [
+      {
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (2D axisymmetric: azimuthal)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
+        "unit": "a.u."
+      }
+    ],
+    "fdtd": [
       {
         "components": [],
         "doc": "magnitude of the electric field, scaled to a maximum of 1",
@@ -940,6 +2251,70 @@
         "name": "Ez",
         "unit": "a.u."
       }
+    ],
+    "nonlinear_driven": [
+      {
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral (2D axisymmetric: radial) component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (2D axisymmetric: azimuthal)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
+        "unit": "a.u."
+      }
+    ],
+    "nonlinear_modes": [
+      {
+        "components": [],
+        "doc": "magnitude of the electric field, scaled to a maximum of 1",
+        "name": "|E|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the transverse (in-plane) part",
+        "name": "|Exz|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "magnitude of the longitudinal part (along the propagation)",
+        "name": "|Ey|",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the lateral component, phase chosen so that the largest component is real",
+        "name": "Re Ex",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the y component (along the propagation)",
+        "name": "Re Ey",
+        "unit": "a.u."
+      },
+      {
+        "components": [],
+        "doc": "real part of the surface-normal component",
+        "name": "Re Ez",
+        "unit": "a.u."
+      }
     ]
   },
   "id": "ems",
@@ -947,6 +2322,18 @@
     {
       "field": "ems.temperature",
       "role": "temperature"
+    },
+    {
+      "field": "ems.potential",
+      "role": "potential"
+    },
+    {
+      "field": "ems.electric_field",
+      "role": "electric_field"
+    },
+    {
+      "field": "ems.strain",
+      "role": "strain"
     }
   ],
   "name": "Electromagnetic waves",
@@ -983,6 +2370,424 @@
       "name": "mu_r",
       "needed_by": [],
       "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Nonlinear Kerr index",
+      "name": "n_2",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^2/W"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Third-order susceptibility chi3_xxxx",
+      "name": "chi3_xxxx",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^2/V^2"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Third-order susceptibility chi3_xxyy",
+      "name": "chi3_xxyy",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^2/V^2"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Third-order susceptibility chi3_xyxy",
+      "name": "chi3_xyxy",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^2/V^2"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Third-order susceptibility chi3_xyyx",
+      "name": "chi3_xyyx",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^2/V^2"
+    },
+    {
+      "default": 1.0,
+      "kind": "scalar",
+      "label": "Maker-Terhune cross-polarization ratio B/A",
+      "name": "b_over_a",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Two-photon absorption coefficient",
+      "name": "beta_tpa",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/W"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Free-carrier absorption cross-section",
+      "name": "sigma_fca",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^2"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Free-carrier dispersion coefficient",
+      "name": "k_fcd",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m^3"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Free-carrier lifetime",
+      "name": "tau_c",
+      "needed_by": [
+        "nonlinear_driven",
+        "nonlinear_modes",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "s"
+    },
+    {
+      "default": null,
+      "kind": "matrix3x6",
+      "label": "Second-order nonlinear tensor d_iJ",
+      "name": "chi2_d",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 1.0,
+      "kind": "scalar",
+      "label": "Uniform QPM poling sign (+1 or -1)",
+      "name": "qpm_sign",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Periodic QPM poling period",
+      "name": "qpm_period",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Periodic QPM poling period alias",
+      "name": "Lambda_qpm",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m"
+    },
+    {
+      "default": 0.5,
+      "kind": "scalar",
+      "label": "Periodic QPM positive-domain duty cycle",
+      "name": "qpm_duty_cycle",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": ""
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "Periodic QPM spatial phase offset",
+      "name": "qpm_phase_offset",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d11",
+      "name": "d11",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d12",
+      "name": "d12",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d13",
+      "name": "d13",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d14",
+      "name": "d14",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d15",
+      "name": "d15",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d16",
+      "name": "d16",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d21",
+      "name": "d21",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d22",
+      "name": "d22",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d23",
+      "name": "d23",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d24",
+      "name": "d24",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d25",
+      "name": "d25",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d26",
+      "name": "d26",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d31",
+      "name": "d31",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d32",
+      "name": "d32",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d33",
+      "name": "d33",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d34",
+      "name": "d34",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d35",
+      "name": "d35",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
+    },
+    {
+      "default": 0.0,
+      "kind": "scalar",
+      "label": "d36",
+      "name": "d36",
+      "needed_by": [
+        "nonlinear_driven",
+        "dgtd",
+        "fdtd"
+      ],
+      "unit": "m/V"
     }
   ],
   "schema": {
@@ -1541,7 +3346,7 @@
             },
             {
               "additionalProperties": false,
-              "description": "2D boundary-mode waveguide port on an exterior face in a 3D driven frequency sweep.",
+              "description": "2D boundary-mode waveguide port on an exterior face in a 3D driven or EME study.",
               "properties": {
                 "kind": {
                   "const": "waveport"
@@ -1588,6 +3393,855 @@
                 "kind"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Penetrable zero-thickness 2D material sheet (e.g. monolayer Kubo graphene or anisotropic 2D crystal) with 2x2 tangential surface conductivity tensor sigma_2D(omega, T, mu_c, B_0) in Siemens.",
+              "properties": {
+                "kind": {
+                  "const": "sheet_2d"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "b_0": {
+                      "default": 0.0,
+                      "description": "Out-of-plane magnetic bias [T]. static out-of-plane magnetic flux density B_0 in Tesla (Hall effect)",
+                      "type": "number"
+                    },
+                    "c_ox": {
+                      "default": 0.0,
+                      "description": "Gate oxide capacitance [F/m^2]. gate oxide capacitance per unit area C_ox for electrostatic chemical-potential gating",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "d_ox": {
+                      "default": 0.0,
+                      "description": "Gate oxide thickness [m]. gate oxide thickness d_ox in metres (used with eps_ox when c_ox is 0)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "eps_ox": {
+                      "default": 0.0,
+                      "description": "Gate oxide relative permittivity. gate oxide relative permittivity eps_ox (used with d_ox when c_ox is 0)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "f_ref": {
+                      "default": 0.0,
+                      "description": "Reference frequency [Hz]. reference frequency for conductivity evaluation (0 uses the study frequency)",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "material": {
+                      "default": "",
+                      "description": "2D sheet material. optional material from the library with a [sheet_2d] block",
+                      "type": "string"
+                    },
+                    "model": {
+                      "default": "kubo_graphene",
+                      "description": "Sheet dispersion model. surface conductivity model when material is omitted",
+                      "enum": [
+                        "kubo_graphene",
+                        "anisotropic",
+                        "constant"
+                      ],
+                      "type": "string"
+                    },
+                    "mu_c_eV": {
+                      "default": 0.3,
+                      "description": "Chemical potential [eV]. Dirac Fermi level / chemical potential mu_c in eV",
+                      "type": "number"
+                    },
+                    "n_layers": {
+                      "default": 1.0,
+                      "description": "Number of layers. effective number of decoupled 2D layers",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "sigma_uu_im": {
+                      "default": 0.0,
+                      "description": "Principal-u imag conductivity [S]. inline imaginary sheet conductivity along principal axis u",
+                      "type": "number"
+                    },
+                    "sigma_uu_re": {
+                      "default": 0.0,
+                      "description": "Principal-u real conductivity [S]. inline real sheet conductivity along principal axis u",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "sigma_vv_im": {
+                      "default": 0.0,
+                      "description": "Principal-v imag conductivity [S]. inline imaginary sheet conductivity along principal axis v",
+                      "type": "number"
+                    },
+                    "sigma_vv_re": {
+                      "default": 0.0,
+                      "description": "Principal-v real conductivity [S]. inline real sheet conductivity along principal axis v",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "tau_s": {
+                      "default": 5e-13,
+                      "description": "Relaxation time [s]. carrier momentum relaxation time tau in seconds",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "temperature": {
+                      "default": 300.0,
+                      "description": "Temperature [K]. sheet temperature T in Kelvin",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "theta_deg": {
+                      "default": 0.0,
+                      "description": "In-plane rotation [deg]. in-plane rotation angle of principal axes (u, v) in degrees",
+                      "type": "number"
+                    },
+                    "v_cnp": {
+                      "default": 0.0,
+                      "description": "Charge-neutrality voltage [V]. gate voltage offset V_CNP at the Dirac charge-neutrality point",
+                      "type": "number"
+                    },
+                    "v_f": {
+                      "default": 1000000.0,
+                      "description": "Fermi velocity [m/s]. Dirac Fermi velocity v_F in m/s",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "v_gate": {
+                      "default": 0.0,
+                      "description": "Uniform gate voltage [V]. uniform gate potential bias V_gate when no spatially varying potential field is imported",
+                      "type": "number"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Planar unit-cell face of a transversely Floquet-periodic driven study expanded in orthonormal TE/TM Rayleigh-Floquet harmonics; every propagating order is an S-matrix channel ('name:(m,n)TE|TM', |S|^2 = diffraction efficiency), evanescent orders enter the exact DtN operator.",
+              "properties": {
+                "kind": {
+                  "const": "diffraction_port"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "m_max": {
+                      "default": -1,
+                      "description": "Max order along axis 1. largest |m| of the Rayleigh harmonics along the first transverse axis (-1: automatic, all propagating orders at f_max plus one evanescent ring)",
+                      "minimum": -1,
+                      "type": "integer"
+                    },
+                    "n_max": {
+                      "default": -1,
+                      "description": "Max order along axis 2. largest |n| along the second transverse axis (-1: automatic)",
+                      "minimum": -1,
+                      "type": "integer"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Port name. unique port identifier",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Scattered-field plane wave E = A exp(i phase) p exp(-i k k_hat.(r - origin)) in the background (eps_bg, mu_bg); 'on' selects the scatterer (contrast) domains.",
+              "properties": {
+                "kind": {
+                  "const": "plane_wave"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amplitude": {
+                      "default": 1.0,
+                      "description": "Amplitude [V/m]. field amplitude (plane wave) or focal amplitude (beams)",
+                      "type": "number"
+                    },
+                    "direction": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        -1.0
+                      ],
+                      "description": "Propagation direction. unit propagation vector k_hat in wafer axes",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "eps_bg": {
+                      "default": 1.0,
+                      "description": "Background permittivity. real part of the homogeneous background eps_r",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "eps_bg_im": {
+                      "default": 0.0,
+                      "description": "Background permittivity (imaginary). imaginary part (<= 0 for loss with exp(+i w t))",
+                      "type": "number"
+                    },
+                    "keep_scattered": {
+                      "default": true,
+                      "description": "Keep scattered fields. also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+                      "type": "boolean"
+                    },
+                    "mu_bg": {
+                      "default": 1.0,
+                      "description": "Background permeability",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Excitation name. unique excitation identifier",
+                      "type": "string"
+                    },
+                    "origin": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Phase origin [m]. point where the incident phase equals 'phase'",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "phase": {
+                      "default": 0.0,
+                      "description": "Phase [rad]. phase at the origin / focus",
+                      "type": "number"
+                    },
+                    "polarization": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (real part). electric polarization; its component along k_hat is removed",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "polarization_im": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (imaginary part). imaginary part for elliptical polarization",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Scattered-field Gaussian beam of waist w0 focused at 'focus' (exact complex-source/sink beam by default, or the paraxial model); 'on' selects the contrast domains.",
+              "properties": {
+                "kind": {
+                  "const": "gaussian_beam"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amplitude": {
+                      "default": 1.0,
+                      "description": "Amplitude [V/m]. field amplitude (plane wave) or focal amplitude (beams)",
+                      "type": "number"
+                    },
+                    "direction": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        -1.0
+                      ],
+                      "description": "Propagation direction. unit propagation vector k_hat in wafer axes",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "eps_bg": {
+                      "default": 1.0,
+                      "description": "Background permittivity. real part of the homogeneous background eps_r",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "eps_bg_im": {
+                      "default": 0.0,
+                      "description": "Background permittivity (imaginary). imaginary part (<= 0 for loss with exp(+i w t))",
+                      "type": "number"
+                    },
+                    "focus": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Focus [m]. beam focus",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "keep_scattered": {
+                      "default": true,
+                      "description": "Keep scattered fields. also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "default": "complex_source",
+                      "description": "Beam model. exact complex-source/sink beam or first-order paraxial Gaussian",
+                      "enum": [
+                        "complex_source",
+                        "paraxial"
+                      ],
+                      "type": "string"
+                    },
+                    "mu_bg": {
+                      "default": 1.0,
+                      "description": "Background permeability",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Excitation name. unique excitation identifier",
+                      "type": "string"
+                    },
+                    "phase": {
+                      "default": 0.0,
+                      "description": "Phase [rad]. phase at the origin / focus",
+                      "type": "number"
+                    },
+                    "polarization": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (real part). electric polarization; its component along k_hat is removed",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "polarization_im": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (imaginary part). imaginary part for elliptical polarization",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "waist": {
+                      "default": 1e-6,
+                      "description": "Waist radius w0 [m]. 1/e field radius at the focus",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Scattered-field elliptical paraxial Gaussian beam with waists (waist_x, waist_y) at axial foci (focus_x, focus_y) relative to 'focus'.",
+              "properties": {
+                "kind": {
+                  "const": "astigmatic_gaussian_beam"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amplitude": {
+                      "default": 1.0,
+                      "description": "Amplitude [V/m]. field amplitude (plane wave) or focal amplitude (beams)",
+                      "type": "number"
+                    },
+                    "direction": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        -1.0
+                      ],
+                      "description": "Propagation direction. unit propagation vector k_hat in wafer axes",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "eps_bg": {
+                      "default": 1.0,
+                      "description": "Background permittivity. real part of the homogeneous background eps_r",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "eps_bg_im": {
+                      "default": 0.0,
+                      "description": "Background permittivity (imaginary). imaginary part (<= 0 for loss with exp(+i w t))",
+                      "type": "number"
+                    },
+                    "focus": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Reference point [m]. beam reference point on the axis",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "focus_x": {
+                      "default": 0.0,
+                      "description": "Axial focus of x [m]. axial offset of the x waist from 'focus'",
+                      "type": "number"
+                    },
+                    "focus_y": {
+                      "default": 0.0,
+                      "description": "Axial focus of y [m]. axial offset of the y waist from 'focus'",
+                      "type": "number"
+                    },
+                    "keep_scattered": {
+                      "default": true,
+                      "description": "Keep scattered fields. also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+                      "type": "boolean"
+                    },
+                    "mu_bg": {
+                      "default": 1.0,
+                      "description": "Background permeability",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Excitation name. unique excitation identifier",
+                      "type": "string"
+                    },
+                    "phase": {
+                      "default": 0.0,
+                      "description": "Phase [rad]. phase at the origin / focus",
+                      "type": "number"
+                    },
+                    "polarization": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (real part). electric polarization; its component along k_hat is removed",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "polarization_im": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (imaginary part). imaginary part for elliptical polarization",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "waist_x": {
+                      "default": 1e-6,
+                      "description": "Waist along x_axis [m]",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "waist_y": {
+                      "default": 1e-6,
+                      "description": "Waist along y [m]",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "x_axis": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Transverse x axis. projected onto the plane normal to the direction",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Scattered-field vectorial angular-spectrum focus of an aplanatic lens of numerical aperture NA (Gauss-Legendre x trapezoid superposition of exact plane waves).",
+              "properties": {
+                "kind": {
+                  "const": "thin_lens_beam"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "NA": {
+                      "default": 0.5,
+                      "description": "Numerical aperture. n_bg sin(theta_max)",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "amplitude": {
+                      "default": 1.0,
+                      "description": "Amplitude [V/m]. field amplitude (plane wave) or focal amplitude (beams)",
+                      "type": "number"
+                    },
+                    "direction": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        -1.0
+                      ],
+                      "description": "Propagation direction. unit propagation vector k_hat in wafer axes",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "eps_bg": {
+                      "default": 1.0,
+                      "description": "Background permittivity. real part of the homogeneous background eps_r",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "eps_bg_im": {
+                      "default": 0.0,
+                      "description": "Background permittivity (imaginary). imaginary part (<= 0 for loss with exp(+i w t))",
+                      "type": "number"
+                    },
+                    "filling": {
+                      "default": 0.0,
+                      "description": "Pupil filling factor. Gaussian pupil apodization exp(-(sin theta / sin theta_max)^2 / filling^2); 0 = uniform",
+                      "minimum": 0.0,
+                      "type": "number"
+                    },
+                    "focus": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Focus [m]. geometric focus",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "keep_scattered": {
+                      "default": true,
+                      "description": "Keep scattered fields. also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+                      "type": "boolean"
+                    },
+                    "mu_bg": {
+                      "default": 1.0,
+                      "description": "Background permeability",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "n_phi": {
+                      "default": 48,
+                      "description": "Azimuthal quadrature points",
+                      "minimum": 4,
+                      "type": "integer"
+                    },
+                    "n_theta": {
+                      "default": 32,
+                      "description": "Polar quadrature points",
+                      "minimum": 2,
+                      "type": "integer"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Excitation name. unique excitation identifier",
+                      "type": "string"
+                    },
+                    "phase": {
+                      "default": 0.0,
+                      "description": "Phase [rad]. phase at the origin / focus",
+                      "type": "number"
+                    },
+                    "polarization": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (real part). electric polarization; its component along k_hat is removed",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "polarization_im": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Polarization (imaginary part). imaginary part for elliptical polarization",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "x_axis": {
+                      "default": [
+                        1.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Transverse x axis. pupil x axis",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Hertzian electric (C m) or magnetic (A m^2) point dipole radiating into the background; it must lie outside the contrast domains selected by 'on'.",
+              "properties": {
+                "kind": {
+                  "const": "dipole"
+                },
+                "on": {
+                  "description": "a region name or a boundary selector",
+                  "type": "string"
+                },
+                "params": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "eps_bg": {
+                      "default": 1.0,
+                      "description": "Background permittivity. real part of the homogeneous background eps_r",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "eps_bg_im": {
+                      "default": 0.0,
+                      "description": "Background permittivity (imaginary). imaginary part (<= 0 for loss with exp(+i w t))",
+                      "type": "number"
+                    },
+                    "keep_scattered": {
+                      "default": true,
+                      "description": "Keep scattered fields. also emit the scattered cell fields Esx..Esz, Hsx..Hsz",
+                      "type": "boolean"
+                    },
+                    "magnetic": {
+                      "default": false,
+                      "description": "Magnetic dipole. magnetic instead of electric dipole",
+                      "type": "boolean"
+                    },
+                    "moment": {
+                      "default": [
+                        1e-20,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Moment (real part). dipole moment, C m (electric) or A m^2 (magnetic)",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "moment_im": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Moment (imaginary part)",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "mu_bg": {
+                      "default": 1.0,
+                      "description": "Background permeability",
+                      "minimum": 2.2250738585072014e-308,
+                      "type": "number"
+                    },
+                    "name": {
+                      "default": "",
+                      "description": "Excitation name. unique excitation identifier",
+                      "type": "string"
+                    },
+                    "position": {
+                      "default": [
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "description": "Position [m]",
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "on",
+                "kind"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -1603,6 +4257,120 @@
             {
               "additionalProperties": false,
               "properties": {
+                "Lambda_qpm": {
+                  "description": "Periodic QPM poling period alias [m]",
+                  "type": "number"
+                },
+                "b_over_a": {
+                  "description": "Maker-Terhune cross-polarization ratio B/A []",
+                  "type": "number"
+                },
+                "beta_tpa": {
+                  "description": "Two-photon absorption coefficient [m/W]",
+                  "type": "number"
+                },
+                "chi2_d": {
+                  "description": "Second-order nonlinear tensor d_iJ [m/V]",
+                  "items": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "type": "array"
+                },
+                "chi3_xxxx": {
+                  "description": "Third-order susceptibility chi3_xxxx [m^2/V^2]",
+                  "type": "number"
+                },
+                "chi3_xxyy": {
+                  "description": "Third-order susceptibility chi3_xxyy [m^2/V^2]",
+                  "type": "number"
+                },
+                "chi3_xyxy": {
+                  "description": "Third-order susceptibility chi3_xyxy [m^2/V^2]",
+                  "type": "number"
+                },
+                "chi3_xyyx": {
+                  "description": "Third-order susceptibility chi3_xyyx [m^2/V^2]",
+                  "type": "number"
+                },
+                "d11": {
+                  "description": "d11 [m/V]",
+                  "type": "number"
+                },
+                "d12": {
+                  "description": "d12 [m/V]",
+                  "type": "number"
+                },
+                "d13": {
+                  "description": "d13 [m/V]",
+                  "type": "number"
+                },
+                "d14": {
+                  "description": "d14 [m/V]",
+                  "type": "number"
+                },
+                "d15": {
+                  "description": "d15 [m/V]",
+                  "type": "number"
+                },
+                "d16": {
+                  "description": "d16 [m/V]",
+                  "type": "number"
+                },
+                "d21": {
+                  "description": "d21 [m/V]",
+                  "type": "number"
+                },
+                "d22": {
+                  "description": "d22 [m/V]",
+                  "type": "number"
+                },
+                "d23": {
+                  "description": "d23 [m/V]",
+                  "type": "number"
+                },
+                "d24": {
+                  "description": "d24 [m/V]",
+                  "type": "number"
+                },
+                "d25": {
+                  "description": "d25 [m/V]",
+                  "type": "number"
+                },
+                "d26": {
+                  "description": "d26 [m/V]",
+                  "type": "number"
+                },
+                "d31": {
+                  "description": "d31 [m/V]",
+                  "type": "number"
+                },
+                "d32": {
+                  "description": "d32 [m/V]",
+                  "type": "number"
+                },
+                "d33": {
+                  "description": "d33 [m/V]",
+                  "type": "number"
+                },
+                "d34": {
+                  "description": "d34 [m/V]",
+                  "type": "number"
+                },
+                "d35": {
+                  "description": "d35 [m/V]",
+                  "type": "number"
+                },
+                "d36": {
+                  "description": "d36 [m/V]",
+                  "type": "number"
+                },
                 "eps_r": {
                   "description": "Relative permittivity []",
                   "oneOf": [
@@ -1677,6 +4445,10 @@
                     }
                   ]
                 },
+                "k_fcd": {
+                  "description": "Free-carrier dispersion coefficient [m^3]",
+                  "type": "number"
+                },
                 "loss_tangent": {
                   "description": "Dielectric loss tangent []",
                   "oneOf": [
@@ -1716,6 +4488,34 @@
                 },
                 "mu_r": {
                   "description": "Relative permeability []",
+                  "type": "number"
+                },
+                "n_2": {
+                  "description": "Nonlinear Kerr index [m^2/W]",
+                  "type": "number"
+                },
+                "qpm_duty_cycle": {
+                  "description": "Periodic QPM positive-domain duty cycle []",
+                  "type": "number"
+                },
+                "qpm_period": {
+                  "description": "Periodic QPM poling period [m]",
+                  "type": "number"
+                },
+                "qpm_phase_offset": {
+                  "description": "Periodic QPM spatial phase offset [m]",
+                  "type": "number"
+                },
+                "qpm_sign": {
+                  "description": "Uniform QPM poling sign (+1 or -1) []",
+                  "type": "number"
+                },
+                "sigma_fca": {
+                  "description": "Free-carrier absorption cross-section [m^2]",
+                  "type": "number"
+                },
+                "tau_c": {
+                  "description": "Free-carrier lifetime [s]",
                   "type": "number"
                 }
               },
@@ -2057,6 +4857,751 @@
                     "default": false,
                     "description": "Strict PROM tolerance. return an error if max_prom_residual still exceeds prom_tol after max_hdm_solves",
                     "type": "boolean"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "3D bidirectional eigenmode expansion along +y over uniform, explicit, composite, or periodic cross-section segments with BLAKE3 slice deduplication, exact cross-power interface scattering matrices, Redheffer star products, cylindrical bends, and thermo-optic coupling.",
+            "properties": {
+              "kind": {
+                "const": "eme"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "bend_radius": {
+                    "default": 0.0,
+                    "description": "Cylindrical bend radius [m]. optional in-plane bend radius R_bend in metres along x (0 disables bending)",
+                    "type": "number"
+                  },
+                  "evanescent": {
+                    "default": false,
+                    "description": "Evanescent target. search around an imaginary effective index",
+                    "type": "boolean"
+                  },
+                  "freq": {
+                    "default": 193400000000000.0,
+                    "description": "Frequency [Hz]. operating optical or microwave frequency",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "grid_json": {
+                    "default": "",
+                    "description": "Nested grid specification JSON. optional serialized EmeGridSpec JSON ('uniform', 'explicit', 'composite', or 'periodic_subgrid') overriding flat grid parameters",
+                    "type": "string"
+                  },
+                  "grid_kind": {
+                    "default": "uniform",
+                    "description": "Segment partition kind. partition kind along +y ('uniform', 'explicit', 'periodic_subgrid', or 'json' for nested composite/periodic specs)",
+                    "enum": [
+                      "uniform",
+                      "explicit",
+                      "periodic_subgrid",
+                      "composite",
+                      "json"
+                    ],
+                    "type": "string"
+                  },
+                  "lengths": {
+                    "default": [],
+                    "description": "Explicit segment lengths [m]. explicit positive segment lengths L_c in metres along +y",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "n_cells": {
+                    "default": 10,
+                    "description": "Uniform slice count. number of uniform slices along +y (or per unit cell)",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_modes": {
+                    "default": 6,
+                    "description": "Modes per slice. default number of eigenmodes solved per unique 2D cross-section",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_target": {
+                    "default": 1.5,
+                    "description": "Effective index near. default target effective index for 2D slice mode searches",
+                    "type": "number"
+                  },
+                  "num_reps": {
+                    "default": 1,
+                    "description": "Periodic repetitions. unit-cell repetition count N_rep for 'periodic_subgrid'",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "port_modes": {
+                    "default": 0,
+                    "description": "Exposed terminal modes per end. number of end-slice modes exposed in DrivenPortData when no waveport conditions are set (0 exposes all solved modes)",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "port_z0_ohm": {
+                    "default": 50.0,
+                    "description": "Reference circuit impedance [Ohm]. reference impedance Z_0 for S-to-Z/Y conversion when no waveport z0_ohm is set",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "reconstruct_fields": {
+                    "default": true,
+                    "description": "Reconstruct 3D electric field. reconstruct the 3D bidirectional modal superposition electric field on the mesh under port 1 excitation",
+                    "type": "boolean"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  },
+                  "y_range": {
+                    "default": [],
+                    "description": "Propagation y bounds [m]. optional [y0, y1] propagation interval in metres along +y; defaults to the mesh y-bounds",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "freq"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "3D frequency-domain nonlinear optics solver: single-tone chi^(3) Kerr + TPA + FCA/FCD Harmonic Balance FEM (with power-ramp and pseudo-arclength optical bistability continuation) and multi-harmonic chi^(2) / chi^(3) XPM Coupled-Wave FEM (SHG, SFG, DFG, OPA, depleted or undepleted, with Gauss-point QPM poling).",
+            "properties": {
+              "kind": {
+                "const": "nonlinear_driven"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "arclength_ds": {
+                    "default": 0.08,
+                    "description": "Initial arclength step. dimensionless initial step size Delta s for pseudo-arclength continuation",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "arclength_max_steps": {
+                    "default": 240,
+                    "description": "Max arclength steps. maximum continuation steps along the pseudo-arclength curve",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "continuation": {
+                    "default": "power_ramp",
+                    "description": "Continuation method. 'power_ramp' for monotonic power sweeps or 'arclength' for Keller pseudo-arclength continuation across bistable S-curve turning points",
+                    "enum": [
+                      "power_ramp",
+                      "arclength"
+                    ],
+                    "type": "string"
+                  },
+                  "coupling": {
+                    "default": "depleted",
+                    "description": "Harmonic coupling mode. 'depleted' solves the fully coupled multi-harmonic system with exact pump depletion and Manley-Rowe conservation; 'undepleted' omits back-action onto the pump",
+                    "enum": [
+                      "depleted",
+                      "undepleted"
+                    ],
+                    "type": "string"
+                  },
+                  "drive_port": {
+                    "default": 0,
+                    "description": "Primary drive port index. 0-based port index driven by power_w",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "freq": {
+                    "default": 193414489000000.0,
+                    "description": "Primary / pump frequency [Hz]. primary optical or microwave frequency f_1",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "freq_2": {
+                    "default": 0.0,
+                    "description": "Secondary / signal frequency [Hz]. secondary/signal frequency f_2 in Hz for non-degenerate 'sfg', 'dfg', 'opa', or 'chi3_xpm'",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "max_it": {
+                    "default": 40,
+                    "description": "Max Newton iterations. maximum nonlinear iterations per step",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_steps": {
+                    "default": 1,
+                    "description": "Sweep steps. number of uniform power steps when powers_w is empty",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "nl_solver": {
+                    "default": "newton",
+                    "description": "Nonlinear solver. 'newton' (sparse direct LU reusing symbolic factorization) or 'jfnk' (LU-preconditioned Jacobian-free Newton-Krylov)",
+                    "enum": [
+                      "newton",
+                      "jfnk"
+                    ],
+                    "type": "string"
+                  },
+                  "port_phases_rad": {
+                    "default": [],
+                    "description": "Per-port pump phases [rad]. optional per-port incident pump phases in radians",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "port_powers_w": {
+                    "default": [],
+                    "description": "Per-port pump powers [W]. optional per-port incident pump powers in Watts (enables arbitrary polarization/ellipticity mixtures)",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "power_max_w": {
+                    "default": 0.0,
+                    "description": "Maximum sweep power [W]. maximum power in Watts for multi-step sweeps or arclength continuation",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "power_min_w": {
+                    "default": 0.0,
+                    "description": "Minimum sweep power [W]. starting power in Watts for multi-step sweeps or arclength continuation",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "power_w": {
+                    "default": 1.0,
+                    "description": "Input pump power [W]. incident pump optical power in Watts",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "powers_w": {
+                    "default": [],
+                    "description": "Explicit power sweep [W]. optional sequence of incident pump powers in Watts for power_ramp continuation",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "process": {
+                    "default": "auto",
+                    "description": "Nonlinear process. nonlinear interaction kind ('auto', 'chi3', 'chi3_xpm', 'shg', 'sfg', 'dfg', or 'opa')",
+                    "enum": [
+                      "auto",
+                      "chi3",
+                      "chi3_xpm",
+                      "shg",
+                      "sfg",
+                      "dfg",
+                      "opa"
+                    ],
+                    "type": "string"
+                  },
+                  "rtol": {
+                    "default": 1e-10,
+                    "description": "Relative residual tolerance. nonlinear convergence relative residual tolerance",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "signal_phase_rad": {
+                    "default": 0.0,
+                    "description": "Signal phase [rad]. incident phase of the secondary/signal wave in radians",
+                    "type": "number"
+                  },
+                  "signal_port": {
+                    "default": 0,
+                    "description": "Signal port index. 0-based port index for the secondary/signal wave",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "signal_power_w": {
+                    "default": 0.0,
+                    "description": "Signal / seed power [W]. incident signal/seed power in Watts for 'sfg', 'dfg', 'opa', 'chi3_xpm', or seeded 'shg'",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "freq"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "2D cross-section nonlinear waveguide mode analysis computing vectorial nonlinear parameter gamma (1/(W*m)), effective mode area A_eff (m^2), TPA figure of merit, and fixed-power Newton continuation n_eff(P).",
+            "properties": {
+              "kind": {
+                "const": "nonlinear_modes"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "evanescent": {
+                    "default": false,
+                    "description": "Evanescent target. search around an imaginary effective index",
+                    "type": "boolean"
+                  },
+                  "freq": {
+                    "default": 193414489000000.0,
+                    "description": "Frequency [Hz]. operating optical frequency",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "max_it": {
+                    "default": 30,
+                    "description": "Max Newton iterations. maximum Newton iterations per power point",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mode_index": {
+                    "default": 1,
+                    "description": "Mode index. 1-based index of the guided mode to track across optical power P",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_target": {
+                    "default": 1.8,
+                    "description": "Effective index near. target effective index for the baseline linear mode search",
+                    "type": "number"
+                  },
+                  "power_w": {
+                    "default": 1.0,
+                    "description": "Guided optical power [W]. guided Poynting power P in Watts when powers_w is empty",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "powers_w": {
+                    "default": [],
+                    "description": "Explicit guided powers [W]. optional sequence of guided optical powers P >= 0 in Watts",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "rtol": {
+                    "default": 1e-10,
+                    "description": "Relative residual tolerance. bordered Newton relative residual tolerance",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "freq"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "High-order curved and mixed-cell 2D/3D Discontinuous Galerkin time-domain solver with pre-inverted element mass matrices, Rankine-Hugoniot upwind and energy-conserving central fluxes, penetrable zero-thickness 2D sheet jumps, dispersive ADE poles, instantaneous chi^(2)/chi^(3) Kerr + QPM + TPA/FCA nonlinearity, FEM-seeded waveguide modal ports, and power-of-two Local Time-Stepping (LTS).",
+            "properties": {
+              "kind": {
+                "const": "dgtd"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "absorbing_on": {
+                    "default": "",
+                    "description": "Silver-Muller absorbing boundaries. optional comma-separated boundary selectors treated as first-order Silver-Muller absorbing boundaries",
+                    "type": "string"
+                  },
+                  "backend": {
+                    "default": "auto",
+                    "description": "Compute backend. time-domain compute backend ('auto', 'cpu', or 'gpu'; 'gpu' requires --features gpu)",
+                    "enum": [
+                      "auto",
+                      "cpu",
+                      "gpu"
+                    ],
+                    "type": "string"
+                  },
+                  "basis_order": {
+                    "default": 0,
+                    "description": "Polynomial basis order override. optional DG polynomial basis order p in 1..=3 (0 uses the problem element order)",
+                    "maximum": 3,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "cfl": {
+                    "default": 0.8,
+                    "description": "CFL factor. Courant-Friedrichs-Lewy local stability multiplier",
+                    "maximum": 2.0,
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "excited_port": {
+                    "default": 1,
+                    "description": "Excited port index. 1-based index of the driven waveport or lumped port",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "f0": {
+                    "default": 193400000000000.0,
+                    "description": "Carrier / peak frequency [Hz]. source pulse center frequency",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "f_max": {
+                    "default": 0.0,
+                    "description": "Monitor stop frequency [Hz]. optional stop frequency for running DFT monitors (>= f_min)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "f_min": {
+                    "default": 0.0,
+                    "description": "Monitor start frequency [Hz]. optional start frequency for running DFT monitors (0 uses f0)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "flux": {
+                    "default": "upwind",
+                    "description": "Numerical Riemann flux. element-interface Riemann flux ('upwind' Rankine-Hugoniot or 'central' energy-conserving)",
+                    "enum": [
+                      "upwind",
+                      "central"
+                    ],
+                    "type": "string"
+                  },
+                  "flux_monitors_on": {
+                    "default": "",
+                    "description": "Surface Poynting flux monitors. optional comma-separated boundary or interface selectors recorded as running DFT Poynting flux monitors",
+                    "type": "string"
+                  },
+                  "freqs_hz": {
+                    "default": [],
+                    "description": "Explicit monitor frequencies [Hz]. optional explicit ascending frequency grid in Hz for running DFT monitors",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "fwidth": {
+                    "default": 0.0,
+                    "description": "Pulse bandwidth [Hz]. Gaussian pulse bandwidth parameter f_width (0 defaults to 0.25 * f0)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "max_lts_tiers": {
+                    "default": 6,
+                    "description": "Maximum LTS tiers. maximum number of power-of-two local time-stepping CFL tiers L (dt_ell = 2^ell dt_0; 1 forces uniform stepping)",
+                    "maximum": 12,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "n_freqs": {
+                    "default": 1,
+                    "description": "Monitor frequency points. number of uniformly spaced DFT monitor frequencies in [f_min, f_max]",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "nonlinear": {
+                    "default": false,
+                    "description": "Enable nonlinear polarization. opt-in activation for material [nonlinear] chi^(2)/chi^(3) Kerr, SHG, QPM, and TPA/FCA terms (false auto-skips library [nonlinear] blocks for linear speed)",
+                    "type": "boolean"
+                  },
+                  "polarization": {
+                    "default": "full",
+                    "description": "2D/3D polarization. active electromagnetic polarization ('full' 6-component, 2D 'tm', or 2D 'te')",
+                    "enum": [
+                      "full",
+                      "tm",
+                      "te"
+                    ],
+                    "type": "string"
+                  },
+                  "precision": {
+                    "default": "auto",
+                    "description": "GPU floating-point precision. GPU floating-point precision ('auto' picks f64 for nonlinear runs when SHADER_F64 is supported, otherwise scaled f32)",
+                    "enum": [
+                      "auto",
+                      "f32",
+                      "f64"
+                    ],
+                    "type": "string"
+                  },
+                  "pulse": {
+                    "default": "gaussian",
+                    "description": "Source pulse waveform. broadband source pulse waveform ('gaussian' carrier or 'ricker' wavelet)",
+                    "enum": [
+                      "gaussian",
+                      "ricker"
+                    ],
+                    "type": "string"
+                  },
+                  "pulse_amplitude": {
+                    "default": 1.0,
+                    "description": "Pulse amplitude. source pulse peak amplitude scale factor A (incident port peak power scales as A^2)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  },
+                  "t_final": {
+                    "default": 1e-13,
+                    "description": "Simulation duration [s]. total physical time-stepping duration",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
+                  },
+                  "time_stepper": {
+                    "default": "lts",
+                    "description": "Explicit time integrator. time integration scheme ('lts' multi-rate power-of-two local time-stepping, 'lserk4', or 'rk4')",
+                    "enum": [
+                      "lts",
+                      "lserk4",
+                      "rk4"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "t_final"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "2D and 3D SIMD structured subpixel Yee FDTD solver with Farjadpour polarized dielectric averaging, Dey-Mittra conformal PEC, Drude/Lorentz ADE dispersion, instantaneous chi^(2)/chi^(3) Kerr + QPM + TPA/FCA nonlinearity, CFS-PML/Absorber/Bloch boundaries, FEM-seeded ModeSource and ModeMonitor ports, broadband DFT/flux/diffraction monitors, and Prony cavity resonance extraction.",
+            "properties": {
+              "kind": {
+                "const": "fdtd"
+              },
+              "params": {
+                "additionalProperties": false,
+                "properties": {
+                  "backend": {
+                    "default": "auto",
+                    "description": "Compute backend. time-domain compute backend ('auto', 'cpu', or 'gpu'; 'gpu' requires --features gpu)",
+                    "enum": [
+                      "auto",
+                      "cpu",
+                      "gpu"
+                    ],
+                    "type": "string"
+                  },
+                  "config_json": {
+                    "default": "",
+                    "description": "FDTD configuration JSON. optional serialized FdtdStudyConfig JSON specifying sources, monitors, layer refinements, overrides, ADE poles, and boundaries",
+                    "type": "string"
+                  },
+                  "conformal_pec": {
+                    "default": true,
+                    "description": "Dey-Mittra conformal PEC. enable stabilized Dey-Mittra fractional edge/face updates on curved PEC boundaries",
+                    "type": "boolean"
+                  },
+                  "courant": {
+                    "default": 0.95,
+                    "description": "Courant factor. CFL stability factor in (0, 1)",
+                    "maximum": 0.999999,
+                    "minimum": 0.001,
+                    "type": "number"
+                  },
+                  "freqs_hz": {
+                    "default": [],
+                    "description": "Monitor frequencies [Hz]. optional monitor frequency grid in Hz applied to the default field monitor when config_json omits monitors",
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "max_steps": {
+                    "default": 0,
+                    "description": "Maximum time steps. optional cap on leapfrog time steps (0 = uncapped)",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "min_steps_per_wave": {
+                    "default": 16.0,
+                    "description": "Grid steps per wavelength. minimum Yee cells per medium wavelength lambda_min / n_max",
+                    "minimum": 4.0,
+                    "type": "number"
+                  },
+                  "nonlinear": {
+                    "default": false,
+                    "description": "Enable nonlinear polarization. opt-in activation for material [nonlinear] chi^(2)/chi^(3) Kerr, SHG, QPM, and TPA/FCA terms (false auto-skips library [nonlinear] blocks for linear speed)",
+                    "type": "boolean"
+                  },
+                  "polarization_2d": {
+                    "default": "tm_ey",
+                    "description": "2D polarization. active Maxwell subsystem on 2D cross-section meshes",
+                    "enum": [
+                      "tm_ey",
+                      "te_hy",
+                      "full"
+                    ],
+                    "type": "string"
+                  },
+                  "port_z0_ohm": {
+                    "default": 0.0,
+                    "description": "Reference circuit impedance [Ohm]. optional reference impedance Z_0 for DrivenPortData S->Z/Y conversion (0 uses modal wave impedance)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "precision": {
+                    "default": "auto",
+                    "description": "GPU floating-point precision. GPU floating-point precision ('auto' picks f64 for nonlinear runs when SHADER_F64 is supported, otherwise scaled f32)",
+                    "enum": [
+                      "auto",
+                      "f32",
+                      "f64"
+                    ],
+                    "type": "string"
+                  },
+                  "run_time": {
+                    "default": 0.0,
+                    "description": "Simulation run time [s]. physical simulation duration in seconds (0 selects automatic pulse + transit window)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "shutoff_energy_ratio": {
+                    "default": 1e-9,
+                    "description": "Auto-shutoff energy ratio. early termination threshold on field energy relative to peak energy (0 disables early shutoff)",
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "subpixel": {
+                    "default": "polarized",
+                    "description": "Subpixel dielectric averaging. anisotropic interface subpixel permittivity averaging mode",
+                    "enum": [
+                      "polarized",
+                      "volumetric",
+                      "staircased"
+                    ],
+                    "type": "string"
+                  },
+                  "symmetry": {
+                    "default": "none",
+                    "description": "Midplane symmetry. auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+                    "enum": [
+                      "none",
+                      "pec_x",
+                      "pmc_x",
+                      "pec_z",
+                      "pmc_z",
+                      "pec_x_pmc_z",
+                      "pmc_x_pec_z",
+                      "pmc_x_pmc_z",
+                      "pec_x_pec_z"
+                    ],
+                    "type": "string"
+                  },
+                  "wavelength_min": {
+                    "default": 1.5e-6,
+                    "description": "Minimum free-space wavelength [m]. shortest free-space wavelength lambda_min resolved by the automatic Yee grid",
+                    "minimum": 2.2250738585072014e-308,
+                    "type": "number"
                   }
                 },
                 "required": [],
@@ -2477,6 +6022,1215 @@
           },
           "label": "BLR compression tolerance",
           "name": "blr_tol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "three",
+      "doc": "3D bidirectional eigenmode expansion along +y over uniform, explicit, composite, or periodic cross-section segments with BLAKE3 slice deduplication, exact cross-power interface scattering matrices, Redheffer star products, cylindrical bends, and thermo-optic coupling.",
+      "kind": "eme",
+      "name": "Eigenmode expansion (EME)",
+      "params": [
+        {
+          "doc": "operating optical or microwave frequency",
+          "kind": {
+            "default": 193400000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "default target effective index for 2D slice mode searches",
+          "kind": {
+            "default": 1.5,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Effective index near",
+          "name": "n_target",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "search around an imaginary effective index",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Evanescent target",
+          "name": "evanescent",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "default number of eigenmodes solved per unique 2D cross-section",
+          "kind": {
+            "default": 6,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Modes per slice",
+          "name": "n_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "partition kind along +y ('uniform', 'explicit', 'periodic_subgrid', or 'json' for nested composite/periodic specs)",
+          "kind": {
+            "default": "uniform",
+            "options": [
+              "uniform",
+              "explicit",
+              "periodic_subgrid",
+              "composite",
+              "json"
+            ],
+            "type": "choice"
+          },
+          "label": "Segment partition kind",
+          "name": "grid_kind",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "number of uniform slices along +y (or per unit cell)",
+          "kind": {
+            "default": 10,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Uniform slice count",
+          "name": "n_cells",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "explicit positive segment lengths L_c in metres along +y",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Explicit segment lengths",
+          "name": "lengths",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "unit-cell repetition count N_rep for 'periodic_subgrid'",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Periodic repetitions",
+          "name": "num_reps",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional in-plane bend radius R_bend in metres along x (0 disables bending)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Cylindrical bend radius",
+          "name": "bend_radius",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "optional serialized EmeGridSpec JSON ('uniform', 'explicit', 'composite', or 'periodic_subgrid') overriding flat grid parameters",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Nested grid specification JSON",
+          "name": "grid_json",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional [y0, y1] propagation interval in metres along +y; defaults to the mesh y-bounds",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Propagation y bounds",
+          "name": "y_range",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "number of end-slice modes exposed in DrivenPortData when no waveport conditions are set (0 exposes all solved modes)",
+          "kind": {
+            "default": 0,
+            "max": null,
+            "min": 0,
+            "type": "integer"
+          },
+          "label": "Exposed terminal modes per end",
+          "name": "port_modes",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "reference impedance Z_0 for S-to-Z/Y conversion when no waveport z0_ohm is set",
+          "kind": {
+            "default": 50.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Reference circuit impedance",
+          "name": "port_z0_ohm",
+          "required": false,
+          "unit": "Ohm"
+        },
+        {
+          "doc": "reconstruct the 3D bidirectional modal superposition electric field on the mesh under port 1 excitation",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Reconstruct 3D electric field",
+          "name": "reconstruct_fields",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "three",
+      "doc": "3D frequency-domain nonlinear optics solver: single-tone chi^(3) Kerr + TPA + FCA/FCD Harmonic Balance FEM (with power-ramp and pseudo-arclength optical bistability continuation) and multi-harmonic chi^(2) / chi^(3) XPM Coupled-Wave FEM (SHG, SFG, DFG, OPA, depleted or undepleted, with Gauss-point QPM poling).",
+      "kind": "nonlinear_driven",
+      "name": "Nonlinear harmonic-balance & coupled-wave driven",
+      "params": [
+        {
+          "doc": "nonlinear interaction kind ('auto', 'chi3', 'chi3_xpm', 'shg', 'sfg', 'dfg', or 'opa')",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "chi3",
+              "chi3_xpm",
+              "shg",
+              "sfg",
+              "dfg",
+              "opa"
+            ],
+            "type": "choice"
+          },
+          "label": "Nonlinear process",
+          "name": "process",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "primary optical or microwave frequency f_1",
+          "kind": {
+            "default": 193414489000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Primary / pump frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "secondary/signal frequency f_2 in Hz for non-degenerate 'sfg', 'dfg', 'opa', or 'chi3_xpm'",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Secondary / signal frequency",
+          "name": "freq_2",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "incident pump optical power in Watts",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Input pump power",
+          "name": "power_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "optional sequence of incident pump powers in Watts for power_ramp continuation",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Explicit power sweep",
+          "name": "powers_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "starting power in Watts for multi-step sweeps or arclength continuation",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Minimum sweep power",
+          "name": "power_min_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "maximum power in Watts for multi-step sweeps or arclength continuation",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Maximum sweep power",
+          "name": "power_max_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "number of uniform power steps when powers_w is empty",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Sweep steps",
+          "name": "n_steps",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "0-based port index driven by power_w",
+          "kind": {
+            "default": 0,
+            "max": null,
+            "min": 0,
+            "type": "integer"
+          },
+          "label": "Primary drive port index",
+          "name": "drive_port",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional per-port incident pump powers in Watts (enables arbitrary polarization/ellipticity mixtures)",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Per-port pump powers",
+          "name": "port_powers_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "optional per-port incident pump phases in radians",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Per-port pump phases",
+          "name": "port_phases_rad",
+          "required": false,
+          "unit": "rad"
+        },
+        {
+          "doc": "incident signal/seed power in Watts for 'sfg', 'dfg', 'opa', 'chi3_xpm', or seeded 'shg'",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Signal / seed power",
+          "name": "signal_power_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "0-based port index for the secondary/signal wave",
+          "kind": {
+            "default": 0,
+            "max": null,
+            "min": 0,
+            "type": "integer"
+          },
+          "label": "Signal port index",
+          "name": "signal_port",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "incident phase of the secondary/signal wave in radians",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Signal phase",
+          "name": "signal_phase_rad",
+          "required": false,
+          "unit": "rad"
+        },
+        {
+          "doc": "'power_ramp' for monotonic power sweeps or 'arclength' for Keller pseudo-arclength continuation across bistable S-curve turning points",
+          "kind": {
+            "default": "power_ramp",
+            "options": [
+              "power_ramp",
+              "arclength"
+            ],
+            "type": "choice"
+          },
+          "label": "Continuation method",
+          "name": "continuation",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "'depleted' solves the fully coupled multi-harmonic system with exact pump depletion and Manley-Rowe conservation; 'undepleted' omits back-action onto the pump",
+          "kind": {
+            "default": "depleted",
+            "options": [
+              "depleted",
+              "undepleted"
+            ],
+            "type": "choice"
+          },
+          "label": "Harmonic coupling mode",
+          "name": "coupling",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "'newton' (sparse direct LU reusing symbolic factorization) or 'jfnk' (LU-preconditioned Jacobian-free Newton-Krylov)",
+          "kind": {
+            "default": "newton",
+            "options": [
+              "newton",
+              "jfnk"
+            ],
+            "type": "choice"
+          },
+          "label": "Nonlinear solver",
+          "name": "nl_solver",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "nonlinear convergence relative residual tolerance",
+          "kind": {
+            "default": 1e-10,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Relative residual tolerance",
+          "name": "rtol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "maximum nonlinear iterations per step",
+          "kind": {
+            "default": 40,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Max Newton iterations",
+          "name": "max_it",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "dimensionless initial step size Delta s for pseudo-arclength continuation",
+          "kind": {
+            "default": 0.08,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Initial arclength step",
+          "name": "arclength_ds",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "maximum continuation steps along the pseudo-arclength curve",
+          "kind": {
+            "default": 240,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Max arclength steps",
+          "name": "arclength_max_steps",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "two",
+      "doc": "2D cross-section nonlinear waveguide mode analysis computing vectorial nonlinear parameter gamma (1/(W*m)), effective mode area A_eff (m^2), TPA figure of merit, and fixed-power Newton continuation n_eff(P).",
+      "kind": "nonlinear_modes",
+      "name": "Nonlinear waveguide modes",
+      "params": [
+        {
+          "doc": "operating optical frequency",
+          "kind": {
+            "default": 193414489000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Frequency",
+          "name": "freq",
+          "required": true,
+          "unit": "Hz"
+        },
+        {
+          "doc": "target effective index for the baseline linear mode search",
+          "kind": {
+            "default": 1.8,
+            "max": null,
+            "min": null,
+            "type": "number"
+          },
+          "label": "Effective index near",
+          "name": "n_target",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "search around an imaginary effective index",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Evanescent target",
+          "name": "evanescent",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "1-based index of the guided mode to track across optical power P",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Mode index",
+          "name": "mode_index",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "guided Poynting power P in Watts when powers_w is empty",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Guided optical power",
+          "name": "power_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "optional sequence of guided optical powers P >= 0 in Watts",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Explicit guided powers",
+          "name": "powers_w",
+          "required": false,
+          "unit": "W"
+        },
+        {
+          "doc": "bordered Newton relative residual tolerance",
+          "kind": {
+            "default": 1e-10,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Relative residual tolerance",
+          "name": "rtol",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "maximum Newton iterations per power point",
+          "kind": {
+            "default": 30,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Max Newton iterations",
+          "name": "max_it",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "both",
+      "doc": "High-order curved and mixed-cell 2D/3D Discontinuous Galerkin time-domain solver with pre-inverted element mass matrices, Rankine-Hugoniot upwind and energy-conserving central fluxes, penetrable zero-thickness 2D sheet jumps, dispersive ADE poles, instantaneous chi^(2)/chi^(3) Kerr + QPM + TPA/FCA nonlinearity, FEM-seeded waveguide modal ports, and power-of-two Local Time-Stepping (LTS).",
+      "kind": "dgtd",
+      "name": "Discontinuous Galerkin time-domain (DGTD)",
+      "params": [
+        {
+          "doc": "total physical time-stepping duration",
+          "kind": {
+            "default": 1e-13,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Simulation duration",
+          "name": "t_final",
+          "required": true,
+          "unit": "s"
+        },
+        {
+          "doc": "Courant-Friedrichs-Lewy local stability multiplier",
+          "kind": {
+            "default": 0.8,
+            "max": 2.0,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "CFL factor",
+          "name": "cfl",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "element-interface Riemann flux ('upwind' Rankine-Hugoniot or 'central' energy-conserving)",
+          "kind": {
+            "default": "upwind",
+            "options": [
+              "upwind",
+              "central"
+            ],
+            "type": "choice"
+          },
+          "label": "Numerical Riemann flux",
+          "name": "flux",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "time integration scheme ('lts' multi-rate power-of-two local time-stepping, 'lserk4', or 'rk4')",
+          "kind": {
+            "default": "lts",
+            "options": [
+              "lts",
+              "lserk4",
+              "rk4"
+            ],
+            "type": "choice"
+          },
+          "label": "Explicit time integrator",
+          "name": "time_stepper",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "maximum number of power-of-two local time-stepping CFL tiers L (dt_ell = 2^ell dt_0; 1 forces uniform stepping)",
+          "kind": {
+            "default": 6,
+            "max": 12,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Maximum LTS tiers",
+          "name": "max_lts_tiers",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "active electromagnetic polarization ('full' 6-component, 2D 'tm', or 2D 'te')",
+          "kind": {
+            "default": "full",
+            "options": [
+              "full",
+              "tm",
+              "te"
+            ],
+            "type": "choice"
+          },
+          "label": "2D/3D polarization",
+          "name": "polarization",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional DG polynomial basis order p in 1..=3 (0 uses the problem element order)",
+          "kind": {
+            "default": 0,
+            "max": 3,
+            "min": 0,
+            "type": "integer"
+          },
+          "label": "Polynomial basis order override",
+          "name": "basis_order",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "broadband source pulse waveform ('gaussian' carrier or 'ricker' wavelet)",
+          "kind": {
+            "default": "gaussian",
+            "options": [
+              "gaussian",
+              "ricker"
+            ],
+            "type": "choice"
+          },
+          "label": "Source pulse waveform",
+          "name": "pulse",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "source pulse center frequency",
+          "kind": {
+            "default": 193400000000000.0,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Carrier / peak frequency",
+          "name": "f0",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "Gaussian pulse bandwidth parameter f_width (0 defaults to 0.25 * f0)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Pulse bandwidth",
+          "name": "fwidth",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "source pulse peak amplitude scale factor A (incident port peak power scales as A^2)",
+          "kind": {
+            "default": 1.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Pulse amplitude",
+          "name": "pulse_amplitude",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional start frequency for running DFT monitors (0 uses f0)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Monitor start frequency",
+          "name": "f_min",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "optional stop frequency for running DFT monitors (>= f_min)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Monitor stop frequency",
+          "name": "f_max",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "number of uniformly spaced DFT monitor frequencies in [f_min, f_max]",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Monitor frequency points",
+          "name": "n_freqs",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional explicit ascending frequency grid in Hz for running DFT monitors",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Explicit monitor frequencies",
+          "name": "freqs_hz",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "1-based index of the driven waveport or lumped port",
+          "kind": {
+            "default": 1,
+            "max": null,
+            "min": 1,
+            "type": "integer"
+          },
+          "label": "Excited port index",
+          "name": "excited_port",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional comma-separated boundary selectors treated as first-order Silver-Muller absorbing boundaries",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Silver-Muller absorbing boundaries",
+          "name": "absorbing_on",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional comma-separated boundary or interface selectors recorded as running DFT Poynting flux monitors",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "Surface Poynting flux monitors",
+          "name": "flux_monitors_on",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "time-domain compute backend ('auto', 'cpu', or 'gpu'; 'gpu' requires --features gpu)",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "cpu",
+              "gpu"
+            ],
+            "type": "choice"
+          },
+          "label": "Compute backend",
+          "name": "backend",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "GPU floating-point precision ('auto' picks f64 for nonlinear runs when SHADER_F64 is supported, otherwise scaled f32)",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "f32",
+              "f64"
+            ],
+            "type": "choice"
+          },
+          "label": "GPU floating-point precision",
+          "name": "precision",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "opt-in activation for material [nonlinear] chi^(2)/chi^(3) Kerr, SHG, QPM, and TPA/FCA terms (false auto-skips library [nonlinear] blocks for linear speed)",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Enable nonlinear polarization",
+          "name": "nonlinear",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
+          "required": false,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "dims": "both",
+      "doc": "2D and 3D SIMD structured subpixel Yee FDTD solver with Farjadpour polarized dielectric averaging, Dey-Mittra conformal PEC, Drude/Lorentz ADE dispersion, instantaneous chi^(2)/chi^(3) Kerr + QPM + TPA/FCA nonlinearity, CFS-PML/Absorber/Bloch boundaries, FEM-seeded ModeSource and ModeMonitor ports, broadband DFT/flux/diffraction monitors, and Prony cavity resonance extraction.",
+      "kind": "fdtd",
+      "name": "Finite-difference time-domain (FDTD)",
+      "params": [
+        {
+          "doc": "shortest free-space wavelength lambda_min resolved by the automatic Yee grid",
+          "kind": {
+            "default": 1.5e-6,
+            "max": null,
+            "min": 2.2250738585072014e-308,
+            "type": "number"
+          },
+          "label": "Minimum free-space wavelength",
+          "name": "wavelength_min",
+          "required": false,
+          "unit": "m"
+        },
+        {
+          "doc": "minimum Yee cells per medium wavelength lambda_min / n_max",
+          "kind": {
+            "default": 16.0,
+            "max": null,
+            "min": 4.0,
+            "type": "number"
+          },
+          "label": "Grid steps per wavelength",
+          "name": "min_steps_per_wave",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "physical simulation duration in seconds (0 selects automatic pulse + transit window)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Simulation run time",
+          "name": "run_time",
+          "required": false,
+          "unit": "s"
+        },
+        {
+          "doc": "optional cap on leapfrog time steps (0 = uncapped)",
+          "kind": {
+            "default": 0,
+            "max": null,
+            "min": 0,
+            "type": "integer"
+          },
+          "label": "Maximum time steps",
+          "name": "max_steps",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "CFL stability factor in (0, 1)",
+          "kind": {
+            "default": 0.95,
+            "max": 0.999999,
+            "min": 0.001,
+            "type": "number"
+          },
+          "label": "Courant factor",
+          "name": "courant",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "early termination threshold on field energy relative to peak energy (0 disables early shutoff)",
+          "kind": {
+            "default": 1e-9,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Auto-shutoff energy ratio",
+          "name": "shutoff_energy_ratio",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "active Maxwell subsystem on 2D cross-section meshes",
+          "kind": {
+            "default": "tm_ey",
+            "options": [
+              "tm_ey",
+              "te_hy",
+              "full"
+            ],
+            "type": "choice"
+          },
+          "label": "2D polarization",
+          "name": "polarization_2d",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "anisotropic interface subpixel permittivity averaging mode",
+          "kind": {
+            "default": "polarized",
+            "options": [
+              "polarized",
+              "volumetric",
+              "staircased"
+            ],
+            "type": "choice"
+          },
+          "label": "Subpixel dielectric averaging",
+          "name": "subpixel",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "enable stabilized Dey-Mittra fractional edge/face updates on curved PEC boundaries",
+          "kind": {
+            "default": true,
+            "type": "bool"
+          },
+          "label": "Dey-Mittra conformal PEC",
+          "name": "conformal_pec",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "optional reference impedance Z_0 for DrivenPortData S->Z/Y conversion (0 uses modal wave impedance)",
+          "kind": {
+            "default": 0.0,
+            "max": null,
+            "min": 0.0,
+            "type": "number"
+          },
+          "label": "Reference circuit impedance",
+          "name": "port_z0_ohm",
+          "required": false,
+          "unit": "Ohm"
+        },
+        {
+          "doc": "optional monitor frequency grid in Hz applied to the default field monitor when config_json omits monitors",
+          "kind": {
+            "default": [],
+            "type": "numbers"
+          },
+          "label": "Monitor frequencies",
+          "name": "freqs_hz",
+          "required": false,
+          "unit": "Hz"
+        },
+        {
+          "doc": "optional serialized FdtdStudyConfig JSON specifying sources, monitors, layer refinements, overrides, ADE poles, and boundaries",
+          "kind": {
+            "default": "",
+            "type": "text"
+          },
+          "label": "FDTD configuration JSON",
+          "name": "config_json",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "time-domain compute backend ('auto', 'cpu', or 'gpu'; 'gpu' requires --features gpu)",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "cpu",
+              "gpu"
+            ],
+            "type": "choice"
+          },
+          "label": "Compute backend",
+          "name": "backend",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "GPU floating-point precision ('auto' picks f64 for nonlinear runs when SHADER_F64 is supported, otherwise scaled f32)",
+          "kind": {
+            "default": "auto",
+            "options": [
+              "auto",
+              "f32",
+              "f64"
+            ],
+            "type": "choice"
+          },
+          "label": "GPU floating-point precision",
+          "name": "precision",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "opt-in activation for material [nonlinear] chi^(2)/chi^(3) Kerr, SHG, QPM, and TPA/FCA terms (false auto-skips library [nonlinear] blocks for linear speed)",
+          "kind": {
+            "default": false,
+            "type": "bool"
+          },
+          "label": "Enable nonlinear polarization",
+          "name": "nonlinear",
+          "required": false,
+          "unit": ""
+        },
+        {
+          "doc": "auto-detect exterior facets on x = 0 and/or z = 0 and apply PEC or PMC symmetry (on x >= 0, z >= 0: TE0 is pec_x_pmc_z, TM0 is pmc_x_pec_z)",
+          "kind": {
+            "default": "none",
+            "options": [
+              "none",
+              "pec_x",
+              "pmc_x",
+              "pec_z",
+              "pmc_z",
+              "pec_x_pmc_z",
+              "pmc_x_pec_z",
+              "pmc_x_pmc_z",
+              "pec_x_pec_z"
+            ],
+            "type": "choice"
+          },
+          "label": "Midplane symmetry",
+          "name": "symmetry",
           "required": false,
           "unit": ""
         }

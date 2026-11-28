@@ -1109,9 +1109,12 @@ pub struct EmwAssembly {
     pub mu_inv: Vec<C3>,
     pub pml_cells: Vec<bool>,
     pub eps_phys_re: Vec<[[f64; 3]; 3]>,
+    pub eps_phys_im: Vec<[[f64; 3]; 3]>,
+    pub has_loss: bool,
     pub d_omega_eps: Vec<[[f64; 3]; 3]>,
     pub mur_phys: Vec<f64>,
     pub y_periodic_ky: Option<f64>,
+    pub is_non_symmetric: bool,
 }
 
 /// Stage 2 output: complex frequencies (Hz) with the index of their reduced vector, sorted by real part.
@@ -1135,11 +1138,15 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
     };
     validate_port_contacts_3d(mesh, problem)?;
     let order = if problem.order == 1 { 1 } else { 2 };
-    let tens = problem.materials.cell_complex_permittivity(mesh, Some(1.0))?;
+    let tens = problem.cell_complex_permittivity(mesh)?;
     let eps_phys_re: Vec<[[f64; 3]; 3]> = tens.iter().map(|(re, _)| *re).collect();
+    let eps_phys_im: Vec<[[f64; 3]; 3]> = tens.iter().map(|(_, im)| *im).collect();
+    let has_loss = problem.has_loss() || eps_phys_im.iter().flatten().flatten().any(|&v| v.abs() > 1e-15);
     let d_omega_eps = problem.cell_d_omega_eps(mesh)?;
     let mur = problem.materials.cell_values(mesh, "mu_r", Some(1.0))?;
     let (eps, mu_inv) = simplex_cell_materials_3d(mesh, problem)?;
+    let mut is_non_symmetric =
+        problem.materials.is_non_symmetric() || crate::mixed_ops::is_c3_slice_non_symmetric(&eps, &mu_inv);
     let (lo, hi) = mesh.bbox();
     let size = (0..3).map(|a| hi[a] - lo[a]).fold(0.0, f64::max).max(1e-300);
     let f0 = if f_search > 0.0 { f_search } else { C0 / (2.0 * size) };
@@ -1165,18 +1172,33 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
 
     let sigma = (2.0 * PI * f0 / C0).powi(2);
 
-    let has_cqed =
-        !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty() || !problem.lumped_ports.is_empty();
+    let has_cqed = !problem.surface_impedance.is_empty()
+        || !problem.lumped_jj.is_empty()
+        || !problem.lumped_ports.is_empty()
+        || !problem.sheet_2d.is_empty();
     let has_sheets = has_cqed || !problem.pec.is_empty();
     let mut ibc_jj = if has_sheets {
-        Some(assemble_ibc_and_jj_3d_cavity(
+        let mut ij = assemble_ibc_and_jj_3d_cavity(
             mesh,
             &ned,
             &problem.pec,
             &problem.surface_impedance,
             &problem.lumped_jj,
             f0,
-        )?)
+        )?;
+        if !problem.sheet_2d.is_empty() {
+            let has_non_sym_sheets = crate::ibc::assemble_sheet2d_3d(
+                mesh,
+                &ned,
+                &problem.pec,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                f0,
+                &mut ij,
+            )?;
+            is_non_symmetric |= has_non_sym_sheets;
+        }
+        Some(ij)
     } else {
         None
     };
@@ -1639,14 +1661,17 @@ pub fn assemble_emw_eigen(mesh: &Discretisation, problem: &Problem) -> Result<Em
         mu_inv,
         pml_cells,
         eps_phys_re,
+        eps_phys_im,
+        has_loss,
         d_omega_eps,
         mur_phys: mur,
         y_periodic_ky,
+        is_non_symmetric,
     })
 }
 
 /// Stage 2: the eigenpairs `K x = k0^2 M x` nearest the shift with the gradients projected out (real symmetric route with
-/// shift-invert, or the complex route for absorbing layers, Floquet phases, and lossy `R_s > 0` IBCs).
+/// shift-invert, or the complex route for absorbing layers, Floquet phases, non-symmetric gyrotropy, and lossy `R_s > 0` IBCs).
 pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
     let (kc, mc, g_red, g_h, sigma, n_modes) = (&asm.kc, &asm.mc, &asm.g_red, &asm.g_h, asm.sigma, asm.n_modes);
     let mut tl = Instant::now();
@@ -1666,7 +1691,7 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
         let (d_ruiz, kc_eq, mc_eq, g_eq, gh_eq) = ruiz_equilibrate(kc, mc, g_red, sigma);
         let n_extra_lp = asm.lumped_ports.len();
         let n_ask = (n_modes + n_extra_lp).min(asm.nred.saturating_sub(1)).max(n_modes);
-        if is_real(&kc_eq) && is_real(&mc_eq) && is_real(&g_eq) {
+        if !asm.is_non_symmetric && is_real(&kc_eq) && is_real(&mc_eq) && is_real(&g_eq) {
             let (kr, mr, gr) = (to_real(&kc_eq), to_real(&mc_eq), to_real(&g_eq));
             lap(&mut tl, "emw3d: matrices (Ruiz equilibrated)");
             let opts = EigOpts { tol: 1e-12, ..EigOpts::default() };
@@ -1765,7 +1790,7 @@ pub fn solve_emw_modes(asm: &EmwAssembly) -> Result<EmwSolve, String> {
             dim = pairs.dim;
             converged = pairs.converged;
         }
-    } else if is_real(kc) && is_real(mc) && is_real(g_red) {
+    } else if !asm.is_non_symmetric && is_real(kc) && is_real(mc) && is_real(g_red) {
         let (kr, mr, gr) = (to_real(kc), to_real(mc), to_real(g_red));
         lap(&mut tl, "emw3d: matrices");
         let pairs = if gr.ncols() > 0 {
@@ -1911,7 +1936,7 @@ pub fn emw_eigen_fields(
         let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
         let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
         let avg = |vals: Vec<f64>| node_average(mesh, &vals.iter().map(|x| x * s).collect::<Vec<f64>>(), 1, 2);
-        let fields = vec![
+        let mut fields = vec![
             Field::scalar("|E|", "a.u.", avg(mag.clone())),
             Field::scalar("Re Ex", "a.u.", avg(e.iter().map(|v| (v[0] * rot).re).collect())),
             Field::scalar("Re Ey", "a.u.", avg(e.iter().map(|v| (v[1] * rot).re).collect())),
@@ -1921,6 +1946,7 @@ pub fn emw_eigen_fields(
         // Physical U_elec = 1 J normalization and exact modal energy partition
         let (s_e, mut energy_row, mut equip_err) = compute_mode_energy_and_scale(f_raw, &vectors[i], rot, asm);
         let mut f = f_raw;
+        let mut pert_inv_scale = 1.0_f64;
         // FR-30: Perturbative Wheeler surface-current kinetic inductance and surface-resistance shifts
         if let Some(ref pe) = pert_eval {
             let scale_phys = rot * s_e;
@@ -1933,6 +1959,7 @@ pub fn emw_eigen_fields(
                 .max(1e-300);
             let alpha_kin = (du_kin_0 / u_mag_0).max(0.0);
             let inv_scale = 1.0 / (1.0 + alpha_kin);
+            pert_inv_scale = inv_scale;
             let f_re_new = f_raw.re * inv_scale.sqrt();
             energy_row.u_mag_vol_j *= inv_scale;
             energy_row.u_kin_ibc_j = (energy_row.u_kin_ibc_j + du_kin_0) * inv_scale;
@@ -1950,6 +1977,30 @@ pub fn emw_eigen_fields(
         }
         out_freqs.push((f, i));
         max_equip_err = max_equip_err.max(equip_err);
+        if asm.has_loss {
+            let scale_phys = rot * s_e;
+            let x_phys: Vec<C> = x.iter().map(|&z| z * scale_phys).collect();
+            let (q_opt, _) = crate::heat_source::compute_3d_heat_source_simplex_ext(
+                mesh,
+                ned,
+                &x_phys,
+                f.re.max(0.0),
+                &asm.pml_cells,
+                &asm.eps_phys_im,
+                &asm.mur_phys,
+                &problem.pec,
+                &problem.surface_impedance,
+                asm.f0,
+                &asm.pert_ibc_tris,
+                pert_inv_scale,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                problem.temperature_field.as_deref(),
+                None,
+                2,
+            )?;
+            fields.push(Field::scalar("Q_opt", "W/m^3", q_opt));
+        }
 
         let mut cells = CellFields::new(mesh, 2);
         let (e_scale, e_unit) = if asm.has_cqed { (rot * s_e, "V/m") } else { (rot * s, "a.u.") };
@@ -1970,7 +2021,12 @@ pub fn emw_eigen_fields(
             for a in 0..nloc {
                 let idx = ci * nloc + a;
                 let ce = curl_e[idx];
-                h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
+                h_field[idx] = if asm.is_non_symmetric {
+                    let mce = crate::mixed_ops::c3_mul_vec(&asm.mu_inv[ci], ce);
+                    [mce[0] * h_prefactor, mce[1] * h_prefactor, mce[2] * h_prefactor]
+                } else {
+                    [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor]
+                };
             }
         }
         for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
@@ -2012,6 +2068,23 @@ pub fn emw_eigen_fields(
                                 n_hat[1] * hm[2] - n_hat[2] * hm[1],
                                 n_hat[2] * hm[0] - n_hat[0] * hm[2],
                                 n_hat[0] * hm[1] - n_hat[1] * hm[0],
+                            ];
+                        }
+                    }
+                    SheetCellKind::Sheet2D { sigma_2d, u_hat, v_hat, n_hat } => {
+                        for a in 0..nloc {
+                            let idx = ci * nloc + a;
+                            let ep = [e[idx][0] * e_scale, e[idx][1] * e_scale, e[idx][2] * e_scale];
+                            let en = ep[0] * n_hat[0] + ep[1] * n_hat[1] + ep[2] * n_hat[2];
+                            let e_par = [ep[0] - en * n_hat[0], ep[1] - en * n_hat[1], ep[2] - en * n_hat[2]];
+                            let eu = e_par[0] * u_hat[0] + e_par[1] * u_hat[1] + e_par[2] * u_hat[2];
+                            let ev = e_par[0] * v_hat[0] + e_par[1] * v_hat[1] + e_par[2] * v_hat[2];
+                            let ku = sigma_2d[0][0] * eu + sigma_2d[0][1] * ev;
+                            let kv = sigma_2d[1][0] * eu + sigma_2d[1][1] * ev;
+                            k_field[idx] = [
+                                ku * u_hat[0] + kv * v_hat[0],
+                                ku * u_hat[1] + kv * v_hat[1],
+                                ku * u_hat[2] + kv * v_hat[2],
                             ];
                         }
                     }
@@ -2400,18 +2473,33 @@ pub fn assemble_emw_eigen_mixed(
         assemble_maxwell_mixed(mesh, &ned, &mats.eps_0, &mats.mu_inv_0, pml_table.has_any().then_some(&pml_table));
     lap(&mut tl, "emw3d(mixed): numbering and assembly");
 
-    let has_cqed =
-        !problem.surface_impedance.is_empty() || !problem.lumped_jj.is_empty() || !problem.lumped_ports.is_empty();
+    let has_cqed = !problem.surface_impedance.is_empty()
+        || !problem.lumped_jj.is_empty()
+        || !problem.lumped_ports.is_empty()
+        || !problem.sheet_2d.is_empty();
     let has_sheets = has_cqed || !problem.pec.is_empty();
+    let mut has_non_sym_sheets = false;
     let mut ibc_jj = if has_sheets {
-        Some(assemble_ibc_and_jj_3d_mixed_cavity(
+        let mut ij_tuple = assemble_ibc_and_jj_3d_mixed_cavity(
             mesh,
             &ned,
             &problem.pec,
             &problem.surface_impedance,
             &problem.lumped_jj,
             f0,
-        )?)
+        )?;
+        if !problem.sheet_2d.is_empty() {
+            has_non_sym_sheets = crate::mixed_ops::assemble_sheet2d_3d_mixed(
+                mesh,
+                &ned,
+                &problem.pec,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                f0,
+                &mut ij_tuple.0,
+            )?;
+        }
+        Some(ij_tuple)
     } else {
         None
     };
@@ -2890,6 +2978,7 @@ pub fn assemble_emw_eigen_mixed(
         vkey: Vec::new(),
     };
 
+    let has_loss = problem.has_loss() || mats.eps_phys_im.iter().flatten().flatten().any(|&v| v.abs() > 1e-15);
     Ok((
         EmwAssembly {
             order,
@@ -2925,9 +3014,12 @@ pub fn assemble_emw_eigen_mixed(
             mu_inv: mats.mu_inv_0,
             pml_cells,
             eps_phys_re: mats.eps_phys_re,
+            eps_phys_im: mats.eps_phys_im,
+            has_loss,
             d_omega_eps: mats.d_omega_eps,
             mur_phys: mats.mur_phys,
             y_periodic_ky,
+            is_non_symmetric: mats.is_non_symmetric || has_non_sym_sheets,
         },
         ned,
         masks,
@@ -2991,7 +3083,7 @@ pub fn emw_eigen_fields_mixed(
         let mag: Vec<f64> = e.iter().map(|v| (v[0].norm_sqr() + v[1].norm_sqr() + v[2].norm_sqr()).sqrt()).collect();
         let s = 1.0 / mag.iter().cloned().fold(0.0, f64::max).max(1e-300);
         let avg = |vals: Vec<f64>| node_average(&simplex, &vals.iter().map(|x| x * s).collect::<Vec<f64>>(), 1, 2);
-        let fields = vec![
+        let mut fields = vec![
             Field::scalar("|E|", "a.u.", avg(mag.clone())),
             Field::scalar("Re Ex", "a.u.", avg(e.iter().map(|v| (v[0] * rot).re).collect())),
             Field::scalar("Re Ey", "a.u.", avg(e.iter().map(|v| (v[1] * rot).re).collect())),
@@ -3000,6 +3092,7 @@ pub fn emw_eigen_fields_mixed(
 
         let (s_e, mut energy_row, mut equip_err) = compute_mode_energy_and_scale(f_raw, &vectors[i], rot, asm);
         let mut f = f_raw;
+        let mut pert_loss_w = 0.0_f64;
         if let Some(ref pe) = pert_eval {
             let scale_phys = rot * s_e;
             let x_phys: Vec<C> = x.iter().map(|&z| z * scale_phys).collect();
@@ -3020,6 +3113,7 @@ pub fn emw_eigen_fields_mixed(
             let u_mag_tot = energy_row.u_mag_vol_j + energy_row.u_kin_ibc_j + energy_row.u_ind_jj_j.iter().sum::<f64>();
             equip_err = (energy_row.u_elec_j - u_mag_tot).abs() / energy_row.u_elec_j.max(1e-300);
             let p_cond = (0.5 * inv_scale / (omega_0 * omega_0 * MU0 * MU0)) * sum_rs_ktilde2;
+            pert_loss_w = p_cond;
             let u_tot = (energy_row.u_elec_j + u_mag_tot).max(1e-300);
             let df_im = p_cond / (4.0 * PI * u_tot);
             f = c(f_re_new, f_raw.im + df_im);
@@ -3028,6 +3122,30 @@ pub fn emw_eigen_fields_mixed(
         }
         out_freqs.push((f, i));
         max_equip_err = max_equip_err.max(equip_err);
+        if asm.has_loss {
+            let scale_phys = rot * s_e;
+            let x_phys: Vec<C> = x.iter().map(|&z| z * scale_phys).collect();
+            let (q_opt, _) = crate::heat_source::compute_3d_heat_source_mixed_ext(
+                mixed,
+                ned,
+                &simplex,
+                &proj,
+                &x_phys,
+                f.re.max(0.0),
+                &asm.pml_cells,
+                &asm.eps_phys_im,
+                &problem.pec,
+                &problem.surface_impedance,
+                asm.f0,
+                pert_loss_w,
+                &asm.pert_ibc_tris,
+                &problem.sheet_2d,
+                problem.imported_potential.as_deref(),
+                problem.temperature_field.as_deref(),
+                2,
+            )?;
+            fields.push(Field::scalar("Q_opt", "W/m^3", q_opt));
+        }
 
         let mut cells = CellFields::new(&simplex, 2);
         let (e_scale, e_unit) = if asm.has_cqed { (rot * s_e, "V/m") } else { (rot * s, "a.u.") };
@@ -3047,7 +3165,12 @@ pub fn emw_eigen_fields_mixed(
             for a in 0..nloc {
                 let idx = sc * nloc + a;
                 let ce = curl_e[idx];
-                h_field[idx] = [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor];
+                h_field[idx] = if asm.is_non_symmetric {
+                    let mce = crate::mixed_ops::c3_mul_vec(&asm.mu_inv[mc], ce);
+                    [mce[0] * h_prefactor, mce[1] * h_prefactor, mce[2] * h_prefactor]
+                } else {
+                    [ce[0] * mui * h_prefactor, ce[1] * mui * h_prefactor, ce[2] * mui * h_prefactor]
+                };
             }
         }
         for (k, name) in ["Hx", "Hy", "Hz"].iter().enumerate() {
@@ -3089,6 +3212,23 @@ pub fn emw_eigen_fields_mixed(
                                 n_hat[1] * hm[2] - n_hat[2] * hm[1],
                                 n_hat[2] * hm[0] - n_hat[0] * hm[2],
                                 n_hat[0] * hm[1] - n_hat[1] * hm[0],
+                            ];
+                        }
+                    }
+                    SheetCellKind::Sheet2D { sigma_2d, u_hat, v_hat, n_hat } => {
+                        for a in 0..nloc {
+                            let idx = sc * nloc + a;
+                            let ep = [e[idx][0] * e_scale, e[idx][1] * e_scale, e[idx][2] * e_scale];
+                            let en = ep[0] * n_hat[0] + ep[1] * n_hat[1] + ep[2] * n_hat[2];
+                            let e_par = [ep[0] - en * n_hat[0], ep[1] - en * n_hat[1], ep[2] - en * n_hat[2]];
+                            let eu = e_par[0] * u_hat[0] + e_par[1] * u_hat[1] + e_par[2] * u_hat[2];
+                            let ev = e_par[0] * v_hat[0] + e_par[1] * v_hat[1] + e_par[2] * v_hat[2];
+                            let ku = sigma_2d[0][0] * eu + sigma_2d[0][1] * ev;
+                            let kv = sigma_2d[1][0] * eu + sigma_2d[1][1] * ev;
+                            k_field[idx] = [
+                                ku * u_hat[0] + kv * v_hat[0],
+                                ku * u_hat[1] + kv * v_hat[1],
+                                ku * u_hat[2] + kv * v_hat[2],
                             ];
                         }
                     }
