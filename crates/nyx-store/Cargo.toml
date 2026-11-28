@@ -12,4 +12,4 @@ description = "Workspace, workflow, experiment and run storage for nyx: manifest
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 blake3 = "1"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { workspace = true }
